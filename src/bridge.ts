@@ -173,6 +173,7 @@ export interface AppWindow {
   status_close: () => void;
   selected_jid: string;
   stick_bottom: boolean;
+  conv_ready: boolean;
   chat_tab: string;
   search_changed: (text: string) => void;
   tab_changed: (tab: string) => void;
@@ -1636,19 +1637,25 @@ export class Bridge implements WAListener {
     const rows = list.map((m, i) => this.toRow(m, i > 0 ? list[i - 1] : undefined));
     this.messagesModel.splice(0, this.messagesModel.length, ...rows);
     this.win.chat_open = true;
+    this.win.conv_ready = false;
     const saved = this.scrollPos.get(jid);
-    if (saved !== undefined && saved < 0) {
-      // Restore where the user left off in this conversation.
+    // Anchor across a few layout passes while hidden, then reveal.
+    for (const delay of [0, 40, 90]) {
       setTimeout(() => {
         try {
-          this.win.set_conversation_scroll(saved);
+          if (saved !== undefined && saved < 0) {
+            this.win.set_conversation_scroll(saved);
+          } else {
+            this.win.scroll_conversation_end();
+          }
         } catch {
-          // layout not ready
+          // layout not ready yet
         }
-      }, 60);
-    } else {
-      this.scrollToEnd();
+      }, delay);
     }
+    setTimeout(() => {
+      this.win.conv_ready = true;
+    }, 120);
     this.scheduleRefreshChats();
     void this.loadMediaForChat(jid);
     // Thin conversation: ask the phone for this chat's older messages.

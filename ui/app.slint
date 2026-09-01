@@ -293,6 +293,9 @@ export component AppWindow inherits Window {
     in-out property <[MessageItem]> messages;
     in-out property <bool> attach-open: false;
     in-out property <bool> stick-bottom: true;
+    // Kept invisible until the host anchors it, so opening a chat never
+    // shows the list scrolling into place.
+    in-out property <bool> conv-ready: false;
     in-out property <bool> picker-open: false;
     in-out property <string> picker-tab: "emoji";
     in-out property <[[string]]> emoji-rows;
@@ -1040,6 +1043,7 @@ export component AppWindow inherits Window {
                 }
 
                 msg-list := ListView {
+                    opacity: root.conv-ready ? 1.0 : 0.0;
                     changed viewport-y => {
                         root.conv-scroll = self.viewport-y;
                         root.stick-bottom =
