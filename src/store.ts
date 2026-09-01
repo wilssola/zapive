@@ -450,6 +450,18 @@ export class Store {
     return oldest;
   }
 
+  // Most recent received stickers (for the picker panel).
+  recentStickers(limit: number): StoredMessage[] {
+    const out: StoredMessage[] = [];
+    for (const list of this.messages.values()) {
+      for (const m of list) {
+        if (m.raw?.message?.stickerMessage) out.push(m);
+      }
+    }
+    out.sort((a, b) => b.timestamp - a.timestamp);
+    return out.slice(0, limit);
+  }
+
   totalMessages(): number {
     let n = 0;
     for (const list of this.messages.values()) n += list.length;

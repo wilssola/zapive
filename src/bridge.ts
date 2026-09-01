@@ -11,6 +11,12 @@ import type { SlintImageData } from "./qr.ts";
 import type { WAListener, WhatsAppService } from "./whatsapp.ts";
 import type { MediaService } from "./media.ts";
 
+interface StickerCell {
+  id: string;
+  pic: SlintImageData;
+  ready: boolean;
+}
+
 interface ChatRow {
   jid: string;
   name: string;
@@ -64,6 +70,13 @@ export interface AppWindow {
   pairing_code: string;
   chats: ArrayModel<ChatRow>;
   statuses: ArrayModel<ChatRow>;
+  emoji_rows: string[][];
+  sticker_rows: ArrayModel<StickerCell[]>;
+  picker_open: boolean;
+  emoji_pick: (e: string) => void;
+  sticker_send: (id: string) => void;
+  picker_opened: () => void;
+  attach_sticker: () => void;
   sidebar_view: string;
   status_open: (jid: string) => void;
   sv_open: boolean;
@@ -126,6 +139,37 @@ export interface AppWindow {
 
 const AVATAR_RETRIES = 3;
 
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// Curated emoji palette for the picker (variation selectors stripped —
+// see cleanText — so every glyph renders in Slint).
+const EMOJIS = (
+  "😀 😃 😄 😁 😆 😅 🤣 😂 " +
+  "🙂 😉 😊 😇 🥰 😍 🤩 😘 " +
+  "😜 🤪 🤑 🤗 🤭 🤫 🤔 🤐 " +
+  "🤨 😐 😑 😶 😏 😒 🙄 😬 " +
+  "🤥 😌 😔 😪 🤤 😴 😷 🤒 " +
+  "🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 " +
+  "🤯 🤠 🥳 😎 🤓 🧐 😕 😟 " +
+  "🙁 😮 😯 😲 😳 🥺 😦 😧 " +
+  "😨 😰 😥 😢 😭 😱 😖 😣 " +
+  "😞 😓 😩 😫 🥱 😤 😡 😠 " +
+  "🤬 😈 👿 💀 💩 🤡 👹 👻 " +
+  "👽 🤖 😺 😸 😹 😻 😼 😽 " +
+  "🙌 👏 🤝 👍 👎 👊 ✊ 🤛 " +
+  "🤜 🤞 ✌ 🤟 🤘 👌 🤏 👈 " +
+  "👉 👆 👇 ☝ ✋ 🤚 🖐 🖖 " +
+  "👋 🤙 💪 🙏 ❤ 🧡 💛 💚 " +
+  "💙 💜 🖤 🤍 💔 💕 💞 💓 " +
+  "💯 💥 💫 🔥 ⭐ 🌟 ⚡ 🎉 " +
+  "🎈 🎁 🏆 ⚽ 🎮 🎵 ☕ 🍻 " +
+  "🍕 🍔 🎂 🍫 🚀 ✈ 🚗 💰"
+).split(" ");
+
 function initialOf(name: string): string {
   const ch = [...name.trim()][0];
   return ch ? ch.toUpperCase() : "?";
@@ -157,6 +201,8 @@ export class Bridge implements WAListener {
   private tab = "all";
   private notify = new Notify();
   private statusModel = new ArrayModel<ChatRow>([]);
+  private stickerModel = new ArrayModel<StickerCell[]>([]);
+  private stickerRawById = new Map<string, StoredMessage>();
   private viewer: { items: StoredMessage[]; idx: number } | null = null;
 
   constructor(win: AppWindow, media: MediaService) {
@@ -172,6 +218,12 @@ export class Bridge implements WAListener {
       this.viewer = null;
       win.sv_open = false;
     };
+    win.emoji_rows = chunk(EMOJIS, 8);
+    win.sticker_rows = this.stickerModel;
+    win.emoji_pick = (e) => win.append_composer(e);
+    win.picker_opened = () => void this.loadStickerPanel();
+    win.sticker_send = (id) => void this.sendStickerById(id);
+    win.attach_sticker = () => void this.handleAttachSticker();
 
     win.open_chat = (jid) => this.openDm(jid);
     win.search_changed = (text) => {
@@ -607,6 +659,61 @@ export class Bridge implements WAListener {
     }
     if (changed && this.currentJid) {
       this.currentJid = this.store.canon(this.currentJid);
+    }
+  }
+
+  // Fills the sticker tab with recently received stickers (lazy decode).
+  private async loadStickerPanel() {
+    const items = this.store.recentStickers(32);
+    this.stickerRawById.clear();
+    const cells: StickerCell[] = [];
+    for (const m of items) {
+      this.stickerRawById.set(m.id, m);
+      cells.push({ id: m.id, pic: EMPTY_IMAGE, ready: false });
+    }
+    this.stickerModel.splice(0, this.stickerModel.length, ...chunk(cells, 4));
+    for (const m of items) {
+      const path = await this.media.ensureCached(m.id, m.raw!);
+      if (!path) continue;
+      const img = await this.media.decodeImage(m.id, path);
+      if (!img) continue;
+      outer: for (let r = 0; r < this.stickerModel.length; r++) {
+        const row = this.stickerModel.rowData(r);
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          if (row[c]!.id === m.id) {
+            const copy = [...row];
+            copy[c] = { id: m.id, pic: img, ready: true };
+            this.stickerModel.setRowData(r, copy);
+            break outer;
+          }
+        }
+      }
+    }
+  }
+
+  private async sendStickerById(id: string) {
+    const jid = this.currentJid;
+    const m = this.stickerRawById.get(id);
+    if (!jid || !m?.raw) return;
+    try {
+      this.echoSent(await this.service.sendForward(jid, m.raw), jid);
+    } catch (err) {
+      console.error("sticker send failed:", err);
+    }
+  }
+
+  private async handleAttachSticker() {
+    const jid = this.currentJid;
+    if (!jid) return;
+    const src = await this.media.pickFile("image");
+    if (!src || this.currentJid !== jid) return;
+    const webp = await this.media.toWebpSticker(src);
+    if (!webp) return;
+    try {
+      this.echoSent(await this.service.sendSticker(jid, webp), jid);
+    } catch (err) {
+      console.error("sticker create failed:", err);
     }
   }
 

@@ -152,3 +152,12 @@ msgstr "Status"
 
 msgid "No recent updates"
 msgstr "Nenhuma atualização recente"
+
+msgid "Emoji"
+msgstr "Emoji"
+
+msgid "Stickers"
+msgstr "Figurinhas"
+
+msgid "Sticker"
+msgstr "Figurinha"

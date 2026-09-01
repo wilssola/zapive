@@ -38,6 +38,12 @@ export struct ChatItem {
     pinned: bool,
 }
 
+export struct StickerCell {
+    id: string,
+    pic: image,
+    ready: bool,
+}
+
 export struct MessageItem {
     id: string,
     kind: string,          // "text" | "image" | "audio" | "doc"
@@ -249,6 +255,14 @@ export component AppWindow inherits Window {
     in-out property <[MessageItem]> messages;
     in-out property <bool> attach-open: false;
     in-out property <bool> stick-bottom: true;
+    in-out property <bool> picker-open: false;
+    in-out property <string> picker-tab: "emoji";
+    in-out property <[[string]]> emoji-rows;
+    in-out property <[[StickerCell]]> sticker-rows;
+    callback emoji-pick(string);
+    callback sticker-send(string);
+    callback picker-opened();
+    callback attach-sticker();
     callback send-message(string);
     callback attach-image();
     callback attach-audio();
@@ -1029,7 +1043,18 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         IconButton {
                             icon: @image-url("icons/plus.svg");
-                            clicked => { root.attach-open = !root.attach-open; }
+                            clicked => {
+                                root.picker-open = false;
+                                root.attach-open = !root.attach-open;
+                            }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/mood-smile.svg");
+                            clicked => {
+                                root.attach-open = false;
+                                root.picker-open = !root.picker-open;
+                                if (root.picker-open) { root.picker-opened(); }
+                            }
                         }
                         message-input := LineEdit {
                             placeholder-text: @tr("Type a message");
@@ -1043,6 +1068,97 @@ export component AppWindow inherits Window {
                             clicked => {
                                 root.send-message(message-input.text);
                                 message-input.text = "";
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Emoji / sticker picker above the composer
+            if root.picker-open && root.chat-open: Rectangle {
+                x: 12px;
+                y: parent.height - self.height - 74px;
+                width: 380px;
+                height: 320px;
+                background: Theme.panel;
+                border-radius: 10px;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000055;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        FilterChip {
+                            label: @tr("Emoji");
+                            active: root.picker-tab == "emoji";
+                            clicked => { root.picker-tab = "emoji"; }
+                        }
+                        FilterChip {
+                            label: @tr("Stickers");
+                            active: root.picker-tab == "sticker";
+                            clicked => { root.picker-tab = "sticker"; }
+                        }
+                    }
+                    if root.picker-tab == "emoji": ListView {
+                        for row in root.emoji-rows: Rectangle {
+                            height: 44px;
+                            HorizontalLayout {
+                                spacing: 2px;
+                                alignment: start;
+                                for e in row: em-touch := TouchArea {
+                                    width: 42px;
+                                    height: 42px;
+                                    mouse-cursor: pointer;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 6px;
+                                        background: em-touch.has-hover ? Theme.hover : transparent;
+                                        Text {
+                                            text: e;
+                                            font-size: 24px;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    clicked => { root.emoji-pick(e); }
+                                }
+                            }
+                        }
+                    }
+                    if root.picker-tab == "sticker": ListView {
+                        for row in root.sticker-rows: Rectangle {
+                            height: 92px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                for cell in row: sk-touch := TouchArea {
+                                    width: 84px;
+                                    height: 84px;
+                                    mouse-cursor: pointer;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 8px;
+                                        background: sk-touch.has-hover ? Theme.hover : transparent;
+                                        if cell.ready: Image {
+                                            source: cell.pic;
+                                            width: 76px;
+                                            height: 76px;
+                                            x: 4px;
+                                            y: 4px;
+                                            image-fit: contain;
+                                        }
+                                    }
+                                    clicked => {
+                                        root.sticker-send(cell.id);
+                                        root.picker-open = false;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1076,6 +1192,11 @@ export component AppWindow inherits Window {
                         icon: @image-url("icons/music.svg");
                         label: @tr("Audio");
                         clicked => { root.attach-open = false; root.attach-audio(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("icons/sticker-2.svg");
+                        label: @tr("Sticker");
+                        clicked => { root.attach-open = false; root.attach-sticker(); }
                     }
                 }
             }

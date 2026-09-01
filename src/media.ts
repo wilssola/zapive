@@ -233,6 +233,25 @@ export class MediaService {
     }
   }
 
+  // Converts any image into a 512x512 transparent-padded webp sticker.
+  async toWebpSticker(srcPath: string): Promise<string | null> {
+    try {
+      const dir = join(CACHE_DIR, ".tmp");
+      await mkdir(dir, { recursive: true });
+      const out = resolve(join(dir, `sticker_${Date.now()}.webp`));
+      await sharp(this.db.decryptBytes(await readFile(srcPath)))
+        .resize(512, 512, {
+          fit: "contain",
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        })
+        .webp({ quality: 90 })
+        .toFile(out);
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
   // Saves a clipboard image (if any) to a temp PNG and returns its path.
   async clipboardImage(): Promise<string | null> {
     const dir = join(CACHE_DIR, ".tmp");

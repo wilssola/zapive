@@ -237,6 +237,10 @@ export class WhatsAppService {
     return this.send(jid, { image: { url: filePath }, caption });
   }
 
+  sendSticker(jid: string, webpPath: string): Promise<WAMessage | null> {
+    return this.send(jid, { sticker: { url: webpPath } });
+  }
+
   sendForward(jid: string, raw: WAMessage): Promise<WAMessage | null> {
     return this.send(jid, { forward: raw } as never);
   }
