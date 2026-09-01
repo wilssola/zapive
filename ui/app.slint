@@ -1,0 +1,1270 @@
+import { Button, LineEdit, ListView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+
+export global Theme {
+    in-out property <bool> dark: true;
+
+    out property <color> bg: dark ? #111b21 : #f0f2f5;
+    out property <color> panel: dark ? #202c33 : #ffffff;
+    out property <color> header: dark ? #202c33 : #f0f2f5;
+    out property <color> sidebar: dark ? #111b21 : #ffffff;
+    out property <color> text: dark ? #e9edef : #111b21;
+    out property <color> text-dim: dark ? #8696a0 : #667781;
+    out property <color> border: dark ? #222d34 : #e0e4e7;
+    out property <color> hover: dark ? #202c33 : #f5f6f6;
+    out property <color> selected: dark ? #2a3942 : #f0f2f5;
+    out property <color> conv-bg: dark ? #0b141a : #efeae2;
+    out property <color> bubble-in: dark ? #202c33 : #ffffff;
+    out property <color> bubble-out: dark ? #005c4b : #d9fdd3;
+    out property <color> bubble-text: dark ? #e9edef : #111b21;
+    out property <color> time-out: dark ? #99beb5 : #587a68;
+    out property <color> accent: dark ? #00a884 : #008069;
+    out property <color> chip-bg: dark ? #202c33 : #f0f2f5;
+    out property <color> chip-active-bg: dark ? #0a332c : #d9fdd3;
+    out property <color> icon: dark ? #aebac1 : #54656f;
+    out property <color> pill: dark ? #233138 : #ffffff;
+    out property <color> sender: dark ? #53bdeb : #027eb5;
+}
+
+export struct ChatItem {
+    jid: string,
+    name: string,
+    preview: string,
+    time: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+    unread: int,
+    pinned: bool,
+}
+
+export struct MessageItem {
+    id: string,
+    kind: string,          // "text" | "image" | "audio" | "doc"
+    text: string,          // body, caption, filename or audio duration
+    fromMe: bool,
+    sender: string,
+    senderJid: string,
+    showSender: bool,
+    firstOfRun: bool,
+    forwarded: bool,
+    deleted: bool,
+    time: string,
+    picture: image,
+    picW: int,
+    picH: int,
+    mediaPath: string,
+    mediaReady: bool,
+    reactions: string,
+    dayLabel: string,
+    ticks: string,
+    ticksBlue: bool,
+}
+
+component Avatar inherits Rectangle {
+    in property <image> src;
+    in property <bool> has-image;
+    in property <string> initial;
+    in property <int> color-idx;
+    property <[color]> avatar-colors: [#6bcbef, #e17ab0, #91ab01, #f05d4d, #ffbc38, #8b7add, #02a698, #ee6e51];
+
+    border-radius: self.width / 2;
+    clip: true;
+    background: self.has-image ? transparent : self.avatar-colors[self.color-idx];
+
+    if self.has-image: Image {
+        source: root.src;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+    }
+    if !self.has-image: Text {
+        text: root.initial;
+        color: white;
+        font-size: root.width * 0.4;
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component GreenLink inherits TouchArea {
+    in property <string> label;
+    mouse-cursor: pointer;
+    height: t.preferred-height;
+    width: t.preferred-width;
+    t := Text {
+        text: root.label;
+        color: Theme.accent;
+        font-size: 14px;
+        font-weight: 700;
+    }
+}
+
+component IconButton inherits TouchArea {
+    in property <image> icon;
+    in property <bool> active: false;
+    in property <length> icon-size: 22px;
+    width: 40px;
+    height: 40px;
+    mouse-cursor: pointer;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        background: root.active ? Theme.selected : root.has-hover ? Theme.hover : transparent;
+        Image {
+            source: root.icon;
+            colorize: Theme.icon;
+            width: root.icon-size;
+            height: root.icon-size;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}
+
+component FilterChip inherits TouchArea {
+    in property <string> label;
+    in property <bool> active: false;
+    mouse-cursor: pointer;
+    width: chip.preferred-width;
+    height: 30px;
+    chip := Rectangle {
+        height: parent.height;
+        border-radius: 15px;
+        background: root.active ? Theme.chip-active-bg : Theme.chip-bg;
+        HorizontalLayout {
+            padding-left: 13px;
+            padding-right: 13px;
+            Text {
+                text: root.label;
+                color: root.active ? Theme.accent : Theme.text-dim;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component MenuRow inherits TouchArea {
+    in property <image> icon;
+    in property <string> label;
+    mouse-cursor: pointer;
+    height: 40px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        background: root.has-hover ? Theme.hover : transparent;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 16px;
+            spacing: 10px;
+            Image {
+                source: root.icon;
+                colorize: Theme.icon;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Zapive";
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.bg;
+    init => {
+        Palette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light;
+        Theme.dark = root.dark-theme;
+    }
+
+    // Theme + language (resolved by the host)
+    in-out property <bool> dark-theme: true;
+    in-out property <string> theme-mode: "dark";      // "dark" | "light" | "system"
+    in-out property <string> language-mode: "system"; // "pt" | "en" | "system"
+    callback theme-changed(string);
+    callback language-changed(string);
+    changed dark-theme => {
+        Theme.dark = self.dark-theme;
+        Palette.color-scheme = self.dark-theme ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    // "locked" | "login" | "main"
+    in-out property <string> screen: "login";
+    in-out property <string> status-text: @tr("Connecting...");
+
+    // Lock screen
+    in-out property <string> lock-error: "";
+    callback unlock(string);
+
+    // Login
+    in-out property <image> qr-image;
+    in-out property <bool> pairing-mode: false;
+    in-out property <string> pairing-code: "";
+    callback request-pairing-code(string);
+
+    // Chats
+    in-out property <[ChatItem]> chats;
+    in-out property <int> selected-chat: -1;
+    in-out property <string> chat-tab: "all";
+    callback open-chat(int);
+    callback search-changed(string);
+    callback tab-changed(string);
+
+    // Conversation
+    in-out property <bool> chat-open: false;
+    in-out property <string> sync-banner: "";
+    in-out property <string> current-chat-name;
+    in-out property <string> current-status: "";
+    in-out property <image> current-avatar;
+    in-out property <bool> current-avatar-has: false;
+    in-out property <string> current-initial: "";
+    in-out property <int> current-color-idx: 0;
+    in-out property <[MessageItem]> messages;
+    in-out property <bool> attach-open: false;
+    callback send-message(string);
+    callback attach-image();
+    callback attach-audio();
+    callback attach-doc();
+    callback play-audio(string);
+    callback load-older();
+    callback paste-clipboard();
+    callback open-dm(string);
+    callback request-forward(string);
+
+    // Forward picker
+    in-out property <bool> forward-open: false;
+    callback forward-to(int);
+
+    public function append-composer(t: string) {
+        message-input.text = message-input.text + t;
+    }
+    public function scroll-conversation-end() {
+        msg-list.viewport-y = min(0px, msg-list.height - msg-list.viewport-height);
+    }
+    public function scroll-conversation-top() {
+        msg-list.viewport-y = 0;
+    }
+
+    // Settings
+    in-out property <bool> settings-open: false;
+    in-out property <bool> pin-set: false;
+    in-out property <string> settings-status: "";
+    callback save-pin(string, string);
+    callback remove-pin(string);
+    callback logout();
+
+    // Lightbox
+    in-out property <bool> lightbox-open: false;
+    in-out property <image> lightbox-image;
+
+    // Send-image preview (paste / attach confirmation)
+    in-out property <bool> preview-open: false;
+    in-out property <image> preview-image;
+    callback confirm-send-image(string);
+    callback cancel-send-image();
+
+    // ---------- Lock screen ----------
+    if root.screen == "locked": VerticalBox {
+        alignment: center;
+        spacing: 14px;
+        HorizontalBox {
+            alignment: center;
+            spacing: 10px;
+            Image {
+                source: @image-url("icons/lock.svg");
+                colorize: Theme.text;
+                width: 26px;
+                height: 26px;
+                y: 2px;
+            }
+            Text {
+                text: "Zapive";
+                color: Theme.text;
+                font-size: 26px;
+                font-weight: 700;
+            }
+        }
+        Text {
+            text: @tr("Enter your PIN to unlock");
+            color: Theme.text-dim;
+            font-size: 14px;
+            horizontal-alignment: center;
+        }
+        HorizontalBox {
+            alignment: center;
+            pin-input := LineEdit {
+                width: 220px;
+                input-type: password;
+                placeholder-text: @tr("PIN");
+                accepted => { root.unlock(self.text); self.text = ""; }
+            }
+            Button {
+                text: @tr("Unlock");
+                primary: true;
+                clicked => { root.unlock(pin-input.text); pin-input.text = ""; }
+            }
+        }
+        Text {
+            text: root.lock-error;
+            color: #f05d4d;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+
+    // ---------- Login ----------
+    if root.screen == "login": VerticalBox {
+        alignment: center;
+        HorizontalBox {
+            alignment: center;
+            Rectangle {
+                width: 820px;
+                height: 420px;
+                background: Theme.panel;
+                border-radius: 12px;
+
+                if !root.pairing-mode: HorizontalLayout {
+                    padding: 48px;
+                    spacing: 40px;
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 22px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: @tr("Log in to WhatsApp");
+                            color: Theme.text;
+                            font-size: 24px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.status-text;
+                            color: Theme.text-dim;
+                            font-size: 13px;
+                        }
+                        Text { text: @tr("1.  Open WhatsApp on your phone"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("2.  Tap Menu and then Linked devices"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("3.  Tap Link a device"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("4.  Point your camera at this code"); color: Theme.text; font-size: 15px; }
+                        Rectangle { height: 8px; }
+                        GreenLink {
+                            label: @tr("Log in with phone number  ›");
+                            clicked => { root.pairing-mode = true; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 264px;
+                            height: 264px;
+                            background: white;
+                            border-radius: 8px;
+                            Image {
+                                source: root.qr-image;
+                                width: 240px;
+                                height: 240px;
+                                image-rendering: pixelated;
+                            }
+                        }
+                    }
+                }
+
+                if root.pairing-mode: VerticalLayout {
+                    padding: 48px;
+                    spacing: 20px;
+                    alignment: start;
+                    Text {
+                        text: @tr("Log in with phone number");
+                        color: Theme.text;
+                        font-size: 24px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: @tr("Enter your number with the country code to receive a code to type on your phone.");
+                        color: Theme.text-dim;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        phone-input := LineEdit {
+                            width: 300px;
+                            placeholder-text: @tr("E.g.: 5511999998888");
+                        }
+                        Button {
+                            text: @tr("Get code");
+                            primary: true;
+                            clicked => { root.request-pairing-code(phone-input.text); }
+                        }
+                    }
+                    Text {
+                        text: root.pairing-code;
+                        color: Theme.accent;
+                        font-size: 36px;
+                        font-weight: 700;
+                        letter-spacing: 4px;
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    GreenLink {
+                        label: @tr("‹  Back to QR code");
+                        clicked => { root.pairing-mode = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Main ----------
+    // capture-key-pressed sees Ctrl+V even while the composer LineEdit is
+    // focused; rejecting keeps normal text paste working while the app
+    // checks the clipboard for an image (WhatsApp-style paste-to-send).
+    capture-scope := FocusScope {
+        visible: root.screen == "main";
+        capture-key-pressed(event) => {
+            if (event.text == "v" && event.modifiers.control && root.chat-open) {
+                root.paste-clipboard();
+            }
+            reject
+        }
+
+    main-pane := HorizontalLayout {
+        padding: 0;
+        spacing: 0;
+
+        // Icon rail
+        Rectangle {
+            width: 60px;
+            background: Theme.header;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+                alignment: start;
+                IconButton { icon: @image-url("icons/message-circle.svg"); active: true; }
+                IconButton { icon: @image-url("icons/phone.svg"); }
+                IconButton { icon: @image-url("icons/users.svg"); }
+                Rectangle { vertical-stretch: 1; }
+                IconButton {
+                    icon: @image-url("icons/settings.svg");
+                    clicked => {
+                        root.settings-status = "";
+                        root.settings-open = true;
+                    }
+                }
+            }
+        }
+
+        Rectangle { width: 1px; background: Theme.border; }
+
+        // Sidebar
+        Rectangle {
+            width: 380px;
+            background: Theme.sidebar;
+            VerticalBox {
+                padding: 0;
+                spacing: 0;
+
+                Rectangle {
+                    height: 56px;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text {
+                            text: @tr("Chats");
+                            color: Theme.text;
+                            font-size: 21px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 46px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        padding-bottom: 8px;
+                        search-box := LineEdit {
+                            placeholder-text: @tr("Search chats");
+                            edited => { root.search-changed(self.text); }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 40px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        spacing: 8px;
+                        alignment: start;
+                        FilterChip {
+                            label: @tr("All");
+                            active: root.chat-tab == "all";
+                            clicked => { root.chat-tab = "all"; root.tab-changed("all"); }
+                        }
+                        FilterChip {
+                            label: @tr("Unread");
+                            active: root.chat-tab == "unread";
+                            clicked => { root.chat-tab = "unread"; root.tab-changed("unread"); }
+                        }
+                        FilterChip {
+                            label: @tr("Archived");
+                            active: root.chat-tab == "archived";
+                            clicked => { root.chat-tab = "archived"; root.tab-changed("archived"); }
+                        }
+                    }
+                }
+
+                ListView {
+                    for chat[i] in root.chats: Rectangle {
+                        height: 72px;
+                        clip: true;
+                        background: i == root.selected-chat ? Theme.selected
+                            : touch.has-hover ? Theme.hover : transparent;
+                        touch := TouchArea {
+                            clicked => { root.open-chat(i); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 13px;
+                            padding-right: 15px;
+                            spacing: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 0;
+                                Avatar {
+                                    width: 49px;
+                                    height: 49px;
+                                    src: chat.avatar;
+                                    has-image: chat.hasAvatar;
+                                    initial: chat.initial;
+                                    color-idx: chat.colorIdx;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text {
+                                        text: chat.name;
+                                        color: Theme.text;
+                                        font-size: 15px;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        text: chat.time;
+                                        color: chat.unread > 0 ? Theme.accent : Theme.text-dim;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 0;
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text {
+                                        text: chat.preview;
+                                        color: Theme.text-dim;
+                                        font-size: 13px;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                    if chat.pinned: Image {
+                                        source: @image-url("icons/pin.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 14px;
+                                        height: 14px;
+                                        y: (parent.height - self.height) / 2;
+                                        horizontal-stretch: 0;
+                                    }
+                                    if chat.unread > 0: Rectangle {
+                                        width: max(20px, badge-text.preferred-width + 12px);
+                                        height: 20px;
+                                        border-radius: 10px;
+                                        background: Theme.accent;
+                                        badge-text := Text {
+                                            text: chat.unread;
+                                            color: Theme.dark ? #111b21 : #ffffff;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            x: 75px;
+                            y: parent.height - 1px;
+                            width: parent.width - 75px;
+                            height: 1px;
+                            background: Theme.border;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle { width: 1px; background: Theme.border; }
+
+        // Conversation pane
+        Rectangle {
+            background: Theme.conv-bg;
+
+            VerticalBox {
+                visible: !root.chat-open;
+                width: 100%;
+                height: 100%;
+                alignment: center;
+                Text {
+                    text: "Zapive";
+                    color: Theme.text;
+                    font-size: 28px;
+                    font-weight: 300;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: @tr("Select a conversation to start");
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            VerticalBox {
+                visible: root.chat-open;
+                width: 100%;
+                height: 100%;
+                padding: 0;
+                spacing: 0;
+
+                Rectangle {
+                    height: 54px;
+                    background: Theme.header;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            Avatar {
+                                width: 40px;
+                                height: 40px;
+                                src: root.current-avatar;
+                                has-image: root.current-avatar-has;
+                                initial: root.current-initial;
+                                color-idx: root.current-color-idx;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            Text {
+                                text: root.current-chat-name;
+                                color: Theme.text;
+                                font-size: 16px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+                            if root.current-status != "": Text {
+                                text: root.current-status;
+                                color: root.current-status == "online" ? Theme.text-dim : Theme.accent;
+                                font-size: 12px;
+                            }
+                        }
+                    }
+                }
+
+                if root.sync-banner != "": Rectangle {
+                    height: 32px;
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: 6px;
+                        Rectangle {
+                            width: banner-text.preferred-width + 24px;
+                            height: 24px;
+                            border-radius: 12px;
+                            background: Theme.pill;
+                            banner-text := Text {
+                                text: root.sync-banner;
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                msg-list := ListView {
+                    changed viewport-y => {
+                        if (self.viewport-y >= -4px && self.viewport-height > self.height) {
+                            root.load-older();
+                        }
+                    }
+                    for msg in root.messages: msg-row := Rectangle {
+                        property <length> max-text-w: max(120px, self.width * 0.65 - 44px);
+                        property <length> day-offset: msg.dayLabel != "" ? 34px : 0;
+                        height: bubble.height + (msg.firstOfRun ? 16px : 6px)
+                            + (msg.reactions != "" ? 14px : 0) + self.day-offset;
+                        if msg.dayLabel != "": Rectangle {
+                            y: 8px;
+                            x: (parent.width - self.width) / 2;
+                            width: day-text.preferred-width + 24px;
+                            height: 24px;
+                            border-radius: 6px;
+                            background: Theme.pill;
+                            day-text := Text {
+                                text: msg.dayLabel;
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        bubble := Rectangle {
+                            y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
+                            x: msg.fromMe ? parent.width - self.width - 30px : 30px;
+                            width: content.preferred-width;
+                            height: content.preferred-height;
+                            background: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
+                            border-radius: 7px;
+                            content := VerticalLayout {
+                                padding: 6px;
+                                padding-left: 9px;
+                                padding-right: 9px;
+                                spacing: 2px;
+
+                                if msg.showSender: sender-touch := TouchArea {
+                                    width: sender-text.width;
+                                    height: sender-text.preferred-height;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.open-dm(msg.senderJid); }
+                                    sender-text := Text {
+                                        text: msg.sender;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        color: Theme.sender;
+                                        width: min(self.preferred-width, msg-row.max-text-w);
+                                        overflow: elide;
+                                    }
+                                }
+
+                                if msg.forwarded && !msg.deleted: HorizontalLayout {
+                                    spacing: 4px;
+                                    alignment: start;
+                                    Image {
+                                        source: @image-url("icons/corner-up-right.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 12px;
+                                        height: 12px;
+                                        y: 1px;
+                                    }
+                                    Text {
+                                        text: @tr("Forwarded");
+                                        font-size: 11px;
+                                        font-italic: true;
+                                        color: Theme.text-dim;
+                                    }
+                                }
+
+                                if msg.kind == "image" && msg.mediaReady: TouchArea {
+                                    width: msg.picW * 1px;
+                                    height: msg.picH * 1px;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.lightbox-image = msg.picture;
+                                        root.lightbox-open = true;
+                                    }
+                                    Image {
+                                        source: msg.picture;
+                                        width: parent.width;
+                                        height: parent.height;
+                                    }
+                                }
+                                if msg.kind == "image" && !msg.mediaReady: Text {
+                                    text: @tr("Loading image...");
+                                    color: Theme.text-dim;
+                                }
+
+                                if msg.kind == "audio" || msg.kind == "doc": HorizontalLayout {
+                                    spacing: 8px;
+                                    IconButton {
+                                        icon: msg.kind == "audio"
+                                            ? @image-url("icons/player-play.svg")
+                                            : @image-url("icons/file-text.svg");
+                                        enabled: msg.mediaReady;
+                                        clicked => { root.play-audio(msg.mediaPath); }
+                                    }
+                                    Text {
+                                        text: msg.text;
+                                        color: Theme.bubble-text;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        width: min(self.preferred-width, msg-row.max-text-w - 60px);
+                                    }
+                                }
+
+                                if msg.kind == "text" || (msg.kind == "image" && msg.text != ""): Rectangle {
+                                    width: body-text.width;
+                                    height: body-text.preferred-height;
+                                    ContextMenuArea {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        Menu {
+                                            MenuItem {
+                                                title: @tr("Copy");
+                                                activated => {
+                                                    body-text.select-all();
+                                                    body-text.copy();
+                                                    body-text.clear-selection();
+                                                }
+                                            }
+                                            MenuItem {
+                                                title: @tr("Forward");
+                                                activated => { root.request-forward(msg.id); }
+                                            }
+                                        }
+                                        body-text := TextInput {
+                                            text: msg.deleted ? "🚫 " + msg.text : msg.text;
+                                            read-only: true;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            font-size: 14px;
+                                            font-italic: msg.deleted;
+                                            color: msg.deleted ? Theme.text-dim : Theme.bubble-text;
+                                            selection-background-color: #3390ec;
+                                            selection-foreground-color: white;
+                                            // captions wrap to the image width
+                                            width: min(self.preferred-width,
+                                                msg.kind == "image" && msg.picW > 0
+                                                    ? msg.picW * 1px
+                                                    : msg-row.max-text-w);
+                                            height: self.preferred-height;
+                                        }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    alignment: end;
+                                    spacing: 4px;
+                                    Text {
+                                        text: msg.time;
+                                        font-size: 10px;
+                                        color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                    }
+                                    if msg.ticks != "": Text {
+                                        text: msg.ticks;
+                                        font-size: 10px;
+                                        font-weight: 700;
+                                        color: msg.ticksBlue ? #53bdeb : Theme.time-out;
+                                    }
+                                }
+                            }
+                        }
+                        if msg.reactions != "": Rectangle {
+                            y: bubble.y + bubble.height - 4px;
+                            x: msg.fromMe
+                                ? bubble.x + bubble.width - self.width - 4px
+                                : bubble.x + 4px;
+                            width: react-text.preferred-width + 14px;
+                            height: 21px;
+                            border-radius: 10.5px;
+                            background: Theme.pill;
+                            border-width: 1.5px;
+                            border-color: Theme.conv-bg;
+                            react-text := Text {
+                                text: msg.reactions;
+                                font-size: 11px;
+                                color: Theme.text;
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 10px; }
+
+                Rectangle {
+                    height: 62px;
+                    background: Theme.header;
+                    HorizontalBox {
+                        padding: 11px;
+                        spacing: 8px;
+                        IconButton {
+                            icon: @image-url("icons/plus.svg");
+                            clicked => { root.attach-open = !root.attach-open; }
+                        }
+                        message-input := LineEdit {
+                            placeholder-text: @tr("Type a message");
+                            accepted => {
+                                root.send-message(self.text);
+                                self.text = "";
+                            }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/send-2.svg");
+                            clicked => {
+                                root.send-message(message-input.text);
+                                message-input.text = "";
+                            }
+                        }
+                    }
+                }
+            }
+
+            // WhatsApp-style attach menu popping above the composer
+            if root.attach-open && root.chat-open: Rectangle {
+                x: 12px;
+                y: parent.height - self.height - 74px;
+                width: 220px;
+                height: menu-col.preferred-height + 16px;
+                background: Theme.panel;
+                border-radius: 10px;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000055;
+                menu-col := VerticalLayout {
+                    padding: 8px;
+                    spacing: 2px;
+                    MenuRow {
+                        icon: @image-url("icons/file-text.svg");
+                        label: @tr("Document");
+                        clicked => { root.attach-open = false; root.attach-doc(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("icons/photo.svg");
+                        label: @tr("Photos");
+                        clicked => { root.attach-open = false; root.attach-image(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("icons/music.svg");
+                        label: @tr("Audio");
+                        clicked => { root.attach-open = false; root.attach-audio(); }
+                    }
+                }
+            }
+        }
+    }
+    } // capture-scope
+
+    // ---------- Forward picker ----------
+    if root.forward-open: Rectangle {
+        background: #000000aa;
+        TouchArea { clicked => { root.forward-open = false; } }
+        Rectangle {
+            width: 420px;
+            height: 540px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            VerticalBox {
+                padding: 18px;
+                spacing: 10px;
+                HorizontalLayout {
+                    Text {
+                        text: @tr("Forward message to");
+                        color: Theme.text;
+                        font-size: 17px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/x.svg");
+                        clicked => { root.forward-open = false; }
+                    }
+                }
+                ListView {
+                    for chat[i] in root.chats: Rectangle {
+                        height: 56px;
+                        background: fwd-touch.has-hover ? Theme.hover : transparent;
+                        border-radius: 8px;
+                        fwd-touch := TouchArea {
+                            clicked => { root.forward-to(i); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 10px;
+                            VerticalLayout {
+                                alignment: center;
+                                Avatar {
+                                    width: 40px;
+                                    height: 40px;
+                                    src: chat.avatar;
+                                    has-image: chat.hasAvatar;
+                                    initial: chat.initial;
+                                    color-idx: chat.colorIdx;
+                                }
+                            }
+                            Text {
+                                text: chat.name;
+                                color: Theme.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Settings overlay ----------
+    if root.settings-open: Rectangle {
+        background: #000000aa;
+        TouchArea { clicked => { root.settings-open = false; } }
+        Rectangle {
+            width: 440px;
+            height: 620px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            VerticalBox {
+                padding: 24px;
+                spacing: 13px;
+                HorizontalLayout {
+                    Text {
+                        text: @tr("Settings");
+                        color: Theme.text;
+                        font-size: 20px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/x.svg");
+                        clicked => { root.settings-open = false; }
+                    }
+                }
+                Text {
+                    text: @tr("Appearance");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterChip {
+                        label: @tr("Dark");
+                        active: root.theme-mode == "dark";
+                        clicked => { root.theme-mode = "dark"; root.theme-changed("dark"); }
+                    }
+                    FilterChip {
+                        label: @tr("Light");
+                        active: root.theme-mode == "light";
+                        clicked => { root.theme-mode = "light"; root.theme-changed("light"); }
+                    }
+                    FilterChip {
+                        label: @tr("System");
+                        active: root.theme-mode == "system";
+                        clicked => { root.theme-mode = "system"; root.theme-changed("system"); }
+                    }
+                }
+                Text {
+                    text: @tr("Language");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterChip {
+                        label: "Português";
+                        active: root.language-mode == "pt";
+                        clicked => { root.language-mode = "pt"; root.language-changed("pt"); }
+                    }
+                    FilterChip {
+                        label: "English";
+                        active: root.language-mode == "en";
+                        clicked => { root.language-mode = "en"; root.language-changed("en"); }
+                    }
+                    FilterChip {
+                        label: @tr("System");
+                        active: root.language-mode == "system";
+                        clicked => { root.language-mode = "system"; root.language-changed("system"); }
+                    }
+                }
+                Text {
+                    text: @tr("Security");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: root.pin-set
+                        ? @tr("PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI).")
+                        : @tr("Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch.");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                current-pin := LineEdit {
+                    visible: root.pin-set;
+                    input-type: password;
+                    placeholder-text: @tr("Current PIN");
+                }
+                new-pin := LineEdit {
+                    input-type: password;
+                    placeholder-text: @tr("New PIN (4 to 10 digits)");
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Button {
+                        text: root.pin-set ? @tr("Change PIN") : @tr("Set PIN");
+                        primary: true;
+                        clicked => {
+                            root.save-pin(current-pin.text, new-pin.text);
+                            new-pin.text = "";
+                        }
+                    }
+                    Button {
+                        visible: root.pin-set;
+                        text: @tr("Remove PIN");
+                        clicked => {
+                            root.remove-pin(current-pin.text);
+                            current-pin.text = "";
+                        }
+                    }
+                }
+                Text {
+                    text: root.settings-status;
+                    color: #ffbc38;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text {
+                    text: @tr("Account");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    logout-btn := TouchArea {
+                        mouse-cursor: pointer;
+                        width: lb.preferred-width + 28px;
+                        height: 36px;
+                        clicked => { root.logout(); }
+                        lb := Text {
+                            text: @tr("Log out of WhatsApp");
+                            color: white;
+                            font-size: 14px;
+                            font-weight: 700;
+                            x: 14px;
+                            height: parent.height;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 8px;
+                            background: logout-btn.has-hover ? #d9534f : #c9302c;
+                            z: -1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Send-image preview ----------
+    if root.preview-open: Rectangle {
+        background: #000000d9;
+        TouchArea { }
+        VerticalLayout {
+            padding: 28px;
+            spacing: 14px;
+            HorizontalLayout {
+                alignment: start;
+                IconButton {
+                    icon: @image-url("icons/x.svg");
+                    clicked => { root.cancel-send-image(); }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                Image {
+                    source: root.preview-image;
+                    width: parent.width * 0.9;
+                    height: parent.height * 0.96;
+                    x: parent.width * 0.05;
+                    y: parent.height * 0.02;
+                    image-fit: contain;
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                preview-caption := LineEdit {
+                    width: 420px;
+                    placeholder-text: @tr("Add a caption");
+                    accepted => {
+                        root.confirm-send-image(self.text);
+                        self.text = "";
+                    }
+                }
+                Button {
+                    text: @tr("Send");
+                    primary: true;
+                    clicked => {
+                        root.confirm-send-image(preview-caption.text);
+                        preview-caption.text = "";
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Lightbox ----------
+    if root.lightbox-open: Rectangle {
+        background: #000000e6;
+        TouchArea { clicked => { root.lightbox-open = false; } }
+        Image {
+            source: root.lightbox-image;
+            width: parent.width * 0.92;
+            height: parent.height * 0.92;
+            x: parent.width * 0.04;
+            y: parent.height * 0.04;
+            image-fit: contain;
+        }
+        IconButton {
+            icon: @image-url("icons/x.svg");
+            x: parent.width - self.width - 16px;
+            y: 16px;
+            clicked => { root.lightbox-open = false; }
+        }
+    }
+}
