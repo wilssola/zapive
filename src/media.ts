@@ -1,6 +1,9 @@
 import { extensionForMediaMessage } from "@whiskeysockets/baileys";
 import type { WAMessage } from "@whiskeysockets/baileys";
-import sharp from "sharp";
+import type SharpApi from "sharp";
+import { nativeRequire } from "./native.ts";
+
+const sharp = nativeRequire("sharp") as typeof SharpApi;
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile, readFile, access, rm } from "node:fs/promises";
@@ -13,7 +16,21 @@ import { t } from "./i18n.ts";
 
 const execFileAsync = promisify(execFile);
 
-const CACHE_DIR = "media_cache";
+import {
+  clipboardImage,
+  clipboardRead,
+  clipboardWrite,
+  ffTool,
+  findFfmpeg,
+  killTree,
+  micInput,
+  focusWindow,
+  openPath,
+  pickFile as platformPickFile,
+} from "./platform.ts";
+import { MEDIA_CACHE } from "./paths.ts";
+
+const CACHE_DIR = MEDIA_CACHE;
 const DECODE_CACHE_MAX = 50;
 
 export interface DecodedImage extends SlintImageData {
@@ -313,7 +330,7 @@ export class MediaService {
       const dir = join(CACHE_DIR, ".tmp", `frames_${sanitize(key)}`);
       await mkdir(dir, { recursive: true });
       await execFileAsync(
-        this.findFfmpeg()!,
+        findFfmpeg(),
         ["-hide_banner", "-loglevel", "error", "-y", "-i", src,
          "-vf", `fps=15,scale=${width}:-2`, "-frames:v", "45", join(dir, "f_%03d.png")],
         { timeout: 60_000 },
@@ -352,7 +369,7 @@ export class MediaService {
   private videoToken = 0;
 
   private async probeSize(src: string): Promise<{ w: number; h: number }> {
-    const ffprobe = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffprobe.exe");
+    const ffprobe = ffTool("ffprobe");
     try {
       const { stdout } = await execFileAsync(ffprobe, [
         "-v", "error", "-select_streams", "v:0",
@@ -386,7 +403,7 @@ export class MediaService {
       const fps = 15;
 
       const video = spawn(
-        this.findFfmpeg()!,
+        findFfmpeg(),
         ["-hide_banner", "-loglevel", "error", "-re", "-i", src,
          "-vf", `fps=${fps},scale=${targetW}:${targetH}`,
          "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
@@ -394,7 +411,7 @@ export class MediaService {
       );
       this.videoProcs = [video];
       if (withAudio) {
-        const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
+        const ffplay = ffTool("ffplay");
         this.videoProcs.push(
           spawn(ffplay, ["-nodisp", "-autoexit", "-vn", "-loglevel", "quiet", src], {
             stdio: "ignore",
@@ -447,9 +464,7 @@ export class MediaService {
   private killProc(proc: ReturnType<typeof spawn>) {
     try {
       proc.kill();
-      if (proc.pid) {
-        spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
-      }
+      killTree(proc);
     } catch {
       // already gone
     }
@@ -489,7 +504,7 @@ export class MediaService {
       const dir = join(CACHE_DIR, ".tmp");
       await mkdir(dir, { recursive: true });
       const out = resolve(join(dir, `gif_${Date.now()}.mp4`));
-      await execFileAsync(this.findFfmpeg()!, [
+      await execFileAsync(findFfmpeg(), [
         "-hide_banner", "-loglevel", "error", "-y", "-i", gifPath,
         "-movflags", "faststart", "-pix_fmt", "yuv420p",
         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
@@ -588,7 +603,7 @@ export class MediaService {
       const src = await this.plainAudioPath(msgId, filePath);
       const pcm = await new Promise<Buffer>((done, fail) => {
         const proc = spawn(
-          this.findFfmpeg()!,
+          findFfmpeg(),
           ["-hide_banner", "-loglevel", "error", "-i", src,
            "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
           { stdio: ["ignore", "pipe", "ignore"] },
@@ -653,7 +668,7 @@ export class MediaService {
     try {
       const src = await this.plainAudioPath(msgId, filePath);
       if (token !== this.playToken) return false;
-      const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
+      const ffplay = ffTool("ffplay");
       const proc = spawn(
         ffplay,
         [
@@ -682,14 +697,7 @@ export class MediaService {
   }
 
   private hardKill(proc: ReturnType<typeof spawn>) {
-    try {
-      proc.kill();
-      if (proc.pid) {
-        spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
-      }
-    } catch {
-      // already gone
-    }
+    killTree(proc);
   }
 
   stopAudio(): void {
@@ -706,54 +714,6 @@ export class MediaService {
 
   private recProc: ReturnType<typeof spawn> | null = null;
   private recPath: string | null = null;
-  private ffmpegPath: string | null | undefined;
-  private micName: string | null | undefined;
-
-  private findFfmpeg(): string | null {
-    if (this.ffmpegPath !== undefined) return this.ffmpegPath;
-    let found: string | null = null;
-    const winget = join(
-      process.env.LOCALAPPDATA ?? "",
-      "Microsoft\\WinGet\\Packages",
-    );
-    if (existsSync(winget)) {
-      for (const dir of readdirSync(winget)) {
-        if (!dir.toLowerCase().includes("ffmpeg")) continue;
-        const stack = [join(winget, dir)];
-        while (stack.length > 0 && !found) {
-          const cur = stack.pop()!;
-          for (const entry of readdirSync(cur, { withFileTypes: true })) {
-            const full = join(cur, entry.name);
-            if (entry.isDirectory()) stack.push(full);
-            else if (entry.name.toLowerCase() === "ffmpeg.exe") {
-              found = full;
-              break;
-            }
-          }
-        }
-        if (found) break;
-      }
-    }
-    this.ffmpegPath = found ?? "ffmpeg"; // fall back to PATH
-    return this.ffmpegPath;
-  }
-
-  // First DirectShow audio input reported by ffmpeg.
-  private async findMicrophone(): Promise<string | null> {
-    if (this.micName !== undefined) return this.micName;
-    const ff = this.findFfmpeg();
-    try {
-      await execFileAsync(ff!, ["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"], {
-        timeout: 20_000,
-      });
-      this.micName = null;
-    } catch (err) {
-      const out = String((err as { stderr?: string }).stderr ?? "");
-      const match = out.match(/"([^"]+)"\s*\(audio\)/);
-      this.micName = match?.[1] ?? null;
-    }
-    return this.micName;
-  }
 
   get recording(): boolean {
     return this.recProc !== null;
@@ -761,15 +721,15 @@ export class MediaService {
 
   async startRecording(): Promise<boolean> {
     if (this.recProc) return false;
-    const mic = await this.findMicrophone();
-    if (!mic) return false;
+    const input = await micInput();
+    if (!input) return false;
     const dir = join(CACHE_DIR, ".tmp");
     await mkdir(dir, { recursive: true });
     const out = resolve(join(dir, `voice_${Date.now()}.ogg`));
     // Opus mono 32k is what WhatsApp voice notes use.
     this.recProc = spawn(
-      this.findFfmpeg()!,
-      ["-hide_banner", "-loglevel", "error", "-f", "dshow", "-i", `audio=${mic}`,
+      findFfmpeg(),
+      ["-hide_banner", "-loglevel", "error", ...input,
        "-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1", "-y", out],
       { stdio: ["pipe", "ignore", "ignore"] },
     );
@@ -840,112 +800,38 @@ export class MediaService {
     const dir = join(CACHE_DIR, ".tmp");
     await mkdir(dir, { recursive: true });
     const out = resolve(join(dir, `paste_${Date.now()}.png`));
-    const script =
-      "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; " +
-      "$img = [System.Windows.Forms.Clipboard]::GetImage(); " +
-      `if ($img -ne $null) { $img.Save('${out.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' }`;
-    try {
-      const { stdout } = await execFileAsync(
-        "powershell",
-        ["-NoProfile", "-STA", "-Command", script],
-        { timeout: 15_000 },
-      );
-      return stdout.includes("ok") ? out : null;
-    } catch {
-      return null;
-    }
+    return clipboardImage(out);
   }
 
-  // Writes text to the clipboard (base64 avoids quoting problems).
   // Brings the app forward when a toast is clicked: showing the window
   // is not enough once another app owns the foreground.
   async focusWindow(): Promise<void> {
-    const script =
-      "$s = New-Object -ComObject WScript.Shell; " +
-      "$p = Get-Process -Name node -ErrorAction SilentlyContinue | " +
-      "Where-Object { $_.MainWindowTitle -eq 'Zapive' } | Select-Object -First 1; " +
-      "if ($p) { [void]$s.AppActivate($p.Id) }";
-    try {
-      await execFileAsync("powershell", ["-NoProfile", "-Command", script], {
-        timeout: 10_000,
-      });
-    } catch {
-      // focus is best-effort
-    }
+    await focusWindow();
   }
 
   async setClipboard(text: string): Promise<void> {
-    const b64 = Buffer.from(text, "utf8").toString("base64");
-    const script =
-      `Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString(` +
-      `[Convert]::FromBase64String('${b64}')))`;
-    try {
-      await execFileAsync("powershell", ["-NoProfile", "-Command", script], {
-        timeout: 10_000,
-      });
-    } catch {
-      // clipboard is best-effort
-    }
+    await clipboardWrite(text);
   }
 
   async clipboardText(): Promise<string> {
-    try {
-      const { stdout } = await execFileAsync(
-        "powershell",
-        ["-NoProfile", "-Command", "Get-Clipboard -Raw"],
-        { timeout: 10_000 },
-      );
-      return stdout.replace(/\r?\n$/, "");
-    } catch {
-      return "";
-    }
+    return clipboardRead();
   }
 
-  // Hands a URL to the default browser.
+  // Hands a URL to the desktop's browser.
   openExternal(url: string): void {
     if (!/^https?:\/\//i.test(url)) return;
-    spawn("cmd", ["/c", "start", "", url.replace(/&/g, "^&")], {
-      detached: true,
-      stdio: "ignore",
-    }).unref();
+    openPath(url);
   }
 
   play(filePath: string): void {
     if (!filePath) return;
     void this.tempPlainCopy(filePath)
-      .then((playable) => {
-        spawn("cmd", ["/c", "start", "", playable], {
-          detached: true,
-          stdio: "ignore",
-        }).unref();
-      })
+      .then((playable) => openPath(playable))
       .catch((err) => console.error("play failed:", err));
   }
 
   async pickFile(kind: "image" | "audio" | "doc"): Promise<string | null> {
-    const filter =
-      kind === "image"
-        ? `${t("picker.images")} (*.jpg;*.jpeg;*.png;*.webp;*.gif)|*.jpg;*.jpeg;*.png;*.webp;*.gif`
-        : kind === "audio"
-          ? `${t("picker.audio")} (*.ogg;*.opus;*.mp3;*.m4a;*.wav)|*.ogg;*.opus;*.mp3;*.m4a;*.wav`
-          : `${t("picker.all")} (*.*)|*.*`;
-    const script = [
-      "Add-Type -AssemblyName System.Windows.Forms;",
-      "$d = New-Object System.Windows.Forms.OpenFileDialog;",
-      `$d.Filter = '${filter}';`,
-      "if ($d.ShowDialog() -eq 'OK') { $d.FileName }",
-    ].join(" ");
-    try {
-      const { stdout } = await execFileAsync(
-        "powershell",
-        ["-NoProfile", "-STA", "-Command", script],
-        { timeout: 120_000 },
-      );
-      const path = stdout.trim();
-      return path || null;
-    } catch {
-      return null;
-    }
+    return platformPickFile(kind);
   }
 }
 

@@ -1,4 +1,7 @@
-import notifier from "node-notifier";
+import type NotifierApi from "node-notifier";
+import { nativeRequire } from "./native.ts";
+
+const notifier = nativeRequire("node-notifier") as typeof NotifierApi;
 import { t } from "./i18n.ts";
 
 // Native Windows toast notifications with burst coalescing: several

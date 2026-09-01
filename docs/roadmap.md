@@ -46,7 +46,8 @@ sending does not.
 | GIF catalogue is limited | Openverse indexes openly licensed media, not meme GIFs; Giphy and Tenor both refuse anonymous access |
 | No sticker store, packs or emoji-category tabs | Baileys exposes no sticker-pack API; only sent and starred stickers are available |
 | Calls cannot be answered from the desktop | Baileys detects and declines calls only; Zapive notifies and lists them |
-| Windows only | DPAPI, NotifyIcon, WinForms dialogs and DirectShow |
+| No tray outside Windows | Slint has no tray API; the Windows tray is a PowerShell NotifyIcon, elsewhere the window owns the process |
+| Each build targets one platform | The Node runtime and the native addons in `dist/` are platform-specific |
 
 ## Non-goals
 

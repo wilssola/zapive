@@ -1,17 +1,25 @@
 import "./env.ts";
-import * as slint from "slint-ui";
+import type * as SlintApi from "slint-ui";
+import { nativeRequire } from "./native.ts";
+
+const slint = nativeRequire("slint-ui") as typeof SlintApi;
 import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
-import { spawn, execFile } from "node:child_process";
 import { join } from "node:path";
 import { Bridge } from "./bridge.ts";
 import type { AppWindow } from "./bridge.ts";
 import { MediaService } from "./media.ts";
 import { WhatsAppService } from "./whatsapp.ts";
 import { Db } from "./db.ts";
-import { fileURLToPath } from "node:url";
 import { loadCatalog, translateSlintSource } from "./slint-tr.ts";
 import { setLocale, t } from "./i18n.ts";
 import type { Locale } from "./i18n.ts";
+import { ensureDirs, migrateFromCwd, resourceRoot } from "./paths.ts";
+import { startTray, systemDark as readSystemDark } from "./platform.ts";
+
+// The vault and the cache live in the user's own directories; older
+// builds kept them next to the executable.
+migrateFromCwd(); // before the new directories exist, or nothing moves
+ensureDirs();
 
 const db = new Db();
 
@@ -29,10 +37,10 @@ process.env.LANGUAGE = locale === "pt" ? "pt_BR" : "en_US";
 
 // The markup is translated at load time (see slint-tr.ts for why gettext
 // alone leaves it in English on Windows).
-const appSlint = fileURLToPath(new URL("../ui/app.slint", import.meta.url));
+const appSlint = join(resourceRoot(), "ui", "app.slint");
 const catalog =
   locale === "pt"
-    ? loadCatalog(fileURLToPath(new URL("../i18n/pt_BR.po", import.meta.url)))
+    ? loadCatalog(join(resourceRoot(), "i18n", "pt_BR.po"))
     : new Map<string, string>();
 const ui = slint.loadSource(
   translateSlintSource(readFileSync(appSlint, "utf8"), catalog),
@@ -91,25 +99,9 @@ function boot() {
   });
 }
 
-// ---- Theme: dark / light / follow the Windows system theme ----
+// ---- Theme: dark / light / follow the desktop's system theme ----
 let themeMode = db.settingGet("theme") ?? "dark";
 let systemDark = true;
-
-function readSystemDark(cb: (dark: boolean) => void) {
-  execFile(
-    "reg",
-    [
-      "query",
-      "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-      "/v",
-      "AppsUseLightTheme",
-    ],
-    (err, stdout) => {
-      if (err) return cb(true);
-      cb(!/0x1\s*$/m.test(stdout.trim()));
-    },
-  );
-}
 
 function applyTheme() {
   win.theme_mode = themeMode;
@@ -179,42 +171,19 @@ if (db.hasPin()) {
   boot();
 }
 
-// ---- System tray: closing the window hides it; the app keeps running.
-// A persistent PowerShell NotifyIcon reports clicks over stdout. ----
-const trayScript = [
-  "Add-Type -AssemblyName System.Windows.Forms, System.Drawing;",
-  "$ni = New-Object System.Windows.Forms.NotifyIcon;",
-  "$ni.Icon = [System.Drawing.SystemIcons]::Application;",
-  "$ni.Text = 'Zapive';",
-  "$ni.Visible = $true;",
-  "$menu = New-Object System.Windows.Forms.ContextMenuStrip;",
-  `[void]$menu.Items.Add('${t("tray.open")}', $null, { [Console]::Out.WriteLine('show') });`,
-  `[void]$menu.Items.Add('${t("tray.exit")}', $null, { [Console]::Out.WriteLine('exit'); $ni.Visible = $false; [System.Windows.Forms.Application]::Exit() });`,
-  "$ni.ContextMenuStrip = $menu;",
-  "$ni.add_MouseClick({ if ($_.Button -eq 'Left') { [Console]::Out.WriteLine('show') } });",
-  "[System.Windows.Forms.Application]::Run();",
-].join(" ");
-
-const tray = spawn("powershell", ["-NoProfile", "-STA", "-Command", trayScript], {
-  stdio: ["ignore", "pipe", "ignore"],
-});
-tray.stdout.setEncoding("utf8");
-tray.stdout.on("data", (chunk: string) => {
-  for (const line of chunk.split(/\r?\n/)) {
-    const cmd = line.trim();
-    if (cmd === "show") win.show();
-    if (cmd === "exit") slint.quitEventLoop();
-  }
-});
-process.on("exit", () => {
-  try {
-    tray.kill();
-  } catch {
-    // already gone
-  }
-});
+// ---- System tray (Windows): closing the window hides it and the app
+// keeps running. Elsewhere there is no tray, so the window owns the
+// process lifetime. ----
+const tray = startTray(
+  () => win.show(),
+  () => slint.quitEventLoop(),
+);
+process.on("exit", () => tray?.stop());
 
 win.show();
-await slint.runEventLoop({ quitOnLastWindowClosed: false });
-tray.kill();
-process.exit(0);
+// Wrapped so the bundle can be emitted as CommonJS.
+void (async () => {
+  await slint.runEventLoop({ quitOnLastWindowClosed: !tray });
+  tray?.stop();
+  process.exit(0);
+})();

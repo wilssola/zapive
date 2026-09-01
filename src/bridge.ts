@@ -1,4 +1,9 @@
-import { ArrayModel, StyledText } from "slint-ui";
+import type * as SlintApi from "slint-ui";
+import { nativeRequire } from "./native.ts";
+
+const slint = nativeRequire("slint-ui") as typeof SlintApi;
+const { ArrayModel, StyledText } = slint;
+type ArrayModel<T> = SlintApi.ArrayModel<T>;
 import { jidNormalizedUser, proto } from "@whiskeysockets/baileys";
 import type { WAMessage } from "@whiskeysockets/baileys";
 import {

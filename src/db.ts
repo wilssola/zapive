@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { wrapSecret, unwrapSecret } from "./platform.ts";
+import { DB_PATH } from "./paths.ts";
 import { initAuthCreds, BufferJSON, proto } from "@whiskeysockets/baileys";
 import type { AuthenticationState } from "@whiskeysockets/baileys";
 
@@ -21,7 +22,7 @@ export class Db {
   private failedAttempts = 0;
   private nextTryAt = 0;
 
-  constructor(path = "zapive.db") {
+  constructor(path = DB_PATH) {
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
@@ -46,7 +47,7 @@ export class Db {
     if (this.key || this.hasPin()) return;
     const stored = this.metaGet("dk");
     if (stored) {
-      const inner = unwrapDpapi(stored);
+      const inner = unwrapSecret(stored);
       if (!inner.startsWith("k:")) throw new Error("vault key corrupted");
       this.key = Buffer.from(inner.slice(2), "base64");
       return;
@@ -56,7 +57,7 @@ export class Db {
     const dk = randomBytes(32);
     this.key = dk;
     this.reencryptAll();
-    this.metaSet("dk", wrapDpapi("k:" + dk.toString("base64")));
+    this.metaSet("dk", wrapSecret("k:" + dk.toString("base64")));
   }
 
   unlock(pin: string): boolean {
@@ -89,7 +90,7 @@ export class Db {
     }
 
     try {
-      const inner = unwrapDpapi(stored);
+      const inner = unwrapSecret(stored);
       const kek = scryptSync(pin, salt, 32, SCRYPT_OPTS);
       const dkB64 = decrypt(inner, kek); // GCM auth fails on wrong PIN
       this.key = Buffer.from(dkB64, "base64");
@@ -130,7 +131,7 @@ export class Db {
     if (next !== null) {
       this.persistWrappedDk(next);
     } else {
-      this.metaSet("dk", wrapDpapi("k:" + this.key!.toString("base64")));
+      this.metaSet("dk", wrapSecret("k:" + this.key!.toString("base64")));
       this.db.prepare("DELETE FROM meta WHERE k IN ('pin_salt','pin_check')").run();
     }
     return null;
@@ -140,7 +141,7 @@ export class Db {
     const salt = randomBytes(16);
     const kek = scryptSync(pin, salt, 32, SCRYPT_OPTS);
     this.metaSet("pin_salt", salt.toString("hex"));
-    this.metaSet("dk", wrapDpapi(encrypt(this.key!.toString("base64"), kek)));
+    this.metaSet("dk", wrapSecret(encrypt(this.key!.toString("base64"), kek)));
     kek.fill(0);
   }
 
@@ -251,43 +252,8 @@ export class Db {
   }
 }
 
-// ---- Windows DPAPI (CryptProtectData): binds the wrapped DK to the
-// current Windows user account, the same OS facility Chrome and Signal
-// Desktop use for their local keys. Falls back to raw storage (prefixed)
-// if DPAPI is unavailable. ----
-
-function dpapi(op: "Protect" | "Unprotect", b64: string): string | null {
-  const script =
-    "Add-Type -AssemblyName System.Security; " +
-    `[Convert]::ToBase64String([System.Security.Cryptography.ProtectedData]::${op}(` +
-    `[Convert]::FromBase64String('${b64}'), $null, ` +
-    "[System.Security.Cryptography.DataProtectionScope]::CurrentUser))";
-  const r = spawnSync("powershell", ["-NoProfile", "-Command", script], {
-    encoding: "utf8",
-    timeout: 20_000,
-  });
-  const out = r.stdout?.trim();
-  return r.status === 0 && out ? out : null;
-}
-
-function wrapDpapi(inner: string): string {
-  const protectedB64 = dpapi("Protect", Buffer.from(inner, "utf8").toString("base64"));
-  if (protectedB64) return "dpapi:" + protectedB64;
-  console.warn("[vault] DPAPI unavailable — storing key without OS binding");
-  return "raw:" + Buffer.from(inner, "utf8").toString("base64");
-}
-
-function unwrapDpapi(stored: string): string {
-  if (stored.startsWith("dpapi:")) {
-    const plain = dpapi("Unprotect", stored.slice(6));
-    if (!plain) throw new Error("DPAPI unprotect failed (different Windows user?)");
-    return Buffer.from(plain, "base64").toString("utf8");
-  }
-  if (stored.startsWith("raw:")) {
-    return Buffer.from(stored.slice(4), "base64").toString("utf8");
-  }
-  throw new Error("unknown key wrapping format");
-}
+// The data key is wrapped by whatever key store the OS offers; see
+// platform.ts for DPAPI, the macOS keychain and the Secret Service.
 
 const FILE_MAGIC = Buffer.from("ZENC1");
 

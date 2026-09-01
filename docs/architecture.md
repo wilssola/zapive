@@ -43,6 +43,10 @@ and reports clicks over stdout.
 | `src/qr.ts` | QR string → RGBA buffer for the login screen |
 | `src/i18n.ts` | TypeScript-side translations (en/pt) |
 | `src/env.ts` | Renderer selection (Skia) — must be imported before slint-ui |
+| `src/paths.ts` | Per-platform data/cache directories and resource lookup |
+| `src/platform.ts` | Every OS-specific call: clipboard, dialogs, theme, key store, tray |
+| `src/native.ts` | Loads the addons that cannot be bundled (slint-ui, sharp, node-notifier) |
+| `scripts/build.mjs` | Bundles and injects the app into a Node executable |
 | `ui/app.slint` | Entire interface: theme globals, screens, overlays |
 | `i18n/*.po` | Slint (`@tr`) translation catalogs, applied at load time |
 | `src/slint-tr.ts` | Swaps `@tr("...")` literals for the catalog entry before `loadSource` |
@@ -99,3 +103,35 @@ those keys from the phone, after which the parked collections resume.
 **Reactive theming.** A Slint `global Theme` derives every color from a
 single `dark` boolean, so switching themes repaints instantly without
 reloading the UI.
+
+
+## Platforms
+
+Windows, macOS and Linux run the same code; only `src/platform.ts` differs
+per system, and it is the only module allowed to shell out to the OS.
+
+| Concern | Windows | macOS | Linux |
+|---|---|---|---|
+| Vault key | DPAPI (`CurrentUser`) | login keychain (`security`) | Secret Service (`secret-tool`) |
+| Clipboard | PowerShell `Set-/Get-Clipboard` | `pbcopy` / `pbpaste` | `wl-copy` or `xclip` |
+| File dialog | WinForms `OpenFileDialog` | `osascript choose file` | `zenity` or `kdialog` |
+| Open links | `cmd /c start` | `open` | `xdg-open` |
+| System theme | registry `AppsUseLightTheme` | `defaults read -g AppleInterfaceStyle` | `gsettings color-scheme` |
+| Microphone | ffmpeg `dshow` | ffmpeg `avfoundation` | ffmpeg `pulse` / `alsa` |
+| Tray | PowerShell `NotifyIcon` | — (window owns the lifetime) | — |
+| Notifications | SnoreToast | `terminal-notifier` | `notify-send` |
+
+Where a tool is missing the feature degrades instead of failing: without a
+key store the vault warns and keeps the key unbound; without `zenity` the
+attachment button reports that no dialog is available.
+
+## Where the data lives
+
+| | Vault (`zapive.db`) | Media cache |
+|---|---|---|
+| Windows | `%APPDATA%\Zapive` | `%LOCALAPPDATA%\Zapive\Cache\media` |
+| macOS | `~/Library/Application Support/Zapive` | `~/Library/Caches/Zapive/media` |
+| Linux | `$XDG_DATA_HOME/zapive` | `$XDG_CACHE_HOME/zapive/media` |
+
+Nothing is written next to the executable. A database left in the working
+directory by an earlier build is moved on the first run.

@@ -4,9 +4,12 @@
 
 - **Node.js 24+** — required by `slint-ui`; also runs TypeScript natively
 - **Bun** — package manager and script runner
-- **ffmpeg** (optional) — microphone capture for voice notes;
-  `winget install Gyan.FFmpeg`, or it is auto-discovered under the winget
-  packages folder
+- **ffmpeg** — audio/video playback, waveforms and microphone capture.
+  Windows: `winget install Gyan.FFmpeg` (also auto-discovered under the
+  winget packages folder); macOS: `brew install ffmpeg`; Linux: the
+  distribution package
+- **Linux only** — `zenity` (or `kdialog`) for file dialogs, `wl-clipboard`
+  or `xclip` for the clipboard, `libsecret-tools` for the key store
 
 ## Scripts
 
@@ -15,7 +18,32 @@ bun install       # dependencies
 bun run start     # launch the app (node src/main.ts)
 bun run check     # tsc --noEmit
 bun run i18n      # compile i18n/*.po to gettext .mo catalogs
+bun run build     # package dist/Zapive (executable + resources)
 ```
+
+## Packaging
+
+`bun run build` produces a self-contained folder for the host platform:
+
+```
+dist/Zapive/
+  Zapive.exe          # Node runtime with the app injected (SEA)
+  ui/                 # app.slint and the Tabler icons
+  i18n/               # .po sources and compiled .mo catalogs
+  node_modules/       # only slint-ui, sharp and node-notifier
+```
+
+The steps are in `scripts/build.mjs`: compile the catalogs, bundle
+`src/main.ts` with esbuild into CommonJS, generate the SEA blob, copy the
+Node binary, drop its signature and inject the blob with `postject`. The
+three packages that ship native binaries stay outside the bundle and are
+loaded at runtime through `src/native.ts`; only the host platform's
+prebuilt binaries are copied, so the folder stays around 150 MB.
+
+Build on the platform you are targeting — the Node binary and the native
+addons are platform-specific. On macOS the executable is re-signed ad hoc
+so Gatekeeper allows it locally; a real distribution needs a Developer ID
+signature and notarization.
 
 ## Why Node and not Bun
 

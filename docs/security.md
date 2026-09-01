@@ -64,3 +64,16 @@ is the practical baseline until then.
 - `.gitignore` excludes `zapive.db*`, `media_cache/`, and legacy backups
 - Logout deletes credentials and stored conversations
 - No telemetry, no network calls beyond WhatsApp itself
+
+
+## Key protection per platform
+
+The wrapped data key is handed to whatever the system offers:
+
+- **Windows** — DPAPI (`CryptProtectData`, `CurrentUser` scope), the same
+  facility Chrome and Signal Desktop use for their local keys
+- **macOS** — the login keychain, via `security add-generic-password`
+- **Linux** — the Secret Service (GNOME Keyring, KWallet) via `secret-tool`
+
+If none is reachable the key is stored base64 with a warning on stdout,
+and a PIN remains the only thing protecting the vault at rest.
