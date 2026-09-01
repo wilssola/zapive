@@ -354,6 +354,8 @@ export class WhatsAppService {
   // string = has picture; null = confirmed no picture; undefined = transient
   // failure (offline, rate limit) — caller should retry later.
   async profilePictureUrl(jid: string): Promise<string | null | undefined> {
+    // Channels keep their picture in the newsletter metadata.
+    if (jid.endsWith("@newsletter")) return (await this.fetchChannel(jid)).pictureUrl;
     if (!this.sock || !this._connected) return undefined;
     try {
       return (await this.sock.profilePictureUrl(jid, "preview")) ?? null;
@@ -433,13 +435,33 @@ export class WhatsAppService {
     }
   }
 
-  // Channel (newsletter) display name.
-  async fetchChannelName(jid: string): Promise<string> {
+  // Channel (newsletter) name and picture. The server answers with its
+  // own payload shape, which this Baileys build does not map onto the
+  // typed fields, so both are read from thread_metadata as well.
+  async fetchChannel(
+    jid: string,
+  ): Promise<{ name: string; pictureUrl: string | null }> {
     try {
-      const meta = await this.sock?.newsletterMetadata("jid", jid);
-      return (meta as { name?: string } | null)?.name ?? "";
-    } catch {
-      return "";
+      const meta = (await this.sock?.newsletterMetadata("jid", jid)) as
+        | {
+            name?: string;
+            thread_metadata?: {
+              name?: { text?: string };
+              picture?: { direct_path?: string };
+              preview?: { direct_path?: string };
+            };
+          }
+        | null
+        | undefined;
+      const tm = meta?.thread_metadata;
+      const path = tm?.preview?.direct_path ?? tm?.picture?.direct_path ?? "";
+      return {
+        name: meta?.name ?? tm?.name?.text ?? "",
+        pictureUrl: path ? `https://mmg.whatsapp.net${path}` : null,
+      };
+    } catch (err) {
+      console.log(`[channel] ${jid} failed: ${String(err)}`);
+      return { name: "", pictureUrl: null };
     }
   }
 

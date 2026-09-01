@@ -80,6 +80,10 @@ export struct MessageItem {
     forwarded: bool,
     deleted: bool,
     starred: bool,
+    hasQuote: bool,
+    quoteName: string,
+    quoteText: string,
+    quoteId: string,
     time: string,
     picture: image,
     picW: int,
@@ -389,6 +393,7 @@ export component AppWindow inherits Window {
     in-out property <bool> reactions-open;
     callback show-reactions(string);
     callback request-reply(string);
+    callback open-quote(string);
     callback toggle-star(string);
     callback delete-message(string);
     callback react-to(string, string);
@@ -1347,6 +1352,45 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                if msg.hasQuote && !msg.deleted: Rectangle {
+                                    height: quote-col.preferred-height;
+                                    border-radius: 4px;
+                                    background: msg.fromMe ? #00000014 : #00000010;
+                                    clip: true;
+                                    quote-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-quote(msg.quoteId); }
+                                    }
+                                    Rectangle {
+                                        x: 0;
+                                        width: 4px;
+                                        height: parent.height;
+                                        background: Theme.accent;
+                                    }
+                                    quote-col := VerticalLayout {
+                                        padding: 6px;
+                                        padding-left: 12px;
+                                        spacing: 2px;
+                                        Text {
+                                            text: msg.quoteName;
+                                            color: Theme.accent;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            overflow: elide;
+                                            width: min(self.preferred-width,
+                                                msg-row.content-w - 20px);
+                                        }
+                                        Text {
+                                            text: msg.quoteText;
+                                            color: Theme.text-dim;
+                                            font-size: 12.5px;
+                                            overflow: elide;
+                                            width: min(self.preferred-width,
+                                                msg-row.content-w - 20px);
+                                        }
+                                    }
+                                }
+
                                 if msg.forwarded && !msg.deleted: HorizontalLayout {
                                     spacing: 4px;
                                     alignment: start;
@@ -1459,14 +1503,17 @@ export component AppWindow inherits Window {
                                 // Voice-note player: waveform track, played
                                 // portion clipped over it, click to seek.
                                 if msg.kind == "audio": HorizontalLayout {
-                                    spacing: 8px;
-                                    IconButton {
-                                        icon: msg.playing
-                                            ? @image-url("icons/player-pause.svg")
-                                            : @image-url("icons/player-play.svg");
-                                        icon-size: 20px;
-                                        enabled: msg.mediaReady;
-                                        clicked => { root.audio-toggle(msg.id); }
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        IconButton {
+                                            icon: msg.playing
+                                                ? @image-url("icons/player-pause.svg")
+                                                : @image-url("icons/player-play.svg");
+                                            icon-size: 20px;
+                                            enabled: msg.mediaReady;
+                                            clicked => { root.audio-toggle(msg.id); }
+                                        }
                                     }
                                     VerticalLayout {
                                         spacing: 2px;

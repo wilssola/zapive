@@ -121,6 +121,10 @@ interface MessageRow {
   forwarded: boolean;
   deleted: boolean;
   starred: boolean;
+  hasQuote: boolean;
+  quoteName: string;
+  quoteText: string;
+  quoteId: string;
 }
 
 // The generated AppWindow component; slint-ui has no generated typings, so
@@ -269,6 +273,7 @@ export interface AppWindow {
   reactions_open: boolean;
   show_reactions: (msgId: string) => void;
   request_reply: (msgId: string) => void;
+  open_quote: (msgId: string) => void;
   toggle_star: (msgId: string) => void;
   delete_message: (msgId: string) => void;
   react_to: (msgId: string, emoji: string) => void;
@@ -535,6 +540,11 @@ export class Bridge implements WAListener {
     win.reaction_rows = this.reactionsModel;
     win.show_reactions = (msgId) => this.showReactions(msgId);
     win.request_reply = (msgId) => this.startReply(msgId);
+    // Clicking a quoted strip goes to the message it quotes.
+    win.open_quote = (msgId) => {
+      const jid = this.currentJid;
+      if (jid && msgId) this.openDm(jid, msgId);
+    };
     win.cancel_reply = () => this.clearReply();
     win.toggle_star = (msgId) => void this.toggleStar(msgId);
     win.delete_message = (msgId) => void this.deleteMessage(msgId);
@@ -948,7 +958,7 @@ export class Bridge implements WAListener {
   private async resolveChannelNames() {
     for (const meta of this.store.sortedChats()) {
       if (!isChannel(meta.jid) || meta.name) continue;
-      const name = await this.service.fetchChannelName(meta.jid);
+      const { name } = await this.service.fetchChannel(meta.jid);
       if (name) this.store.setName(meta.jid, name);
     }
     this.scheduleRefreshChats();
@@ -2364,6 +2374,13 @@ export class Bridge implements WAListener {
       senderJid,
       forwarded: !!m.forwarded,
       starred: !!m.starred,
+      hasQuote: !!m.quoteText || !!m.quoteId,
+      quoteName: m.quoteAuthor
+        ? this.store.chatName(this.resolveLid(m.quoteAuthor)) ||
+          displayId(m.quoteAuthor)
+        : t("reactions.you"),
+      quoteText: this.store.namedMentions(m.quoteText ?? ""),
+      quoteId: m.quoteId ?? "",
       deleted: !!m.deleted,
     };
   }

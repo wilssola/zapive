@@ -19,6 +19,10 @@ export interface StoredMessage {
   sticker?: boolean;
   mentions?: string[];
   mentionsMe?: boolean;
+  // The message this one replies to, as WhatsApp sends it inline.
+  quoteId?: string;
+  quoteAuthor?: string;
+  quoteText?: string;
   linkTitle?: string;
   linkDesc?: string;
   linkUrl?: string;
@@ -375,6 +379,9 @@ export class Store {
             isForwarded?: boolean | null;
             mentionedJid?: (string | null)[] | null;
             groupMentions?: unknown[] | null;
+            stanzaId?: string | null;
+            participant?: string | null;
+            quotedMessage?: Record<string, unknown> | null;
           };
         }
       | undefined)?.contextInfo;
@@ -398,6 +405,19 @@ export class Store {
       if (r.text) reactions[reactor] = cleanText(r.text);
     }
 
+    // A reply carries a copy of what it answers; enough of it to draw
+    // the quoted strip without looking the original up.
+    const quotedAuthor = ctx?.participant
+      ? this.canon(jidNormalizedUser(ctx.participant))
+      : "";
+    const quote = ctx?.quotedMessage
+      ? {
+          quoteId: ctx.stanzaId ?? "",
+          quoteAuthor: quotedAuthor,
+          quoteText: quotedSummary(ctx.quotedMessage),
+        }
+      : null;
+
     const base = {
       id,
       jid,
@@ -408,6 +428,7 @@ export class Store {
       raw: msg,
       ...(forwarded ? { forwarded: true } : {}),
       ...(mentionsMe ? { mentionsMe: true } : {}),
+      ...(quote ?? {}),
       ...(fromMe ? { status: toNum(msg.status) || 2 } : {}),
       ...(Object.keys(reactions).length > 0 ? { reactions } : {}),
     };
@@ -855,6 +876,30 @@ function dedupeStickers(items: StoredMessage[], limit: number): StoredMessage[] 
     if (out.length >= limit) break;
   }
   return out;
+}
+
+// One line describing a quoted message, from the copy WhatsApp
+// embeds in the reply.
+function quotedSummary(quoted: Record<string, unknown>): string {
+  const inner = (quoted.ephemeralMessage as { message?: Record<string, unknown> })?.message
+    ?? (quoted.viewOnceMessageV2 as { message?: Record<string, unknown> })?.message
+    ?? quoted;
+  const text =
+    (inner.conversation as string | undefined) ??
+    (inner.extendedTextMessage as { text?: string } | undefined)?.text;
+  if (text) return cleanText(text).slice(0, 120);
+  const caption =
+    (inner.imageMessage as { caption?: string } | undefined)?.caption ??
+    (inner.videoMessage as { caption?: string } | undefined)?.caption;
+  if (inner.imageMessage) return caption ? `${t("preview.photo")} ${cleanText(caption)}` : t("preview.photo");
+  if (inner.stickerMessage) return t("preview.sticker");
+  if (inner.audioMessage) return t("preview.audio");
+  if (inner.videoMessage) return caption ? `${t("preview.video")} ${cleanText(caption)}` : t("preview.video");
+  if (inner.documentMessage) {
+    const name = (inner.documentMessage as { fileName?: string }).fileName ?? "";
+    return t("preview.document", cleanText(name));
+  }
+  return "";
 }
 
 // What a message looks like in the chat list, without the sender prefix.
