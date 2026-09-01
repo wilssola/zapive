@@ -55,6 +55,9 @@ const en = {
   "tray.open": "Open Zapive",
   "tray.exit": "Quit",
   "preview.sticker": "🩵 Sticker",
+  "preview.video": "🎬 Video",
+  "rec.noMic": "No microphone found (install ffmpeg to record)",
+  "preview.gif": "🎬 GIF",
   "forward.title": "Forward message to",
 } as const;
 
@@ -101,6 +104,9 @@ const pt: Record<MessageKey, string> = {
   "tray.open": "Abrir Zapive",
   "tray.exit": "Sair",
   "preview.sticker": "🩵 Figurinha",
+  "preview.video": "🎬 Vídeo",
+  "rec.noMic": "Nenhum microfone encontrado (instale o ffmpeg para gravar)",
+  "preview.gif": "🎬 GIF",
   "forward.title": "Encaminhar mensagem para",
 };
 

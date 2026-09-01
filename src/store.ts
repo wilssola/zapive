@@ -2,7 +2,7 @@ import { getContentType, jidNormalizedUser, proto } from "@whiskeysockets/bailey
 import type { Chat, Contact, WAMessage } from "@whiskeysockets/baileys";
 import { t } from "./i18n.ts";
 
-export type MessageKind = "text" | "image" | "audio" | "doc";
+export type MessageKind = "text" | "image" | "audio" | "doc" | "video";
 
 export interface StoredMessage {
   id: string;
@@ -14,6 +14,7 @@ export interface StoredMessage {
   senderJid?: string;
   forwarded?: boolean;
   deleted?: boolean;
+  gif?: boolean;
   timestamp: number;
   mimetype?: string;
   durationSec?: number;
@@ -312,6 +313,17 @@ export class Store {
         mimetype: content.stickerMessage?.mimetype ?? "image/webp",
       };
     }
+    if (type === "videoMessage") {
+      const v = content.videoMessage;
+      return {
+        ...base,
+        kind: "video",
+        text: cleanText(v?.caption ?? ""),
+        mimetype: v?.mimetype ?? "video/mp4",
+        durationSec: toNum(v?.seconds),
+        gif: !!v?.gifPlayback,
+      };
+    }
     if (type === "imageMessage") {
       return {
         ...base,
@@ -448,6 +460,18 @@ export class Store {
       }
     }
     return oldest;
+  }
+
+  // Most recent received GIFs (gif-playback videos) for the picker panel.
+  recentGifs(limit: number): StoredMessage[] {
+    const out: StoredMessage[] = [];
+    for (const list of this.messages.values()) {
+      for (const m of list) {
+        if (m.raw?.message?.videoMessage?.gifPlayback) out.push(m);
+      }
+    }
+    out.sort((a, b) => b.timestamp - a.timestamp);
+    return out.slice(0, limit);
   }
 
   // Most recent received stickers (for the picker panel).
@@ -601,6 +625,8 @@ function computePreview(stored: StoredMessage): string {
       ? t("preview.photo")
       : stored.kind === "audio"
         ? t("preview.audio")
+        : stored.kind === "video"
+        ? (stored.gif ? t("preview.gif") : t("preview.video"))
         : stored.kind === "doc"
           ? t("preview.document", stored.text)
           : [...stored.text.replace(/\s+/g, " ")].slice(0, 80).join("");

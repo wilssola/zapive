@@ -237,6 +237,24 @@ export class WhatsAppService {
     return this.send(jid, { image: { url: filePath }, caption });
   }
 
+  // Voice note; viewOnce wraps it so it can be played a single time.
+  sendVoice(jid: string, filePath: string, viewOnce: boolean): Promise<WAMessage | null> {
+    return this.send(jid, {
+      audio: { url: filePath },
+      mimetype: "audio/ogg; codecs=opus",
+      ptt: true,
+      viewOnce,
+    });
+  }
+
+  sendGif(jid: string, filePath: string): Promise<WAMessage | null> {
+    return this.send(jid, {
+      video: { url: filePath },
+      gifPlayback: true,
+      mimetype: "video/mp4",
+    });
+  }
+
   sendSticker(jid: string, webpPath: string): Promise<WAMessage | null> {
     return this.send(jid, { sticker: { url: webpPath } });
   }

@@ -72,6 +72,16 @@ export interface AppWindow {
   statuses: ArrayModel<ChatRow>;
   emoji_rows: string[][];
   sticker_rows: ArrayModel<StickerCell[]>;
+  gif_rows: ArrayModel<StickerCell[]>;
+  gif_send: (id: string) => void;
+  conv_scroll: number;
+  rec_active: boolean;
+  rec_elapsed: string;
+  rec_view_once: boolean;
+  rec_start: () => void;
+  rec_stop: () => void;
+  rec_cancel: () => void;
+  set_conversation_scroll: (y: number) => void;
   picker_open: boolean;
   emoji_pick: (e: string) => void;
   sticker_send: (id: string) => void;
@@ -202,7 +212,9 @@ export class Bridge implements WAListener {
   private notify = new Notify();
   private statusModel = new ArrayModel<ChatRow>([]);
   private stickerModel = new ArrayModel<StickerCell[]>([]);
+  private gifModel = new ArrayModel<StickerCell[]>([]);
   private stickerRawById = new Map<string, StoredMessage>();
+  private scrollPos = new Map<string, number>();
   private viewer: { items: StoredMessage[]; idx: number } | null = null;
 
   constructor(win: AppWindow, media: MediaService) {
@@ -220,6 +232,11 @@ export class Bridge implements WAListener {
     };
     win.emoji_rows = chunk(EMOJIS, 8);
     win.sticker_rows = this.stickerModel;
+    win.gif_rows = this.gifModel;
+    win.gif_send = (id) => void this.sendStickerById(id);
+    win.rec_start = () => void this.startRecording();
+    win.rec_stop = () => void this.stopRecording();
+    win.rec_cancel = () => this.cancelRecording();
     win.emoji_pick = (e) => win.append_composer(e);
     win.picker_opened = () => void this.loadStickerPanel();
     win.sticker_send = (id) => void this.sendStickerById(id);
@@ -664,27 +681,42 @@ export class Bridge implements WAListener {
 
   // Fills the sticker tab with recently received stickers (lazy decode).
   private async loadStickerPanel() {
+    void this.fillPanel(this.gifModel, this.store.recentGifs(24), true);
     const items = this.store.recentStickers(32);
-    this.stickerRawById.clear();
+    await this.fillPanel(this.stickerModel, items, false);
+  }
+
+  // Populates a picker grid; GIF cells use the embedded video thumbnail
+  // instead of downloading the whole clip.
+  private async fillPanel(
+    model: ArrayModel<StickerCell[]>,
+    items: StoredMessage[],
+    fromThumbnail: boolean,
+  ) {
     const cells: StickerCell[] = [];
     for (const m of items) {
       this.stickerRawById.set(m.id, m);
       cells.push({ id: m.id, pic: EMPTY_IMAGE, ready: false });
     }
-    this.stickerModel.splice(0, this.stickerModel.length, ...chunk(cells, 4));
+    model.splice(0, model.length, ...chunk(cells, 4));
     for (const m of items) {
-      const path = await this.media.ensureCached(m.id, m.raw!);
-      if (!path) continue;
-      const img = await this.media.decodeImage(m.id, path);
+      let img = null;
+      if (fromThumbnail) {
+        const thumb = m.raw?.message?.videoMessage?.jpegThumbnail;
+        if (thumb?.length) img = await this.media.decodeRaw(Buffer.from(thumb));
+      } else {
+        const path = await this.media.ensureCached(m.id, m.raw!);
+        if (path) img = await this.media.decodeImage(m.id, path);
+      }
       if (!img) continue;
-      outer: for (let r = 0; r < this.stickerModel.length; r++) {
-        const row = this.stickerModel.rowData(r);
+      outer: for (let r = 0; r < model.length; r++) {
+        const row = model.rowData(r);
         if (!row) continue;
         for (let c = 0; c < row.length; c++) {
           if (row[c]!.id === m.id) {
             const copy = [...row];
             copy[c] = { id: m.id, pic: img, ready: true };
-            this.stickerModel.setRowData(r, copy);
+            model.setRowData(r, copy);
             break outer;
           }
         }
@@ -701,6 +733,51 @@ export class Bridge implements WAListener {
     } catch (err) {
       console.error("sticker send failed:", err);
     }
+  }
+
+  // ---- Voice recording ----
+
+  private recTimer: NodeJS.Timeout | null = null;
+  private recStartedAt = 0;
+
+  private async startRecording() {
+    if (!this.currentJid || this.media.recording) return;
+    const ok = await this.media.startRecording();
+    if (!ok) {
+      this.win.status_text = t("rec.noMic");
+      return;
+    }
+    this.recStartedAt = Date.now();
+    this.win.rec_active = true;
+    this.win.rec_elapsed = "0:00";
+    this.recTimer = setInterval(() => {
+      const secs = Math.floor((Date.now() - this.recStartedAt) / 1000);
+      this.win.rec_elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+    }, 500);
+  }
+
+  private stopTimer() {
+    if (this.recTimer) clearInterval(this.recTimer);
+    this.recTimer = null;
+    this.win.rec_active = false;
+  }
+
+  private async stopRecording() {
+    const jid = this.currentJid;
+    this.stopTimer();
+    const path = await this.media.stopRecording();
+    if (!path || !jid) return;
+    try {
+      const sent = await this.service.sendVoice(jid, path, this.win.rec_view_once);
+      this.echoSent(sent, jid);
+    } catch (err) {
+      console.error("voice send failed:", err);
+    }
+  }
+
+  private cancelRecording() {
+    this.stopTimer();
+    this.media.cancelRecording();
   }
 
   private async handleAttachSticker() {
@@ -939,6 +1016,9 @@ export class Bridge implements WAListener {
   }
 
   private openJid(jid: string) {
+    if (this.currentJid && this.currentJid !== jid) {
+      this.scrollPos.set(this.currentJid, this.win.conv_scroll);
+    }
     this.currentJid = jid;
     this.win.selected_jid = jid;
     this.win.stick_bottom = true;
@@ -951,7 +1031,19 @@ export class Bridge implements WAListener {
     const rows = list.map((m, i) => this.toRow(m, i > 0 ? list[i - 1] : undefined));
     this.messagesModel.splice(0, this.messagesModel.length, ...rows);
     this.win.chat_open = true;
-    this.scrollToEnd();
+    const saved = this.scrollPos.get(jid);
+    if (saved !== undefined && saved < 0) {
+      // Restore where the user left off in this conversation.
+      setTimeout(() => {
+        try {
+          this.win.set_conversation_scroll(saved);
+        } catch {
+          // layout not ready
+        }
+      }, 60);
+    } else {
+      this.scrollToEnd();
+    }
     this.scheduleRefreshChats();
     void this.loadMediaForChat(jid);
     // Thin conversation: ask the phone for this chat's older messages.
@@ -1023,6 +1115,21 @@ export class Bridge implements WAListener {
   private async loadMediaForMessage(stored: StoredMessage) {
     if (!stored.raw) return;
     const jid = stored.jid;
+    if (stored.kind === "video") {
+      // Show the embedded thumbnail; the clip downloads only on click.
+      const thumb = stored.raw.message?.videoMessage?.jpegThumbnail;
+      if (thumb?.length) {
+        const img = await this.media.decodeRaw(Buffer.from(thumb));
+        if (img && this.currentJid === jid) {
+          const scale = Math.min(330 / img.displayW, 380 / img.displayH, 1);
+          this.patchRow(stored.id, {
+            picture: img,
+            picW: Math.max(1, Math.round(img.displayW * scale)),
+            picH: Math.max(1, Math.round(img.displayH * scale)),
+          });
+        }
+      }
+    }
     const path = await this.media.ensureCached(stored.id, stored.raw);
     if (this.currentJid !== jid) return;
     if (!path) {
@@ -1030,7 +1137,7 @@ export class Bridge implements WAListener {
       return;
     }
     if (stored.kind !== "image") {
-      // audio and documents just need the cached file for open/play
+      // audio, documents and videos just need the cached file to open
       this.patchRow(stored.id, { mediaPath: path, mediaReady: true });
       return;
     }

@@ -5,6 +5,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile, readFile, access, rm } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
 import type { SlintImageData } from "./qr.ts";
 import type { WhatsAppService } from "./whatsapp.ts";
 import type { Db } from "./db.ts";
@@ -230,6 +231,120 @@ export class MediaService {
       };
     } catch {
       return null;
+    }
+  }
+
+  // ---- Voice recording (ffmpeg + DirectShow) ----
+
+  private recProc: ReturnType<typeof spawn> | null = null;
+  private recPath: string | null = null;
+  private ffmpegPath: string | null | undefined;
+  private micName: string | null | undefined;
+
+  private findFfmpeg(): string | null {
+    if (this.ffmpegPath !== undefined) return this.ffmpegPath;
+    let found: string | null = null;
+    const winget = join(
+      process.env.LOCALAPPDATA ?? "",
+      "Microsoft\\WinGet\\Packages",
+    );
+    if (existsSync(winget)) {
+      for (const dir of readdirSync(winget)) {
+        if (!dir.toLowerCase().includes("ffmpeg")) continue;
+        const stack = [join(winget, dir)];
+        while (stack.length > 0 && !found) {
+          const cur = stack.pop()!;
+          for (const entry of readdirSync(cur, { withFileTypes: true })) {
+            const full = join(cur, entry.name);
+            if (entry.isDirectory()) stack.push(full);
+            else if (entry.name.toLowerCase() === "ffmpeg.exe") {
+              found = full;
+              break;
+            }
+          }
+        }
+        if (found) break;
+      }
+    }
+    this.ffmpegPath = found ?? "ffmpeg"; // fall back to PATH
+    return this.ffmpegPath;
+  }
+
+  // First DirectShow audio input reported by ffmpeg.
+  private async findMicrophone(): Promise<string | null> {
+    if (this.micName !== undefined) return this.micName;
+    const ff = this.findFfmpeg();
+    try {
+      await execFileAsync(ff!, ["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"], {
+        timeout: 20_000,
+      });
+      this.micName = null;
+    } catch (err) {
+      const out = String((err as { stderr?: string }).stderr ?? "");
+      const match = out.match(/"([^"]+)"\s*\(audio\)/);
+      this.micName = match?.[1] ?? null;
+    }
+    return this.micName;
+  }
+
+  get recording(): boolean {
+    return this.recProc !== null;
+  }
+
+  async startRecording(): Promise<boolean> {
+    if (this.recProc) return false;
+    const mic = await this.findMicrophone();
+    if (!mic) return false;
+    const dir = join(CACHE_DIR, ".tmp");
+    await mkdir(dir, { recursive: true });
+    const out = resolve(join(dir, `voice_${Date.now()}.ogg`));
+    // Opus mono 32k is what WhatsApp voice notes use.
+    this.recProc = spawn(
+      this.findFfmpeg()!,
+      ["-hide_banner", "-loglevel", "error", "-f", "dshow", "-i", `audio=${mic}`,
+       "-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1", "-y", out],
+      { stdio: ["pipe", "ignore", "ignore"] },
+    );
+    this.recPath = out;
+    return true;
+  }
+
+  // Gracefully stops ffmpeg ("q" on stdin) so the container is finalized.
+  async stopRecording(): Promise<string | null> {
+    const proc = this.recProc;
+    const path = this.recPath;
+    if (!proc || !path) return null;
+    this.recProc = null;
+    this.recPath = null;
+    await new Promise<void>((done) => {
+      const finish = () => done();
+      proc.once("exit", finish);
+      try {
+        proc.stdin?.write("q");
+        proc.stdin?.end();
+      } catch {
+        proc.kill();
+      }
+      setTimeout(() => {
+        try {
+          proc.kill();
+        } catch {
+          // already gone
+        }
+        finish();
+      }, 4000);
+    });
+    return existsSync(path) ? path : null;
+  }
+
+  cancelRecording(): void {
+    const proc = this.recProc;
+    this.recProc = null;
+    this.recPath = null;
+    try {
+      proc?.kill();
+    } catch {
+      // already gone
     }
   }
 

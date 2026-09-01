@@ -259,6 +259,15 @@ export component AppWindow inherits Window {
     in-out property <string> picker-tab: "emoji";
     in-out property <[[string]]> emoji-rows;
     in-out property <[[StickerCell]]> sticker-rows;
+    in-out property <[[StickerCell]]> gif-rows;
+    callback gif-send(string);
+    in-out property <length> conv-scroll: 0;
+    in-out property <bool> rec-active: false;
+    in-out property <string> rec-elapsed: "0:00";
+    in-out property <bool> rec-view-once: false;
+    callback rec-start();
+    callback rec-stop();
+    callback rec-cancel();
     callback emoji-pick(string);
     callback sticker-send(string);
     callback picker-opened();
@@ -285,6 +294,9 @@ export component AppWindow inherits Window {
     }
     public function scroll-conversation-top() {
         msg-list.viewport-y = 0;
+    }
+    public function set-conversation-scroll(y: length) {
+        msg-list.viewport-y = y;
     }
 
     // Settings
@@ -841,6 +853,7 @@ export component AppWindow inherits Window {
 
                 msg-list := ListView {
                     changed viewport-y => {
+                        root.conv-scroll = self.viewport-y;
                         root.stick-bottom =
                             self.viewport-y <= self.height - self.viewport-height + 60px;
                         if (self.viewport-y >= -4px && self.viewport-height > self.height) {
@@ -915,6 +928,33 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                if msg.kind == "video" && msg.picW > 0: TouchArea {
+                                    width: msg.picW * 1px;
+                                    height: msg.picH * 1px;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.play-audio(msg.mediaPath); }
+                                    Image {
+                                        source: msg.picture;
+                                        width: parent.width;
+                                        height: parent.height;
+                                    }
+                                    Rectangle {
+                                        width: 46px;
+                                        height: 46px;
+                                        border-radius: 23px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        background: #000000a0;
+                                        Image {
+                                            source: @image-url("icons/player-play.svg");
+                                            colorize: white;
+                                            width: 24px;
+                                            height: 24px;
+                                            x: 11px;
+                                            y: 11px;
+                                        }
+                                    }
+                                }
                                 if msg.kind == "image" && msg.mediaReady: TouchArea {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
@@ -1038,7 +1078,59 @@ export component AppWindow inherits Window {
                 Rectangle {
                     height: 62px;
                     background: Theme.header;
+
+                    // Recording bar (replaces the composer while capturing)
                     HorizontalBox {
+                        visible: root.rec-active;
+                        padding: 11px;
+                        spacing: 10px;
+                        IconButton {
+                            icon: @image-url("icons/trash.svg");
+                            clicked => { root.rec-cancel(); }
+                        }
+                        Rectangle {
+                            width: 10px;
+                            height: 10px;
+                            border-radius: 5px;
+                            background: #f05d4d;
+                            y: 26px;
+                        }
+                        Text {
+                            text: root.rec-elapsed;
+                            color: Theme.text;
+                            font-size: 15px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        vo-touch := TouchArea {
+                            width: 40px;
+                            height: 40px;
+                            mouse-cursor: pointer;
+                            clicked => { root.rec-view-once = !root.rec-view-once; }
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 8px;
+                                background: root.rec-view-once ? Theme.chip-active-bg
+                                    : vo-touch.has-hover ? Theme.hover : transparent;
+                                Image {
+                                    source: @image-url("icons/eye.svg");
+                                    colorize: root.rec-view-once ? Theme.accent : Theme.icon;
+                                    width: 22px;
+                                    height: 22px;
+                                    x: 9px;
+                                    y: 9px;
+                                }
+                            }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/send-2.svg");
+                            clicked => { root.rec-stop(); }
+                        }
+                    }
+
+                    HorizontalBox {
+                        visible: !root.rec-active;
                         padding: 11px;
                         spacing: 8px;
                         IconButton {
@@ -1064,6 +1156,10 @@ export component AppWindow inherits Window {
                             }
                         }
                         IconButton {
+                            icon: @image-url("icons/microphone.svg");
+                            clicked => { root.rec-start(); }
+                        }
+                        IconButton {
                             icon: @image-url("icons/send-2.svg");
                             clicked => {
                                 root.send-message(message-input.text);
@@ -1071,6 +1167,31 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                }
+            }
+
+            // Floating "jump to latest" button
+            if root.chat-open && !root.stick-bottom: Rectangle {
+                x: parent.width - self.width - 24px;
+                y: parent.height - self.height - 86px;
+                width: 42px;
+                height: 42px;
+                border-radius: 21px;
+                background: Theme.panel;
+                drop-shadow-blur: 6px;
+                drop-shadow-color: #00000055;
+                jump-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.scroll-conversation-end(); }
+                }
+                Image {
+                    source: @image-url("icons/chevron-right.svg");
+                    colorize: Theme.icon;
+                    width: 22px;
+                    height: 22px;
+                    x: 10px;
+                    y: 10px;
+                    rotation-angle: 90deg;
                 }
             }
 
@@ -1100,6 +1221,11 @@ export component AppWindow inherits Window {
                             active: root.picker-tab == "sticker";
                             clicked => { root.picker-tab = "sticker"; }
                         }
+                        FilterChip {
+                            label: "GIF";
+                            active: root.picker-tab == "gif";
+                            clicked => { root.picker-tab = "gif"; }
+                        }
                     }
                     if root.picker-tab == "emoji": ListView {
                         for row in root.emoji-rows: Rectangle {
@@ -1126,6 +1252,37 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     clicked => { root.emoji-pick(e); }
+                                }
+                            }
+                        }
+                    }
+                    if root.picker-tab == "gif": ListView {
+                        for row in root.gif-rows: Rectangle {
+                            height: 92px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                for cell in row: gif-touch := TouchArea {
+                                    width: 84px;
+                                    height: 84px;
+                                    mouse-cursor: pointer;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 8px;
+                                        clip: true;
+                                        background: gif-touch.has-hover ? Theme.hover : transparent;
+                                        if cell.ready: Image {
+                                            source: cell.pic;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            image-fit: cover;
+                                        }
+                                    }
+                                    clicked => {
+                                        root.gif-send(cell.id);
+                                        root.picker-open = false;
+                                    }
                                 }
                             }
                         }
