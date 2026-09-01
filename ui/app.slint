@@ -1200,19 +1200,27 @@ export component AppWindow inherits Window {
                                                 source: msg.wave;
                                                 colorize: msg.fromMe
                                                     ? #9fd3c7 : Theme.text-dim;
+                                                x: 0;
+                                                y: 0;
                                                 width: parent.width;
                                                 height: parent.height;
                                                 image-fit: fill;
                                             }
+                                            // Played portion: same bitmap in the
+                                            // accent color, clipped from the left.
                                             if msg.hasWave: Rectangle {
+                                                x: 0;
+                                                y: 0;
                                                 width: parent.width * msg.progress;
                                                 height: parent.height;
                                                 clip: true;
                                                 Image {
                                                     source: msg.wave;
                                                     colorize: #53bdeb;
+                                                    x: 0;
+                                                    y: 0;
                                                     width: wave-area.width;
-                                                    height: parent.height;
+                                                    height: wave-area.height;
                                                     image-fit: fill;
                                                 }
                                             }

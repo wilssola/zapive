@@ -1387,6 +1387,7 @@ export class Bridge implements WAListener {
   }
 
   private openJid(jid: string) {
+    this.stopAudio(); // never leave a voice note playing behind
     if (this.currentJid && this.currentJid !== jid) {
       this.scrollPos.set(this.currentJid, this.win.conv_scroll);
     }

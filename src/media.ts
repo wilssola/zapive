@@ -237,6 +237,7 @@ export class MediaService {
   // ---- Audio playback (ffplay) and waveforms ----
 
   private playProc: ReturnType<typeof spawn> | null = null;
+  private playToken = 0;
   private plainAudio = new Map<string, string>();
   private waveCache = new Map<string, DecodedImage | null>();
 
@@ -299,10 +300,15 @@ export class MediaService {
   }
 
   // Starts (or restarts at an offset) playback of a cached audio file.
+  // The token guards against fast successive clicks: decrypting the file
+  // is async, so a stale start must not spawn after a newer one.
   async playAudio(msgId: string, filePath: string, offsetSec: number): Promise<boolean> {
     this.stopAudio();
+    const token = ++this.playToken;
     try {
       const src = await this.plainAudioPath(msgId, filePath);
+      if (token !== this.playToken) return false;
+      this.stopAudio();
       const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
       this.playProc = spawn(
         ffplay,
@@ -320,10 +326,18 @@ export class MediaService {
   }
 
   stopAudio(): void {
+    this.playToken++;
     const proc = this.playProc;
     this.playProc = null;
+    if (!proc) return;
     try {
-      proc?.kill();
+      proc.kill();
+      // ffplay can ignore the soft kill; make sure it really stops.
+      if (proc.pid) {
+        spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
+          stdio: "ignore",
+        });
+      }
     } catch {
       // already gone
     }
