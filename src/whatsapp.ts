@@ -343,15 +343,32 @@ export class WhatsAppService {
     }
   }
 
-  async fetchGroups(): Promise<Record<string, { subject?: string }>> {
+  async fetchGroups(): Promise<
+    Record<
+      string,
+      {
+        subject?: string;
+        linkedParent?: string;
+        isCommunity?: boolean;
+        isCommunityAnnounce?: boolean;
+      }
+    >
+  > {
     if (!this.sock) return {};
     try {
-      return (await this.sock.groupFetchAllParticipating()) as Record<
-        string,
-        { subject?: string }
-      >;
+      return (await this.sock.groupFetchAllParticipating()) as never;
     } catch {
       return {};
+    }
+  }
+
+  // Channel (newsletter) display name.
+  async fetchChannelName(jid: string): Promise<string> {
+    try {
+      const meta = await this.sock?.newsletterMetadata("jid", jid);
+      return (meta as { name?: string } | null)?.name ?? "";
+    } catch {
+      return "";
     }
   }
 

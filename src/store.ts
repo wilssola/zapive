@@ -46,6 +46,8 @@ export interface ChatMeta {
   unread?: number;
   pinned?: number; // pin timestamp; 0/undefined = not pinned
   archived?: boolean;
+  community?: string; // parent community jid, when this group belongs to one
+  isCommunity?: boolean; // this jid is the community itself
 }
 
 function fresh(timestamp: number): boolean {
@@ -61,12 +63,20 @@ function toNum(t: unknown): number {
   return 0;
 }
 
+export function isChannel(jid: string): boolean {
+  return jid.endsWith("@newsletter");
+}
+
 export function isDisplayableJid(jid: string | null | undefined): jid is string {
   if (!jid) return false;
   if (jid === "status@broadcast") return false;
-  if (jid.endsWith("@newsletter")) return false;
   if (jid.endsWith("@broadcast")) return false;
-  return jid.endsWith("@s.whatsapp.net") || jid.endsWith("@g.us") || jid.endsWith("@lid");
+  return (
+    jid.endsWith("@s.whatsapp.net") ||
+    jid.endsWith("@g.us") ||
+    jid.endsWith("@lid") ||
+    isChannel(jid)
+  );
 }
 
 export function formatTime(timestamp: number): string {
@@ -208,6 +218,8 @@ export class Store {
       preview: existing?.preview ?? "",
       timestamp: Math.max(ts, existing?.timestamp ?? 0),
       unread: existing?.unread ?? 0,
+      community: existing?.community,
+      isCommunity: existing?.isCommunity,
       pinned:
         extra.pinned === undefined ? (existing?.pinned ?? 0) : toNum(extra.pinned ?? 0),
       archived: archivedRaw === undefined || archivedRaw === null
@@ -374,6 +386,8 @@ export class Store {
         unread: existing?.unread ?? 0,
         pinned: existing?.pinned ?? 0,
         archived: existing?.archived ?? false,
+        community: existing?.community,
+        isCommunity: existing?.isCommunity,
       });
     }
     if (!stored.fromMe && stored.sender && msgIsDirect(stored.jid)) {

@@ -5,23 +5,18 @@ lightweight native process.
 
 ## Next up
 
-**Contact and group info panel**
-Right pane with the profile picture, phone number, About text, shared
-media grid, groups in common, and per-chat actions (mute, archive, block,
-clear chat). Data comes from `fetchStatus`, `groupMetadata` and the local
-store.
+**Replies (quoted messages)**
+Render `contextInfo.quotedMessage` above the bubble and send with
+`quoted:`, including jumping to the quoted message.
 
-**Channels and communities**
-Channels are `@newsletter` jids, currently filtered out of the chat list;
-communities are group hierarchies with an announcement group. Both need
-their own rail tabs and read-only rendering first, then follow/unfollow.
+**Reacting from the app**
+Right-click a bubble to pick an emoji — receiving reactions already works,
+sending does not.
 
 ## Planned
 
-- **Replies (quoted messages)** — render `contextInfo.quotedMessage` and
-  send with `quoted:`; includes jumping to the quoted message
-- **Reacting from the app** — long-press/right-click a bubble to pick an
-  emoji (receiving already works)
+- **Groups in common** in the contact info panel
+- **Following and leaving channels** (listing and reading already work)
 - **Message search inside a conversation**, plus global search across
   stored messages
 - **Starred messages** and per-chat mute settings

@@ -185,3 +185,9 @@ msgstr "Desarquivar conversa"
 
 msgid "Clear messages on this device"
 msgstr "Limpar mensagens neste dispositivo"
+
+msgid "Channels"
+msgstr "Canais"
+
+msgid "Communities"
+msgstr "Comunidades"

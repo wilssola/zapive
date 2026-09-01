@@ -8,6 +8,7 @@ import {
   reactionSummary,
   ticksFor,
   displayId,
+  isChannel,
 } from "./store.ts";
 import { Notify } from "./notify.ts";
 import { t } from "./i18n.ts";
@@ -113,6 +114,7 @@ export interface AppWindow {
   picker_opened: () => void;
   attach_sticker: () => void;
   sidebar_view: string;
+  view_changed: (view: string) => void;
   status_open: (jid: string) => void;
   sv_open: boolean;
   sv_name: string;
@@ -234,6 +236,7 @@ export class Bridge implements WAListener {
   private avatarTries = new Map<string, number>();
   private searchText = "";
   private tab = "all";
+  private view = "chats"; // chats | channels | communities
   private notify = new Notify();
   private statusModel = new ArrayModel<ChatRow>([]);
   private stickerModel = new ArrayModel<StickerCell[]>([]);
@@ -283,6 +286,10 @@ export class Bridge implements WAListener {
     };
     win.tab_changed = (tab) => {
       this.tab = tab;
+      this.refreshChats();
+    };
+    win.view_changed = (view) => {
+      this.view = view;
       this.refreshChats();
     };
     win.send_message = (text) => void this.handleSendText(text);
@@ -626,6 +633,7 @@ export class Bridge implements WAListener {
   private async fetchGroupNames() {
     const groups = await this.service.fetchGroups();
     console.log(`[groups] fetched ${Object.keys(groups).length}`);
+    let communities = 0;
     for (const [jid, meta] of Object.entries(groups)) {
       if (!meta?.subject) continue;
       // Seed the sidebar with participating groups even before any message.
@@ -633,6 +641,24 @@ export class Bridge implements WAListener {
         this.store.chats.set(jid, { jid, name: meta.subject, preview: "", timestamp: 0 });
       }
       this.store.setName(jid, meta.subject);
+      const entry = this.store.chats.get(jid);
+      if (entry) {
+        entry.isCommunity = !!meta.isCommunity;
+        entry.community = meta.linkedParent ?? undefined;
+        if (entry.isCommunity || entry.community) communities++;
+      }
+    }
+    if (communities > 0) console.log(`[groups] ${communities} community-linked`);
+    void this.resolveChannelNames();
+    this.scheduleRefreshChats();
+  }
+
+  // Channels arrive as jids only; ask the server for their display names.
+  private async resolveChannelNames() {
+    for (const meta of this.store.sortedChats()) {
+      if (!isChannel(meta.jid) || meta.name) continue;
+      const name = await this.service.fetchChannelName(meta.jid);
+      if (name) this.store.setName(meta.jid, name);
     }
     this.scheduleRefreshChats();
   }
@@ -670,6 +696,16 @@ export class Bridge implements WAListener {
 
   private visibleChats() {
     return this.store.sortedChats().filter((meta) => {
+      const channel = isChannel(meta.jid);
+      if (this.view === "channels") {
+        if (!channel) return false;
+      } else if (this.view === "communities") {
+        if (!meta.isCommunity && !meta.community) return false;
+      } else {
+        // Regular chat list: channels and community shells live in their
+        // own tabs.
+        if (channel || meta.isCommunity) return false;
+      }
       if (this.tab === "archived") {
         if (!meta.archived) return false;
       } else {

@@ -225,6 +225,7 @@ export component AppWindow inherits Window {
     in-out property <[ChatItem]> statuses;
     in-out property <string> sidebar-view: "chats";
     callback status-open(string);
+    callback view-changed(string);
     // Status viewer
     in-out property <bool> sv-open: false;
     in-out property <string> sv-name: "";
@@ -514,15 +515,32 @@ export component AppWindow inherits Window {
                 IconButton {
                     icon: @image-url("icons/message-circle.svg");
                     active: root.sidebar-view == "chats";
-                    clicked => { root.sidebar-view = "chats"; }
+                    clicked => {
+                        root.sidebar-view = "chats";
+                        root.view-changed("chats");
+                    }
                 }
                 IconButton {
                     icon: @image-url("icons/circle-dot.svg");
                     active: root.sidebar-view == "status";
                     clicked => { root.sidebar-view = "status"; }
                 }
-                IconButton { icon: @image-url("icons/phone.svg"); }
-                IconButton { icon: @image-url("icons/users.svg"); }
+                IconButton {
+                    icon: @image-url("icons/speakerphone.svg");
+                    active: root.sidebar-view == "channels";
+                    clicked => {
+                        root.sidebar-view = "channels";
+                        root.view-changed("channels");
+                    }
+                }
+                IconButton {
+                    icon: @image-url("icons/users-group.svg");
+                    active: root.sidebar-view == "communities";
+                    clicked => {
+                        root.sidebar-view = "communities";
+                        root.view-changed("communities");
+                    }
+                }
                 Rectangle { vertical-stretch: 1; }
                 IconButton {
                     icon: @image-url("icons/settings.svg");
@@ -623,7 +641,7 @@ export component AppWindow inherits Window {
             }
 
             VerticalBox {
-                visible: root.sidebar-view == "chats";
+                visible: root.sidebar-view != "status";
                 width: 100%;
                 height: 100%;
                 padding: 0;
@@ -635,7 +653,9 @@ export component AppWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         Text {
-                            text: @tr("Chats");
+                            text: root.sidebar-view == "channels" ? @tr("Channels")
+                                : root.sidebar-view == "communities" ? @tr("Communities")
+                                : @tr("Chats");
                             color: Theme.text;
                             font-size: 21px;
                             font-weight: 700;
@@ -659,7 +679,8 @@ export component AppWindow inherits Window {
                 }
 
                 Rectangle {
-                    height: 40px;
+                    height: root.sidebar-view == "chats" ? 40px : 0;
+                    visible: root.sidebar-view == "chats";
                     HorizontalLayout {
                         padding-left: 12px;
                         spacing: 8px;

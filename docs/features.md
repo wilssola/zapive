@@ -53,6 +53,21 @@ Everything below is implemented and working against a live account.
 - **Emoji picker** with a curated palette that renders correctly in Slint
 - Clipboard images (Ctrl+V) open the same confirmation preview as attachments
 
+## Contact and group info
+
+- Clicking the conversation header opens a side panel with the large
+  avatar, phone number (contacts) or participant count (groups)
+- **About** text for contacts and **description** for groups, fetched live
+- **Shared media** grid built from thumbnails already cached locally
+- Archive / unarchive the conversation, or clear its local messages
+
+## Channels and communities
+
+- **Channels** (`@newsletter`) have their own rail tab; names are resolved
+  through newsletter metadata and posts render like any conversation
+- **Communities** tab groups the community shells and their linked groups,
+  detected from `linkedParent` / `isCommunity` in group metadata
+
 ## Status (stories)
 
 - Rail tab listing authors with accent-ring avatars
