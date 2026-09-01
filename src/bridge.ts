@@ -1988,15 +1988,26 @@ export class Bridge implements WAListener {
   }
 
   // Brings a message into view. The list only instantiates the rows
-  // around the viewport, so we guess a position from the average row
-  // height, let the row report where it landed, and correct from there.
-  private jump: { id: string; tries: number; timer: NodeJS.Timeout | null } | null =
-    null;
+  // around the viewport, so the position is found by trial: guess from
+  // the average row height, scan outwards a screen at a time, and let
+  // the row itself report where it landed so the offset can be trimmed.
+  private jump: {
+    id: string;
+    tries: number;
+    base: number | null;
+    settled: boolean;
+    timer: NodeJS.Timeout | null;
+  } | null = null;
+
+  get jumping(): boolean {
+    return this.jump !== null;
+  }
 
   private jumpToMessage(id: string) {
     this.cancelJump();
-    this.jump = { id, tries: 0, timer: null };
-    setTimeout(() => this.jumpStep(true), 160);
+    this.jump = { id, tries: 0, base: null, settled: false, timer: null };
+    // Let openJid finish anchoring the list before taking it over.
+    setTimeout(() => this.jumpScan(), 220);
   }
 
   private cancelJump() {
@@ -2009,46 +2020,60 @@ export class Bridge implements WAListener {
     }
   }
 
-  private jumpStep(guess: boolean) {
+  // Re-creating the probe makes the row report its position, if it is
+  // instantiated at all; otherwise the fallback moves the search on.
+  private probe(next: () => void, delay: number) {
     const j = this.jump;
     if (!j) return;
-    if (j.tries >= 6) {
-      this.cancelJump();
-      return;
-    }
-    j.tries++;
-    if (guess) {
-      const count = this.messagesModel.length;
-      let idx = -1;
-      for (let i = 0; i < count; i++) {
-        if (this.messagesModel.rowData(i)?.id === j.id) {
-          idx = i;
-          break;
-        }
-      }
-      if (idx < 0) {
-        this.cancelJump();
-        return;
-      }
-      const total = this.win.conv_viewport_h;
-      const visible = this.win.conv_list_h;
-      const avg = count > 0 ? total / count : 0;
-      const top = Math.min(
-        Math.max(0, avg * idx - visible / 3),
-        Math.max(0, total - visible),
-      );
-      try {
-        this.win.set_conversation_scroll(-top);
-      } catch {
-        // layout not ready
-      }
-    }
-    // Re-arming the id re-creates the probe, which reports its position.
     this.win.jump_id = "";
     setTimeout(() => {
       if (this.jump === j) this.win.jump_id = j.id;
     }, 20);
-    j.timer = setTimeout(() => this.jumpStep(true), 220);
+    j.timer = setTimeout(next, delay);
+  }
+
+  private jumpScan() {
+    const j = this.jump;
+    if (!j) return;
+    if (j.tries >= 10) {
+      this.cancelJump();
+      return;
+    }
+    const count = this.messagesModel.length;
+    let idx = -1;
+    for (let i = 0; i < count; i++) {
+      if (this.messagesModel.rowData(i)?.id === j.id) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) {
+      this.cancelJump();
+      return;
+    }
+    const total = this.win.conv_viewport_h;
+    const visible = this.win.conv_list_h;
+    const max = Math.max(0, total - visible);
+    if (j.base === null) {
+      const avg = count > 0 ? total / count : 0;
+      j.base = Math.min(Math.max(0, avg * idx - visible / 3), max);
+    }
+    // Sweep alternating sides of the estimate, a screen at a time.
+    const k = Math.ceil(j.tries / 2);
+    const dir = j.tries % 2 === 1 ? 1 : -1;
+    const top = Math.min(
+      Math.max(0, j.base + (j.tries === 0 ? 0 : dir * k * visible * 0.8)),
+      max,
+    );
+    j.tries++;
+    // Media finishing its download must not drag the list to the end.
+    this.win.stick_bottom = false;
+    try {
+      this.win.set_conversation_scroll(-top);
+    } catch {
+      // layout not ready
+    }
+    this.probe(() => this.jumpScan(), 260);
   }
 
   private onJumpReport(offset: number) {
@@ -2058,15 +2083,22 @@ export class Bridge implements WAListener {
     const target = Math.min(120, this.win.conv_list_h / 3);
     const delta = target - offset;
     if (Math.abs(delta) < 6) {
-      this.cancelJump();
+      if (j.settled) {
+        this.cancelJump();
+        return;
+      }
+      // Images still decoding can shift the row: check once more.
+      j.settled = true;
+      j.timer = setTimeout(() => this.probe(() => this.cancelJump(), 400), 450);
       return;
     }
+    this.win.stick_bottom = false;
     try {
       this.win.set_conversation_scroll(this.win.conv_scroll + delta);
     } catch {
       // layout not ready
     }
-    j.timer = setTimeout(() => this.jumpStep(false), 120);
+    this.probe(() => this.jumpScan(), 200);
   }
 
   private queueAvatar(jid: string) {
@@ -2331,7 +2363,7 @@ export class Bridge implements WAListener {
   private patchRow(id: string, patch: Partial<MessageRow>) {
     // A late-loading image must not push the newest message out of view;
     // debounced so a burst of images re-anchors only once.
-    if (patch.mediaReady && this.win.stick_bottom && !this.stickTimer) {
+    if (patch.mediaReady && this.win.stick_bottom && !this.stickTimer && !this.jumping) {
       this.stickTimer = setTimeout(() => {
         this.stickTimer = null;
         if (this.win.stick_bottom) this.scrollToEnd();

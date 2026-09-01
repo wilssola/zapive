@@ -1208,7 +1208,12 @@ export component AppWindow inherits Window {
                         }
                     }
                     for msg in root.messages: msg-row := Rectangle {
-                        property <length> max-text-w: max(120px, self.width * 0.65 - 44px);
+                        // A link card drives the bubble width, so the text
+                        // wraps at the card instead of stretching past it on
+                        // a wide window.
+                        property <length> max-text-w: msg.hasLink
+                            ? min(360px, max(120px, self.width * 0.65 - 44px))
+                            : max(120px, self.width * 0.65 - 44px);
                         // Probe used to scroll straight to a given message.
                         if root.jump-id == msg.id: Rectangle {
                             width: 0px;
