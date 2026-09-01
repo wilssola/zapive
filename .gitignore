@@ -1,0 +1,8 @@
+node_modules/
+auth_info/
+media_cache/
+data_store.json
+*.log
+zapive.db*
+auth_info.bak/
+data_store.json.bak
