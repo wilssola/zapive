@@ -84,6 +84,8 @@ export struct MessageItem {
     senderColorIdx: int,
     groupIndent: bool,
     showAvatar: bool,
+    senderNumber: string,
+    senderLabel: string,
     sticker: bool,
     gif: bool,
     styled: styled-text,
@@ -1115,18 +1117,33 @@ export component AppWindow inherits Window {
                                 padding-right: 9px;
                                 spacing: 2px;
 
-                                if msg.showSender: sender-touch := TouchArea {
-                                    width: sender-text.width;
-                                    height: sender-text.preferred-height;
-                                    mouse-cursor: pointer;
-                                    clicked => { root.open-dm(msg.senderJid); }
-                                    sender-text := Text {
-                                        text: msg.sender;
-                                        font-size: 12px;
-                                        font-weight: 700;
-                                        color: Theme.sender;
-                                        width: min(self.preferred-width, msg-row.max-text-w);
-                                        overflow: elide;
+                                if msg.showSender: HorizontalLayout {
+                                    spacing: 8px;
+                                    sender-touch := TouchArea {
+                                        width: sender-text.width;
+                                        height: sender-text.preferred-height;
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-dm(msg.senderJid); }
+                                        sender-text := Text {
+                                            text: msg.senderLabel;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            color: Theme.sender;
+                                            width: min(self.preferred-width,
+                                                msg-row.max-text-w - 90px);
+                                            overflow: elide;
+                                        }
+                                    }
+                                    // Gap before the number; a stretching
+                                    // spacer here would loop with the
+                                    // content-driven bubble width.
+                                    Rectangle { width: 28px; }
+                                    if msg.senderNumber != "": Text {
+                                        text: msg.senderNumber;
+                                        font-size: 11px;
+                                        color: Theme.text-dim;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 0;
                                     }
                                 }
 
@@ -1309,41 +1326,59 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Link preview card, as WhatsApp shows it.
+                                // Link preview card: artwork spans the full
+                                // width, with the host on a tinted strip.
                                 if msg.hasLink: Rectangle {
-                                    width: min(msg-row.max-text-w, 300px);
+                                    property <length> card-w: min(msg-row.max-text-w, 300px);
+                                    width: card-w;
                                     height: link-col.preferred-height;
                                     border-radius: 6px;
-                                    background: msg.fromMe ? #ffffff14 : #00000018;
+                                    clip: true;
+                                    background: msg.fromMe ? #ffffff14 : #00000014;
                                     link-col := VerticalLayout {
-                                        padding: 8px;
-                                        spacing: 3px;
                                         width: parent.width;
+                                        spacing: 0;
                                         if msg.hasLinkThumb: Image {
                                             source: msg.linkThumb;
-                                            width: parent.width - 16px;
-                                            height: 140px;
+                                            width: parent.width;
+                                            height: 170px;
                                             image-fit: cover;
                                         }
-                                        if msg.linkTitle != "": Text {
-                                            text: msg.linkTitle;
-                                            color: Theme.bubble-text;
-                                            font-size: 13px;
-                                            font-weight: 700;
-                                            wrap: word-wrap;
-                                            width: parent.width - 16px;
+                                        if msg.linkHost != "": Rectangle {
+                                            height: 26px;
+                                            background: msg.fromMe ? #ffffff10 : #00000010;
+                                            Text {
+                                                text: msg.linkHost;
+                                                color: Theme.text-dim;
+                                                font-size: 11px;
+                                                x: 9px;
+                                                height: parent.height;
+                                                vertical-alignment: center;
+                                            }
                                         }
-                                        if msg.linkDesc != "": Text {
-                                            text: msg.linkDesc;
-                                            color: Theme.text-dim;
-                                            font-size: 12px;
-                                            wrap: word-wrap;
-                                            width: parent.width - 16px;
+                                        if msg.linkTitle != "": Rectangle {
+                                            height: link-title.preferred-height + 10px;
+                                            link-title := Text {
+                                                text: msg.linkTitle;
+                                                color: Theme.bubble-text;
+                                                font-size: 13px;
+                                                font-weight: 700;
+                                                wrap: word-wrap;
+                                                x: 9px;
+                                                y: 5px;
+                                                width: parent.width - 18px;
+                                            }
                                         }
-                                        if msg.linkHost != "": Text {
-                                            text: msg.linkHost;
-                                            color: Theme.text-dim;
-                                            font-size: 11px;
+                                        if msg.linkDesc != "": Rectangle {
+                                            height: link-desc.preferred-height + 8px;
+                                            link-desc := Text {
+                                                text: msg.linkDesc;
+                                                color: Theme.text-dim;
+                                                font-size: 12px;
+                                                wrap: word-wrap;
+                                                x: 9px;
+                                                width: parent.width - 18px;
+                                            }
                                         }
                                     }
                                 }

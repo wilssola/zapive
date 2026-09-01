@@ -299,18 +299,23 @@ export class MediaService {
 
   // Extracts frames from a short clip so GIFs can loop inside the bubble
   // instead of opening an external player.
-  async videoFrames(msgId: string, filePath: string): Promise<DecodedImage[]> {
-    const cached = this.stickerAnim.get(msgId);
+  async videoFrames(
+    msgId: string,
+    filePath: string,
+    width = 320,
+  ): Promise<DecodedImage[]> {
+    const key = width === 320 ? msgId : `${msgId}@${width}`;
+    const cached = this.stickerAnim.get(key);
     if (cached) return cached;
     const frames: DecodedImage[] = [];
     try {
       const src = await this.plainAudioPath(msgId, filePath);
-      const dir = join(CACHE_DIR, ".tmp", `frames_${sanitize(msgId)}`);
+      const dir = join(CACHE_DIR, ".tmp", `frames_${sanitize(key)}`);
       await mkdir(dir, { recursive: true });
       await execFileAsync(
         this.findFfmpeg()!,
         ["-hide_banner", "-loglevel", "error", "-y", "-i", src,
-         "-vf", "fps=15,scale=320:-2", "-frames:v", "45", join(dir, "f_%03d.png")],
+         "-vf", `fps=15,scale=${width}:-2`, "-frames:v", "45", join(dir, "f_%03d.png")],
         { timeout: 60_000 },
       );
       for (const file of readdirSync(dir).sort()) {
@@ -330,7 +335,7 @@ export class MediaService {
     } catch {
       // leave whatever decoded; caller falls back to the thumbnail
     }
-    this.stickerAnim.set(msgId, frames);
+    this.stickerAnim.set(key, frames);
     return frames;
   }
 

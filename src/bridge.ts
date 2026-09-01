@@ -9,6 +9,7 @@ import {
   reactionSummary,
   ticksFor,
   displayId,
+  formatNumber,
   isChannel,
 } from "./store.ts";
 import { Notify } from "./notify.ts";
@@ -77,6 +78,8 @@ interface MessageRow {
   senderColorIdx: number;
   groupIndent: boolean;
   showAvatar: boolean;
+  senderNumber: string;
+  senderLabel: string;
   sticker: boolean;
   gif: boolean;
   styled: unknown;
@@ -446,6 +449,7 @@ export class Bridge implements WAListener {
     };
     win.open_video = (id) => void this.handleVideoClick(id);
     win.close_video = () => {
+      this.stopZoomLoop();
       this.media.stopVideo();
       win.video_open = false;
     };
@@ -1096,12 +1100,44 @@ export class Bridge implements WAListener {
     await this.openVideo(id);
   }
 
+  // GIFs zoom instantly: the frames decoded for the bubble are shown at
+  // once, then swapped for a sharper set as soon as it finishes.
+  private zoomTimer: NodeJS.Timeout | null = null;
+
+  private startZoomLoop(frames: SlintImageData[]) {
+    this.stopZoomLoop();
+    if (frames.length === 0) return;
+    const first = frames[0]!;
+    this.win.video_w = first.width;
+    this.win.video_h = first.height;
+    this.win.video_frame = first;
+    if (frames.length < 2) return;
+    let idx = 0;
+    this.zoomTimer = setInterval(() => {
+      idx = (idx + 1) % frames.length;
+      this.win.video_frame = frames[idx]!;
+    }, 66);
+  }
+
+  private stopZoomLoop() {
+    if (this.zoomTimer) clearInterval(this.zoomTimer);
+    this.zoomTimer = null;
+  }
+
   private async openVideo(id: string) {
     const jid = this.currentJid;
     const stored = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
     if (!stored?.raw) return;
     const path = await this.media.ensureCached(id, stored.raw);
     if (!path || this.currentJid !== jid) return;
+
+    if (stored.gif) {
+      this.win.video_open = true;
+      this.startZoomLoop(this.media.cachedFrames(id));
+      const sharper = await this.media.videoFrames(id, path, 720);
+      if (this.win.video_open && sharper.length > 0) this.startZoomLoop(sharper);
+      return;
+    }
     this.win.video_open = true;
     // GIFs keep looping while zoomed and carry no audio track.
     const loop = !!stored.gif;
@@ -1713,6 +1749,7 @@ export class Bridge implements WAListener {
   private openJid(jid: string) {
     this.stopAudio(); // never leave a voice note playing behind
     this.stopStickerAnimations();
+    this.stopZoomLoop();
     this.media.stopVideo();
     this.win.video_open = false;
     if (this.currentJid && this.currentJid !== jid) {
@@ -1819,8 +1856,14 @@ export class Bridge implements WAListener {
 
   private toRow(m: StoredMessage, prev?: StoredMessage): MessageRow {
     const isGroup = m.jid.endsWith("@g.us");
+    // A run also breaks after a pause, so a long stream from one sender
+    // still shows who is talking, like WhatsApp does.
+    const RUN_GAP = 5 * 60;
     const firstOfRun =
-      !prev || prev.fromMe !== m.fromMe || (isGroup && prev.sender !== m.sender);
+      !prev ||
+      prev.fromMe !== m.fromMe ||
+      (isGroup && prev.sender !== m.sender) ||
+      m.timestamp - prev.timestamp > RUN_GAP;
     // Group messages from others are indented to leave room for the
     // sender's avatar, drawn once per run like WhatsApp does.
     const senderJid =
@@ -1842,6 +1885,10 @@ export class Bridge implements WAListener {
       fromMe: m.fromMe,
       sender: m.sender,
       showSender: isGroup && !m.fromMe && firstOfRun,
+      senderLabel:
+        isGroup && senderJid && !this.store.savedContacts.has(senderJid)
+          ? `~ ${m.sender}`
+          : m.sender,
       firstOfRun,
       time: formatTime(m.timestamp),
       picture: EMPTY_IMAGE,
@@ -1862,6 +1909,11 @@ export class Bridge implements WAListener {
       senderColorIdx: colorIdxOf(senderJid || m.jid),
       groupIndent,
       showAvatar: groupIndent && firstOfRun,
+      // Unsaved senders show their number next to the push name.
+      senderNumber:
+        groupIndent && senderJid && !this.store.savedContacts.has(senderJid)
+          ? formatNumber(senderJid)
+          : "",
       sticker: !!m.sticker,
       gif: !!m.gif,
       ...styledFor(m),

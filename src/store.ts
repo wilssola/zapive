@@ -132,6 +132,19 @@ export function displayId(jid: string): string {
   return user;
 }
 
+// +5538920006927 -> +55 38 92000-6927 (falls back to a plain +digits).
+export function formatNumber(jid: string): string {
+  const digits = (jid.split("@")[0] ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    const area = digits.slice(2, 4);
+    const rest = digits.slice(4);
+    const head = rest.slice(0, rest.length - 4);
+    return `+55 ${area} ${head}-${rest.slice(-4)}`;
+  }
+  return `+${digits}`;
+}
+
 export function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -144,6 +157,7 @@ export class Store {
   contacts = new Map<string, string>();
   aliases = new Map<string, string>(); // @lid jid -> phone-number jid
   starredIds = new Set<string>(); // stars can arrive before the message does
+  savedContacts = new Set<string>(); // jids known from the address book
   deletedJids = new Set<string>();
 
   // Resolves a jid through the LID->PN alias table.
@@ -218,7 +232,12 @@ export class Store {
   upsertContact(c: Contact) {
     const jid = jidNormalizedUser(c.id);
     const name = c.name ?? c.notify ?? c.verifiedName;
-    if (jid && name) this.contacts.set(jid, name);
+    if (jid && name) {
+      this.contacts.set(jid, name);
+      // Only a real address-book entry counts as "saved"; push names are
+      // learned from messages and still deserve the number beside them.
+      if (c.name) this.savedContacts.add(jid);
+    }
   }
 
   upsertChat(c: Chat) {
