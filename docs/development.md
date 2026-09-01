@@ -1,0 +1,89 @@
+# Development
+
+## Requirements
+
+- **Node.js 24+** — required by `slint-ui`; also runs TypeScript natively
+- **Bun** — package manager and script runner
+- **ffmpeg** (optional) — microphone capture for voice notes;
+  `winget install Gyan.FFmpeg`, or it is auto-discovered under the winget
+  packages folder
+
+## Scripts
+
+```bash
+bun install       # dependencies
+bun run start     # launch the app (node src/main.ts)
+bun run check     # tsc --noEmit
+bun run i18n      # compile i18n/*.po to gettext .mo catalogs
+```
+
+## Why Node and not Bun
+
+`slint-ui` and `sharp` are napi modules that need Node ≥24, and Baileys is
+unreliable on Bun's WebSocket implementation (reconnect loops that can
+trip WhatsApp's ban heuristics). Bun stays as the toolchain: fast installs
+and script running. **Never `bun run src/main.ts`.**
+
+## TypeScript without a build step
+
+Node 24 strips types natively, so there is no bundler. The constraints:
+
+- Only erasable syntax — no `enum`, no `namespace`, no constructor
+  parameter properties
+- Relative imports must include the `.ts` extension
+- `tsconfig.json` is type-check only (`noEmit`, `erasableSyntaxOnly`)
+
+## Slint notes
+
+Hard-won details that are easy to trip over again:
+
+- Dashed identifiers map to **underscores** in JS (`status-text` →
+  `status_text`), and component instances are **not extensible** — every
+  property/callback must exist in the `.slint` file
+- Wrapped `Text` needs an explicit `width: min(self.preferred-width, max)`
+  or its height is computed wrong (bubbles collapse or overlap)
+- A `Rectangle`'s bound height is not its `preferred-height`; counting
+  padding twice makes rows overlap
+- Emoji followed by a variation selector (U+FE0F) render as tofu — see
+  `cleanText()`; dingbats like ✕ ➤ are missing from the font, so the UI
+  uses Tabler SVGs instead
+- `runEventLoop({ quitOnLastWindowClosed: false })` enables tray behavior
+- `capture-key-pressed` on a `FocusScope` sees Ctrl+V even while a
+  `LineEdit` has focus (used for paste-to-send)
+- Programmatic scrolling must be re-applied a few times: rows grow after
+  the first layout pass when images and wrapped text resolve
+
+## Baileys notes
+
+- `syncFullHistory: true` breaks registration on 7.0.0-rc14 with an
+  instant 428 loop — keep it `false` and pass
+  `shouldSyncHistoryMessage: () => true`
+- The pairing history sync can arrive empty; use `fetchMessageHistory`
+  to walk backwards instead
+- Pinned/archived chats need `resyncAppState`; when the phone withheld
+  sync keys, request them with an `APP_STATE_SYNC_KEY_REQUEST` protocol
+  message to your own jid (`category: "peer"`)
+- Force-killing the app mid-handshake can invalidate the session and
+  require re-pairing
+
+## Adding a translation string
+
+1. Slint markup: wrap the literal in `@tr("…")`
+2. TypeScript: add the key to both tables in `src/i18n.ts`
+3. Add `msgid`/`msgstr` to `i18n/pt_BR.po`
+4. Run `bun run i18n`
+
+## Commit conventions
+
+Conventional Commits in English, imperative subject ≤ 72 chars, body only
+for non-obvious *why*. One concern per commit.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `Could not connect to socket` on commit | 1Password SSH agent locked — open 1Password |
+| Endless `Connection Terminated` (428) | `syncFullHistory` enabled, or too many rapid reconnects; wait a few minutes |
+| Chats stuck empty after pairing | History sync arrived empty; the backfill fills it in over the next minutes |
+| Pins/archives missing | App-state keys not shared yet; keep the phone online, the key request retries |
+| Voice button does nothing | ffmpeg not found or no DirectShow microphone |
