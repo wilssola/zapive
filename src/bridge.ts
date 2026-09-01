@@ -767,7 +767,7 @@ export class Bridge implements WAListener {
           meta.unread = (meta.unread ?? 0) + 1;
           if (stored.mentionsMe) meta.mentioned = true;
         }
-        const body = notificationBody(stored);
+        const body = this.store.namedMentions(notificationBody(stored));
         const isGroup = stored.jid.endsWith("@g.us");
         const title = this.store.chatName(stored.jid);
         const text = isGroup && stored.sender ? `${stored.sender}: ${body}` : body;

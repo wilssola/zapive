@@ -231,6 +231,21 @@ export class Store {
     return user;
   }
 
+  // Turns "@5511999999999" into "@Name" wherever we know who it is, so
+  // previews and notifications read like the conversation does.
+  namedMentions(text: string): string {
+    if (!text.includes("@")) return text;
+    return text.replace(/@(\d{5,20})/g, (whole, num: string) => {
+      for (const form of [`${num}@s.whatsapp.net`, `${num}@lid`]) {
+        const jid = this.canon(form);
+        const name =
+          this.contacts.get(jid) ?? this.chats.get(jid)?.name ?? this.pushNames.get(jid);
+        if (name) return `@${cleanText(name)}`;
+      }
+      return whole;
+    });
+  }
+
   // Records our own jids so mentions can be matched against them.
   setSelf(ids: string[]) {
     for (const id of ids) {
@@ -494,7 +509,7 @@ export class Store {
     this.dirtyJids.add(stored.jid);
 
     const existing = this.chats.get(stored.jid);
-    const preview = computePreview(stored);
+    const preview = computePreview(stored, this);
     if (!existing || stored.timestamp >= existing.timestamp) {
       this.chats.set(stored.jid, {
         jid: stored.jid,
@@ -808,7 +823,7 @@ export class Store {
       const last = list[list.length - 1];
       const meta = this.chats.get(jid);
       if (last && meta) {
-        meta.preview = computePreview({ ...last, text: cleanText(last.text) });
+        meta.preview = computePreview({ ...last, text: cleanText(last.text) }, this);
       }
     }
   }
@@ -855,8 +870,8 @@ export function previewBody(stored: StoredMessage): string {
           : [...stored.text.replace(/\s+/g, " ")].slice(0, 80).join("");
 }
 
-function computePreview(stored: StoredMessage): string {
-  const body = previewBody(stored);
+function computePreview(stored: StoredMessage, store?: Store): string {
+  const body = store ? store.namedMentions(previewBody(stored)) : previewBody(stored);
   const prefix = stored.fromMe
     ? "✓ "
     : stored.jid.endsWith("@g.us") && stored.sender

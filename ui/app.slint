@@ -1247,6 +1247,12 @@ export component AppWindow inherits Window {
                         property <length> max-text-w: msg.hasLink
                             ? min(360px, max(120px, self.width * 0.65 - 44px))
                             : max(120px, self.width * 0.65 - 44px);
+                        // Media drives the bubble width; the header and the
+                        // caption wrap inside it instead of widening the bubble.
+                        property <length> content-w:
+                            (msg.kind == "image" || msg.kind == "video") && msg.picW > 0
+                                ? max(150px, msg.picW * 1px)
+                                : max-text-w;
                         property <length> day-offset: msg.dayLabel != "" ? 34px : 0;
                         height: bubble.height + (msg.firstOfRun ? 16px : 6px)
                             + (msg.reactions != "" ? 14px : 0) + self.day-offset;
@@ -1314,7 +1320,7 @@ export component AppWindow inherits Window {
                                             font-weight: 700;
                                             color: Theme.sender;
                                             width: min(self.preferred-width,
-                                                msg-row.max-text-w - 90px);
+                                                msg-row.content-w - 90px);
                                             overflow: elide;
                                         }
                                     }
@@ -1709,9 +1715,7 @@ export component AppWindow inherits Window {
                                             selection-foreground-color: white;
                                             // captions wrap to the image width
                                             width: min(self.preferred-width,
-                                                msg.kind == "image" && msg.picW > 0
-                                                    ? msg.picW * 1px
-                                                    : msg-row.max-text-w);
+                                                msg-row.content-w);
                                             height: self.preferred-height;
                                         }
                                     }
