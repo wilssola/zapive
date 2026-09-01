@@ -33,6 +33,9 @@ Everything below is implemented and working against a live account.
 - **Reactions** shown as a pill attached to the bubble
 - **Forwarded** and **deleted** ("This message was deleted") indicators
 - Group sender names are clickable — opens or starts that DM
+- **WhatsApp formatting** — *bold*, _italic_, ~strike~ and ```monospace```
+  render as styled text
+- **Link previews** with thumbnail, title, description and host
 - **Text selection** by dragging (blue selection) plus a context menu with
   Copy and Forward
 - **Scroll memory** per conversation, floating jump-to-latest button, and

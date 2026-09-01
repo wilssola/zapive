@@ -1,4 +1,4 @@
-import { ArrayModel } from "slint-ui";
+import { ArrayModel, StyledText } from "slint-ui";
 import { jidNormalizedUser, proto } from "@whiskeysockets/baileys";
 import type { WAMessage } from "@whiskeysockets/baileys";
 import {
@@ -12,6 +12,7 @@ import {
   isChannel,
 } from "./store.ts";
 import { Notify } from "./notify.ts";
+import { hasMarkup, toMarkdown } from "./markup.ts";
 import { t } from "./i18n.ts";
 import type { Db } from "./db.ts";
 import type { StoredMessage } from "./store.ts";
@@ -78,6 +79,14 @@ interface MessageRow {
   showAvatar: boolean;
   sticker: boolean;
   gif: boolean;
+  styled: unknown;
+  hasStyled: boolean;
+  linkTitle: string;
+  linkDesc: string;
+  linkHost: string;
+  hasLink: boolean;
+  linkThumb: SlintImageData;
+  hasLinkThumb: boolean;
   wave: SlintImageData;
   hasWave: boolean;
   playing: boolean;
@@ -218,6 +227,7 @@ export interface AppWindow {
   attach_image: () => void;
   attach_audio: () => void;
   play_audio: (path: string) => void;
+  copy_text: (id: string) => void;
   audio_toggle: (id: string) => void;
   audio_seek: (id: string, frac: number) => void;
   scroll_conversation_end: () => void;
@@ -282,6 +292,27 @@ function notificationBody(m: StoredMessage): string {
   if (m.kind === "doc") return t("preview.document", m.text);
   if (m.kind === "video") return m.gif ? t("preview.gif") : t("preview.video");
   return m.text;
+}
+
+// Formatted messages render as styled text; plain ones keep the
+// selectable input so text can still be dragged and copied.
+function styledFor(m: StoredMessage): { styled: unknown; hasStyled: boolean } {
+  const body = m.deleted ? "" : m.text;
+  if (!body || !hasMarkup(body)) return { styled: null, hasStyled: false };
+  try {
+    return { styled: StyledText.fromMarkdown(toMarkdown(body)), hasStyled: true };
+  } catch {
+    return { styled: null, hasStyled: false };
+  }
+}
+
+function hostOf(url: string | undefined): string {
+  if (!url) return "";
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
 }
 
 function initialOf(name: string): string {
@@ -404,6 +435,11 @@ export class Bridge implements WAListener {
       win.preview_open = false;
     };
     win.play_audio = (path) => this.media.play(path);
+    win.copy_text = (id) => {
+      const jid = this.currentJid;
+      const msg = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
+      if (msg) void this.media.setClipboard(msg.text);
+    };
     win.open_video = (id) => void this.handleVideoClick(id);
     win.close_video = () => {
       this.media.stopVideo();
@@ -1824,6 +1860,13 @@ export class Bridge implements WAListener {
       showAvatar: groupIndent && firstOfRun,
       sticker: !!m.sticker,
       gif: !!m.gif,
+      ...styledFor(m),
+      linkTitle: m.linkTitle ?? "",
+      linkDesc: m.linkDesc ?? "",
+      linkHost: hostOf(m.linkUrl),
+      hasLink: !!(m.linkTitle || m.linkUrl),
+      linkThumb: EMPTY_IMAGE,
+      hasLinkThumb: false,
       wave: EMPTY_IMAGE,
       hasWave: false,
       playing: false,
@@ -1840,7 +1883,7 @@ export class Bridge implements WAListener {
   private async loadMediaForChat(jid: string) {
     const pending = this.store
       .messagesFor(jid)
-      .filter((m) => m.kind !== "text")
+      .filter((m) => m.kind !== "text" || m.linkTitle || m.linkUrl)
       .reverse();
     const worker = async () => {
       while (pending.length > 0) {
@@ -1855,6 +1898,17 @@ export class Bridge implements WAListener {
   private async loadMediaForMessage(stored: StoredMessage) {
     if (!stored.raw) return;
     const jid = stored.jid;
+    if (stored.kind === "text") {
+      // Link preview thumbnail travels inside the message itself.
+      const thumb = stored.raw.message?.extendedTextMessage?.jpegThumbnail;
+      if (thumb?.length) {
+        const img = await this.media.decodeRaw(Buffer.from(thumb));
+        if (img && this.currentJid === jid) {
+          this.patchRow(stored.id, { linkThumb: img, hasLinkThumb: true });
+        }
+      }
+      return;
+    }
     if (stored.kind === "video" && stored.gif) {
       // GIFs loop inline: download the short clip and cycle its frames.
       const path = await this.media.ensureCached(stored.id, stored.raw);

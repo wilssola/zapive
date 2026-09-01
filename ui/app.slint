@@ -86,6 +86,14 @@ export struct MessageItem {
     showAvatar: bool,
     sticker: bool,
     gif: bool,
+    styled: styled-text,
+    hasStyled: bool,
+    linkTitle: string,
+    linkDesc: string,
+    linkHost: string,
+    hasLink: bool,
+    linkThumb: image,
+    hasLinkThumb: bool,
     wave: image,
     hasWave: bool,
     playing: bool,
@@ -346,6 +354,7 @@ export component AppWindow inherits Window {
     callback attach-audio();
     callback attach-doc();
     callback play-audio(string);
+    callback copy-text(string);
     callback audio-toggle(string);
     callback audio-seek(string, float);
     callback load-older();
@@ -1300,7 +1309,68 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                if msg.kind == "text" || (msg.kind == "image" && msg.text != ""): Rectangle {
+                                // Link preview card, as WhatsApp shows it.
+                                if msg.hasLink: Rectangle {
+                                    width: min(msg-row.max-text-w, 300px);
+                                    height: link-col.preferred-height;
+                                    border-radius: 6px;
+                                    background: msg.fromMe ? #ffffff14 : #00000018;
+                                    link-col := VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 3px;
+                                        width: parent.width;
+                                        if msg.hasLinkThumb: Image {
+                                            source: msg.linkThumb;
+                                            width: parent.width - 16px;
+                                            height: 140px;
+                                            image-fit: cover;
+                                        }
+                                        if msg.linkTitle != "": Text {
+                                            text: msg.linkTitle;
+                                            color: Theme.bubble-text;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            wrap: word-wrap;
+                                            width: parent.width - 16px;
+                                        }
+                                        if msg.linkDesc != "": Text {
+                                            text: msg.linkDesc;
+                                            color: Theme.text-dim;
+                                            font-size: 12px;
+                                            wrap: word-wrap;
+                                            width: parent.width - 16px;
+                                        }
+                                        if msg.linkHost != "": Text {
+                                            text: msg.linkHost;
+                                            color: Theme.text-dim;
+                                            font-size: 11px;
+                                        }
+                                    }
+                                }
+
+                                // Formatted text (bold/italic/strike/mono).
+                                if msg.hasStyled: ContextMenuArea {
+                                    width: styled-body.width;
+                                    height: styled-body.preferred-height;
+                                    Menu {
+                                        MenuItem {
+                                            title: @tr("Copy");
+                                            activated => { root.copy-text(msg.id); }
+                                        }
+                                        MenuItem {
+                                            title: @tr("Forward");
+                                            activated => { root.request-forward(msg.id); }
+                                        }
+                                    }
+                                    styled-body := StyledText {
+                                        text: msg.styled;
+                                        default-color: Theme.bubble-text;
+                                        default-font-size: 14px;
+                                        width: min(self.preferred-width, msg-row.max-text-w);
+                                    }
+                                }
+
+                                if !msg.hasStyled && (msg.kind == "text" || (msg.kind == "image" && msg.text != "")): Rectangle {
                                     width: body-text.width;
                                     height: body-text.preferred-height;
                                     ContextMenuArea {

@@ -17,6 +17,9 @@ export interface StoredMessage {
   gif?: boolean;
   starred?: boolean;
   sticker?: boolean;
+  linkTitle?: string;
+  linkDesc?: string;
+  linkUrl?: string;
   timestamp: number;
   mimetype?: string;
   mediaW?: number;
@@ -325,10 +328,20 @@ export class Store {
       return { ...base, kind: "text", text: cleanText(content.conversation ?? "") };
     }
     if (type === "extendedTextMessage") {
+      const ext = content.extendedTextMessage;
+      // Link previews ride along with the text as title/description.
+      const url = ext?.matchedText ?? "";
       return {
         ...base,
         kind: "text",
-        text: cleanText(content.extendedTextMessage?.text ?? ""),
+        text: cleanText(ext?.text ?? ""),
+        ...(ext?.title || url
+          ? {
+              linkTitle: cleanText(ext?.title ?? ""),
+              linkDesc: cleanText(ext?.description ?? ""),
+              linkUrl: url,
+            }
+          : {}),
       };
     }
     if (type === "stickerMessage") {

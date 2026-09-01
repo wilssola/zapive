@@ -825,6 +825,21 @@ export class MediaService {
     }
   }
 
+  // Writes text to the clipboard (base64 avoids quoting problems).
+  async setClipboard(text: string): Promise<void> {
+    const b64 = Buffer.from(text, "utf8").toString("base64");
+    const script =
+      `Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString(` +
+      `[Convert]::FromBase64String('${b64}')))`;
+    try {
+      await execFileAsync("powershell", ["-NoProfile", "-Command", script], {
+        timeout: 10_000,
+      });
+    } catch {
+      // clipboard is best-effort
+    }
+  }
+
   async clipboardText(): Promise<string> {
     try {
       const { stdout } = await execFileAsync(
