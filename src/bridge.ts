@@ -259,6 +259,31 @@ const EMOJIS = (
   "🍕 🍔 🎂 🍫 🚀 ✈ 🚗 💰"
 ).split(" ");
 
+// Scales media dimensions into the bubble's 330x380 box (stickers use a
+// smaller square), falling back to a sane default when unknown.
+function mediaBox(m: StoredMessage): { picW: number; picH: number } {
+  if (m.kind !== "image" && m.kind !== "video") return { picW: 0, picH: 0 };
+  const maxW = m.sticker ? 180 : 330;
+  const maxH = m.sticker ? 180 : 380;
+  const w = m.mediaW && m.mediaW > 0 ? m.mediaW : 260;
+  const h = m.mediaH && m.mediaH > 0 ? m.mediaH : 200;
+  const scale = Math.min(maxW / w, maxH / h, 1);
+  return {
+    picW: Math.max(1, Math.round(w * scale)),
+    picH: Math.max(1, Math.round(h * scale)),
+  };
+}
+
+// Every media kind gets a translated one-liner in notifications.
+function notificationBody(m: StoredMessage): string {
+  if (m.sticker) return t("preview.sticker");
+  if (m.kind === "image") return t("preview.photo");
+  if (m.kind === "audio") return t("preview.audio");
+  if (m.kind === "doc") return t("preview.document", m.text);
+  if (m.kind === "video") return m.gif ? t("preview.gif") : t("preview.video");
+  return m.text;
+}
+
 function initialOf(name: string): string {
   const ch = [...name.trim()][0];
   return ch ? ch.toUpperCase() : "?";
@@ -387,6 +412,14 @@ export class Bridge implements WAListener {
 
   setService(service: WhatsAppService) {
     this.service = service;
+    this.notify.onActivate = (jid) => {
+      try {
+        this.win.show(); // raise from the tray
+      } catch {
+        // already visible
+      }
+      this.openDm(jid);
+    };
   }
 
   // Called after the db is unlocked: loads persisted chats/messages.
@@ -603,14 +636,7 @@ export class Bridge implements WAListener {
       } else if (!stored.fromMe) {
         const meta = this.store.chats.get(stored.jid);
         if (meta) meta.unread = (meta.unread ?? 0) + 1;
-        const body =
-          stored.kind === "image"
-            ? t("preview.photo")
-            : stored.kind === "audio"
-              ? t("preview.audio")
-              : stored.kind === "doc"
-                ? t("preview.document", stored.text)
-                : stored.text;
+        const body = notificationBody(stored);
         const isGroup = stored.jid.endsWith("@g.us");
         const title = this.store.chatName(stored.jid);
         const text = isGroup && stored.sender ? `${stored.sender}: ${body}` : body;
@@ -618,7 +644,7 @@ export class Bridge implements WAListener {
         void this.media
           .fetchAvatar(jid)
           .then(() => this.media.avatarIcon(jid))
-          .then((icon) => this.notify.push(title, text, icon));
+          .then((icon) => this.notify.push(title, text, icon, jid));
       }
     }
     this.scheduleRefreshChats();
@@ -1681,8 +1707,9 @@ export class Bridge implements WAListener {
       firstOfRun,
       time: formatTime(m.timestamp),
       picture: EMPTY_IMAGE,
-      picW: 0,
-      picH: 0,
+      // Reserve the final box from the media's own dimensions so the
+      // bubble keeps its height when the bitmap arrives.
+      ...mediaBox(m),
       mediaPath: "",
       mediaReady: false,
       reactions: reactionSummary(m),
@@ -1710,12 +1737,21 @@ export class Bridge implements WAListener {
     };
   }
 
+  // Newest first: those are the ones on screen. Three workers keep the
+  // visible part of the conversation filling quickly.
   private async loadMediaForChat(jid: string) {
-    for (const stored of this.store.messagesFor(jid)) {
-      if (this.currentJid !== jid) return;
-      if (stored.kind === "text") continue;
-      await this.loadMediaForMessage(stored);
-    }
+    const pending = this.store
+      .messagesFor(jid)
+      .filter((m) => m.kind !== "text")
+      .reverse();
+    const worker = async () => {
+      while (pending.length > 0) {
+        if (this.currentJid !== jid) return;
+        const stored = pending.shift()!;
+        await this.loadMediaForMessage(stored);
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
   }
 
   private async loadMediaForMessage(stored: StoredMessage) {
@@ -1805,7 +1841,17 @@ export class Bridge implements WAListener {
     });
   }
 
+  private stickTimer: NodeJS.Timeout | null = null;
+
   private patchRow(id: string, patch: Partial<MessageRow>) {
+    // A late-loading image must not push the newest message out of view;
+    // debounced so a burst of images re-anchors only once.
+    if (patch.mediaReady && this.win.stick_bottom && !this.stickTimer) {
+      this.stickTimer = setTimeout(() => {
+        this.stickTimer = null;
+        if (this.win.stick_bottom) this.scrollToEnd();
+      }, 120);
+    }
     for (let i = 0; i < this.messagesModel.length; i++) {
       const row = this.messagesModel.rowData(i);
       if (row && row.id === id) {

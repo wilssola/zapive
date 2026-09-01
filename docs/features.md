@@ -92,7 +92,8 @@ makes sure you never miss one instead:
 ## Desktop integration
 
 - **Native Windows toasts** with the contact's **round photo**, coalescing
-  bursts into a single summary notification
+  bursts into a single summary notification; clicking one opens that
+  conversation and raises the window
 - **System tray**: closing the window keeps the app connected; the icon
   reopens it and offers Quit
 - Notifications are suppressed for the conversation currently open

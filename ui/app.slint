@@ -1130,7 +1130,13 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                if msg.kind == "video" && msg.picW > 0: TouchArea {
+                                if msg.kind == "video" && !msg.mediaReady && msg.picW > 0: Rectangle {
+                                    width: msg.picW * 1px;
+                                    height: msg.picH * 1px;
+                                    border-radius: 6px;
+                                    background: Theme.hover;
+                                }
+                                if msg.kind == "video" && msg.mediaReady && msg.picW > 0: TouchArea {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
@@ -1190,9 +1196,13 @@ export component AppWindow inherits Window {
                                         height: parent.height;
                                     }
                                 }
-                                if msg.kind == "image" && !msg.mediaReady: Text {
-                                    text: @tr("Loading image...");
-                                    color: Theme.text-dim;
+                                // Placeholder of the final size: the bubble
+                                // never changes height once the image lands.
+                                if msg.kind == "image" && !msg.mediaReady: Rectangle {
+                                    width: msg.picW * 1px;
+                                    height: msg.picH * 1px;
+                                    border-radius: 6px;
+                                    background: Theme.hover;
                                 }
 
                                 if msg.kind == "doc": HorizontalLayout {

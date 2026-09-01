@@ -19,6 +19,8 @@ export interface StoredMessage {
   sticker?: boolean;
   timestamp: number;
   mimetype?: string;
+  mediaW?: number;
+  mediaH?: number;
   durationSec?: number;
   status?: number; // WAMessageStatus for own messages (2 ack, 3 delivered, 4 read)
   reactions?: Record<string, string>; // reactor id -> emoji
@@ -335,6 +337,8 @@ export class Store {
         kind: "image",
         text: "",
         sticker: true,
+        mediaW: content.stickerMessage?.width ?? 180,
+        mediaH: content.stickerMessage?.height ?? 180,
         mimetype: content.stickerMessage?.mimetype ?? "image/webp",
       };
     }
@@ -344,6 +348,8 @@ export class Store {
         ...base,
         kind: "video",
         text: cleanText(v?.caption ?? ""),
+        mediaW: v?.width ?? 0,
+        mediaH: v?.height ?? 0,
         mimetype: v?.mimetype ?? "video/mp4",
         durationSec: toNum(v?.seconds),
         gif: !!v?.gifPlayback,
@@ -354,6 +360,8 @@ export class Store {
         ...base,
         kind: "image",
         text: cleanText(content.imageMessage?.caption ?? ""),
+        mediaW: content.imageMessage?.width ?? 0,
+        mediaH: content.imageMessage?.height ?? 0,
         mimetype: content.imageMessage?.mimetype ?? "image/jpeg",
       };
     }
