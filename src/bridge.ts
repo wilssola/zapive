@@ -105,6 +105,7 @@ export interface AppWindow {
   statuses: ArrayModel<ChatRow>;
   emoji_rows: string[][];
   sticker_rows: ArrayModel<StickerCell[]>;
+  fav_rows: ArrayModel<StickerCell[]>;
   gif_rows: ArrayModel<StickerCell[]>;
   gif_send: (id: string) => void;
   conv_scroll: number;
@@ -278,6 +279,7 @@ export class Bridge implements WAListener {
   private statusModel = new ArrayModel<ChatRow>([]);
   private stickerModel = new ArrayModel<StickerCell[]>([]);
   private gifModel = new ArrayModel<StickerCell[]>([]);
+  private favModel = new ArrayModel<StickerCell[]>([]);
   private stickerRawById = new Map<string, StoredMessage>();
   private scrollPos = new Map<string, number>();
   private infoMediaModel = new ArrayModel<StickerCell[]>([]);
@@ -301,6 +303,7 @@ export class Bridge implements WAListener {
     win.emoji_rows = chunk(EMOJIS, 8);
     win.sticker_rows = this.stickerModel;
     win.gif_rows = this.gifModel;
+    win.fav_rows = this.favModel;
     win.gif_send = (id) => void this.sendStickerById(id);
     win.jump_latest = () => this.scrollToEnd();
     win.info_media = this.infoMediaModel;
@@ -596,10 +599,23 @@ export class Bridge implements WAListener {
     this.scheduleRefreshChats();
   }
 
-  onMessagesUpdate(updates: { key?: WAMessage["key"]; update?: { status?: unknown } }[]) {
+  onMessagesUpdate(
+    updates: {
+      key?: WAMessage["key"];
+      update?: { status?: unknown; starred?: unknown };
+    }[],
+  ) {
     for (const u of updates) {
+      if (!u.key?.remoteJid || !u.key.id) continue;
+      if (typeof u.update?.starred === "boolean") {
+        this.store.setStarred(
+          this.store.canon(jidNormalizedUser(u.key.remoteJid)),
+          u.key.id,
+          u.update.starred,
+        );
+      }
       const status = Number(u.update?.status ?? 0);
-      if (!status || !u.key?.remoteJid || !u.key.id) continue;
+      if (!status) continue;
       const jid = this.store.canon(jidNormalizedUser(u.key.remoteJid));
       const m = this.store.setStatus(jid, u.key.id, status);
       if (m && jid === this.currentJid) {
@@ -800,6 +816,7 @@ export class Bridge implements WAListener {
   // Fills the sticker tab with recently received stickers (lazy decode).
   private async loadStickerPanel() {
     void this.fillPanel(this.gifModel, this.store.recentGifs(24), true);
+    void this.fillPanel(this.favModel, this.store.starredStickers(32), false);
     const items = this.store.recentStickers(32);
     await this.fillPanel(this.stickerModel, items, false);
   }

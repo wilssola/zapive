@@ -206,3 +206,6 @@ msgstr "Recusar"
 
 msgid "Dismiss"
 msgstr "Ignorar"
+
+msgid "Favorites"
+msgstr "Favoritas"

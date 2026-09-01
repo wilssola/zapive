@@ -23,7 +23,12 @@ export interface WAListener {
   onChatsUpsert(chats: unknown[]): void;
   onContactsUpsert(contacts: unknown[]): void;
   onMessagesUpsert(messages: WAMessage[]): void;
-  onMessagesUpdate(updates: { key?: WAMessage["key"]; update?: { status?: unknown } }[]): void;
+  onMessagesUpdate(
+    updates: {
+      key?: WAMessage["key"];
+      update?: { status?: unknown; starred?: unknown };
+    }[],
+  ): void;
   onCall(calls: unknown[]): void;
   onPresence(update: {
     id: string;

@@ -47,7 +47,7 @@ Everything below is implemented and working against a live account.
 | Video / GIF | Embedded thumbnail with play badge; opens externally | GIF tab in the picker |
 | Audio / voice notes | **In-app player**: waveform, seek, elapsed time | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
 | Documents | Filename + open button | Attach menu, any file type |
-| Stickers | Rendered like images | Recent-stickers tab; any image converted to 512 px webp |
+| Stickers | Rendered like images | Tabs for stickers you sent and starred ones; any image converted to 512 px webp |
 
 - Group messages show the sender avatar beside the first bubble of a run
 - **Attach menu** (`+`): Document, Photos, Audio, Sticker

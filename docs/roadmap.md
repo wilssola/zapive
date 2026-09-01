@@ -45,6 +45,7 @@ sending does not.
 | Video opens in the system player | No embedded video surface yet; voice notes play in-app |
 | History only goes back as far as the phone serves | WhatsApp on-demand sync returns ~50 messages per request |
 | Sending a GIF forwards an existing one | Uploading a local mp4 as gif-playback is wired but not exposed in the UI |
+| No sticker store, packs or emoji-category tabs | Baileys exposes no sticker-pack API; only sent and starred stickers are available |
 | Calls cannot be answered from the desktop | Baileys detects and declines calls only; Zapive notifies and lists them |
 | Windows only | DPAPI, NotifyIcon, WinForms dialogs and DirectShow |
 

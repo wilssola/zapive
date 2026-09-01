@@ -296,6 +296,7 @@ export component AppWindow inherits Window {
     in-out property <[[string]]> emoji-rows;
     in-out property <[[StickerCell]]> sticker-rows;
     in-out property <[[StickerCell]]> gif-rows;
+    in-out property <[[StickerCell]]> fav-rows;
     callback gif-send(string);
     in-out property <length> conv-scroll: 0;
     in-out property <bool> rec-active: false;
@@ -1476,6 +1477,11 @@ export component AppWindow inherits Window {
                             clicked => { root.picker-tab = "sticker"; }
                         }
                         FilterChip {
+                            label: @tr("Favorites");
+                            active: root.picker-tab == "fav";
+                            clicked => { root.picker-tab = "fav"; }
+                        }
+                        FilterChip {
                             label: "GIF";
                             active: root.picker-tab == "gif";
                             clicked => { root.picker-tab = "gif"; }
@@ -1535,6 +1541,38 @@ export component AppWindow inherits Window {
                                     }
                                     clicked => {
                                         root.gif-send(cell.id);
+                                        root.picker-open = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if root.picker-tab == "fav": ListView {
+                        for row in root.fav-rows: Rectangle {
+                            height: 92px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                for cell in row: fav-touch := TouchArea {
+                                    width: 84px;
+                                    height: 84px;
+                                    mouse-cursor: pointer;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 8px;
+                                        background: fav-touch.has-hover ? Theme.hover : transparent;
+                                        if cell.ready: Image {
+                                            source: cell.pic;
+                                            width: 76px;
+                                            height: 76px;
+                                            x: 4px;
+                                            y: 4px;
+                                            image-fit: contain;
+                                        }
+                                    }
+                                    clicked => {
+                                        root.sticker-send(cell.id);
                                         root.picker-open = false;
                                     }
                                 }

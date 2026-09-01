@@ -15,6 +15,7 @@ export interface StoredMessage {
   forwarded?: boolean;
   deleted?: boolean;
   gif?: boolean;
+  starred?: boolean;
   timestamp: number;
   mimetype?: string;
   durationSec?: number;
@@ -533,16 +534,34 @@ export class Store {
     return out.slice(0, limit);
   }
 
-  // Most recent received stickers (for the picker panel).
+  // Stickers the user actually sent, newest first and de-duplicated by
+  // content hash — the closest thing to WhatsApp's "recent" tray that the
+  // protocol exposes.
   recentStickers(limit: number): StoredMessage[] {
+    return dedupeStickers(this.collectStickers((m) => m.fromMe), limit);
+  }
+
+  // Stickers starred on the phone; starring syncs through app state.
+  starredStickers(limit: number): StoredMessage[] {
+    return dedupeStickers(this.collectStickers((m) => !!m.starred), limit);
+  }
+
+  private collectStickers(keep: (m: StoredMessage) => boolean): StoredMessage[] {
     const out: StoredMessage[] = [];
     for (const list of this.messages.values()) {
       for (const m of list) {
-        if (m.raw?.message?.stickerMessage) out.push(m);
+        if (m.raw?.message?.stickerMessage && keep(m)) out.push(m);
       }
     }
-    out.sort((a, b) => b.timestamp - a.timestamp);
-    return out.slice(0, limit);
+    return out.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  setStarred(jid: string, id: string, starred: boolean): StoredMessage | null {
+    const m = this.messages.get(jid)?.find((x) => x.id === id);
+    if (!m || m.starred === starred) return null;
+    m.starred = starred;
+    this.dirtyJids.add(jid);
+    return m;
   }
 
   totalMessages(): number {
@@ -682,6 +701,21 @@ export class Store {
     this.messages = new Map(p.messages.map(([jid, list]) => [jid, hydrate(list)]));
     for (const jid of this.messages.keys()) this.dirtyJids.add(jid);
   }
+}
+
+// Same sticker sent twice must appear once in the picker.
+function dedupeStickers(items: StoredMessage[], limit: number): StoredMessage[] {
+  const seen = new Set<string>();
+  const out: StoredMessage[] = [];
+  for (const m of items) {
+    const sha = m.raw?.message?.stickerMessage?.fileSha256;
+    const key = sha ? Buffer.from(sha).toString("base64") : m.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 function computePreview(stored: StoredMessage): string {
