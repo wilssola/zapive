@@ -426,6 +426,23 @@ export function unwrapSecret(stored: string): string {
   throw new Error("unknown key wrapping format");
 }
 
+// ---- Toast identity (Windows) ----
+//
+// The app name and the small icon in a toast's header come from the
+// AppUserModelID registration, not from the toast payload. Unpackaged
+// apps declare theirs under HKCU; re-registering every start keeps the
+// icon path current when a new build unpacks somewhere else.
+export function registerAppId(appId: string, displayName: string, iconPath: string): void {
+  if (!IS_WIN) return;
+  const key = `HKCU\\Software\\Classes\\AppUserModelId\\${appId}`;
+  const add = (name: string, value: string) =>
+    spawnSync("reg", ["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"], {
+      stdio: "ignore",
+    });
+  add("DisplayName", displayName);
+  if (existsSync(iconPath)) add("IconUri", iconPath);
+}
+
 // ---- Tray ----
 //
 // Slint has no tray API, so Windows keeps its PowerShell NotifyIcon and

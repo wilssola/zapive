@@ -16,7 +16,7 @@ import type { Locale } from "./i18n.ts";
 import { ensureDirs, migrateFromCwd } from "./paths.ts";
 import { runtimeRoot } from "./resources.ts";
 import { claimSingleInstance } from "./single.ts";
-import { startTray, systemDark as readSystemDark } from "./platform.ts";
+import { registerAppId, startTray, systemDark as readSystemDark } from "./platform.ts";
 
 // The vault and the cache live in the user's own directories; older
 // builds kept them next to the executable.
@@ -183,6 +183,9 @@ if (db.hasPin()) {
 // ---- System tray (Windows): closing the window hides it and the app
 // keeps running. Elsewhere there is no tray, so the window owns the
 // process lifetime. ----
+// Toasts show this identity (name + small icon) in their header.
+registerAppId("Zapive", "Zapive", join(runtimeRoot(), "ui", "zapive.ico"));
+
 const tray = startTray(
   () => win.show(),
   () => slint.quitEventLoop(),

@@ -10,7 +10,8 @@
     "start": "node src/main.ts",
     "check": "tsc --noEmit",
     "i18n": "node scripts/build-mo.mjs",
-    "build": "node scripts/build.mjs"
+    "ico": "node scripts/make-ico.mjs",
+    "build": "npm run ico && npm run i18n && node scripts/build.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc14",
