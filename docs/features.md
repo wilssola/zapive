@@ -108,8 +108,10 @@ makes sure you never miss one instead:
 ## Appearance and language
 
 - **Dark**, **Light** and **System** themes (registry-polled, live switch)
-- **English**, **Portuguese** and **System** language (Slint `@tr` gettext
-  catalog + TypeScript dictionary)
+- **English**, **Portuguese** and **System** language. `@tr` literals are
+  substituted from the `.po` catalog while the markup is loaded (libintl
+  never resolves a locale under Node on Windows), and the TypeScript side
+  uses its own dictionary
 - **Tabler icons** throughout, colorized per theme
 
 ## Security

@@ -8,6 +8,8 @@ import type { AppWindow } from "./bridge.ts";
 import { MediaService } from "./media.ts";
 import { WhatsAppService } from "./whatsapp.ts";
 import { Db } from "./db.ts";
+import { fileURLToPath } from "node:url";
+import { loadCatalog, translateSlintSource } from "./slint-tr.ts";
 import { setLocale, t } from "./i18n.ts";
 import type { Locale } from "./i18n.ts";
 
@@ -24,9 +26,18 @@ const systemLocale: Locale = (Intl.DateTimeFormat().resolvedOptions().locale ?? 
 const locale: Locale = langMode === "pt" ? "pt" : langMode === "en" ? "en" : systemLocale;
 setLocale(locale);
 process.env.LANGUAGE = locale === "pt" ? "pt_BR" : "en_US";
-slint.initTranslations("zapive", new URL("../i18n/", import.meta.url));
 
-const ui = slint.loadFile(new URL("../ui/app.slint", import.meta.url)) as {
+// The markup is translated at load time (see slint-tr.ts for why gettext
+// alone leaves it in English on Windows).
+const appSlint = fileURLToPath(new URL("../ui/app.slint", import.meta.url));
+const catalog =
+  locale === "pt"
+    ? loadCatalog(fileURLToPath(new URL("../i18n/pt_BR.po", import.meta.url)))
+    : new Map<string, string>();
+const ui = slint.loadSource(
+  translateSlintSource(readFileSync(appSlint, "utf8"), catalog),
+  appSlint,
+) as {
   AppWindow: new () => AppWindow;
 };
 const win = new ui.AppWindow();

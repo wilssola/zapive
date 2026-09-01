@@ -77,6 +77,11 @@ interface MessageRow {
   senderHasAvatar: boolean;
   senderInitial: string;
   senderColorIdx: number;
+  voiceJid: string;
+  voiceAvatar: SlintImageData;
+  voiceHasAvatar: boolean;
+  voiceInitial: string;
+  voiceColorIdx: number;
   groupIndent: boolean;
   showAvatar: boolean;
   senderNumber: string;
@@ -238,6 +243,9 @@ export interface AppWindow {
   audio_toggle: (id: string) => void;
   audio_seek: (id: string, frac: number) => void;
   audio_rate_label: string;
+  jump_id: string;
+  jump_report: (offset: number) => void;
+  conv_list_h: number;
   audio_cycle_rate: () => void;
   mini_audio: boolean;
   mini_audio_name: string;
@@ -349,6 +357,7 @@ export class Bridge implements WAListener {
   private refreshTimer: NodeJS.Timeout | null = null;
   private groupsFetched = false;
   private requestedAvatars = new Set<string>();
+  private selfJid = "";
   private avatarQueue: string[] = [];
   private avatarBusy = false;
 
@@ -469,9 +478,12 @@ export class Bridge implements WAListener {
     win.audio_cycle_rate = () => this.cycleAudioRate();
     win.mini_audio_toggle = () => void this.toggleAudio(this.audio?.id ?? "");
     win.mini_audio_open = () => {
-      const jid = this.audio?.jid;
-      if (jid) this.openDm(jid);
+      const a = this.audio;
+      if (!a) return;
+      this.openDm(a.jid);
+      this.jumpToMessage(a.id);
     };
+    win.jump_report = (offset) => this.onJumpReport(offset);
     win.mini_audio_close = () => this.stopAudio();
     win.request_pairing_code = (phone) => void this.handlePairing(phone);
   }
@@ -528,7 +540,11 @@ export class Bridge implements WAListener {
   onOpen() {
     this.win.status_text = t("status.connected");
     if (this.win.screen === "login") this.win.screen = "main";
-    this.store.setSelf(this.service.selfIds());
+    const ids = this.service.selfIds();
+    this.store.setSelf(ids);
+    // Our own picture rides along with the voice notes we sent.
+    this.selfJid = ids[0] ? jidNormalizedUser(ids[0]) : "";
+    if (this.selfJid) this.queueAvatar(this.selfJid);
     if (!this.groupsFetched) {
       this.groupsFetched = true;
       void this.fetchGroupNames();
@@ -1793,6 +1809,13 @@ export class Bridge implements WAListener {
     if (!avatar) return;
     for (let i = 0; i < this.messagesModel.length; i++) {
       const row = this.messagesModel.rowData(i);
+      if (row && row.voiceJid === jid && !row.voiceHasAvatar) {
+        this.messagesModel.setRowData(i, {
+          ...row,
+          voiceAvatar: avatar,
+          voiceHasAvatar: true,
+        });
+      }
       if (row && row.senderJid === jid && !row.senderHasAvatar) {
         this.messagesModel.setRowData(i, {
           ...row,
@@ -1964,6 +1987,95 @@ export class Bridge implements WAListener {
     }, 40);
   }
 
+  // Brings a message into view. The list only instantiates the rows
+  // around the viewport, so we guess a position from the average row
+  // height, let the row report where it landed, and correct from there.
+  private jump: { id: string; tries: number; timer: NodeJS.Timeout | null } | null =
+    null;
+
+  private jumpToMessage(id: string) {
+    this.cancelJump();
+    this.jump = { id, tries: 0, timer: null };
+    setTimeout(() => this.jumpStep(true), 160);
+  }
+
+  private cancelJump() {
+    if (this.jump?.timer) clearTimeout(this.jump.timer);
+    this.jump = null;
+    try {
+      this.win.jump_id = "";
+    } catch {
+      // window gone
+    }
+  }
+
+  private jumpStep(guess: boolean) {
+    const j = this.jump;
+    if (!j) return;
+    if (j.tries >= 6) {
+      this.cancelJump();
+      return;
+    }
+    j.tries++;
+    if (guess) {
+      const count = this.messagesModel.length;
+      let idx = -1;
+      for (let i = 0; i < count; i++) {
+        if (this.messagesModel.rowData(i)?.id === j.id) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx < 0) {
+        this.cancelJump();
+        return;
+      }
+      const total = this.win.conv_viewport_h;
+      const visible = this.win.conv_list_h;
+      const avg = count > 0 ? total / count : 0;
+      const top = Math.min(
+        Math.max(0, avg * idx - visible / 3),
+        Math.max(0, total - visible),
+      );
+      try {
+        this.win.set_conversation_scroll(-top);
+      } catch {
+        // layout not ready
+      }
+    }
+    // Re-arming the id re-creates the probe, which reports its position.
+    this.win.jump_id = "";
+    setTimeout(() => {
+      if (this.jump === j) this.win.jump_id = j.id;
+    }, 20);
+    j.timer = setTimeout(() => this.jumpStep(true), 220);
+  }
+
+  private onJumpReport(offset: number) {
+    const j = this.jump;
+    if (!j) return;
+    if (j.timer) clearTimeout(j.timer);
+    const target = Math.min(120, this.win.conv_list_h / 3);
+    const delta = target - offset;
+    if (Math.abs(delta) < 6) {
+      this.cancelJump();
+      return;
+    }
+    try {
+      this.win.set_conversation_scroll(this.win.conv_scroll + delta);
+    } catch {
+      // layout not ready
+    }
+    j.timer = setTimeout(() => this.jumpStep(false), 120);
+  }
+
+  private queueAvatar(jid: string) {
+    if (!jid || this.requestedAvatars.has(jid)) return;
+    this.requestedAvatars.add(jid);
+    this.avatarQueue.push(jid);
+    void this.drainAvatars();
+  }
+
   private scrollToEnd() {
     for (const delay of [0, 60, 220]) {
       setTimeout(() => {
@@ -2018,11 +2130,12 @@ export class Bridge implements WAListener {
     const senderJid = this.resolveLid(rawSender);
     const groupIndent = isGroup && !m.fromMe;
     const senderAvatar = senderJid ? this.media.avatarFor(senderJid) : null;
-    if (groupIndent && senderJid && !this.requestedAvatars.has(senderJid)) {
-      this.requestedAvatars.add(senderJid);
-      this.avatarQueue.push(senderJid);
-      void this.drainAvatars();
-    }
+    if (groupIndent && senderJid) this.queueAvatar(senderJid);
+    // Voice notes carry the speaker's picture on the right, ours included.
+    const voiceJid =
+      m.kind === "audio" ? (m.fromMe ? this.selfJid : senderJid || m.jid) : "";
+    const voiceAvatar = voiceJid ? this.media.avatarFor(voiceJid) : null;
+    if (voiceJid) this.queueAvatar(voiceJid);
     return {
       id: m.id,
       kind: m.deleted ? "text" : m.kind,
@@ -2053,6 +2166,13 @@ export class Bridge implements WAListener {
       senderHasAvatar: !!senderAvatar,
       senderInitial: initialOf(m.sender || "?"),
       senderColorIdx: colorIdxOf(senderJid || m.jid),
+      voiceJid,
+      voiceAvatar: voiceAvatar ?? EMPTY_IMAGE,
+      voiceHasAvatar: !!voiceAvatar,
+      voiceInitial: initialOf(
+        (m.fromMe ? this.store.chatName(this.selfJid) : m.sender) || "?",
+      ),
+      voiceColorIdx: colorIdxOf(voiceJid || m.jid),
       groupIndent,
       showAvatar: groupIndent && firstOfRun,
       // Unsaved senders show their number next to the push name.

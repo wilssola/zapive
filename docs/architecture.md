@@ -44,7 +44,8 @@ and reports clicks over stdout.
 | `src/i18n.ts` | TypeScript-side translations (en/pt) |
 | `src/env.ts` | Renderer selection (Skia) — must be imported before slint-ui |
 | `ui/app.slint` | Entire interface: theme globals, screens, overlays |
-| `i18n/*.po` | Slint (`@tr`) translation catalogs, compiled to `.mo` |
+| `i18n/*.po` | Slint (`@tr`) translation catalogs, applied at load time |
+| `src/slint-tr.ts` | Swaps `@tr("...")` literals for the catalog entry before `loadSource` |
 
 ## Data flow
 

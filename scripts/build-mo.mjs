@@ -13,7 +13,9 @@ function parsePo(src) {
   let msgstr = null;
   let mode = null;
   const flush = () => {
-    if (msgid !== null && msgstr !== null && msgid !== "") entries.set(msgid, msgstr);
+    // The empty msgid carries the catalog metadata (charset above all);
+    // without it gettext falls back to ASCII and drops the catalog.
+    if (msgid !== null && msgstr !== null) entries.set(msgid, msgstr);
     msgid = msgstr = mode = null;
   };
   for (const rawLine of src.split(/\r?\n/)) {
@@ -81,11 +83,21 @@ for (const file of readdirSync(I18N_DIR)) {
   if (!file.endsWith(".po")) continue;
   const locale = basename(file, ".po");
   const entries = parsePo(readFileSync(join(I18N_DIR, file), "utf8"));
+  if (!entries.has("")) {
+    entries.set(
+      "",
+      `Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+Language: ${locale}
+MIME-Version: 1.0
+`,
+    );
+  }
   const mo = buildMo(entries);
   for (const dir of [locale, locale.split("_")[0]]) {
     const out = join(I18N_DIR, dir, "LC_MESSAGES");
     mkdirSync(out, { recursive: true });
     writeFileSync(join(out, `${DOMAIN}.mo`), mo);
   }
-  console.log(`${file}: ${entries.size} strings -> ${locale}/LC_MESSAGES/${DOMAIN}.mo`);
+  console.log(`${file}: ${entries.size - 1} strings -> ${locale}/LC_MESSAGES/${DOMAIN}.mo`);
 }

@@ -83,6 +83,11 @@ export struct MessageItem {
     senderHasAvatar: bool,
     senderInitial: string,
     senderColorIdx: int,
+    voiceJid: string,
+    voiceAvatar: image,
+    voiceHasAvatar: bool,
+    voiceInitial: string,
+    voiceColorIdx: int,
     groupIndent: bool,
     showAvatar: bool,
     senderNumber: string,
@@ -319,6 +324,10 @@ export component AppWindow inherits Window {
     callback gif-send(string);
     in-out property <length> conv-scroll: 0;
     in-out property <length> conv-viewport-h: 0;
+    in-out property <length> conv-list-h: 0;
+    // Set to a message id to have that row report where it sits.
+    in-out property <string> jump-id;
+    callback jump-report(length);
     in-out property <bool> rec-active: false;
     in-out property <string> rec-elapsed: "0:00";
     in-out property <bool> rec-view-once: false;
@@ -1187,6 +1196,9 @@ export component AppWindow inherits Window {
                     changed viewport-height => {
                         root.conv-viewport-h = self.viewport-height;
                     }
+                    changed height => {
+                        root.conv-list-h = self.height;
+                    }
                     changed viewport-y => {
                         root.conv-scroll = self.viewport-y;
                         root.stick-bottom =
@@ -1197,6 +1209,15 @@ export component AppWindow inherits Window {
                     }
                     for msg in root.messages: msg-row := Rectangle {
                         property <length> max-text-w: max(120px, self.width * 0.65 - 44px);
+                        // Probe used to scroll straight to a given message.
+                        if root.jump-id == msg.id: Rectangle {
+                            width: 0px;
+                            height: 0px;
+                            init => {
+                                root.jump-report(msg-row.absolute-position.y
+                                    - msg-list.absolute-position.y);
+                            }
+                        }
                         property <length> day-offset: msg.dayLabel != "" ? 34px : 0;
                         height: bubble.height + (msg.firstOfRun ? 16px : 6px)
                             + (msg.reactions != "" ? 14px : 0) + self.day-offset;
@@ -1394,27 +1415,6 @@ export component AppWindow inherits Window {
                                 // portion clipped over it, click to seek.
                                 if msg.kind == "audio": HorizontalLayout {
                                     spacing: 8px;
-                                    VerticalLayout {
-                                        alignment: center;
-                                        Rectangle {
-                                            width: rate-label.preferred-width + 16px;
-                                            height: 22px;
-                                            border-radius: 11px;
-                                            background: rate-touch.has-hover
-                                                ? (msg.fromMe ? #00000030 : #00000020)
-                                                : (msg.fromMe ? #00000020 : #00000014);
-                                            rate-touch := TouchArea {
-                                                mouse-cursor: pointer;
-                                                clicked => { root.audio-cycle-rate(); }
-                                            }
-                                            rate-label := Text {
-                                                text: root.audio-rate-label;
-                                                color: Theme.text-dim;
-                                                font-size: 11px;
-                                                font-weight: 700;
-                                            }
-                                        }
-                                    }
                                     IconButton {
                                         icon: msg.playing
                                             ? @image-url("icons/player-pause.svg")
@@ -1476,6 +1476,48 @@ export component AppWindow inherits Window {
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 font-size: 11px;
                                                 horizontal-stretch: 1;
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 38px;
+                                            height: 38px;
+                                            if !msg.playing: Avatar {
+                                                width: 38px;
+                                                height: 38px;
+                                                src: msg.voiceAvatar;
+                                                has-image: msg.voiceHasAvatar;
+                                                initial: msg.voiceInitial;
+                                                color-idx: msg.voiceColorIdx;
+                                            }
+                                            if !msg.playing: Image {
+                                                source: @image-url("icons/microphone.svg");
+                                                colorize: #53bdeb;
+                                                width: 15px;
+                                                height: 15px;
+                                                x: parent.width - self.width;
+                                                y: parent.height - self.height;
+                                            }
+                                            if msg.playing: Rectangle {
+                                                width: rate-label.preferred-width + 16px;
+                                                height: 24px;
+                                                x: parent.width - self.width;
+                                                y: (parent.height - self.height) / 2;
+                                                border-radius: 12px;
+                                                background: rate-touch.has-hover
+                                                    ? #00000030 : #00000018;
+                                                rate-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.audio-cycle-rate(); }
+                                                }
+                                                rate-label := Text {
+                                                    text: root.audio-rate-label;
+                                                    color: Theme.text-dim;
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                }
                                             }
                                         }
                                     }
