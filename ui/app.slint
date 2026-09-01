@@ -265,6 +265,7 @@ export component AppWindow inherits Window {
     in-out property <bool> rec-active: false;
     in-out property <string> rec-elapsed: "0:00";
     in-out property <bool> rec-view-once: false;
+    callback jump-latest();
     callback rec-start();
     callback rec-stop();
     callback rec-cancel();
@@ -1182,7 +1183,9 @@ export component AppWindow inherits Window {
                 drop-shadow-color: #00000055;
                 jump-touch := TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { root.scroll-conversation-end(); }
+                    // Routed through the host so the jump is re-applied
+                    // while late-growing rows settle.
+                    clicked => { root.jump-latest(); }
                 }
                 Image {
                     source: @image-url("icons/chevron-right.svg");

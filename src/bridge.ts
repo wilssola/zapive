@@ -78,6 +78,7 @@ export interface AppWindow {
   rec_active: boolean;
   rec_elapsed: string;
   rec_view_once: boolean;
+  jump_latest: () => void;
   rec_start: () => void;
   rec_stop: () => void;
   rec_cancel: () => void;
@@ -234,6 +235,7 @@ export class Bridge implements WAListener {
     win.sticker_rows = this.stickerModel;
     win.gif_rows = this.gifModel;
     win.gif_send = (id) => void this.sendStickerById(id);
+    win.jump_latest = () => this.scrollToEnd();
     win.rec_start = () => void this.startRecording();
     win.rec_stop = () => void this.stopRecording();
     win.rec_cancel = () => this.cancelRecording();
@@ -1060,14 +1062,18 @@ export class Bridge implements WAListener {
     }
   }
 
+  // Bubbles keep growing after the first layout pass (images and wrapped
+  // text resolve late), so re-apply the jump until the viewport settles.
   private scrollToEnd() {
-    setTimeout(() => {
-      try {
-        this.win.scroll_conversation_end();
-      } catch {
-        // layout not ready yet — harmless
-      }
-    }, 60);
+    for (const delay of [0, 60, 200, 500, 900]) {
+      setTimeout(() => {
+        try {
+          this.win.scroll_conversation_end();
+        } catch {
+          // layout not ready yet — harmless
+        }
+      }, delay);
+    }
   }
 
   private toRow(m: StoredMessage, prev?: StoredMessage): MessageRow {

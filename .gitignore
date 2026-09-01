@@ -6,3 +6,4 @@ data_store.json
 zapive.db*
 auth_info.bak/
 data_store.json.bak
+.idea/
