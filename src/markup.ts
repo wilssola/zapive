@@ -80,6 +80,7 @@ export function toMarkdown(
     }
     last = m.index + m[0].length;
   }
-  out += escapeMd(text.slice(last));
+  // The tail is literal text as well: it still needs mentions and links.
+  out += plain(text.slice(last));
   return out;
 }

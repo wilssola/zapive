@@ -90,6 +90,8 @@ interface MessageRow {
   hasLink: boolean;
   linkThumb: SlintImageData;
   hasLinkThumb: boolean;
+  linkThumbW: number;
+  linkThumbH: number;
   wave: SlintImageData;
   hasWave: boolean;
   playing: boolean;
@@ -868,6 +870,27 @@ export class Bridge implements WAListener {
       }
       return true;
     });
+  }
+
+  // Maps a single @lid identity to its phone number using the mapping
+  // Baileys stores in the auth state.
+  private resolveLid(jid: string): string {
+    if (!jid.endsWith("@lid") || !this.db) return jid;
+    const alias = this.store.canon(jid);
+    if (alias !== jid) return alias;
+    const user = jid.split("@")[0];
+    const v = this.db.get(`auth:lid-mapping-${user}_reverse`);
+    if (!v) return jid;
+    let pnUser: unknown;
+    try {
+      pnUser = JSON.parse(v);
+    } catch {
+      pnUser = v;
+    }
+    if (typeof pnUser !== "string" || !pnUser) return jid;
+    const pn = `${pnUser}@s.whatsapp.net`;
+    this.store.learnAlias(jid, pn);
+    return pn;
   }
 
   // Resolves @lid chats to phone-number chats using the LID mappings
@@ -1882,11 +1905,12 @@ export class Bridge implements WAListener {
       m.timestamp - prev.timestamp > RUN_GAP;
     // Group messages from others are indented to leave room for the
     // sender's avatar, drawn once per run like WhatsApp does.
-    const senderJid =
+    const rawSender =
       m.senderJid ??
       (m.raw?.key?.participant
         ? this.store.canon(jidNormalizedUser(m.raw.key.participant))
         : "");
+    const senderJid = this.resolveLid(rawSender);
     const groupIndent = isGroup && !m.fromMe;
     const senderAvatar = senderJid ? this.media.avatarFor(senderJid) : null;
     if (groupIndent && senderJid && !this.requestedAvatars.has(senderJid)) {
@@ -1901,10 +1925,11 @@ export class Bridge implements WAListener {
       fromMe: m.fromMe,
       sender: m.sender,
       showSender: isGroup && !m.fromMe && firstOfRun,
+      // Saved contacts show their address-book name without the ~ mark.
       senderLabel:
-        isGroup && senderJid && !this.store.savedContacts.has(senderJid)
-          ? `~ ${m.sender}`
-          : m.sender,
+        isGroup && senderJid && !this.store.isSaved(senderJid)
+          ? `~ ${this.store.chatName(senderJid)}`
+          : this.store.chatName(senderJid || m.jid),
       firstOfRun,
       time: formatTime(m.timestamp),
       picture: EMPTY_IMAGE,
@@ -1927,7 +1952,7 @@ export class Bridge implements WAListener {
       showAvatar: groupIndent && firstOfRun,
       // Unsaved senders show their number next to the push name.
       senderNumber:
-        groupIndent && senderJid && !this.store.savedContacts.has(senderJid)
+        groupIndent && senderJid && !this.store.isSaved(senderJid)
           ? formatNumber(senderJid)
           : "",
       sticker: !!m.sticker,
@@ -1939,6 +1964,8 @@ export class Bridge implements WAListener {
       hasLink: !!(m.linkTitle || m.linkUrl),
       linkThumb: EMPTY_IMAGE,
       hasLinkThumb: false,
+      linkThumbW: 0,
+      linkThumbH: 0,
       wave: EMPTY_IMAGE,
       hasWave: false,
       playing: false,
@@ -1976,7 +2003,12 @@ export class Bridge implements WAListener {
       if (thumb?.length) {
         const img = await this.media.decodeRaw(Buffer.from(thumb));
         if (img && this.currentJid === jid) {
-          this.patchRow(stored.id, { linkThumb: img, hasLinkThumb: true });
+          this.patchRow(stored.id, {
+            linkThumb: img,
+            hasLinkThumb: true,
+            linkThumbW: img.displayW,
+            linkThumbH: img.displayH,
+          });
         }
       }
       return;

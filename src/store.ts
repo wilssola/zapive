@@ -135,6 +135,7 @@ export function displayId(jid: string): string {
 
 // +5538920006927 -> +55 38 92000-6927 (falls back to a plain +digits).
 export function formatNumber(jid: string): string {
+  if (jid.endsWith("@lid")) return ""; // LIDs are not phone numbers
   const digits = (jid.split("@")[0] ?? "").replace(/\D/g, "");
   if (!digits) return "";
   if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
@@ -155,7 +156,8 @@ export function formatDuration(seconds: number): string {
 export class Store {
   chats = new Map<string, ChatMeta>();
   messages = new Map<string, StoredMessage[]>();
-  contacts = new Map<string, string>();
+  contacts = new Map<string, string>(); // address-book names
+  pushNames = new Map<string, string>(); // names announced in messages
   aliases = new Map<string, string>(); // @lid jid -> phone-number jid
   starredIds = new Set<string>(); // stars can arrive before the message does
   savedContacts = new Set<string>(); // jids known from the address book
@@ -205,13 +207,18 @@ export class Store {
     this.deletedJids.add(from);
     const name = this.contacts.get(from);
     if (name && !this.contacts.has(into)) this.contacts.set(into, name);
+    const push = this.pushNames.get(from);
+    if (push && !this.pushNames.has(into)) this.pushNames.set(into, push);
+    if (this.savedContacts.delete(from)) this.savedContacts.add(into);
   }
 
   chatName(jid: string): string {
-    const meta = this.chats.get(jid);
-    if (meta?.name) return cleanText(meta.name);
     const contact = this.contacts.get(jid);
     if (contact) return cleanText(contact);
+    const meta = this.chats.get(jid);
+    if (meta?.name) return cleanText(meta.name);
+    const push = this.pushNames.get(jid);
+    if (push) return cleanText(push);
     const user = jid.split("@")[0] ?? jid;
     // Bare phone-number DMs read better in international format.
     if (jid.endsWith("@s.whatsapp.net") && /^\d{10,15}$/.test(user)) {
@@ -232,13 +239,21 @@ export class Store {
 
   upsertContact(c: Contact) {
     const jid = jidNormalizedUser(c.id);
-    const name = c.name ?? c.notify ?? c.verifiedName;
-    if (jid && name) {
-      this.contacts.set(jid, name);
-      // Only a real address-book entry counts as "saved"; push names are
-      // learned from messages and still deserve the number beside them.
-      if (c.name) this.savedContacts.add(jid);
+    if (!jid) return;
+    if (c.name || c.verifiedName) {
+      this.contacts.set(jid, (c.name ?? c.verifiedName)!);
+      this.savedContacts.add(jid);
+    } else if (c.notify) {
+      this.pushNames.set(jid, c.notify);
     }
+  }
+
+  // A jid counts as saved when the address book knows it, or when the
+  // phone gave its DM a name (which it only does for saved contacts).
+  isSaved(jid: string): boolean {
+    if (this.savedContacts.has(jid)) return true;
+    const chat = this.chats.get(jid);
+    return !!(chat?.name && jid.endsWith("@s.whatsapp.net"));
   }
 
   upsertChat(c: Chat) {
@@ -311,11 +326,15 @@ export class Store {
     }
 
     const senderJid = this.canon(participant ? jidNormalizedUser(participant) : jid);
-    if (!fromMe && msg.pushName) this.contacts.set(senderJid, msg.pushName);
+    if (!fromMe && msg.pushName) this.pushNames.set(senderJid, msg.pushName);
     const sender = cleanText(
       fromMe
         ? ""
-        : (this.contacts.get(senderJid) ?? msg.pushName ?? displayId(senderJid)),
+        : (this.contacts.get(senderJid) ??
+            this.chats.get(senderJid)?.name ??
+            this.pushNames.get(senderJid) ??
+            msg.pushName ??
+            displayId(senderJid)),
     );
 
     // Forwarded flag lives in the content's contextInfo.
@@ -451,7 +470,7 @@ export class Store {
       });
     }
     if (!stored.fromMe && stored.sender && msgIsDirect(stored.jid)) {
-      this.contacts.set(stored.jid, stored.sender);
+      this.pushNames.set(stored.jid, stored.sender);
     }
     return true;
   }
@@ -675,6 +694,8 @@ export class Store {
   saveTo(db: import("./db.ts").Db) {
     db.set("store:chats", JSON.stringify([...this.chats]));
     db.set("store:contacts", JSON.stringify([...this.contacts]));
+    db.set("store:pushnames", JSON.stringify([...this.pushNames]));
+    db.set("store:saved", JSON.stringify([...this.savedContacts]));
     db.set("store:aliases", JSON.stringify([...this.aliases]));
     for (const jid of this.deletedJids) {
       db.del(`store:msgs:${jid}`);
@@ -713,6 +734,10 @@ export class Store {
     if (chats) this.chats = new Map(JSON.parse(chats));
     const contacts = db.get("store:contacts");
     if (contacts) this.contacts = new Map(JSON.parse(contacts));
+    const pushNames = db.get("store:pushnames");
+    if (pushNames) this.pushNames = new Map(JSON.parse(pushNames));
+    const saved = db.get("store:saved");
+    if (saved) this.savedContacts = new Set(JSON.parse(saved));
     const aliases = db.get("store:aliases");
     if (aliases) this.aliases = new Map(JSON.parse(aliases));
     for (const key of db.keys("store:msgs:")) {
