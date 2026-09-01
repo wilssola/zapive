@@ -1527,9 +1527,11 @@ export component AppWindow inherits Window {
                                 // hand and the height is their exact sum, so
                                 // the card never grows past its content.
                                 if msg.hasLink: Rectangle {
-                                    property <length> card-w: min(msg-row.max-text-w, 300px);
+                                    // The card spans the bubble like WhatsApp
+                                    // does, instead of leaving a margin beside it.
+                                    property <length> card-w: msg-row.max-text-w;
                                     property <length> img-h: msg.hasLinkThumb
-                                        ? min(200px, card-w * msg.linkThumbH
+                                        ? min(300px, card-w * msg.linkThumbH
                                             / max(msg.linkThumbW, 1))
                                         : 0px;
                                     property <length> host-h: msg.linkHost != "" ? 24px : 0px;
