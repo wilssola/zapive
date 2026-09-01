@@ -209,3 +209,15 @@ msgstr "Ignorar"
 
 msgid "Favorites"
 msgstr "Favoritas"
+
+msgid "Search GIFs"
+msgstr "Buscar GIFs"
+
+msgid "GIF search"
+msgstr "Busca de GIFs"
+
+msgid "Giphy API key (optional)"
+msgstr "Chave da API do Giphy (opcional)"
+
+msgid "Save"
+msgstr "Salvar"

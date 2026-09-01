@@ -16,6 +16,7 @@ export interface StoredMessage {
   deleted?: boolean;
   gif?: boolean;
   starred?: boolean;
+  sticker?: boolean;
   timestamp: number;
   mimetype?: string;
   durationSec?: number;
@@ -332,6 +333,7 @@ export class Store {
         ...base,
         kind: "image",
         text: "",
+        sticker: true,
         mimetype: content.stickerMessage?.mimetype ?? "image/webp",
       };
     }

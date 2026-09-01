@@ -234,12 +234,104 @@ export class MediaService {
     }
   }
 
+  // Decodes a sticker into its frames (animated webp yields many); the
+  // caller cycles them to animate.
+  async stickerFrames(msgId: string, filePath: string): Promise<DecodedImage[]> {
+    const cached = this.stickerAnim.get(msgId);
+    if (cached) return cached;
+    const frames: DecodedImage[] = [];
+    try {
+      const buf = this.db.decryptBytes(await readFile(filePath));
+      const meta = await sharp(buf, { animated: true }).metadata();
+      const pages = Math.min(meta.pages ?? 1, 24);
+      for (let page = 0; page < pages; page++) {
+        const { data, info } = await sharp(buf, { page })
+          .resize(180, 180, { fit: "inside", withoutEnlargement: true })
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        frames.push({
+          width: info.width,
+          height: info.height,
+          data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+          displayW: info.width,
+          displayH: info.height,
+        });
+      }
+    } catch {
+      // fall through with whatever decoded
+    }
+    this.stickerAnim.set(msgId, frames);
+    return frames;
+  }
+
+  // ---- GIF search (Giphy) ----
+  // Baileys has no GIF API, so searching mirrors what WhatsApp does:
+  // query a GIF provider, then send the mp4 as a gif-playback video.
+
+  async giphy(apiKey: string, query: string): Promise<{ id: string; preview: string; mp4: string }[]> {
+    const base = query.trim()
+      ? `https://api.giphy.com/v1/gifs/search?q=${encodeURIComponent(query.trim())}`
+      : "https://api.giphy.com/v1/gifs/trending?";
+    const url = `${base}&api_key=${encodeURIComponent(apiKey)}&limit=24&rating=pg-13`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const body = (await res.json()) as {
+        data?: {
+          id?: string;
+          images?: {
+            fixed_width_small?: { url?: string };
+            fixed_width?: { mp4?: string; url?: string };
+            original?: { mp4?: string };
+          };
+        }[];
+      };
+      return (body.data ?? [])
+        .map((g) => ({
+          id: g.id ?? "",
+          preview: g.images?.fixed_width_small?.url ?? g.images?.fixed_width?.url ?? "",
+          mp4: g.images?.fixed_width?.mp4 ?? g.images?.original?.mp4 ?? "",
+        }))
+        .filter((g) => g.id && g.preview && g.mp4);
+    } catch {
+      return [];
+    }
+  }
+
+  // Fetches a remote image (GIF preview) and decodes its first frame.
+  async decodeUrl(url: string): Promise<DecodedImage | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      return await this.decodeRaw(Buffer.from(await res.arrayBuffer()));
+    } catch {
+      return null;
+    }
+  }
+
+  // Downloads an mp4 into the temp folder so it can be sent.
+  async downloadTemp(url: string, ext: string): Promise<string | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const dir = join(CACHE_DIR, ".tmp");
+      await mkdir(dir, { recursive: true });
+      const out = resolve(join(dir, `dl_${Date.now()}.${ext}`));
+      await writeFile(out, Buffer.from(await res.arrayBuffer()));
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
   // ---- Audio playback (ffplay) and waveforms ----
 
   private playProcs = new Set<ReturnType<typeof spawn>>();
   private playToken = 0;
   private plainAudio = new Map<string, string>();
   private waveCache = new Map<string, DecodedImage | null>();
+  private stickerAnim = new Map<string, DecodedImage[]>();
 
   // Decrypted copy kept around so play/seek doesn't decrypt every time.
   private async plainAudioPath(msgId: string, filePath: string): Promise<string> {

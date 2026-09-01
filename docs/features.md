@@ -44,10 +44,10 @@ Everything below is implemented and working against a live account.
 | Type | Receive | Send |
 |---|---|---|
 | Images | Inline thumbnail (≤330×380) + full-screen lightbox | Picker or Ctrl+V, with caption preview |
-| Video / GIF | Embedded thumbnail with play badge; opens externally | GIF tab in the picker |
+| Video / GIF | Embedded thumbnail with play badge; opens externally | GIF tab with Giphy search (optional API key) |
 | Audio / voice notes | **In-app player**: waveform, seek, elapsed time | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
 | Documents | Filename + open button | Attach menu, any file type |
-| Stickers | Rendered like images | Tabs for stickers you sent and starred ones; any image converted to 512 px webp |
+| Stickers | Animated, drawn without a bubble | Tabs for stickers you sent and starred ones; any image converted to 512 px webp |
 
 - Group messages show the sender avatar beside the first bubble of a run
 - **Attach menu** (`+`): Document, Photos, Audio, Sticker

@@ -76,6 +76,7 @@ interface MessageRow {
   senderColorIdx: number;
   groupIndent: boolean;
   showAvatar: boolean;
+  sticker: boolean;
   wave: SlintImageData;
   hasWave: boolean;
   playing: boolean;
@@ -108,6 +109,11 @@ export interface AppWindow {
   fav_rows: ArrayModel<StickerCell[]>;
   gif_rows: ArrayModel<StickerCell[]>;
   gif_send: (id: string) => void;
+  gif_search: (query: string) => void;
+  gif_hint: string;
+  gif_key_set: boolean;
+  giphy_key: string;
+  giphy_key_changed: (key: string) => void;
   conv_scroll: number;
   rec_active: boolean;
   rec_elapsed: string;
@@ -281,6 +287,7 @@ export class Bridge implements WAListener {
   private gifModel = new ArrayModel<StickerCell[]>([]);
   private favModel = new ArrayModel<StickerCell[]>([]);
   private stickerRawById = new Map<string, StoredMessage>();
+  private gifUrlById = new Map<string, string>();
   private scrollPos = new Map<string, number>();
   private infoMediaModel = new ArrayModel<StickerCell[]>([]);
   private callsModel = new ArrayModel<CallRow>([]);
@@ -304,7 +311,8 @@ export class Bridge implements WAListener {
     win.sticker_rows = this.stickerModel;
     win.gif_rows = this.gifModel;
     win.fav_rows = this.favModel;
-    win.gif_send = (id) => void this.sendStickerById(id);
+    win.gif_send = (id) => void this.sendGifById(id);
+    win.gif_search = (query) => void this.searchGifs(query);
     win.jump_latest = () => this.scrollToEnd();
     win.info_media = this.infoMediaModel;
     win.open_info = () => void this.openContactInfo();
@@ -815,7 +823,7 @@ export class Bridge implements WAListener {
 
   // Fills the sticker tab with recently received stickers (lazy decode).
   private async loadStickerPanel() {
-    void this.fillPanel(this.gifModel, this.store.recentGifs(24), true);
+    void this.searchGifs("");
     void this.fillPanel(this.favModel, this.store.starredStickers(32), false);
     const items = this.store.recentStickers(32);
     await this.fillPanel(this.stickerModel, items, false);
@@ -859,6 +867,62 @@ export class Bridge implements WAListener {
     }
   }
 
+  // GIF picker: Giphy results when a key is configured, otherwise the
+  // gif-playback clips already present in local history.
+  private async searchGifs(query: string) {
+    const key = this.db?.settingGet("giphy_key") ?? "";
+    this.win.gif_key_set = !!key;
+    if (!key) {
+      this.win.gif_hint = t("gif.needKey");
+      void this.fillPanel(this.gifModel, this.store.recentGifs(24), true);
+      return;
+    }
+    this.win.gif_hint = "";
+    const results = await this.media.giphy(key, query);
+    this.gifUrlById.clear();
+    const cells: StickerCell[] = [];
+    for (const g of results) {
+      this.gifUrlById.set(g.id, g.mp4);
+      cells.push({ id: g.id, pic: EMPTY_IMAGE, ready: false });
+    }
+    this.gifModel.splice(0, this.gifModel.length, ...chunk(cells, 4));
+    if (results.length === 0) this.win.gif_hint = t("gif.noResults");
+    for (const g of results) {
+      const img = await this.media.decodeUrl(g.preview);
+      if (!img) continue;
+      outer: for (let r = 0; r < this.gifModel.length; r++) {
+        const row = this.gifModel.rowData(r);
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          if (row[c]!.id === g.id) {
+            const copy = [...row];
+            copy[c] = { id: g.id, pic: img, ready: true };
+            this.gifModel.setRowData(r, copy);
+            break outer;
+          }
+        }
+      }
+    }
+  }
+
+  private async sendGifById(id: string) {
+    const jid = this.currentJid;
+    if (!jid) return;
+    const url = this.gifUrlById.get(id);
+    if (!url) {
+      // history GIF: forward the original message
+      await this.sendStickerById(id);
+      return;
+    }
+    const path = await this.media.downloadTemp(url, "mp4");
+    if (!path || this.currentJid !== jid) return;
+    try {
+      this.echoSent(await this.service.sendGif(jid, path), jid);
+    } catch (err) {
+      console.error("gif send failed:", err);
+    }
+  }
+
   private async sendStickerById(id: string) {
     const jid = this.currentJid;
     const m = this.stickerRawById.get(id);
@@ -868,6 +932,34 @@ export class Bridge implements WAListener {
     } catch (err) {
       console.error("sticker send failed:", err);
     }
+  }
+
+  // ---- Animated stickers ----
+  // Slint images are static buffers, so animation means swapping frames
+  // on a shared ticker while the conversation is open.
+
+  private animated = new Map<string, { frames: SlintImageData[]; idx: number }>();
+  private stickerTimer: NodeJS.Timeout | null = null;
+
+  private ensureStickerTicker() {
+    if (this.stickerTimer) return;
+    this.stickerTimer = setInterval(() => {
+      if (this.animated.size === 0) {
+        clearInterval(this.stickerTimer!);
+        this.stickerTimer = null;
+        return;
+      }
+      for (const [id, anim] of this.animated) {
+        anim.idx = (anim.idx + 1) % anim.frames.length;
+        this.patchRow(id, { picture: anim.frames[anim.idx]! });
+      }
+    }, 110);
+  }
+
+  private stopStickerAnimations() {
+    this.animated.clear();
+    if (this.stickerTimer) clearInterval(this.stickerTimer);
+    this.stickerTimer = null;
   }
 
   // ---- In-bubble audio player ----
@@ -1405,6 +1497,7 @@ export class Bridge implements WAListener {
 
   private openJid(jid: string) {
     this.stopAudio(); // never leave a voice note playing behind
+    this.stopStickerAnimations();
     if (this.currentJid && this.currentJid !== jid) {
       this.scrollPos.set(this.currentJid, this.win.conv_scroll);
     }
@@ -1507,6 +1600,7 @@ export class Bridge implements WAListener {
       senderColorIdx: colorIdxOf(senderJid || m.jid),
       groupIndent,
       showAvatar: groupIndent && firstOfRun,
+      sticker: !!m.sticker,
       wave: EMPTY_IMAGE,
       hasWave: false,
       playing: false,
@@ -1554,6 +1648,23 @@ export class Bridge implements WAListener {
       // audio, documents and videos just need the cached file to open
       this.patchRow(stored.id, { mediaPath: path, mediaReady: true });
       if (stored.kind === "audio") void this.loadWaveform(stored, path);
+      return;
+    }
+    if (stored.sticker) {
+      const frames = await this.media.stickerFrames(stored.id, path);
+      if (this.currentJid !== jid || frames.length === 0) return;
+      const first = frames[0]!;
+      this.patchRow(stored.id, {
+        picture: first,
+        picW: first.displayW,
+        picH: first.displayH,
+        mediaPath: path,
+        mediaReady: true,
+      });
+      if (frames.length > 1) {
+        this.animated.set(stored.id, { frames, idx: 0 });
+        this.ensureStickerTicker();
+      }
       return;
     }
     const img = await this.media.decodeImage(stored.id, path);

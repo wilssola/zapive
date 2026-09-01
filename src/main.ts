@@ -145,6 +145,12 @@ win.save_pin = (current, next) => {
   }
 };
 
+win.giphy_key = db.settingGet("giphy_key") ?? "";
+win.giphy_key_changed = (key: string) => {
+  db.settingSet("giphy_key", key.trim());
+  win.settings_status = key.trim() ? t("gif.keySaved") : t("gif.keyCleared");
+};
+
 win.logout = () => {
   win.settings_open = false;
   win.status_text = t("status.loggingOut");

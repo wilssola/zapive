@@ -84,6 +84,7 @@ export struct MessageItem {
     senderColorIdx: int,
     groupIndent: bool,
     showAvatar: bool,
+    sticker: bool,
     wave: image,
     hasWave: bool,
     playing: bool,
@@ -327,6 +328,11 @@ export component AppWindow inherits Window {
     callback emoji-pick(string);
     callback sticker-send(string);
     callback picker-opened();
+    callback gif-search(string);
+    in-out property <string> gif-hint: "";
+    in-out property <bool> gif-key-set: false;
+    in-out property <string> giphy-key: "";
+    callback giphy-key-changed(string);
     callback attach-sticker();
     callback send-message(string);
     callback attach-image();
@@ -1072,7 +1078,9 @@ export component AppWindow inherits Window {
                                 : (msg.groupIndent ? 48px : 30px);
                             width: content.preferred-width;
                             height: content.preferred-height;
-                            background: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
+                            background: msg.sticker
+                                ? transparent
+                                : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
                             border-radius: 7px;
                             content := VerticalLayout {
                                 padding: 6px;
@@ -1516,7 +1524,28 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.picker-tab == "gif": ListView {
+                    if root.picker-tab == "gif": VerticalLayout {
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            gif-input := LineEdit {
+                                placeholder-text: @tr("Search GIFs");
+                                enabled: root.gif-key-set;
+                                accepted => { root.gif-search(self.text); }
+                            }
+                            IconButton {
+                                icon: @image-url("icons/search.svg");
+                                enabled: root.gif-key-set;
+                                clicked => { root.gif-search(gif-input.text); }
+                            }
+                        }
+                        if root.gif-hint != "": Text {
+                            text: root.gif-hint;
+                            color: Theme.text-dim;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        ListView {
                         for row in root.gif-rows: Rectangle {
                             height: 92px;
                             HorizontalLayout {
@@ -1545,6 +1574,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
+                        }
                         }
                     }
                     if root.picker-tab == "fav": ListView {
@@ -2102,6 +2132,26 @@ export component AppWindow inherits Window {
                         label: @tr("System");
                         active: root.language-mode == "system";
                         clicked => { root.language-mode = "system"; root.language-changed("system"); }
+                    }
+                }
+                Text {
+                    text: @tr("GIF search");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    giphy-input := LineEdit {
+                        placeholder-text: @tr("Giphy API key (optional)");
+                        text: root.giphy-key;
+                    }
+                    Button {
+                        text: @tr("Save");
+                        clicked => {
+                            root.giphy-key = giphy-input.text;
+                            root.giphy-key-changed(giphy-input.text);
+                        }
                     }
                 }
                 Text {
