@@ -120,6 +120,7 @@ interface MessageRow {
   senderJid: string;
   forwarded: boolean;
   deleted: boolean;
+  starred: boolean;
 }
 
 // The generated AppWindow component; slint-ui has no generated typings, so
@@ -262,6 +263,16 @@ export interface AppWindow {
   reactions_title: string;
   reactions_open: boolean;
   show_reactions: (msgId: string) => void;
+  request_reply: (msgId: string) => void;
+  toggle_star: (msgId: string) => void;
+  delete_message: (msgId: string) => void;
+  react_to: (msgId: string, emoji: string) => void;
+  react_pick: (msgId: string) => void;
+  react_bar_id: string;
+  reply_open: boolean;
+  reply_name: string;
+  reply_text: string;
+  cancel_reply: () => void;
   mini_audio: boolean;
   mini_audio_name: string;
   mini_audio_avatar: SlintImageData;
@@ -373,6 +384,9 @@ export class Bridge implements WAListener {
   private groupsFetched = false;
   private requestedAvatars = new Set<string>();
   private reactionsModel = new ArrayModel<ReactionRow>([]);
+  // Message being replied to, and the one waiting for a picked reaction.
+  private replyTo: StoredMessage | null = null;
+  private reactPickFor: string | null = null;
   // Chats whose list currently starts mid-conversation (after a jump).
   private truncated = new Set<string>();
   private selfJid = "";
@@ -432,7 +446,16 @@ export class Bridge implements WAListener {
     win.rec_start = () => void this.startRecording();
     win.rec_stop = () => void this.stopRecording();
     win.rec_cancel = () => this.cancelRecording();
-    win.emoji_pick = (e) => win.append_composer(e);
+    win.emoji_pick = (e) => {
+      const target = this.reactPickFor;
+      if (target) {
+        this.reactPickFor = null;
+        win.picker_open = false;
+        void this.sendReaction(target, e);
+        return;
+      }
+      win.append_composer(e);
+    };
     win.picker_opened = () => void this.loadStickerPanel();
     win.picker_closed = () => this.stopPickerAnimations();
     win.sticker_send = (id) => void this.sendStickerById(id);
@@ -496,6 +519,16 @@ export class Bridge implements WAListener {
     win.audio_cycle_rate = () => this.cycleAudioRate();
     win.reaction_rows = this.reactionsModel;
     win.show_reactions = (msgId) => this.showReactions(msgId);
+    win.request_reply = (msgId) => this.startReply(msgId);
+    win.cancel_reply = () => this.clearReply();
+    win.toggle_star = (msgId) => void this.toggleStar(msgId);
+    win.delete_message = (msgId) => void this.deleteMessage(msgId);
+    win.react_to = (msgId, emoji) => void this.sendReaction(msgId, emoji);
+    win.react_pick = (msgId) => {
+      // The full picker doubles as the reaction picker.
+      this.reactPickFor = msgId;
+      this.win.picker_open = true;
+    };
     win.mini_audio_toggle = () => void this.toggleAudio(this.audio?.id ?? "");
     win.mini_audio_open = () => {
       const a = this.audio;
@@ -1963,6 +1996,7 @@ export class Bridge implements WAListener {
       }
       this.truncated.delete(this.currentJid);
     }
+    if (this.currentJid !== jid) this.clearReply();
     this.currentJid = jid;
     this.win.selected_jid = jid;
     this.win.stick_bottom = true;
@@ -2065,6 +2099,60 @@ export class Bridge implements WAListener {
       this.win.conv_ready = true;
       void this.loadMediaForChat(jid);
     }, 40);
+  }
+
+  private findMessage(id: string): StoredMessage | null {
+    const jid = this.currentJid;
+    if (!jid) return null;
+    return this.store.messagesFor(jid).find((m) => m.id === id) ?? null;
+  }
+
+  private startReply(msgId: string) {
+    const m = this.findMessage(msgId);
+    if (!m?.raw) return;
+    this.replyTo = m;
+    this.win.reply_open = true;
+    this.win.reply_name = m.fromMe ? t("reactions.you") : (m.sender || displayId(m.jid));
+    this.win.reply_text = previewBody(m);
+  }
+
+  private clearReply() {
+    this.replyTo = null;
+    this.win.reply_open = false;
+    this.win.reply_name = "";
+    this.win.reply_text = "";
+  }
+
+  private async toggleStar(msgId: string) {
+    const m = this.findMessage(msgId);
+    if (!m?.raw?.key) return;
+    const next = !m.starred;
+    if (await this.service.starMessage(m.raw.key, next)) {
+      m.starred = next;
+      this.patchRow(msgId, { starred: next });
+    }
+  }
+
+  private async deleteMessage(msgId: string) {
+    const m = this.findMessage(msgId);
+    if (!m?.raw?.key) return;
+    if (await this.service.deleteMessage(m.raw.key)) {
+      this.store.markDeleted(m.jid, msgId);
+      this.patchRow(msgId, { deleted: true, kind: "text", text: t("msg.deleted") });
+      this.scheduleRefreshChats();
+    }
+  }
+
+  private async sendReaction(msgId: string, emoji: string) {
+    const m = this.findMessage(msgId);
+    if (!m?.raw?.key) return;
+    // Reacting again with the same emoji removes it, like WhatsApp.
+    const mine = m.reactions?.["me"] ?? "";
+    const next = cleanText(mine) === cleanText(emoji) ? "" : emoji;
+    if (!(await this.service.react(m.raw.key, next))) return;
+    const updated = this.store.applyReaction(m.jid, msgId, "me", next);
+    if (updated) this.patchRow(msgId, { reactions: reactionSummary(updated) });
+    this.scheduleSave();
   }
 
   // Lists who reacted to a message, like WhatsApp's reaction sheet.
@@ -2234,6 +2322,7 @@ export class Bridge implements WAListener {
       posLabel: "",
       senderJid,
       forwarded: !!m.forwarded,
+      starred: !!m.starred,
       deleted: !!m.deleted,
     };
   }
@@ -2383,7 +2472,9 @@ export class Bridge implements WAListener {
     const jid = this.currentJid;
     if (!body || !jid) return;
     try {
-      const sent = await this.service.sendText(jid, body);
+      const quoted = this.replyTo?.raw ?? undefined;
+      this.clearReply();
+      const sent = await this.service.sendText(jid, body, quoted);
       this.echoSent(sent, jid);
     } catch (err) {
       console.error("sendText failed:", err);

@@ -79,6 +79,7 @@ export struct MessageItem {
     firstOfRun: bool,
     forwarded: bool,
     deleted: bool,
+    starred: bool,
     time: string,
     picture: image,
     picW: int,
@@ -387,6 +388,18 @@ export component AppWindow inherits Window {
     in-out property <string> reactions-title;
     in-out property <bool> reactions-open;
     callback show-reactions(string);
+    callback request-reply(string);
+    callback toggle-star(string);
+    callback delete-message(string);
+    callback react-to(string, string);
+    callback react-pick(string);
+    // Quick reaction bar: the message it belongs to, empty when hidden.
+    in-out property <string> react-bar-id;
+    // Reply being composed.
+    in-out property <bool> reply-open;
+    in-out property <string> reply-name;
+    in-out property <string> reply-text;
+    callback cancel-reply();
     in-out property <string> audio-rate-label: "1x";
     // Mini player shown while a voice note plays in another chat.
     in-out property <bool> mini-audio;
@@ -1223,6 +1236,11 @@ export component AppWindow inherits Window {
                         }
                     }
                     for msg in root.messages: msg-row := Rectangle {
+                        row-hover := TouchArea {
+                            mouse-cursor: default;
+                            // Purely a hover probe: clicks fall through.
+                            enabled: false;
+                        }
                         // A link card drives the bubble width, so the text
                         // wraps at the card instead of stretching past it on
                         // a wide window.
@@ -1617,12 +1635,24 @@ export component AppWindow inherits Window {
                                     height: styled-body.preferred-height;
                                     Menu {
                                         MenuItem {
+                                            title: @tr("Reply");
+                                            activated => { root.request-reply(msg.id); }
+                                        }
+                                        MenuItem {
                                             title: @tr("Copy");
                                             activated => { root.copy-text(msg.id); }
                                         }
                                         MenuItem {
                                             title: @tr("Forward");
                                             activated => { root.request-forward(msg.id); }
+                                        }
+                                        MenuItem {
+                                            title: msg.starred ? @tr("Unstar") : @tr("Star");
+                                            activated => { root.toggle-star(msg.id); }
+                                        }
+                                        MenuItem {
+                                            title: @tr("Delete");
+                                            activated => { root.delete-message(msg.id); }
                                         }
                                     }
                                     styled-body := StyledText {
@@ -1643,6 +1673,10 @@ export component AppWindow inherits Window {
                                         height: parent.height;
                                         Menu {
                                             MenuItem {
+                                                title: @tr("Reply");
+                                                activated => { root.request-reply(msg.id); }
+                                            }
+                                            MenuItem {
                                                 title: @tr("Copy");
                                                 activated => {
                                                     body-text.select-all();
@@ -1653,6 +1687,14 @@ export component AppWindow inherits Window {
                                             MenuItem {
                                                 title: @tr("Forward");
                                                 activated => { root.request-forward(msg.id); }
+                                            }
+                                            MenuItem {
+                                                title: msg.starred ? @tr("Unstar") : @tr("Star");
+                                                activated => { root.toggle-star(msg.id); }
+                                            }
+                                            MenuItem {
+                                                title: @tr("Delete");
+                                                activated => { root.delete-message(msg.id); }
                                             }
                                         }
                                         body-text := TextInput {
@@ -1710,6 +1752,88 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
+                        // Hover actions, mirroring WhatsApp: react, forward
+                        // and the message menu.
+                        if row-hover.has-hover || root.react-bar-id == msg.id: Rectangle {
+                            y: bubble.y + 4px;
+                            x: msg.fromMe
+                                ? max(0px, bubble.x - self.width - 6px)
+                                : bubble.x + bubble.width + 6px;
+                            width: 64px;
+                            height: 28px;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                IconButton {
+                                    icon: @image-url("icons/mood-smile.svg");
+                                    icon-size: 17px;
+                                    clicked => {
+                                        root.react-bar-id =
+                                            root.react-bar-id == msg.id ? "" : msg.id;
+                                    }
+                                }
+                                IconButton {
+                                    icon: @image-url("icons/corner-up-right.svg");
+                                    icon-size: 17px;
+                                    clicked => { root.request-forward(msg.id); }
+                                }
+                            }
+                        }
+
+                        // Quick reactions, the same set WhatsApp offers.
+                        if root.react-bar-id == msg.id: Rectangle {
+                            y: max(0px, bubble.y - 34px);
+                            x: msg.fromMe
+                                ? max(4px, bubble.x + bubble.width - self.width)
+                                : bubble.x;
+                            width: 214px;
+                            height: 38px;
+                            border-radius: 19px;
+                            background: Theme.panel;
+                            drop-shadow-blur: 8px;
+                            drop-shadow-color: #00000030;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 2px;
+                                for e in ["\u{1f44d}", "\u{2764}", "\u{1f602}",
+                                          "\u{1f62e}", "\u{1f622}", "\u{1f64f}"]:
+                                    Rectangle {
+                                        width: 30px;
+                                        emoji-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.react-to(msg.id, e);
+                                                root.react-bar-id = "";
+                                            }
+                                        }
+                                        Text {
+                                            text: e;
+                                            font-size: emoji-touch.has-hover ? 24px : 20px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            width: parent.width;
+                                            height: parent.height;
+                                        }
+                                    }
+                                Rectangle {
+                                    width: 26px;
+                                    plus-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.react-bar-id = "";
+                                            root.react-pick(msg.id);
+                                        }
+                                    }
+                                    Image {
+                                        source: @image-url("icons/plus.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 16px;
+                                        height: 16px;
+                                    }
+                                }
+                            }
+                        }
+
                         if msg.reactions != "": Rectangle {
                             y: bubble.y + bubble.height - 4px;
                             x: msg.fromMe
@@ -1739,6 +1863,54 @@ export component AppWindow inherits Window {
                 }
 
                 Rectangle { height: 10px; }
+
+                if root.reply-open: Rectangle {
+                    height: 58px;
+                    background: Theme.header;
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-top: 6px;
+                        spacing: 10px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: Theme.pill;
+                            border-radius: 6px;
+                            Rectangle {
+                                x: 0;
+                                width: 4px;
+                                height: parent.height;
+                                background: Theme.accent;
+                            }
+                            VerticalLayout {
+                                padding-left: 12px;
+                                padding-right: 8px;
+                                alignment: center;
+                                spacing: 2px;
+                                Text {
+                                    text: root.reply-name;
+                                    color: Theme.accent;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: root.reply-text;
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                icon: @image-url("icons/x.svg");
+                                clicked => { root.cancel-reply(); }
+                            }
+                        }
+                    }
+                }
 
                 Rectangle {
                     height: 62px;

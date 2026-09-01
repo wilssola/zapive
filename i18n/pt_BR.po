@@ -221,3 +221,15 @@ msgstr "Chave da API do Giphy (opcional)"
 
 msgid "Save"
 msgstr "Salvar"
+
+msgid "Reply"
+msgstr "Responder"
+
+msgid "Star"
+msgstr "Favoritar"
+
+msgid "Unstar"
+msgstr "Desfavoritar"
+
+msgid "Delete"
+msgstr "Apagar"

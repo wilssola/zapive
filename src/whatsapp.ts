@@ -255,8 +255,53 @@ export class WhatsAppService {
     return result ?? null;
   }
 
-  sendText(jid: string, text: string): Promise<WAMessage | null> {
-    return this.send(jid, { text });
+  async sendText(
+    jid: string,
+    text: string,
+    quoted?: WAMessage,
+  ): Promise<WAMessage | null> {
+    if (!this.sock) throw new Error(t("error.notConnected"));
+    const sent = await this.sock.sendMessage(jid, { text }, quoted ? { quoted } : undefined);
+    return sent ?? null;
+  }
+
+  // Reacting is a message of its own, keyed to the target; an empty text
+  // removes our reaction.
+  async react(key: WAMessage["key"], emoji: string): Promise<boolean> {
+    if (!this.sock || !key.remoteJid) return false;
+    try {
+      await this.sock.sendMessage(key.remoteJid, { react: { text: emoji, key } });
+      return true;
+    } catch (err) {
+      console.error("[react] failed:", err);
+      return false;
+    }
+  }
+
+  // Revokes a message for everyone (only ours, and within WhatsApp's window).
+  async deleteMessage(key: WAMessage["key"]): Promise<boolean> {
+    if (!this.sock || !key.remoteJid) return false;
+    try {
+      await this.sock.sendMessage(key.remoteJid, { delete: key });
+      return true;
+    } catch (err) {
+      console.error("[delete] failed:", err);
+      return false;
+    }
+  }
+
+  async starMessage(key: WAMessage["key"], starred: boolean): Promise<boolean> {
+    if (!this.sock || !key.remoteJid) return false;
+    try {
+      await this.sock.chatModify(
+        { star: { messages: [{ id: key.id!, fromMe: !!key.fromMe }], star: starred } },
+        key.remoteJid,
+      );
+      return true;
+    } catch (err) {
+      console.error("[star] failed:", err);
+      return false;
+    }
   }
 
   sendImage(jid: string, filePath: string, caption?: string): Promise<WAMessage | null> {
