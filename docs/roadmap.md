@@ -43,7 +43,7 @@ sending does not.
 | Flag emoji render as letters (🇧🇷 → BR) | Slint font fallback lacks regional indicator sequences |
 | Video playback is frame-streamed, not hardware-decoded | Slint has no video item; ffmpeg feeds frames and ffplay the audio |
 | History only goes back as far as the phone serves | WhatsApp on-demand sync returns ~50 messages per request |
-| GIF search catalogue is limited without a key | The keyless provider (Openverse) indexes openly licensed media, not meme GIFs; Giphy needs a free key |
+| GIF catalogue is limited | Openverse indexes openly licensed media, not meme GIFs; Giphy and Tenor both refuse anonymous access |
 | No sticker store, packs or emoji-category tabs | Baileys exposes no sticker-pack API; only sent and starred stickers are available |
 | Calls cannot be answered from the desktop | Baileys detects and declines calls only; Zapive notifies and lists them |
 | Windows only | DPAPI, NotifyIcon, WinForms dialogs and DirectShow |

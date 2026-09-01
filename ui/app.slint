@@ -336,9 +336,6 @@ export component AppWindow inherits Window {
     callback gif-search(string);
     in-out property <string> gif-hint: "";
     in-out property <string> fav-hint: "";
-    in-out property <bool> gif-key-set: false;
-    in-out property <string> giphy-key: "";
-    callback giphy-key-changed(string);
     callback attach-sticker();
     callback send-message(string);
     callback attach-image();
@@ -1594,12 +1591,10 @@ export component AppWindow inherits Window {
                             spacing: 6px;
                             gif-input := LineEdit {
                                 placeholder-text: @tr("Search GIFs");
-                                enabled: root.gif-key-set;
                                 accepted => { root.gif-search(self.text); }
                             }
                             IconButton {
                                 icon: @image-url("icons/search.svg");
-                                enabled: root.gif-key-set;
                                 clicked => { root.gif-search(gif-input.text); }
                             }
                         }
@@ -2202,26 +2197,6 @@ export component AppWindow inherits Window {
                         label: @tr("System");
                         active: root.language-mode == "system";
                         clicked => { root.language-mode = "system"; root.language-changed("system"); }
-                    }
-                }
-                Text {
-                    text: @tr("GIF search");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    giphy-input := LineEdit {
-                        placeholder-text: @tr("Giphy API key (optional)");
-                        text: root.giphy-key;
-                    }
-                    Button {
-                        text: @tr("Save");
-                        clicked => {
-                            root.giphy-key = giphy-input.text;
-                            root.giphy-key-changed(giphy-input.text);
-                        }
                     }
                 }
                 Text {

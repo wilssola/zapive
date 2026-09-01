@@ -344,6 +344,7 @@ export class MediaService {
   // paints, while ffplay renders the audio track in lockstep.
 
   private videoProcs: ReturnType<typeof spawn>[] = [];
+  private videoToken = 0;
 
   private async probeSize(src: string): Promise<{ w: number; h: number }> {
     const ffprobe = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffprobe.exe");
@@ -370,8 +371,10 @@ export class MediaService {
   ): Promise<{ width: number; height: number } | null> {
     this.stopVideo();
     try {
+      const token = this.videoToken;
       const src = await this.plainAudioPath(msgId, filePath);
       const { w, h } = await this.probeSize(src);
+      if (token !== this.videoToken) return null;
       const targetW = Math.min(560, w % 2 === 0 ? w : w - 1);
       const targetH = Math.max(2, Math.round((h * targetW) / w / 2) * 2);
       const frameBytes = targetW * targetH * 4;
@@ -395,7 +398,12 @@ export class MediaService {
       }
 
       let pending: Buffer = Buffer.alloc(0);
+      video.once("spawn", () => {
+        // A stop that arrived before the process existed would be lost.
+        if (token !== this.videoToken) this.killProc(video);
+      });
       video.stdout?.on("data", (chunk: Buffer) => {
+        if (token !== this.videoToken) return; // superseded by a newer clip
         pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk]);
         while (pending.length >= frameBytes) {
           const frame = pending.subarray(0, frameBytes);
@@ -422,56 +430,31 @@ export class MediaService {
   }
 
   stopVideo(): void {
+    this.videoToken++;
     const procs = this.videoProcs;
     this.videoProcs = [];
     for (const proc of procs) {
-      try {
-        proc.kill();
-        if (proc.pid) {
-          spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
-        }
-      } catch {
-        // already gone
-      }
+      this.killProc(proc);
+      proc.once("spawn", () => this.killProc(proc));
     }
   }
 
-  // ---- GIF search (Giphy) ----
-  // Baileys has no GIF API, so searching mirrors what WhatsApp does:
-  // query a GIF provider, then send the mp4 as a gif-playback video.
-
-  async giphy(apiKey: string, query: string): Promise<{ id: string; preview: string; mp4: string }[]> {
-    const base = query.trim()
-      ? `https://api.giphy.com/v1/gifs/search?q=${encodeURIComponent(query.trim())}`
-      : "https://api.giphy.com/v1/gifs/trending?";
-    const url = `${base}&api_key=${encodeURIComponent(apiKey)}&limit=24&rating=pg-13`;
+  private killProc(proc: ReturnType<typeof spawn>) {
     try {
-      const res = await fetch(url);
-      if (!res.ok) return [];
-      const body = (await res.json()) as {
-        data?: {
-          id?: string;
-          images?: {
-            fixed_width_small?: { url?: string };
-            fixed_width?: { mp4?: string; url?: string };
-            original?: { mp4?: string };
-          };
-        }[];
-      };
-      return (body.data ?? [])
-        .map((g) => ({
-          id: g.id ?? "",
-          preview: g.images?.fixed_width_small?.url ?? g.images?.fixed_width?.url ?? "",
-          mp4: g.images?.fixed_width?.mp4 ?? g.images?.original?.mp4 ?? "",
-        }))
-        .filter((g) => g.id && g.preview && g.mp4);
+      proc.kill();
+      if (proc.pid) {
+        spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
+      }
     } catch {
-      return [];
+      // already gone
     }
   }
 
-  // Keyless provider: Openverse indexes openly licensed media and needs
-  // no credentials. Results are .gif files, converted to mp4 on send.
+  // ---- GIF search ----
+
+  // Openverse indexes openly licensed media and needs no credentials.
+  // Its thumbnail proxy is unreliable (424s), so previews decode the
+  // first frame of the GIF itself; sending converts it to mp4.
   async openverse(query: string): Promise<{ id: string; preview: string; gif: string }[]> {
     const q = query.trim() || "funny";
     const url =
@@ -486,7 +469,7 @@ export class MediaService {
       return (body.results ?? [])
         .map((r) => ({
           id: r.id ?? "",
-          preview: r.thumbnail || r.url || "",
+          preview: r.url ?? "",
           gif: r.url ?? "",
         }))
         .filter((r) => r.id && r.gif);
@@ -516,7 +499,7 @@ export class MediaService {
   // Fetches a remote image (GIF preview) and decodes its first frame.
   async decodeUrl(url: string): Promise<DecodedImage | null> {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: { "User-Agent": "Zapive" } });
       if (!res.ok) return null;
       return await this.decodeRaw(Buffer.from(await res.arrayBuffer()));
     } catch {
@@ -527,7 +510,7 @@ export class MediaService {
   // Downloads an mp4 into the temp folder so it can be sent.
   async downloadTemp(url: string, ext: string): Promise<string | null> {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: { "User-Agent": "Zapive" } });
       if (!res.ok) return null;
       const dir = join(CACHE_DIR, ".tmp");
       await mkdir(dir, { recursive: true });

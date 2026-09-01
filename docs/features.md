@@ -44,7 +44,7 @@ Everything below is implemented and working against a live account.
 | Type | Receive | Send |
 |---|---|---|
 | Images | Inline thumbnail (≤330×380) + full-screen lightbox | Picker or Ctrl+V, with caption preview |
-| Video / GIF | GIFs loop in the bubble; videos play in an in-app overlay | GIF tab with keyless search (Openverse), Giphy optional via API key |
+| Video / GIF | GIFs loop in the bubble; videos play in an in-app overlay | GIF tab with keyless search (Openverse) |
 | Audio / voice notes | **In-app player**: waveform, seek, elapsed time | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
 | Documents | Filename + open button | Attach menu, any file type |
 | Stickers | Animated, drawn without a bubble | Tabs for stickers you sent and starred ones; any image converted to 512 px webp |

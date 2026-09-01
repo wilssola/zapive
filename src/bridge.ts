@@ -113,9 +113,6 @@ export interface AppWindow {
   gif_search: (query: string) => void;
   gif_hint: string;
   fav_hint: string;
-  gif_key_set: boolean;
-  giphy_key: string;
-  giphy_key_changed: (key: string) => void;
   conv_scroll: number;
   rec_active: boolean;
   rec_elapsed: string;
@@ -908,20 +905,14 @@ export class Bridge implements WAListener {
     }
   }
 
-  // GIF picker: Giphy results when a key is configured, otherwise the
-  // gif-playback clips already present in local history.
+  // GIF picker: keyless search through Openverse.
   private async searchGifs(query: string) {
-    const key = this.db?.settingGet("giphy_key") ?? "";
-    this.win.gif_key_set = true; // search always available (keyless default)
-    this.win.gif_hint = key ? "" : t("gif.keyless");
-    // Giphy when a key is configured, otherwise the keyless provider.
-    const results = key
-      ? await this.media.giphy(key, query)
-      : (await this.media.openverse(query)).map((r) => ({
-          id: r.id,
-          preview: r.preview,
-          mp4: r.gif,
-        }));
+    this.win.gif_hint = "";
+    const results = (await this.media.openverse(query)).map((r) => ({
+      id: r.id,
+      preview: r.preview,
+      mp4: r.gif,
+    }));
     this.gifUrlById.clear();
     const cells: StickerCell[] = [];
     for (const g of results) {
