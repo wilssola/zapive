@@ -43,20 +43,27 @@ function sh(cmd, args, opts = {}) {
 
 // ---- 1. Clean ----
 step("cleaning dist/");
+// The contents go, not the directory itself: a file manager or an editor
+// holding dist/ open would otherwise block the whole build.
+function clearDir(dir) {
+  if (!existsSync(dir)) return;
+  for (const entry of readdirSync(dir)) {
+    rmSync(join(dir, entry), {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  }
+}
 try {
-  // Windows keeps a running executable locked, so retry briefly and then
-  // say what is holding it instead of dumping an EPERM stack.
-  rmSync(join(ROOT, "dist"), {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 200,
-  });
+  clearDir(OUT);
+  clearDir(WORK);
 } catch (err) {
   if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "ENOTEMPTY") {
     console.error(
-      "\n   dist/ is locked, which means a packaged Zapive is still running.\n" +
-        "   Close it (window and tray icon) and run the build again.",
+      "\n   A packaged Zapive is still running and holds its own file open." +
+        "\n   Close it (window and tray icon) and run the build again.",
     );
     process.exit(1);
   }

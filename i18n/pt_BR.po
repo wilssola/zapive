@@ -236,3 +236,6 @@ msgstr "Apagar"
 
 msgid "Search name or number"
 msgstr "Pesquisar nome ou número"
+
+msgid "Close"
+msgstr "Fechar"

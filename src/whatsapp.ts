@@ -18,6 +18,9 @@ export interface WAListener {
   onQr(qr: string): void;
   onStatus(text: string): void;
   onOpen(): void;
+  // A failure the user has to know about: the session was taken over, or
+  // reconnecting kept failing.
+  onFatal(kind: "conflict" | "offline"): void;
   onLoggedOut(): void;
   onHistorySet(payload: unknown): void;
   onChatsUpsert(chats: unknown[]): void;
@@ -56,6 +59,7 @@ export class WhatsAppService {
   private stopped = false;
   private _connected = false;
   private retryDelay = 2000;
+  private failures = 0;
 
   get connected(): boolean {
     return this._connected;
@@ -92,6 +96,14 @@ export class WhatsAppService {
     if (!user?.id) return [];
     const lid = (user as { lid?: string }).lid;
     return lid ? [user.id, lid] : [user.id];
+  }
+
+  // Resumes after a fatal stop, from the alert's button.
+  async resume(): Promise<void> {
+    this.stopped = false;
+    this.failures = 0;
+    this.retryDelay = 2000;
+    await this.start();
   }
 
   private async requestAppStateKeys() {
@@ -162,6 +174,7 @@ export class WhatsAppService {
       if (connection === "open") {
         this._connected = true;
         this.retryDelay = 2000;
+        this.failures = 0;
         this.listener.onOpen();
       }
       if (connection === "close") {
@@ -172,10 +185,21 @@ export class WhatsAppService {
         if (statusCode === DisconnectReason.loggedOut) {
           this.listener.onStatus(t("status.sessionEnded"));
           void this.resetAuthAndRestart();
+        } else if (statusCode === DisconnectReason.connectionReplaced) {
+          // WhatsApp keeps one desktop session per account: reconnecting
+          // here would only fight the other one, so we stop and ask.
+          this.stopped = true;
+          this.listener.onFatal("conflict");
         } else if (!this.stopped) {
-          this.listener.onStatus(t("status.reconnecting"));
-          setTimeout(() => void this.start(), this.retryDelay);
-          this.retryDelay = Math.min(this.retryDelay * 2, 60_000);
+          this.failures++;
+          if (this.failures >= 5) {
+            this.stopped = true;
+            this.listener.onFatal("offline");
+          } else {
+            this.listener.onStatus(t("status.reconnecting"));
+            setTimeout(() => void this.start(), this.retryDelay);
+            this.retryDelay = Math.min(this.retryDelay * 2, 60_000);
+          }
         }
       }
     });

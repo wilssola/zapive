@@ -115,6 +115,15 @@ makes sure you never miss one instead:
   uses its own dictionary
 - **Tabler icons** throughout, colorized per theme
 
+## Reliability
+
+- **One instance per account** — a second launch raises the running window
+  instead of starting a rival session (WhatsApp drops both when two
+  desktop sessions share an account)
+- **Blocking errors get a modal**, not a silent retry loop: the session
+  being taken over elsewhere ("Use here") and repeated connection
+  failures ("Try again")
+
 ## Security
 
 - All local data encrypted at rest (see [security.md](security.md))

@@ -15,12 +15,20 @@ import { setLocale, t } from "./i18n.ts";
 import type { Locale } from "./i18n.ts";
 import { ensureDirs, migrateFromCwd } from "./paths.ts";
 import { runtimeRoot } from "./resources.ts";
+import { claimSingleInstance } from "./single.ts";
 import { startTray, systemDark as readSystemDark } from "./platform.ts";
 
 // The vault and the cache live in the user's own directories; older
 // builds kept them next to the executable.
 migrateFromCwd(); // before the new directories exist, or nothing moves
 ensureDirs();
+
+// A second copy would fight the first for the WhatsApp session, so it
+// raises the running window and leaves.
+if (!claimSingleInstance()) {
+  console.log("[boot] another Zapive is already running");
+  process.exit(0);
+}
 
 const db = new Db();
 

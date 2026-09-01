@@ -263,6 +263,12 @@ export interface AppWindow {
   remove_pin: (current: string) => void;
   logout: () => void;
   request_pairing_code: (phone: string) => void;
+  alert_open: boolean;
+  alert_title: string;
+  alert_text: string;
+  alert_action: string;
+  alert_retry: () => void;
+  alert_dismiss: () => void;
   open_chat: (jid: string) => void;
   send_message: (text: string) => void;
   attach_image: () => void;
@@ -567,6 +573,14 @@ export class Bridge implements WAListener {
     };
     win.mini_audio_close = () => this.stopAudio();
     win.request_pairing_code = (phone) => void this.handlePairing(phone);
+    win.alert_retry = () => {
+      win.alert_open = false;
+      win.status_text = t("status.connecting");
+      void this.service.resume();
+    };
+    win.alert_dismiss = () => {
+      win.alert_open = false;
+    };
   }
 
   setService(service: WhatsAppService) {
@@ -619,7 +633,17 @@ export class Bridge implements WAListener {
     this.win.status_text = text;
   }
 
+  // Errors the user must act on get a modal instead of a silent retry
+  // loop in the status line.
+  onFatal(kind: "conflict" | "offline") {
+    this.win.alert_title = t(kind === "conflict" ? "alert.conflictTitle" : "alert.offlineTitle");
+    this.win.alert_text = t(kind === "conflict" ? "alert.conflictBody" : "alert.offlineBody");
+    this.win.alert_action = t(kind === "conflict" ? "alert.reconnect" : "alert.retry");
+    this.win.alert_open = true;
+  }
+
   onOpen() {
+    this.win.alert_open = false;
     this.win.status_text = t("status.connected");
     if (this.win.screen === "login") this.win.screen = "main";
     const ids = this.service.selfIds();

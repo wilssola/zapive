@@ -279,6 +279,13 @@ export component AppWindow inherits Window {
     in-out property <bool> pairing-mode: false;
     in-out property <string> pairing-code: "";
     callback request-pairing-code(string);
+    // Blocking error the user has to answer (session taken over, offline).
+    in-out property <bool> alert-open;
+    in-out property <string> alert-title;
+    in-out property <string> alert-text;
+    in-out property <string> alert-action;
+    callback alert-retry();
+    callback alert-dismiss();
 
     // Chats
     in-out property <[ChatItem]> chats;
@@ -2646,6 +2653,82 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Forward picker ----------
+    if root.alert-open: Rectangle {
+        background: #000000aa;
+        TouchArea { }
+        Rectangle {
+            width: 380px;
+            height: alert-col.preferred-height + 44px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            alert-col := VerticalLayout {
+                padding: 22px;
+                spacing: 12px;
+                width: parent.width;
+                Text {
+                    text: root.alert-title;
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                    width: parent.width - 44px;
+                }
+                Text {
+                    text: root.alert-text;
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    width: parent.width - 44px;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    Rectangle {
+                        width: dismiss-text.preferred-width + 28px;
+                        height: 36px;
+                        border-radius: 18px;
+                        background: dismiss-touch.has-hover ? Theme.hover : transparent;
+                        dismiss-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.alert-dismiss(); }
+                        }
+                        dismiss-text := Text {
+                            text: @tr("Close");
+                            color: Theme.text-dim;
+                            font-size: 14px;
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        width: retry-text.preferred-width + 32px;
+                        height: 36px;
+                        border-radius: 18px;
+                        background: retry-touch.has-hover ? Theme.accent.darker(0.15) : Theme.accent;
+                        retry-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.alert-retry(); }
+                        }
+                        retry-text := Text {
+                            text: root.alert-action;
+                            color: white;
+                            font-size: 14px;
+                            font-weight: 700;
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if root.reactions-open: Rectangle {
         background: #00000066;
         TouchArea { clicked => { root.reactions-open = false; } }
