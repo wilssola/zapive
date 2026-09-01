@@ -5,6 +5,7 @@ import {
   Store,
   formatTime,
   formatDay,
+  formatDuration,
   reactionSummary,
   ticksFor,
   displayId,
@@ -69,6 +70,17 @@ interface MessageRow {
   dayLabel: string;
   ticks: string;
   ticksBlue: boolean;
+  senderAvatar: SlintImageData;
+  senderHasAvatar: boolean;
+  senderInitial: string;
+  senderColorIdx: number;
+  groupIndent: boolean;
+  showAvatar: boolean;
+  wave: SlintImageData;
+  hasWave: boolean;
+  playing: boolean;
+  progress: number;
+  posLabel: string;
   senderJid: string;
   forwarded: boolean;
   deleted: boolean;
@@ -191,6 +203,8 @@ export interface AppWindow {
   attach_image: () => void;
   attach_audio: () => void;
   play_audio: (path: string) => void;
+  audio_toggle: (id: string) => void;
+  audio_seek: (id: string, frac: number) => void;
   scroll_conversation_end: () => void;
   scroll_conversation_top: () => void;
   show(): void;
@@ -342,6 +356,8 @@ export class Bridge implements WAListener {
       win.preview_open = false;
     };
     win.play_audio = (path) => this.media.play(path);
+    win.audio_toggle = (id) => void this.toggleAudio(id);
+    win.audio_seek = (id, frac) => void this.seekAudio(id, frac);
     win.request_pairing_code = (phone) => void this.handlePairing(phone);
   }
 
@@ -837,6 +853,80 @@ export class Bridge implements WAListener {
     }
   }
 
+  // ---- In-bubble audio player ----
+
+  private audio: {
+    id: string;
+    path: string;
+    duration: number;
+    pos: number;
+    timer: NodeJS.Timeout;
+  } | null = null;
+
+  private async toggleAudio(id: string) {
+    if (this.audio?.id === id) {
+      this.stopAudio();
+      return;
+    }
+    await this.startAudio(id, 0);
+  }
+
+  private async seekAudio(id: string, frac: number) {
+    const clamped = Math.max(0, Math.min(1, frac));
+    await this.startAudio(id, clamped);
+  }
+
+  private async startAudio(id: string, frac: number) {
+    const jid = this.currentJid;
+    const stored = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
+    if (!stored?.raw) return;
+    const path = await this.media.ensureCached(id, stored.raw);
+    if (!path) return;
+    this.stopAudio();
+
+    const duration = stored.durationSec && stored.durationSec > 0 ? stored.durationSec : 0;
+    const pos = duration > 0 ? duration * frac : 0;
+    if (!(await this.media.playAudio(id, path, pos))) return;
+
+    const timer = setInterval(() => {
+      const a = this.audio;
+      if (!a) return;
+      a.pos += 0.25;
+      if (a.duration > 0 && a.pos >= a.duration) {
+        this.stopAudio();
+        return;
+      }
+      this.patchAudioRow(a);
+    }, 250);
+    this.audio = { id, path, duration, pos, timer };
+    this.patchAudioRow(this.audio);
+  }
+
+  private stopAudio() {
+    const a = this.audio;
+    this.audio = null;
+    this.media.stopAudio();
+    if (!a) return;
+    clearInterval(a.timer);
+    this.patchRow(a.id, { playing: false, progress: 0, posLabel: "" });
+  }
+
+  private patchAudioRow(a: { id: string; duration: number; pos: number }) {
+    this.patchRow(a.id, {
+      playing: true,
+      progress: a.duration > 0 ? Math.min(1, a.pos / a.duration) : 0,
+      posLabel: formatDuration(a.pos),
+    });
+  }
+
+  // Lazily renders the waveform for a voice message.
+  private async loadWaveform(stored: StoredMessage, path: string) {
+    const img = await this.media.waveform(stored.id, path);
+    if (img && this.currentJid === stored.jid) {
+      this.patchRow(stored.id, { wave: img, hasWave: true });
+    }
+  }
+
   // ---- Calls ----
 
   // Baileys reports call state but cannot answer; Zapive shows who is
@@ -1206,6 +1296,7 @@ export class Bridge implements WAListener {
         const img = await this.media.fetchAvatar(jid);
         if (img) {
           this.patchChatRowByJid(jid);
+          this.patchSenderAvatar(jid);
         } else if (!this.media.avatarResolved(jid)) {
           // transient failure — retry a few times, at the back of the queue
           const tries = (this.avatarTries.get(jid) ?? 0) + 1;
@@ -1216,6 +1307,22 @@ export class Bridge implements WAListener {
       }
     } finally {
       this.avatarBusy = false;
+    }
+  }
+
+  // Redraws message rows whose sender avatar just finished downloading.
+  private patchSenderAvatar(jid: string) {
+    const avatar = this.media.avatarFor(jid);
+    if (!avatar) return;
+    for (let i = 0; i < this.messagesModel.length; i++) {
+      const row = this.messagesModel.rowData(i);
+      if (row && row.senderJid === jid && !row.senderHasAvatar) {
+        this.messagesModel.setRowData(i, {
+          ...row,
+          senderAvatar: avatar,
+          senderHasAvatar: true,
+        });
+      }
     }
   }
 
@@ -1342,6 +1449,20 @@ export class Bridge implements WAListener {
     const isGroup = m.jid.endsWith("@g.us");
     const firstOfRun =
       !prev || prev.fromMe !== m.fromMe || (isGroup && prev.sender !== m.sender);
+    // Group messages from others are indented to leave room for the
+    // sender's avatar, drawn once per run like WhatsApp does.
+    const senderJid =
+      m.senderJid ??
+      (m.raw?.key?.participant
+        ? this.store.canon(jidNormalizedUser(m.raw.key.participant))
+        : "");
+    const groupIndent = isGroup && !m.fromMe;
+    const senderAvatar = senderJid ? this.media.avatarFor(senderJid) : null;
+    if (groupIndent && senderJid && !this.requestedAvatars.has(senderJid)) {
+      this.requestedAvatars.add(senderJid);
+      this.avatarQueue.push(senderJid);
+      void this.drainAvatars();
+    }
     return {
       id: m.id,
       kind: m.deleted ? "text" : m.kind,
@@ -1362,11 +1483,18 @@ export class Bridge implements WAListener {
           ? formatDay(m.timestamp)
           : "",
       ...ticksFor(m),
-      senderJid:
-        m.senderJid ??
-        (m.raw?.key?.participant
-          ? this.store.canon(jidNormalizedUser(m.raw.key.participant))
-          : ""),
+      senderAvatar: senderAvatar ?? EMPTY_IMAGE,
+      senderHasAvatar: !!senderAvatar,
+      senderInitial: initialOf(m.sender || "?"),
+      senderColorIdx: colorIdxOf(senderJid || m.jid),
+      groupIndent,
+      showAvatar: groupIndent && firstOfRun,
+      wave: EMPTY_IMAGE,
+      hasWave: false,
+      playing: false,
+      progress: 0,
+      posLabel: "",
+      senderJid,
       forwarded: !!m.forwarded,
       deleted: !!m.deleted,
     };
@@ -1407,6 +1535,7 @@ export class Bridge implements WAListener {
     if (stored.kind !== "image") {
       // audio, documents and videos just need the cached file to open
       this.patchRow(stored.id, { mediaPath: path, mediaReady: true });
+      if (stored.kind === "audio") void this.loadWaveform(stored, path);
       return;
     }
     const img = await this.media.decodeImage(stored.id, path);

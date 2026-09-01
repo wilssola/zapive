@@ -234,6 +234,101 @@ export class MediaService {
     }
   }
 
+  // ---- Audio playback (ffplay) and waveforms ----
+
+  private playProc: ReturnType<typeof spawn> | null = null;
+  private plainAudio = new Map<string, string>();
+  private waveCache = new Map<string, DecodedImage | null>();
+
+  // Decrypted copy kept around so play/seek doesn't decrypt every time.
+  private async plainAudioPath(msgId: string, filePath: string): Promise<string> {
+    const cached = this.plainAudio.get(msgId);
+    if (cached) return cached;
+    const plain = await this.tempPlainCopy(filePath);
+    this.plainAudio.set(msgId, plain);
+    return plain;
+  }
+
+  // Renders the audio envelope as white bars on transparency; the UI
+  // colorizes it (dim for the track, accent for the played part).
+  async waveform(msgId: string, filePath: string): Promise<DecodedImage | null> {
+    const cached = this.waveCache.get(msgId);
+    if (cached !== undefined) return cached;
+    let img: DecodedImage | null = null;
+    try {
+      const src = await this.plainAudioPath(msgId, filePath);
+      const pcm = await new Promise<Buffer>((done, fail) => {
+        const proc = spawn(
+          this.findFfmpeg()!,
+          ["-hide_banner", "-loglevel", "error", "-i", src,
+           "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+          { stdio: ["ignore", "pipe", "ignore"] },
+        );
+        const chunks: Buffer[] = [];
+        proc.stdout?.on("data", (c: Buffer) => chunks.push(c));
+        proc.once("error", fail);
+        proc.once("close", () => done(Buffer.concat(chunks)));
+      });
+      const samples = new Int16Array(
+        pcm.buffer,
+        pcm.byteOffset,
+        Math.floor(pcm.length / 2),
+      );
+      const BARS = 44;
+      const peaks: number[] = [];
+      const per = Math.max(1, Math.floor(samples.length / BARS));
+      for (let b = 0; b < BARS; b++) {
+        let peak = 0;
+        for (let i = b * per; i < Math.min((b + 1) * per, samples.length); i++) {
+          const v = Math.abs(samples[i]!);
+          if (v > peak) peak = v;
+        }
+        peaks.push(peak);
+      }
+      const max = Math.max(1, ...peaks);
+      img = renderBars(peaks.map((v) => v / max));
+      this.waveCache.set(msgId, img);
+    } catch {
+      this.waveCache.set(msgId, null);
+    }
+    return img;
+  }
+
+  get playing(): boolean {
+    return this.playProc !== null;
+  }
+
+  // Starts (or restarts at an offset) playback of a cached audio file.
+  async playAudio(msgId: string, filePath: string, offsetSec: number): Promise<boolean> {
+    this.stopAudio();
+    try {
+      const src = await this.plainAudioPath(msgId, filePath);
+      const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
+      this.playProc = spawn(
+        ffplay,
+        ["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", String(offsetSec), src],
+        { stdio: "ignore" },
+      );
+      this.playProc.once("exit", () => {
+        this.playProc = null;
+      });
+      return true;
+    } catch {
+      this.playProc = null;
+      return false;
+    }
+  }
+
+  stopAudio(): void {
+    const proc = this.playProc;
+    this.playProc = null;
+    try {
+      proc?.kill();
+    } catch {
+      // already gone
+    }
+  }
+
   // ---- Voice recording (ffmpeg + DirectShow) ----
 
   private recProc: ReturnType<typeof spawn> | null = null;
@@ -438,6 +533,30 @@ export class MediaService {
       return null;
     }
   }
+}
+
+// Waveform bitmap: white bars, centered, transparent background.
+function renderBars(levels: number[]): DecodedImage {
+  const barW = 3;
+  const gap = 2;
+  const height = 30;
+  const width = levels.length * (barW + gap);
+  const data = new Uint8ClampedArray(width * height * 4);
+  levels.forEach((level, i) => {
+    const h = Math.max(2, Math.round(level * (height - 4)));
+    const top = Math.floor((height - h) / 2);
+    const x0 = i * (barW + gap);
+    for (let y = top; y < top + h; y++) {
+      for (let x = x0; x < x0 + barW; x++) {
+        const o = (y * width + x) * 4;
+        data[o] = 255;
+        data[o + 1] = 255;
+        data[o + 2] = 255;
+        data[o + 3] = 255;
+      }
+    }
+  });
+  return { width, height, data, displayW: width, displayH: height };
 }
 
 function sanitize(id: string): string {

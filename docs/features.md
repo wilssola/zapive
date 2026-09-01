@@ -45,10 +45,11 @@ Everything below is implemented and working against a live account.
 |---|---|---|
 | Images | Inline thumbnail (≤330×380) + full-screen lightbox | Picker or Ctrl+V, with caption preview |
 | Video / GIF | Embedded thumbnail with play badge; opens externally | GIF tab in the picker |
-| Audio / voice notes | Play button (system player) | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
+| Audio / voice notes | **In-app player**: waveform, seek, elapsed time | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
 | Documents | Filename + open button | Attach menu, any file type |
 | Stickers | Rendered like images | Recent-stickers tab; any image converted to 512 px webp |
 
+- Group messages show the sender avatar beside the first bubble of a run
 - **Attach menu** (`+`): Document, Photos, Audio, Sticker
 - **Emoji picker** with a curated palette that renders correctly in Slint
 - Clipboard images (Ctrl+V) open the same confirmation preview as attachments

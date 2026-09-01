@@ -78,6 +78,17 @@ export struct MessageItem {
     dayLabel: string,
     ticks: string,
     ticksBlue: bool,
+    senderAvatar: image,
+    senderHasAvatar: bool,
+    senderInitial: string,
+    senderColorIdx: int,
+    groupIndent: bool,
+    showAvatar: bool,
+    wave: image,
+    hasWave: bool,
+    playing: bool,
+    progress: float,
+    posLabel: string,
 }
 
 component Avatar inherits Rectangle {
@@ -321,6 +332,8 @@ export component AppWindow inherits Window {
     callback attach-audio();
     callback attach-doc();
     callback play-audio(string);
+    callback audio-toggle(string);
+    callback audio-seek(string, float);
     callback load-older();
     callback paste-clipboard();
     callback open-dm(string);
@@ -1041,9 +1054,21 @@ export component AppWindow inherits Window {
                                 vertical-alignment: center;
                             }
                         }
+                        if msg.showAvatar: Avatar {
+                            width: 28px;
+                            height: 28px;
+                            x: 12px;
+                            y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
+                            src: msg.senderAvatar;
+                            has-image: msg.senderHasAvatar;
+                            initial: msg.senderInitial;
+                            color-idx: msg.senderColorIdx;
+                        }
                         bubble := Rectangle {
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
-                            x: msg.fromMe ? parent.width - self.width - 30px : 30px;
+                            x: msg.fromMe
+                                ? parent.width - self.width - 30px
+                                : (msg.groupIndent ? 48px : 30px);
                             width: content.preferred-width;
                             height: content.preferred-height;
                             background: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
@@ -1133,12 +1158,10 @@ export component AppWindow inherits Window {
                                     color: Theme.text-dim;
                                 }
 
-                                if msg.kind == "audio" || msg.kind == "doc": HorizontalLayout {
+                                if msg.kind == "doc": HorizontalLayout {
                                     spacing: 8px;
                                     IconButton {
-                                        icon: msg.kind == "audio"
-                                            ? @image-url("icons/player-play.svg")
-                                            : @image-url("icons/file-text.svg");
+                                        icon: @image-url("icons/file-text.svg");
                                         enabled: msg.mediaReady;
                                         clicked => { root.play-audio(msg.mediaPath); }
                                     }
@@ -1148,6 +1171,68 @@ export component AppWindow inherits Window {
                                         vertical-alignment: center;
                                         overflow: elide;
                                         width: min(self.preferred-width, msg-row.max-text-w - 60px);
+                                    }
+                                }
+
+                                // Voice-note player: waveform track, played
+                                // portion clipped over it, click to seek.
+                                if msg.kind == "audio": HorizontalLayout {
+                                    spacing: 8px;
+                                    IconButton {
+                                        icon: msg.playing
+                                            ? @image-url("icons/player-pause.svg")
+                                            : @image-url("icons/player-play.svg");
+                                        icon-size: 20px;
+                                        enabled: msg.mediaReady;
+                                        clicked => { root.audio-toggle(msg.id); }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        wave-area := TouchArea {
+                                            width: 220px;
+                                            height: 30px;
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.audio-seek(msg.id,
+                                                    self.mouse-x / self.width);
+                                            }
+                                            if msg.hasWave: Image {
+                                                source: msg.wave;
+                                                colorize: msg.fromMe
+                                                    ? #9fd3c7 : Theme.text-dim;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                image-fit: fill;
+                                            }
+                                            if msg.hasWave: Rectangle {
+                                                width: parent.width * msg.progress;
+                                                height: parent.height;
+                                                clip: true;
+                                                Image {
+                                                    source: msg.wave;
+                                                    colorize: #53bdeb;
+                                                    width: wave-area.width;
+                                                    height: parent.height;
+                                                    image-fit: fill;
+                                                }
+                                            }
+                                            if !msg.hasWave: Rectangle {
+                                                width: parent.width;
+                                                height: 3px;
+                                                y: 14px;
+                                                border-radius: 1.5px;
+                                                background: Theme.text-dim;
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            Text {
+                                                text: msg.playing && msg.posLabel != ""
+                                                    ? msg.posLabel : msg.text;
+                                                color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                font-size: 11px;
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
                                     }
                                 }
 

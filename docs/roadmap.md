@@ -23,7 +23,6 @@ sending does not.
 - **Mark as read / unread**, and sending read receipts explicitly
 - **Group management** — participant list, add/remove, admin actions
 - **Drag and drop** files onto the conversation
-- **In-app audio player** with a waveform instead of the system player
 - **Video playback in-window** (currently opens externally)
 - **Packaging** — signed installer with a proper app icon, autostart
   option, and a portable build
@@ -43,7 +42,7 @@ sending does not.
 | Limitation | Reason |
 |---|---|
 | Flag emoji render as letters (🇧🇷 → BR) | Slint font fallback lacks regional indicator sequences |
-| Video and audio open in the system player | No embedded media player yet |
+| Video opens in the system player | No embedded video surface yet; voice notes play in-app |
 | History only goes back as far as the phone serves | WhatsApp on-demand sync returns ~50 messages per request |
 | Sending a GIF forwards an existing one | Uploading a local mp4 as gif-playback is wired but not exposed in the UI |
 | Calls cannot be answered from the desktop | Baileys detects and declines calls only; Zapive notifies and lists them |
