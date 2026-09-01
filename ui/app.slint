@@ -35,6 +35,7 @@ export struct ChatItem {
     initial: string,
     colorIdx: int,
     unread: int,
+    mentioned: bool,
     pinned: bool,
 }
 
@@ -93,6 +94,7 @@ export struct MessageItem {
     linkTitle: string,
     linkDesc: string,
     linkHost: string,
+    linkUrl: string,
     hasLink: bool,
     linkThumb: image,
     hasLinkThumb: bool,
@@ -361,6 +363,20 @@ export component AppWindow inherits Window {
     callback copy-text(string);
     callback audio-toggle(string);
     callback audio-seek(string, float);
+    callback audio-cycle-rate();
+    in-out property <string> audio-rate-label: "1x";
+    // Mini player shown while a voice note plays in another chat.
+    in-out property <bool> mini-audio;
+    in-out property <string> mini-audio-name;
+    in-out property <image> mini-audio-avatar;
+    in-out property <bool> mini-audio-avatar-has;
+    in-out property <string> mini-audio-initial;
+    in-out property <int> mini-audio-color-idx;
+    in-out property <bool> mini-audio-playing;
+    in-out property <float> mini-audio-progress;
+    callback mini-audio-toggle();
+    callback mini-audio-open();
+    callback mini-audio-close();
     callback load-older();
     callback paste-clipboard();
     callback open-dm(string);
@@ -924,6 +940,14 @@ export component AppWindow inherits Window {
                                         y: (parent.height - self.height) / 2;
                                         horizontal-stretch: 0;
                                     }
+                                    if chat.mentioned: Image {
+                                        source: @image-url("icons/at.svg");
+                                        colorize: Theme.accent;
+                                        width: 15px;
+                                        height: 15px;
+                                        y: (parent.height - self.height) / 2;
+                                        horizontal-stretch: 0;
+                                    }
                                     if chat.unread > 0: Rectangle {
                                         width: max(20px, badge-text.preferred-width + 12px);
                                         height: 20px;
@@ -951,6 +975,107 @@ export component AppWindow inherits Window {
                             background: Theme.border;
                         }
                     }
+                }
+            }
+
+            // Mini player: keeps the running voice note reachable after
+            // the user moves to another conversation.
+            if root.mini-audio: Rectangle {
+                y: parent.height - self.height;
+                width: parent.width;
+                height: 56px;
+                background: #008069;
+                mini-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.mini-audio-open(); }
+                }
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 26px;
+                            height: 26px;
+                            play-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.mini-audio-toggle(); }
+                            }
+                            Image {
+                                source: root.mini-audio-playing
+                                    ? @image-url("icons/player-pause.svg")
+                                    : @image-url("icons/player-play.svg");
+                                colorize: white;
+                                width: 18px;
+                                height: 18px;
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 30px;
+                                    height: 30px;
+                                    Avatar {
+                                        width: 30px;
+                                        height: 30px;
+                                        src: root.mini-audio-avatar;
+                                        has-image: root.mini-audio-avatar-has;
+                                        initial: root.mini-audio-initial;
+                                        color-idx: root.mini-audio-color-idx;
+                                    }
+                                    Image {
+                                        source: @image-url("icons/microphone.svg");
+                                        colorize: white;
+                                        width: 14px;
+                                        height: 14px;
+                                        x: parent.width - self.width;
+                                        y: parent.height - self.height;
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.mini-audio-name;
+                                    color: white;
+                                    font-size: 14px;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            close-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.mini-audio-close(); }
+                            }
+                            Image {
+                                source: @image-url("icons/x.svg");
+                                colorize: white;
+                                width: 16px;
+                                height: 16px;
+                            }
+                        }
+                    }
+                }
+                // Progress hairline along the bottom edge.
+                Rectangle {
+                    x: 0;
+                    y: parent.height - 2px;
+                    width: parent.width * root.mini-audio-progress;
+                    height: 2px;
+                    background: #ffffffcc;
                 }
             }
         }
@@ -1269,6 +1394,27 @@ export component AppWindow inherits Window {
                                 // portion clipped over it, click to seek.
                                 if msg.kind == "audio": HorizontalLayout {
                                     spacing: 8px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: rate-label.preferred-width + 16px;
+                                            height: 22px;
+                                            border-radius: 11px;
+                                            background: rate-touch.has-hover
+                                                ? (msg.fromMe ? #00000030 : #00000020)
+                                                : (msg.fromMe ? #00000020 : #00000014);
+                                            rate-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.audio-cycle-rate(); }
+                                            }
+                                            rate-label := Text {
+                                                text: root.audio-rate-label;
+                                                color: Theme.text-dim;
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                            }
+                                        }
+                                    }
                                     IconButton {
                                         icon: msg.playing
                                             ? @image-url("icons/player-pause.svg")
@@ -1335,56 +1481,74 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Link preview card: artwork keeps its own
-                                // aspect so the card never pads itself out.
+                                // Link preview card. Blocks are placed by
+                                // hand and the height is their exact sum, so
+                                // the card never grows past its content.
                                 if msg.hasLink: Rectangle {
                                     property <length> card-w: min(msg-row.max-text-w, 300px);
+                                    property <length> img-h: msg.hasLinkThumb
+                                        ? min(200px, card-w * msg.linkThumbH
+                                            / max(msg.linkThumbW, 1))
+                                        : 0px;
+                                    property <length> host-h: msg.linkHost != "" ? 24px : 0px;
+                                    property <length> title-h: msg.linkTitle != ""
+                                        ? link-title.preferred-height + 8px : 0px;
+                                    property <length> desc-h: msg.linkDesc != ""
+                                        ? link-desc.preferred-height + 8px : 0px;
+
                                     width: card-w;
-                                    height: link-col.preferred-height;
+                                    height: img-h + host-h + title-h + desc-h;
                                     border-radius: 6px;
                                     clip: true;
                                     background: msg.fromMe ? #ffffff14 : #00000014;
-                                    link-col := VerticalLayout {
+
+                                    if msg.hasLinkThumb: Image {
+                                        source: msg.linkThumb;
+                                        x: 0;
+                                        y: 0;
                                         width: parent.width;
-                                        spacing: 0;
-                                        if msg.hasLinkThumb: Image {
-                                            source: msg.linkThumb;
-                                            width: parent.width;
-                                            height: min(
-                                                200px,
-                                                parent.width * msg.linkThumbH
-                                                    / max(msg.linkThumbW, 1));
-                                            image-fit: cover;
-                                        }
-                                        if msg.linkHost != "": Rectangle {
-                                            height: 24px;
-                                            background: msg.fromMe ? #ffffff10 : #00000010;
-                                            Text {
-                                                text: msg.linkHost;
-                                                color: Theme.text-dim;
-                                                font-size: 11px;
-                                                x: 9px;
-                                                height: parent.height;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        if msg.linkTitle != "": Text {
-                                            text: msg.linkTitle;
-                                            color: Theme.bubble-text;
-                                            font-size: 13px;
-                                            font-weight: 700;
-                                            wrap: word-wrap;
-                                            x: 9px;
-                                            width: parent.width - 18px;
-                                        }
-                                        if msg.linkDesc != "": Text {
-                                            text: msg.linkDesc;
+                                        height: parent.img-h;
+                                        image-fit: cover;
+                                    }
+                                    if msg.linkHost != "": Rectangle {
+                                        x: 0;
+                                        y: parent.img-h;
+                                        width: parent.width;
+                                        height: parent.host-h;
+                                        background: msg.fromMe ? #ffffff10 : #00000010;
+                                        Text {
+                                            text: msg.linkHost;
                                             color: Theme.text-dim;
-                                            font-size: 12px;
-                                            wrap: word-wrap;
+                                            font-size: 11px;
                                             x: 9px;
-                                            width: parent.width - 18px;
+                                            height: parent.height;
+                                            vertical-alignment: center;
                                         }
+                                    }
+                                    link-title := Text {
+                                        text: msg.linkTitle;
+                                        visible: msg.linkTitle != "";
+                                        color: Theme.bubble-text;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        wrap: word-wrap;
+                                        x: 9px;
+                                        y: parent.img-h + parent.host-h + 4px;
+                                        width: parent.width - 18px;
+                                    }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-dm(msg.linkUrl); }
+                                    }
+                                    link-desc := Text {
+                                        text: msg.linkDesc;
+                                        visible: msg.linkDesc != "";
+                                        color: Theme.text-dim;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                        x: 9px;
+                                        y: parent.img-h + parent.host-h + parent.title-h + 4px;
+                                        width: parent.width - 18px;
                                     }
                                 }
 

@@ -51,6 +51,7 @@ interface ChatRow {
   initial: string;
   colorIdx: number;
   unread: number;
+  mentioned: boolean;
   pinned: boolean;
 }
 
@@ -87,6 +88,7 @@ interface MessageRow {
   linkTitle: string;
   linkDesc: string;
   linkHost: string;
+  linkUrl: string;
   hasLink: boolean;
   linkThumb: SlintImageData;
   hasLinkThumb: boolean;
@@ -235,6 +237,19 @@ export interface AppWindow {
   copy_text: (id: string) => void;
   audio_toggle: (id: string) => void;
   audio_seek: (id: string, frac: number) => void;
+  audio_rate_label: string;
+  audio_cycle_rate: () => void;
+  mini_audio: boolean;
+  mini_audio_name: string;
+  mini_audio_avatar: SlintImageData;
+  mini_audio_avatar_has: boolean;
+  mini_audio_initial: string;
+  mini_audio_color_idx: number;
+  mini_audio_playing: boolean;
+  mini_audio_progress: number;
+  mini_audio_toggle: () => void;
+  mini_audio_open: () => void;
+  mini_audio_close: () => void;
   scroll_conversation_end: () => void;
   scroll_conversation_top: () => void;
   show(): void;
@@ -451,6 +466,13 @@ export class Bridge implements WAListener {
     };
     win.audio_toggle = (id) => void this.toggleAudio(id);
     win.audio_seek = (id, frac) => void this.seekAudio(id, frac);
+    win.audio_cycle_rate = () => this.cycleAudioRate();
+    win.mini_audio_toggle = () => void this.toggleAudio(this.audio?.id ?? "");
+    win.mini_audio_open = () => {
+      const jid = this.audio?.jid;
+      if (jid) this.openDm(jid);
+    };
+    win.mini_audio_close = () => this.stopAudio();
     win.request_pairing_code = (phone) => void this.handlePairing(phone);
   }
 
@@ -506,6 +528,7 @@ export class Bridge implements WAListener {
   onOpen() {
     this.win.status_text = t("status.connected");
     if (this.win.screen === "login") this.win.screen = "main";
+    this.store.setSelf(this.service.selfIds());
     if (!this.groupsFetched) {
       this.groupsFetched = true;
       void this.fetchGroupNames();
@@ -670,7 +693,10 @@ export class Bridge implements WAListener {
         this.pushMessageRow(stored);
       } else if (!stored.fromMe) {
         const meta = this.store.chats.get(stored.jid);
-        if (meta) meta.unread = (meta.unread ?? 0) + 1;
+        if (meta) {
+          meta.unread = (meta.unread ?? 0) + 1;
+          if (stored.mentionsMe) meta.mentioned = true;
+        }
         const body = notificationBody(stored);
         const isGroup = stored.jid.endsWith("@g.us");
         const title = this.store.chatName(stored.jid);
@@ -827,7 +853,13 @@ export class Bridge implements WAListener {
     }, 100);
   }
 
-  private toChatRow(jid: string, preview: string, timestamp: number, unread: number): ChatRow {
+  private toChatRow(
+    jid: string,
+    preview: string,
+    timestamp: number,
+    unread: number,
+    mentioned = false,
+  ): ChatRow {
     const name = this.store.chatName(jid);
     const avatar = this.media.avatarFor(jid);
     return {
@@ -840,6 +872,7 @@ export class Bridge implements WAListener {
       initial: initialOf(name),
       colorIdx: colorIdxOf(jid),
       unread,
+      mentioned: mentioned && unread > 0,
       pinned: (this.store.chats.get(jid)?.pinned ?? 0) > 0,
     };
   }
@@ -1229,15 +1262,35 @@ export class Bridge implements WAListener {
 
   private audio: {
     id: string;
+    jid: string;
     path: string;
     duration: number;
     pos: number;
-    timer: NodeJS.Timeout;
+    paused: boolean;
+    timer: NodeJS.Timeout | null;
   } | null = null;
 
+  // WhatsApp cycles 1x/1.5x/2x; we carry on to 3x.
+  private static readonly RATES = [1, 1.5, 2, 2.5, 3];
+  private rateIdx = 0;
+
+  private get audioRate(): number {
+    return Bridge.RATES[this.rateIdx] ?? 1;
+  }
+
+  private cycleAudioRate() {
+    this.rateIdx = (this.rateIdx + 1) % Bridge.RATES.length;
+    this.win.audio_rate_label = this.audioRate + "x";
+    // Restart the running note so the new speed takes effect right away.
+    const a = this.audio;
+    if (a && !a.paused) void this.startAudio(a.id, a.pos, a.jid);
+  }
+
   private async toggleAudio(id: string) {
-    if (this.audio?.id === id) {
-      this.stopAudio();
+    const a = this.audio;
+    if (a?.id === id) {
+      if (a.paused) await this.startAudio(id, a.pos, a.jid);
+      else this.pauseAudio();
       return;
     }
     await this.startAudio(id, 0);
@@ -1245,50 +1298,89 @@ export class Bridge implements WAListener {
 
   private async seekAudio(id: string, frac: number) {
     const clamped = Math.max(0, Math.min(1, frac));
-    await this.startAudio(id, clamped);
+    const jid = this.audio?.id === id ? this.audio.jid : this.currentJid;
+    const stored = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
+    await this.startAudio(id, (stored?.durationSec ?? 0) * clamped, jid ?? undefined);
   }
 
-  private async startAudio(id: string, frac: number) {
-    const jid = this.currentJid;
+  private async startAudio(id: string, posSec: number, fromJid?: string) {
+    const jid = fromJid ?? this.currentJid;
     const stored = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
-    if (!stored?.raw) return;
+    if (!stored?.raw || !jid) return;
     const path = await this.media.ensureCached(id, stored.raw);
     if (!path) return;
-    this.stopAudio();
+    this.clearAudio();
 
     const duration = stored.durationSec && stored.durationSec > 0 ? stored.durationSec : 0;
-    const pos = duration > 0 ? duration * frac : 0;
-    if (!(await this.media.playAudio(id, path, pos))) return;
+    const pos = Math.max(0, posSec);
+    if (!(await this.media.playAudio(id, path, pos, this.audioRate))) return;
 
     const timer = setInterval(() => {
       const a = this.audio;
-      if (!a) return;
-      a.pos += 0.25;
+      if (!a || a.paused) return;
+      a.pos += 0.25 * this.audioRate;
       if (a.duration > 0 && a.pos >= a.duration) {
         this.stopAudio();
         return;
       }
       this.patchAudioRow(a);
     }, 250);
-    this.audio = { id, path, duration, pos, timer };
+    this.audio = { id, jid, path, duration, pos, paused: false, timer };
     this.patchAudioRow(this.audio);
   }
 
-  private stopAudio() {
+  // Keeps the position so the next click resumes where it stopped.
+  private pauseAudio() {
+    const a = this.audio;
+    if (!a) return;
+    this.media.stopAudio();
+    if (a.timer) clearInterval(a.timer);
+    a.timer = null;
+    a.paused = true;
+    this.patchAudioRow(a);
+  }
+
+  private clearAudio() {
     const a = this.audio;
     this.audio = null;
     this.media.stopAudio();
     if (!a) return;
-    clearInterval(a.timer);
+    if (a.timer) clearInterval(a.timer);
     this.patchRow(a.id, { playing: false, progress: 0, posLabel: "" });
   }
 
-  private patchAudioRow(a: { id: string; duration: number; pos: number }) {
+  private stopAudio() {
+    this.clearAudio();
+    this.win.mini_audio = false;
+  }
+
+  private patchAudioRow(a: {
+    id: string;
+    jid: string;
+    duration: number;
+    pos: number;
+    paused: boolean;
+  }) {
+    const progress = a.duration > 0 ? Math.min(1, a.pos / a.duration) : 0;
     this.patchRow(a.id, {
-      playing: true,
-      progress: a.duration > 0 ? Math.min(1, a.pos / a.duration) : 0,
+      playing: !a.paused,
+      progress,
       posLabel: formatDuration(a.pos),
     });
+    // Playback survives leaving the chat: a mini player keeps it reachable.
+    const away = a.jid !== this.currentJid;
+    this.win.mini_audio = away;
+    this.win.mini_audio_playing = !a.paused;
+    this.win.mini_audio_progress = progress;
+    if (away) {
+      const name = this.store.chatName(a.jid);
+      const avatar = this.media.avatarFor(a.jid);
+      this.win.mini_audio_name = name;
+      this.win.mini_audio_avatar = avatar ?? EMPTY_IMAGE;
+      this.win.mini_audio_avatar_has = !!avatar;
+      this.win.mini_audio_initial = initialOf(name);
+      this.win.mini_audio_color_idx = colorIdxOf(a.jid);
+    }
   }
 
   // Lazily renders the waveform for a voice message.
@@ -1542,6 +1634,7 @@ export class Bridge implements WAListener {
         initial: initialOf(name),
         colorIdx: colorIdxOf(a.jid),
         unread: a.count,
+        mentioned: false,
         pinned: false,
       };
     });
@@ -1604,7 +1697,13 @@ export class Bridge implements WAListener {
   private refreshChats() {
     this.resolveLidAliases();
     const rows = this.visibleChats().map((meta) =>
-      this.toChatRow(meta.jid, meta.preview, meta.timestamp, meta.unread ?? 0),
+      this.toChatRow(
+        meta.jid,
+        meta.preview,
+        meta.timestamp,
+        meta.unread ?? 0,
+        !!meta.mentioned,
+      ),
     );
     const model = this.chatsModel;
     const common = Math.min(model.length, rows.length);
@@ -1618,6 +1717,7 @@ export class Bridge implements WAListener {
         cur.preview !== next.preview ||
         cur.time !== next.time ||
         cur.unread !== next.unread ||
+        cur.mentioned !== next.mentioned ||
         cur.pinned !== next.pinned ||
         cur.hasAvatar !== next.hasAvatar ||
         cur.avatar !== next.avatar
@@ -1715,6 +1815,7 @@ export class Bridge implements WAListener {
             meta?.preview ?? row.preview,
             meta?.timestamp ?? 0,
             meta?.unread ?? 0,
+            !!meta?.mentioned,
           ),
         );
         break;
@@ -1764,7 +1865,8 @@ export class Bridge implements WAListener {
   }
 
   private openJid(jid: string) {
-    this.stopAudio(); // never leave a voice note playing behind
+    // Playback follows the user: the mini player takes over the controls.
+    if (this.audio) this.patchAudioRow(this.audio);
     this.stopStickerAnimations();
     this.stopZoomLoop();
     this.media.stopVideo();
@@ -1779,7 +1881,10 @@ export class Bridge implements WAListener {
     this.win.selected_jid = jid;
     this.win.stick_bottom = true;
     const meta = this.store.chats.get(jid);
-    if (meta) meta.unread = 0;
+    if (meta) {
+      meta.unread = 0;
+      meta.mentioned = false;
+    }
     this.win.current_status = "";
     void this.service.subscribePresence(jid);
     this.applyHeaderAvatar(jid);
@@ -1961,6 +2066,7 @@ export class Bridge implements WAListener {
       linkTitle: m.linkTitle ?? "",
       linkDesc: m.linkDesc ?? "",
       linkHost: hostOf(m.linkUrl),
+      linkUrl: m.linkUrl ?? "",
       hasLink: !!(m.linkTitle || m.linkUrl),
       linkThumb: EMPTY_IMAGE,
       hasLinkThumb: false,
@@ -1968,8 +2074,11 @@ export class Bridge implements WAListener {
       linkThumbH: 0,
       wave: EMPTY_IMAGE,
       hasWave: false,
-      playing: false,
-      progress: 0,
+      playing: this.audio?.id === m.id && !this.audio.paused,
+      progress:
+        this.audio?.id === m.id && this.audio.duration > 0
+          ? Math.min(1, this.audio.pos / this.audio.duration)
+          : 0,
       posLabel: "",
       senderJid,
       forwarded: !!m.forwarded,

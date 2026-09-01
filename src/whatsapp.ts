@@ -86,6 +86,14 @@ export class WhatsAppService {
   // Asks the phone (via a peer protocol message) to share the app-state
   // sync keys we're missing; Baileys resumes the parked collection sync
   // automatically when the APP_STATE_SYNC_KEY_SHARE arrives.
+  // Our own identities: the phone-number jid and, on v7, the lid.
+  selfIds(): string[] {
+    const user = this.sock?.user;
+    if (!user?.id) return [];
+    const lid = (user as { lid?: string }).lid;
+    return lid ? [user.id, lid] : [user.id];
+  }
+
   private async requestAppStateKeys() {
     const sock = this.sock;
     const ids = [...this.missingKeys].filter((k) => !this.requestedKeys.has(k));

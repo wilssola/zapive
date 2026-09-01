@@ -630,7 +630,24 @@ export class MediaService {
   // Starts (or restarts at an offset) playback of a cached audio file.
   // Decrypting is async, so a token discards starts that a newer click
   // has already superseded.
-  async playAudio(msgId: string, filePath: string, offsetSec: number): Promise<boolean> {
+  // ffplay's atempo filter tops out at 2x, so faster rates chain filters.
+  private tempoChain(rate: number): string {
+    const parts: string[] = [];
+    let left = rate;
+    while (left > 2) {
+      parts.push("atempo=2");
+      left /= 2;
+    }
+    parts.push("atempo=" + left.toFixed(4));
+    return parts.join(",");
+  }
+
+  async playAudio(
+    msgId: string,
+    filePath: string,
+    offsetSec: number,
+    rate = 1,
+  ): Promise<boolean> {
     this.stopAudio();
     const token = this.playToken;
     try {
@@ -639,7 +656,16 @@ export class MediaService {
       const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
       const proc = spawn(
         ffplay,
-        ["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", String(offsetSec), src],
+        [
+          "-nodisp",
+          "-autoexit",
+          "-loglevel",
+          "quiet",
+          "-ss",
+          String(offsetSec),
+          ...(rate === 1 ? [] : ["-af", this.tempoChain(rate)]),
+          src,
+        ],
         { stdio: "ignore" },
       );
       this.playProcs.add(proc);

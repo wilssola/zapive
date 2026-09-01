@@ -20,6 +20,7 @@ Everything below is implemented and working against a live account.
 - Real group names via `groupFetchAllParticipating`
 - Filters: **All**, **Unread**, **Archived**; live search by name
 - **Pinned chats** first, with a pin icon; **unread badges** in accent color
+- **@ marker** on chats where an unread message mentions you (by number or `@all`)
 - Previews prefixed with the sender in groups, `✓` for your own messages
 - Duplicate `@lid`/phone chats merged into one conversation
 - In-place row updates, so refreshes never reset the scroll position
@@ -35,7 +36,8 @@ Everything below is implemented and working against a live account.
 - Group sender names are clickable — opens or starts that DM
 - **WhatsApp formatting** — *bold*, _italic_, ~strike~ and ```monospace```
   render as styled text
-- **Link previews** with thumbnail, title, description and host
+- **Link previews** with thumbnail, title, description and host; the whole
+  card opens the link, and pages that expose no metadata get no card
 - **Mentions** resolve to contact names and open that chat when clicked;
   **links** open in the default browser
 - **Text selection** by dragging (blue selection) plus a context menu with
@@ -50,7 +52,7 @@ Everything below is implemented and working against a live account.
 |---|---|---|
 | Images | Inline thumbnail (≤330×380) + full-screen lightbox | Picker or Ctrl+V, with caption preview |
 | Video / GIF | GIFs loop in the bubble; videos play in an in-app overlay | GIF tab with keyless search (Openverse) |
-| Audio / voice notes | **In-app player**: waveform, seek, elapsed time | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
+| Audio / voice notes | **In-app player**: waveform, seek, elapsed time, speed (1x–3x), mini player when you leave the chat | **Microphone recording** (ffmpeg → mono opus, ptt), optional **view-once** |
 | Documents | Filename + open button | Attach menu, any file type |
 | Stickers | Animated, drawn without a bubble | Tabs for stickers you sent and starred ones; any image converted to 512 px webp |
 

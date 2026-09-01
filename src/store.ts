@@ -18,6 +18,7 @@ export interface StoredMessage {
   starred?: boolean;
   sticker?: boolean;
   mentions?: string[];
+  mentionsMe?: boolean;
   linkTitle?: string;
   linkDesc?: string;
   linkUrl?: string;
@@ -61,6 +62,7 @@ export interface ChatMeta {
   preview: string;
   timestamp: number;
   unread?: number;
+  mentioned?: boolean; // an unread message mentions us
   pinned?: number; // pin timestamp; 0/undefined = not pinned
   archived?: boolean;
   community?: string; // parent community jid, when this group belongs to one
@@ -155,6 +157,7 @@ export function formatDuration(seconds: number): string {
 
 export class Store {
   chats = new Map<string, ChatMeta>();
+  selfJids = new Set<string>(); // our own identities (phone jid and lid)
   messages = new Map<string, StoredMessage[]>();
   contacts = new Map<string, string>(); // address-book names
   pushNames = new Map<string, string>(); // names announced in messages
@@ -186,6 +189,7 @@ export class Store {
         preview: (dst?.timestamp ?? 0) >= src.timestamp ? (dst?.preview ?? src.preview) : src.preview,
         timestamp: Math.max(src.timestamp, dst?.timestamp ?? 0),
         unread: (src.unread ?? 0) + (dst?.unread ?? 0),
+        mentioned: !!(src.mentioned || dst?.mentioned),
         pinned: Math.max(src.pinned ?? 0, dst?.pinned ?? 0),
         archived: (src.archived ?? false) || (dst?.archived ?? false),
       });
@@ -225,6 +229,16 @@ export class Store {
       return `+${user}`;
     }
     return user;
+  }
+
+  // Records our own jids so mentions can be matched against them.
+  setSelf(ids: string[]) {
+    for (const id of ids) {
+      if (!id) continue;
+      const jid = jidNormalizedUser(id);
+      this.selfJids.add(jid);
+      this.selfJids.add(this.canon(jid));
+    }
   }
 
   sortedChats(): ChatMeta[] {
@@ -340,8 +354,27 @@ export class Store {
     // Forwarded flag lives in the content's contextInfo.
     const ctx = (Object.values(content).find(
       (v) => v && typeof v === "object" && "contextInfo" in v,
-    ) as { contextInfo?: { isForwarded?: boolean | null } } | undefined)?.contextInfo;
+    ) as
+      | {
+          contextInfo?: {
+            isForwarded?: boolean | null;
+            mentionedJid?: (string | null)[] | null;
+            groupMentions?: unknown[] | null;
+          };
+        }
+      | undefined)?.contextInfo;
     const forwarded = !!ctx?.isForwarded;
+
+    // "@number" mentions list us explicitly; "@all"/"@everyone" arrives as
+    // a group mention that targets every participant.
+    const mentionsMe =
+      !fromMe &&
+      ((ctx?.groupMentions?.length ?? 0) > 0 ||
+        (ctx?.mentionedJid ?? []).some(
+          (j) =>
+            typeof j === "string" &&
+            this.selfJids.has(this.canon(jidNormalizedUser(j))),
+        ));
 
     // History-synced messages carry their accumulated reactions inline.
     const reactions: Record<string, string> = {};
@@ -359,6 +392,7 @@ export class Store {
       timestamp,
       raw: msg,
       ...(forwarded ? { forwarded: true } : {}),
+      ...(mentionsMe ? { mentionsMe: true } : {}),
       ...(fromMe ? { status: toNum(msg.status) || 2 } : {}),
       ...(Object.keys(reactions).length > 0 ? { reactions } : {}),
     };
@@ -373,18 +407,23 @@ export class Store {
       const mentions = (ext?.contextInfo?.mentionedJid ?? []).filter(
         (j): j is string => typeof j === "string",
       );
+      // Sites that expose no metadata (private pages, login walls) send
+      // back just the URL; WhatsApp shows no card for those, and neither
+      // do we.
+      const linkTitle = cleanText(ext?.title ?? "");
+      const linkDesc = cleanText(ext?.description ?? "");
+      const hasThumb = (ext?.jpegThumbnail?.length ?? 0) > 0;
+      const host = url.replace(/^https?:\/\//i, "").split("/")[0] ?? "";
+      const informative =
+        hasThumb ||
+        (!!linkTitle && linkTitle !== host && !url.includes(linkTitle)) ||
+        (!!linkDesc && linkDesc !== url && linkDesc !== host);
       return {
         ...base,
         kind: "text",
         text: cleanText(ext?.text ?? ""),
         ...(mentions.length > 0 ? { mentions } : {}),
-        ...(ext?.title || url
-          ? {
-              linkTitle: cleanText(ext?.title ?? ""),
-              linkDesc: cleanText(ext?.description ?? ""),
-              linkUrl: url,
-            }
-          : {}),
+        ...(informative ? { linkTitle, linkDesc, linkUrl: url } : {}),
       };
     }
     if (type === "stickerMessage") {
