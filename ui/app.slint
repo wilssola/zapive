@@ -304,6 +304,7 @@ export component AppWindow inherits Window {
     in-out property <[[StickerCell]]> fav-rows;
     callback gif-send(string);
     in-out property <length> conv-scroll: 0;
+    in-out property <length> conv-viewport-h: 0;
     in-out property <bool> rec-active: false;
     in-out property <string> rec-elapsed: "0:00";
     in-out property <bool> rec-view-once: false;
@@ -1044,6 +1045,9 @@ export component AppWindow inherits Window {
 
                 msg-list := ListView {
                     opacity: root.conv-ready ? 1.0 : 0.0;
+                    changed viewport-height => {
+                        root.conv-viewport-h = self.viewport-height;
+                    }
                     changed viewport-y => {
                         root.conv-scroll = self.viewport-y;
                         root.stick-bottom =

@@ -174,6 +174,7 @@ export interface AppWindow {
   selected_jid: string;
   stick_bottom: boolean;
   conv_ready: boolean;
+  conv_viewport_h: number;
   chat_tab: string;
   search_changed: (text: string) => void;
   tab_changed: (tab: string) => void;
@@ -347,7 +348,10 @@ export class Bridge implements WAListener {
     win.fav_rows = this.favModel;
     win.gif_send = (id) => void this.sendGifById(id);
     win.gif_search = (query) => void this.searchGifs(query);
-    win.jump_latest = () => this.scrollToEnd();
+    win.jump_latest = () => {
+      if (this.currentJid) this.scrollPos.delete(this.currentJid);
+      this.scrollToEnd();
+    };
     win.info_media = this.infoMediaModel;
     win.open_info = () => void this.openContactInfo();
     win.close_info = () => {
@@ -547,24 +551,15 @@ export class Bridge implements WAListener {
         if (stored.jid === this.currentJid) addedToCurrent = true;
       }
     }
-    // Older messages may have arrived for the open conversation. Rebuild
-    // only when it won't disturb the user's reading position.
+    // Older messages may have arrived for the open conversation.
     if (addedToCurrent && this.currentJid) {
-      if (this.scrollUpFetch || this.win.stick_bottom) {
+      if (this.scrollUpFetch) {
+        this.prependOlderRows(this.currentJid);
+      } else if (this.win.stick_bottom) {
         const list = this.store.messagesFor(this.currentJid);
         const rows = list.map((m, i) => this.toRow(m, i > 0 ? list[i - 1] : undefined));
         this.messagesModel.splice(0, this.messagesModel.length, ...rows);
-        if (this.scrollUpFetch) {
-          setTimeout(() => {
-            try {
-              this.win.scroll_conversation_top();
-            } catch {
-              // layout not ready
-            }
-          }, 60);
-        } else {
-          this.scrollToEnd();
-        }
+        this.scrollToEnd();
         void this.loadMediaForChat(this.currentJid);
       }
       // else: data is stored; the view catches up on next open/scroll-up
@@ -1623,7 +1618,10 @@ export class Bridge implements WAListener {
     this.media.stopVideo();
     this.win.video_open = false;
     if (this.currentJid && this.currentJid !== jid) {
-      this.scrollPos.set(this.currentJid, this.win.conv_scroll);
+      // Someone reading at the bottom expects the newest message next
+      // time, not the offset that happened to be the end back then.
+      if (this.win.stick_bottom) this.scrollPos.delete(this.currentJid);
+      else this.scrollPos.set(this.currentJid, this.win.conv_scroll);
     }
     this.currentJid = jid;
     this.win.selected_jid = jid;
@@ -1674,8 +1672,43 @@ export class Bridge implements WAListener {
 
   // Bubbles keep growing after the first layout pass (images and wrapped
   // text resolve late), so re-apply the jump until the viewport settles.
+  // Inserts freshly fetched history above the current rows and shifts the
+  // viewport by exactly the height that was added, so the message the
+  // user was reading stays put.
+  private prependOlderRows(jid: string) {
+    const list = this.store.messagesFor(jid);
+    const firstShown = this.messagesModel.rowData(0)?.id;
+    const cut = firstShown ? list.findIndex((m) => m.id === firstShown) : -1;
+    if (cut <= 0) return;
+
+    const beforeY = this.win.conv_scroll;
+    const beforeH = this.win.conv_viewport_h;
+    this.win.conv_ready = false;
+
+    const older = list
+      .slice(0, cut)
+      .map((m, i) => this.toRow(m, i > 0 ? list[i - 1] : undefined));
+    this.messagesModel.splice(0, 0, ...older);
+    // The row that used to be first now has a predecessor.
+    const boundary = this.messagesModel.rowData(older.length);
+    if (boundary) {
+      this.messagesModel.setRowData(older.length, this.toRow(list[cut]!, list[cut - 1]));
+    }
+
+    setTimeout(() => {
+      try {
+        const added = this.win.conv_viewport_h - beforeH;
+        this.win.set_conversation_scroll(beforeY - added);
+      } catch {
+        // layout not ready
+      }
+      this.win.conv_ready = true;
+      void this.loadMediaForChat(jid);
+    }, 40);
+  }
+
   private scrollToEnd() {
-    for (const delay of [0, 60, 200, 500, 900]) {
+    for (const delay of [0, 60, 220]) {
       setTimeout(() => {
         try {
           this.win.scroll_conversation_end();
