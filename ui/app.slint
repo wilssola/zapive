@@ -216,6 +216,21 @@ export component AppWindow inherits Window {
 
     // Chats
     in-out property <[ChatItem]> chats;
+    in-out property <[ChatItem]> statuses;
+    in-out property <string> sidebar-view: "chats";
+    callback status-open(string);
+    // Status viewer
+    in-out property <bool> sv-open: false;
+    in-out property <string> sv-name: "";
+    in-out property <string> sv-time: "";
+    in-out property <string> sv-text: "";
+    in-out property <bool> sv-has-image: false;
+    in-out property <image> sv-image;
+    in-out property <int> sv-index: 0;
+    in-out property <int> sv-count: 0;
+    callback status-next();
+    callback status-prev();
+    callback status-close();
     in-out property <string> selected-jid: "";
     in-out property <string> chat-tab: "all";
     callback open-chat(string);
@@ -451,7 +466,16 @@ export component AppWindow inherits Window {
                 padding: 10px;
                 spacing: 8px;
                 alignment: start;
-                IconButton { icon: @image-url("icons/message-circle.svg"); active: true; }
+                IconButton {
+                    icon: @image-url("icons/message-circle.svg");
+                    active: root.sidebar-view == "chats";
+                    clicked => { root.sidebar-view = "chats"; }
+                }
+                IconButton {
+                    icon: @image-url("icons/circle-dot.svg");
+                    active: root.sidebar-view == "status";
+                    clicked => { root.sidebar-view = "status"; }
+                }
                 IconButton { icon: @image-url("icons/phone.svg"); }
                 IconButton { icon: @image-url("icons/users.svg"); }
                 Rectangle { vertical-stretch: 1; }
@@ -471,7 +495,92 @@ export component AppWindow inherits Window {
         Rectangle {
             width: 380px;
             background: Theme.sidebar;
+
             VerticalBox {
+                visible: root.sidebar-view == "status";
+                width: 100%;
+                height: 100%;
+                padding: 0;
+                spacing: 0;
+                Rectangle {
+                    height: 56px;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text {
+                            text: @tr("Status");
+                            color: Theme.text;
+                            font-size: 21px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+                if root.statuses.length == 0: Text {
+                    text: @tr("No recent updates");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+                ListView {
+                    for st[i] in root.statuses: Rectangle {
+                        height: 72px;
+                        clip: true;
+                        background: st-touch.has-hover ? Theme.hover : transparent;
+                        st-touch := TouchArea {
+                            clicked => { root.status-open(st.jid); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 13px;
+                            padding-right: 15px;
+                            spacing: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 0;
+                                Rectangle {
+                                    width: 53px;
+                                    height: 53px;
+                                    border-radius: 26.5px;
+                                    border-width: 2px;
+                                    border-color: Theme.accent;
+                                    Avatar {
+                                        width: 46px;
+                                        height: 46px;
+                                        x: 3.5px;
+                                        y: 3.5px;
+                                        src: st.avatar;
+                                        has-image: st.hasAvatar;
+                                        initial: st.initial;
+                                        color-idx: st.colorIdx;
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+                                Text {
+                                    text: st.name;
+                                    color: Theme.text;
+                                    font-size: 15px;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: st.time;
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            VerticalBox {
+                visible: root.sidebar-view == "chats";
+                width: 100%;
+                height: 100%;
                 padding: 0;
                 spacing: 0;
 
@@ -973,6 +1082,86 @@ export component AppWindow inherits Window {
         }
     }
     } // capture-scope
+
+    // ---------- Status viewer ----------
+    if root.sv-open: Rectangle {
+        background: #000000f0;
+        TouchArea { clicked => { root.status-next(); } }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: root.sv-name;
+                    color: white;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.sv-time + "  ·  " + root.sv-index + "/" + root.sv-count;
+                    color: #b0b8bd;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                IconButton {
+                    icon: @image-url("icons/x.svg");
+                    clicked => { root.status-close(); }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                if root.sv-has-image: Image {
+                    source: root.sv-image;
+                    width: parent.width * 0.9;
+                    height: parent.height * 0.94;
+                    x: parent.width * 0.05;
+                    y: parent.height * 0.03;
+                    image-fit: contain;
+                }
+                if !root.sv-has-image: Rectangle {
+                    width: parent.width * 0.7;
+                    height: parent.height * 0.7;
+                    x: parent.width * 0.15;
+                    y: parent.height * 0.15;
+                    background: Theme.accent;
+                    border-radius: 14px;
+                    Text {
+                        text: root.sv-text;
+                        color: white;
+                        font-size: 24px;
+                        wrap: word-wrap;
+                        width: parent.width - 60px;
+                        x: 30px;
+                        height: parent.height;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                IconButton {
+                    icon: @image-url("icons/chevron-left.svg");
+                    x: 4px;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.status-prev(); }
+                }
+                IconButton {
+                    icon: @image-url("icons/chevron-right.svg");
+                    x: parent.width - self.width - 4px;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.status-next(); }
+                }
+            }
+            if root.sv-has-image && root.sv-text != "": Text {
+                text: root.sv-text;
+                color: white;
+                font-size: 14px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
 
     // ---------- Forward picker ----------
     if root.forward-open: Rectangle {

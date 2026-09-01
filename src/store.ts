@@ -47,6 +47,10 @@ export interface ChatMeta {
   archived?: boolean;
 }
 
+function fresh(timestamp: number): boolean {
+  return timestamp * 1000 > Date.now() - 24 * 60 * 60 * 1000;
+}
+
 function toNum(t: unknown): number {
   if (typeof t === "number") return t;
   if (typeof t === "string") return parseInt(t, 10) || 0;
@@ -370,6 +374,69 @@ export class Store {
     return this.messages.get(jid) ?? [];
   }
 
+  // ---- Status/Stories (status@broadcast, 24h lifetime) ----
+
+  statuses = new Map<string, StoredMessage[]>(); // author jid -> updates
+  statusesDirty = false;
+
+  addStatus(msg: WAMessage): StoredMessage | null {
+    const participant = msg.key?.participant;
+    if (!participant || !msg.message || !msg.key?.id) return null;
+    const author = this.canon(jidNormalizedUser(participant));
+    const content = msg.message;
+    const type = getContentType(content);
+    const timestamp = toNum(msg.messageTimestamp);
+    if (!fresh(timestamp)) return null;
+    if (msg.pushName) this.contacts.set(author, msg.pushName);
+
+    let kind: MessageKind = "text";
+    let text = "";
+    if (type === "conversation") text = cleanText(content.conversation ?? "");
+    else if (type === "extendedTextMessage")
+      text = cleanText(content.extendedTextMessage?.text ?? "");
+    else if (type === "imageMessage") {
+      kind = "image";
+      text = cleanText(content.imageMessage?.caption ?? "");
+    } else if (type === "videoMessage") {
+      kind = "image"; // rendered from the embedded jpeg thumbnail
+      text = cleanText(content.videoMessage?.caption ?? "");
+    } else return null;
+
+    const entry: StoredMessage = {
+      id: msg.key.id,
+      jid: author,
+      kind,
+      text,
+      fromMe: !!msg.key.fromMe,
+      sender: this.contacts.get(author) ?? displayId(author),
+      senderJid: author,
+      timestamp,
+      raw: msg,
+    };
+    const list = this.statuses.get(author) ?? [];
+    if (list.some((m) => m.id === entry.id)) return null;
+    list.push(entry);
+    list.sort((a, b) => a.timestamp - b.timestamp);
+    this.statuses.set(author, list);
+    this.statusesDirty = true;
+    return entry;
+  }
+
+  pruneStatuses() {
+    for (const [author, list] of this.statuses) {
+      const kept = list.filter((m) => fresh(m.timestamp));
+      if (kept.length === 0) this.statuses.delete(author);
+      else if (kept.length !== list.length) this.statuses.set(author, kept);
+    }
+  }
+
+  statusAuthors(): { jid: string; latest: StoredMessage; count: number }[] {
+    this.pruneStatuses();
+    return [...this.statuses.entries()]
+      .map(([jid, list]) => ({ jid, latest: list[list.length - 1]!, count: list.length }))
+      .sort((a, b) => b.latest.timestamp - a.latest.timestamp);
+  }
+
   // The oldest stored message that still has its raw WAMessage (needed as
   // the anchor for on-demand history fetches).
   oldestMessage(): StoredMessage | null {
@@ -445,6 +512,16 @@ export class Store {
       db.del(`store:msgs:${jid}`);
     }
     this.deletedJids.clear();
+    if (this.statusesDirty) {
+      this.pruneStatuses();
+      db.set(
+        "store:statuses",
+        JSON.stringify(
+          [...this.statuses.entries()].map(([jid, list]) => [jid, dehydrate(list)]),
+        ),
+      );
+      this.statusesDirty = false;
+    }
     let saved = 0;
     for (const jid of this.dirtyJids) {
       const list = this.messages.get(jid) ?? [];
@@ -466,6 +543,16 @@ export class Store {
       const jid = key.slice("store:msgs:".length);
       const raw = db.get(key);
       if (raw) this.messages.set(jid, hydrate(JSON.parse(raw)));
+    }
+    const statuses = db.get("store:statuses");
+    if (statuses) {
+      this.statuses = new Map(
+        (JSON.parse(statuses) as [string, StoredMessage[]][]).map(([jid, list]) => [
+          jid,
+          hydrate(list),
+        ]),
+      );
+      this.pruneStatuses();
     }
     // Collapse any lid/pn duplicates persisted by older builds.
     for (const [lid, pn] of this.aliases) {

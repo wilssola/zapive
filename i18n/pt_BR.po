@@ -146,3 +146,9 @@ msgstr "Sair do WhatsApp"
 
 msgid "Add a caption"
 msgstr "Adicione uma legenda"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "No recent updates"
+msgstr "Nenhuma atualização recente"

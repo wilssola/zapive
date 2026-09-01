@@ -63,6 +63,20 @@ export interface AppWindow {
   pairing_mode: boolean;
   pairing_code: string;
   chats: ArrayModel<ChatRow>;
+  statuses: ArrayModel<ChatRow>;
+  sidebar_view: string;
+  status_open: (jid: string) => void;
+  sv_open: boolean;
+  sv_name: string;
+  sv_time: string;
+  sv_text: string;
+  sv_has_image: boolean;
+  sv_image: SlintImageData;
+  sv_index: number;
+  sv_count: number;
+  status_next: () => void;
+  status_prev: () => void;
+  status_close: () => void;
   selected_jid: string;
   stick_bottom: boolean;
   chat_tab: string;
@@ -142,12 +156,22 @@ export class Bridge implements WAListener {
   private searchText = "";
   private tab = "all";
   private notify = new Notify();
+  private statusModel = new ArrayModel<ChatRow>([]);
+  private viewer: { items: StoredMessage[]; idx: number } | null = null;
 
   constructor(win: AppWindow, media: MediaService) {
     this.win = win;
     this.media = media;
     win.chats = this.chatsModel;
     win.messages = this.messagesModel;
+    win.statuses = this.statusModel;
+    win.status_open = (jid) => void this.openStatusViewer(jid);
+    win.status_next = () => void this.stepStatus(1);
+    win.status_prev = () => void this.stepStatus(-1);
+    win.status_close = () => {
+      this.viewer = null;
+      win.sv_open = false;
+    };
 
     win.open_chat = (jid) => this.openDm(jid);
     win.search_changed = (text) => {
@@ -197,6 +221,7 @@ export class Bridge implements WAListener {
         `total=${this.store.totalMessages()} oldestTs=${this.store.oldestMessage()?.timestamp}`,
     );
     this.refreshChats();
+    this.refreshStatuses();
   }
 
   importLegacyStore(json: string) {
@@ -356,6 +381,13 @@ export class Bridge implements WAListener {
 
   onMessagesUpsert(messages: WAMessage[]) {
     for (const raw of messages) {
+      if (raw.key?.remoteJid === "status@broadcast") {
+        if (this.store.addStatus(raw)) {
+          this.refreshStatuses();
+          this.scheduleSave();
+        }
+        continue;
+      }
       const pm = raw.message?.protocolMessage;
       if (pm?.key?.id && pm.type === proto.Message.ProtocolMessage.Type.REVOKE) {
         const chatJid = this.store.canon(
@@ -575,6 +607,85 @@ export class Bridge implements WAListener {
     }
     if (changed && this.currentJid) {
       this.currentJid = this.store.canon(this.currentJid);
+    }
+  }
+
+  private refreshStatuses() {
+    const rows = this.store.statusAuthors().map((a) => {
+      const name = this.store.chatName(a.jid);
+      const avatar = this.media.avatarFor(a.jid);
+      if (!this.requestedAvatars.has(a.jid)) {
+        this.requestedAvatars.add(a.jid);
+        this.avatarQueue.push(a.jid);
+        void this.drainAvatars();
+      }
+      return {
+        jid: a.jid,
+        name,
+        preview:
+          a.latest.kind === "image" && a.latest.text === ""
+            ? t("preview.photo")
+            : a.latest.text,
+        time: formatTime(a.latest.timestamp),
+        avatar: avatar ?? EMPTY_IMAGE,
+        hasAvatar: !!avatar,
+        initial: initialOf(name),
+        colorIdx: colorIdxOf(a.jid),
+        unread: a.count,
+        pinned: false,
+      };
+    });
+    this.statusModel.splice(0, this.statusModel.length, ...rows);
+  }
+
+  private async openStatusViewer(jid: string) {
+    const items = this.store.statuses.get(jid);
+    if (!items || items.length === 0) return;
+    this.viewer = { items, idx: 0 };
+    this.win.sv_open = true;
+    await this.loadViewerItem();
+  }
+
+  private async stepStatus(delta: number) {
+    if (!this.viewer) return;
+    const next = this.viewer.idx + delta;
+    if (next < 0 || next >= this.viewer.items.length) {
+      if (next >= this.viewer.items.length) {
+        this.viewer = null;
+        this.win.sv_open = false;
+      }
+      return;
+    }
+    this.viewer.idx = next;
+    await this.loadViewerItem();
+  }
+
+  private async loadViewerItem() {
+    const v = this.viewer;
+    if (!v) return;
+    const item = v.items[v.idx]!;
+    this.win.sv_name = this.store.chatName(item.jid);
+    this.win.sv_time = formatTime(item.timestamp);
+    this.win.sv_text = item.text;
+    this.win.sv_index = v.idx + 1;
+    this.win.sv_count = v.items.length;
+    this.win.sv_has_image = false;
+    if (item.kind !== "image" || !item.raw?.message) return;
+    let img = null;
+    const content = item.raw.message;
+    if (content.imageMessage) {
+      const path = await this.media.ensureCached(`status_${item.id}`, item.raw);
+      if (path) img = await this.media.decodeImage(`status_${item.id}`, path);
+      if (!img && content.imageMessage.jpegThumbnail?.length) {
+        img = await this.media.decodeRaw(Buffer.from(content.imageMessage.jpegThumbnail));
+      }
+    } else if (content.videoMessage?.jpegThumbnail?.length) {
+      img = await this.media.decodeRaw(Buffer.from(content.videoMessage.jpegThumbnail));
+    }
+    if (this.viewer !== v || v.items[v.idx] !== item) return;
+    if (img) {
+      this.win.sv_image = img;
+      this.win.sv_has_image = true;
     }
   }
 

@@ -212,6 +212,27 @@ export class MediaService {
     }
   }
 
+  // Decodes an in-memory image buffer (e.g. an embedded video thumbnail).
+  async decodeRaw(buf: Buffer): Promise<DecodedImage | null> {
+    try {
+      const { data, info } = await sharp(buf)
+        .rotate()
+        .resize(1280, 1280, { fit: "inside", withoutEnlargement: true })
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      return {
+        width: info.width,
+        height: info.height,
+        data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+        displayW: info.width,
+        displayH: info.height,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   // Saves a clipboard image (if any) to a temp PNG and returns its path.
   async clipboardImage(): Promise<string | null> {
     const dir = join(CACHE_DIR, ".tmp");
