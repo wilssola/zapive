@@ -232,8 +232,8 @@ export class Store {
       unread: existing?.unread ?? 0,
       community: existing?.community,
       isCommunity: existing?.isCommunity,
-      pinned:
-        extra.pinned === undefined ? (existing?.pinned ?? 0) : toNum(extra.pinned ?? 0),
+      // null means "unchanged" in chat updates; only a number changes the pin
+      pinned: extra.pinned == null ? (existing?.pinned ?? 0) : toNum(extra.pinned),
       archived: archivedRaw === undefined || archivedRaw === null
         ? (existing?.archived ?? false)
         : !!archivedRaw,

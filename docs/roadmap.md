@@ -23,7 +23,6 @@ sending does not.
 - **Mark as read / unread**, and sending read receipts explicitly
 - **Group management** — participant list, add/remove, admin actions
 - **Drag and drop** files onto the conversation
-- **Video playback in-window** (currently opens externally)
 - **Packaging** — signed installer with a proper app icon, autostart
   option, and a portable build
 
@@ -42,7 +41,7 @@ sending does not.
 | Limitation | Reason |
 |---|---|
 | Flag emoji render as letters (🇧🇷 → BR) | Slint font fallback lacks regional indicator sequences |
-| Video opens in the system player | No embedded video surface yet; voice notes play in-app |
+| Video playback is frame-streamed, not hardware-decoded | Slint has no video item; ffmpeg feeds frames and ffplay the audio |
 | History only goes back as far as the phone serves | WhatsApp on-demand sync returns ~50 messages per request |
 | GIF search catalogue is limited without a key | The keyless provider (Openverse) indexes openly licensed media, not meme GIFs; Giphy needs a free key |
 | No sticker store, packs or emoji-category tabs | Baileys exposes no sticker-pack API; only sent and starred stickers are available |

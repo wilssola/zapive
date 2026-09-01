@@ -85,6 +85,7 @@ export struct MessageItem {
     groupIndent: bool,
     showAvatar: bool,
     sticker: bool,
+    gif: bool,
     wave: image,
     hasWave: bool,
     playing: bool,
@@ -375,6 +376,13 @@ export component AppWindow inherits Window {
     // Lightbox
     in-out property <bool> lightbox-open: false;
     in-out property <image> lightbox-image;
+    // In-app video player
+    in-out property <bool> video-open: false;
+    in-out property <image> video-frame;
+    in-out property <int> video-w: 0;
+    in-out property <int> video-h: 0;
+    callback open-video(string);
+    callback close-video();
 
     // Send-image preview (paste / attach confirmation)
     in-out property <bool> preview-open: false;
@@ -1126,13 +1134,32 @@ export component AppWindow inherits Window {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
-                                    clicked => { root.play-audio(msg.mediaPath); }
+                                    clicked => { root.open-video(msg.id); }
                                     Image {
                                         source: msg.picture;
                                         width: parent.width;
                                         height: parent.height;
                                     }
-                                    Rectangle {
+                                    // GIF badge, shown while the clip rests.
+                                    if msg.gif && !msg.playing: Rectangle {
+                                        x: 8px;
+                                        y: parent.height - self.height - 8px;
+                                        width: gif-label.preferred-width + 12px;
+                                        height: 20px;
+                                        border-radius: 4px;
+                                        background: #000000a0;
+                                        gif-label := Text {
+                                            text: "GIF";
+                                            color: white;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if !msg.gif: Rectangle {
                                         width: 46px;
                                         height: 46px;
                                         border-radius: 23px;
@@ -2306,6 +2333,34 @@ export component AppWindow inherits Window {
                         root.confirm-send-image(preview-caption.text);
                         preview-caption.text = "";
                     }
+                }
+            }
+        }
+    }
+
+    // ---------- Video player ----------
+    if root.video-open: Rectangle {
+        background: #000000ee;
+        TouchArea { }
+        VerticalLayout {
+            padding: 16px;
+            spacing: 10px;
+            HorizontalLayout {
+                alignment: end;
+                IconButton {
+                    icon: @image-url("icons/x.svg");
+                    clicked => { root.close-video(); }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                Image {
+                    source: root.video-frame;
+                    width: min(parent.width * 0.94, root.video-w * 1.6px);
+                    height: self.width * root.video-h / max(root.video-w, 1);
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
                 }
             }
         }

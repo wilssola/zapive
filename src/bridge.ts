@@ -77,6 +77,7 @@ interface MessageRow {
   groupIndent: boolean;
   showAvatar: boolean;
   sticker: boolean;
+  gif: boolean;
   wave: SlintImageData;
   hasWave: boolean;
   playing: boolean;
@@ -201,6 +202,12 @@ export interface AppWindow {
   settings_status: string;
   lightbox_open: boolean;
   lightbox_image: SlintImageData;
+  video_open: boolean;
+  video_frame: SlintImageData;
+  video_w: number;
+  video_h: number;
+  open_video: (id: string) => void;
+  close_video: () => void;
   unlock: (pin: string) => void;
   save_pin: (current: string, next: string) => void;
   remove_pin: (current: string) => void;
@@ -368,6 +375,11 @@ export class Bridge implements WAListener {
       win.preview_open = false;
     };
     win.play_audio = (path) => this.media.play(path);
+    win.open_video = (id) => void this.handleVideoClick(id);
+    win.close_video = () => {
+      this.media.stopVideo();
+      win.video_open = false;
+    };
     win.audio_toggle = (id) => void this.toggleAudio(id);
     win.audio_seek = (id, frac) => void this.seekAudio(id, frac);
     win.request_pairing_code = (phone) => void this.handlePairing(phone);
@@ -421,9 +433,9 @@ export class Bridge implements WAListener {
       this.groupsFetched = true;
       void this.fetchGroupNames();
     }
-    const fullResync = this.db?.settingGet("appstate_seeded") !== "1";
+    const fullResync = this.db?.settingGet("appstate_seeded_v2") !== "1";
     void this.service.resyncAppState(fullResync).then(() => {
-      if (fullResync) this.db?.settingSet("appstate_seeded", "1");
+      if (fullResync) this.db?.settingSet("appstate_seeded_v2", "1");
     });
     // Backfill old conversations via on-demand history sync (the pairing
     // history payload from the phone arrives empty).
@@ -481,7 +493,7 @@ export class Bridge implements WAListener {
     this.chatsModel.splice(0, this.chatsModel.length);
     this.messagesModel.splice(0, this.messagesModel.length);
     this.db?.delPrefix("store:");
-    this.db?.settingSet("appstate_seeded", "0");
+    this.db?.settingSet("appstate_seeded_v2", "0");
   }
 
   onHistorySet(payload: unknown) {
@@ -947,14 +959,67 @@ export class Bridge implements WAListener {
     }
   }
 
+  // ---- In-app video player ----
+
+  // A resting GIF replays on click; a playing one opens full screen.
+  private async handleVideoClick(id: string) {
+    const jid = this.currentJid;
+    const stored = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
+    if (stored?.gif && !this.animated.has(id)) {
+      const frames = this.media.cachedFrames(id);
+      if (frames.length > 1) {
+        this.animated.set(id, { frames, idx: 0, loop: false });
+        this.ensureStickerTicker();
+        return;
+      }
+    }
+    await this.openVideo(id);
+  }
+
+  private async openVideo(id: string) {
+    const jid = this.currentJid;
+    const stored = jid ? this.store.messagesFor(jid).find((m) => m.id === id) : null;
+    if (!stored?.raw) return;
+    const path = await this.media.ensureCached(id, stored.raw);
+    if (!path || this.currentJid !== jid) return;
+    this.win.video_open = true;
+    const size = await this.media.playVideo(
+      id,
+      path,
+      (img) => {
+        this.win.video_frame = img;
+      },
+      () => {
+        this.win.video_open = false;
+      },
+    );
+    if (!size) {
+      this.win.video_open = false;
+      return;
+    }
+    this.win.video_w = size.width;
+    this.win.video_h = size.height;
+  }
+
   // ---- Animated stickers ----
   // Slint images are static buffers, so animation means swapping frames
   // on a shared ticker while the conversation is open.
 
-  private animated = new Map<string, { frames: SlintImageData[]; idx: number }>();
+  private animated = new Map<
+    string,
+    { frames: SlintImageData[]; idx: number; loop: boolean }
+  >();
   private stickerTimer: NodeJS.Timeout | null = null;
 
+  // Animating too many clips at once wastes CPU; keep the newest few.
+  private static readonly MAX_ANIMATIONS = 6;
+
   private ensureStickerTicker() {
+    while (this.animated.size > Bridge.MAX_ANIMATIONS) {
+      const oldest = this.animated.keys().next().value;
+      if (oldest === undefined) break;
+      this.animated.delete(oldest);
+    }
     if (this.stickerTimer) return;
     this.stickerTimer = setInterval(() => {
       if (this.animated.size === 0) {
@@ -963,10 +1028,17 @@ export class Bridge implements WAListener {
         return;
       }
       for (const [id, anim] of this.animated) {
-        anim.idx = (anim.idx + 1) % anim.frames.length;
-        this.patchRow(id, { picture: anim.frames[anim.idx]! });
+        const next = anim.idx + 1;
+        if (next >= anim.frames.length && !anim.loop) {
+          // GIFs play once and rest on their first frame, like WhatsApp.
+          this.animated.delete(id);
+          this.patchRow(id, { picture: anim.frames[0]!, playing: false });
+          continue;
+        }
+        anim.idx = next % anim.frames.length;
+        this.patchRow(id, { picture: anim.frames[anim.idx]!, playing: true });
       }
-    }, 110);
+    }, 66); // ~15 fps, matching the extracted frame rate
   }
 
   private stopStickerAnimations() {
@@ -1516,6 +1588,8 @@ export class Bridge implements WAListener {
   private openJid(jid: string) {
     this.stopAudio(); // never leave a voice note playing behind
     this.stopStickerAnimations();
+    this.media.stopVideo();
+    this.win.video_open = false;
     if (this.currentJid && this.currentJid !== jid) {
       this.scrollPos.set(this.currentJid, this.win.conv_scroll);
     }
@@ -1619,6 +1693,7 @@ export class Bridge implements WAListener {
       groupIndent,
       showAvatar: groupIndent && firstOfRun,
       sticker: !!m.sticker,
+      gif: !!m.gif,
       wave: EMPTY_IMAGE,
       hasWave: false,
       playing: false,
@@ -1641,6 +1716,29 @@ export class Bridge implements WAListener {
   private async loadMediaForMessage(stored: StoredMessage) {
     if (!stored.raw) return;
     const jid = stored.jid;
+    if (stored.kind === "video" && stored.gif) {
+      // GIFs loop inline: download the short clip and cycle its frames.
+      const path = await this.media.ensureCached(stored.id, stored.raw);
+      if (path && this.currentJid === jid) {
+        const frames = await this.media.videoFrames(stored.id, path);
+        if (frames.length > 0 && this.currentJid === jid) {
+          const first = frames[0]!;
+          const scale = Math.min(330 / first.displayW, 380 / first.displayH, 1);
+          this.patchRow(stored.id, {
+            picture: first,
+            picW: Math.max(1, Math.round(first.displayW * scale)),
+            picH: Math.max(1, Math.round(first.displayH * scale)),
+            mediaPath: path,
+            mediaReady: true,
+          });
+          if (frames.length > 1) {
+            this.animated.set(stored.id, { frames, idx: 0, loop: false });
+            this.ensureStickerTicker();
+          }
+          return;
+        }
+      }
+    }
     if (stored.kind === "video") {
       // Show the embedded thumbnail; the clip downloads only on click.
       const thumb = stored.raw.message?.videoMessage?.jpegThumbnail;
@@ -1680,7 +1778,7 @@ export class Bridge implements WAListener {
         mediaReady: true,
       });
       if (frames.length > 1) {
-        this.animated.set(stored.id, { frames, idx: 0 });
+        this.animated.set(stored.id, { frames, idx: 0, loop: true });
         this.ensureStickerTicker();
       }
       return;

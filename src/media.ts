@@ -297,6 +297,142 @@ export class MediaService {
     return frames;
   }
 
+  // Extracts frames from a short clip so GIFs can loop inside the bubble
+  // instead of opening an external player.
+  async videoFrames(msgId: string, filePath: string): Promise<DecodedImage[]> {
+    const cached = this.stickerAnim.get(msgId);
+    if (cached) return cached;
+    const frames: DecodedImage[] = [];
+    try {
+      const src = await this.plainAudioPath(msgId, filePath);
+      const dir = join(CACHE_DIR, ".tmp", `frames_${sanitize(msgId)}`);
+      await mkdir(dir, { recursive: true });
+      await execFileAsync(
+        this.findFfmpeg()!,
+        ["-hide_banner", "-loglevel", "error", "-y", "-i", src,
+         "-vf", "fps=15,scale=320:-2", "-frames:v", "45", join(dir, "f_%03d.png")],
+        { timeout: 60_000 },
+      );
+      for (const file of readdirSync(dir).sort()) {
+        const { data, info } = await sharp(join(dir, file))
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        frames.push({
+          width: info.width,
+          height: info.height,
+          data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+          displayW: info.width,
+          displayH: info.height,
+        });
+      }
+      await rm(dir, { recursive: true, force: true });
+    } catch {
+      // leave whatever decoded; caller falls back to the thumbnail
+    }
+    this.stickerAnim.set(msgId, frames);
+    return frames;
+  }
+
+  // Frames already extracted for a clip (empty when not decoded yet).
+  cachedFrames(msgId: string): DecodedImage[] {
+    return this.stickerAnim.get(msgId) ?? [];
+  }
+
+  // ---- In-app video playback ----
+  // Slint has no video item, so ffmpeg streams raw frames that the UI
+  // paints, while ffplay renders the audio track in lockstep.
+
+  private videoProcs: ReturnType<typeof spawn>[] = [];
+
+  private async probeSize(src: string): Promise<{ w: number; h: number }> {
+    const ffprobe = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffprobe.exe");
+    try {
+      const { stdout } = await execFileAsync(ffprobe, [
+        "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=p=0", src,
+      ], { timeout: 20_000 });
+      const [w, h] = stdout.trim().split(",").map((n) => parseInt(n, 10));
+      if (w && h) return { w, h };
+    } catch {
+      // fall through to a default
+    }
+    return { w: 640, h: 360 };
+  }
+
+  async playVideo(
+    msgId: string,
+    filePath: string,
+    onFrame: (img: DecodedImage) => void,
+    onEnd: () => void,
+  ): Promise<{ width: number; height: number } | null> {
+    this.stopVideo();
+    try {
+      const src = await this.plainAudioPath(msgId, filePath);
+      const { w, h } = await this.probeSize(src);
+      const targetW = Math.min(560, w % 2 === 0 ? w : w - 1);
+      const targetH = Math.max(2, Math.round((h * targetW) / w / 2) * 2);
+      const frameBytes = targetW * targetH * 4;
+      const fps = 15;
+
+      const video = spawn(
+        this.findFfmpeg()!,
+        ["-hide_banner", "-loglevel", "error", "-re", "-i", src,
+         "-vf", `fps=${fps},scale=${targetW}:${targetH}`,
+         "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+        { stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
+      const audio = spawn(
+        ffplay,
+        ["-nodisp", "-autoexit", "-vn", "-loglevel", "quiet", src],
+        { stdio: "ignore" },
+      );
+      this.videoProcs = [video, audio];
+
+      let pending: Buffer = Buffer.alloc(0);
+      video.stdout?.on("data", (chunk: Buffer) => {
+        pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk]);
+        while (pending.length >= frameBytes) {
+          const frame = pending.subarray(0, frameBytes);
+          pending = pending.subarray(frameBytes);
+          onFrame({
+            width: targetW,
+            height: targetH,
+            data: new Uint8ClampedArray(
+              frame.buffer.slice(frame.byteOffset, frame.byteOffset + frameBytes),
+            ),
+            displayW: targetW,
+            displayH: targetH,
+          });
+        }
+      });
+      video.once("close", () => {
+        if (this.videoProcs.includes(video)) onEnd();
+      });
+      return { width: targetW, height: targetH };
+    } catch {
+      this.stopVideo();
+      return null;
+    }
+  }
+
+  stopVideo(): void {
+    const procs = this.videoProcs;
+    this.videoProcs = [];
+    for (const proc of procs) {
+      try {
+        proc.kill();
+        if (proc.pid) {
+          spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
+        }
+      } catch {
+        // already gone
+      }
+    }
+  }
+
   // ---- GIF search (Giphy) ----
   // Baileys has no GIF API, so searching mirrors what WhatsApp does:
   // query a GIF provider, then send the mp4 as a gif-playback video.
