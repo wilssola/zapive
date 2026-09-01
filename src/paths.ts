@@ -1,7 +1,7 @@
 // Where Zapive keeps its files, per platform, and where it finds the
 // resources it ships with. Nothing is written next to the executable:
 // the vault and the media cache live in the user's own directories.
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -73,21 +73,54 @@ export function ensureDirs(): void {
   mkdirSync(MEDIA_CACHE, { recursive: true });
 }
 
-// Earlier builds kept everything in the working directory; move it over
-// once so an existing session survives the upgrade.
-export function migrateFromCwd(): void {
-  const moves: [string, string][] = [
-    ["zapive.db", DB_PATH],
-    ["media_cache", MEDIA_CACHE],
-  ];
-  for (const [from, to] of moves) {
-    if (!existsSync(from) || existsSync(to)) continue;
+// Moves a directory's contents across, keeping whatever the target
+// already has, and drops the source once it is empty.
+function mergeDir(from: string, to: string): number {
+  let moved = 0;
+  mkdirSync(to, { recursive: true });
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const src = join(from, entry.name);
+    const dst = join(to, entry.name);
+    if (entry.isDirectory()) {
+      moved += mergeDir(src, dst);
+      continue;
+    }
+    if (existsSync(dst)) continue;
     try {
-      mkdirSync(dirname(to), { recursive: true });
-      renameSync(from, to);
-      console.log(`[migrate] ${from} -> ${to}`);
+      renameSync(src, dst);
+      moved++;
+    } catch {
+      // a file in use: leave it behind
+    }
+  }
+  try {
+    if (readdirSync(from).length === 0) rmSync(from, { recursive: true });
+  } catch {
+    // not empty yet
+  }
+  return moved;
+}
+
+// Earlier builds kept everything in the working directory; move it over
+// so an existing session and its downloads survive the upgrade.
+export function migrateFromCwd(): void {
+  if (existsSync("zapive.db") && !existsSync(DB_PATH)) {
+    try {
+      mkdirSync(dirname(DB_PATH), { recursive: true });
+      renameSync("zapive.db", DB_PATH);
+      console.log(`[migrate] zapive.db -> ${DB_PATH}`);
     } catch (err) {
-      console.error(`[migrate] ${from} failed:`, err);
+      console.error("[migrate] zapive.db failed:", err);
+    }
+  }
+  // The cache may already hold files downloaded since the move, so the
+  // old directory is merged in rather than skipped.
+  if (existsSync("media_cache") && statSync("media_cache").isDirectory()) {
+    try {
+      const moved = mergeDir("media_cache", MEDIA_CACHE);
+      if (moved > 0) console.log(`[migrate] media_cache -> ${MEDIA_CACHE} (${moved} files)`);
+    } catch (err) {
+      console.error("[migrate] media_cache failed:", err);
     }
   }
   // WAL companions travel with the database.
