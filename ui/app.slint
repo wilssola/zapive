@@ -1498,6 +1498,10 @@ export component AppWindow inherits Window {
 
                                     width: card-w;
                                     height: img-h + host-h + title-h + desc-h;
+                                    // A bare Rectangle stretches by default and
+                                    // would swallow the bubble's leftover space.
+                                    horizontal-stretch: 0;
+                                    vertical-stretch: 0;
                                     border-radius: 6px;
                                     clip: true;
                                     background: msg.fromMe ? #ffffff14 : #00000014;
