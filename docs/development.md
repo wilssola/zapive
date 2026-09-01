@@ -23,22 +23,29 @@ bun run build     # package dist/Zapive (executable + resources)
 
 ## Packaging
 
-`bun run build` produces a self-contained folder for the host platform:
+`bun run build` produces a single executable for the host platform:
 
 ```
-dist/Zapive/
-  Zapive.exe          # Node runtime with the app injected (SEA)
-  ui/                 # app.slint and the Tabler icons
-  i18n/               # .po sources and compiled .mo catalogs
-  node_modules/       # only slint-ui, sharp and node-notifier
+dist/Zapive/Zapive.exe      # ~120 MB, nothing beside it
 ```
 
-The steps are in `scripts/build.mjs`: compile the catalogs, bundle
-`src/main.ts` with esbuild into CommonJS, generate the SEA blob, copy the
-Node binary, drop its signature and inject the blob with `postject`. The
-three packages that ship native binaries stay outside the bundle and are
-loaded at runtime through `src/native.ts`; only the host platform's
-prebuilt binaries are copied, so the folder stays around 150 MB.
+Everything rides inside it. `scripts/build.mjs` compiles the catalogs,
+bundles `src/main.ts` with esbuild into CommonJS, gathers the files that
+must exist on disk at runtime — `ui/`, `i18n/` and the three packages
+carrying native binaries (slint-ui, sharp, node-notifier) — and packs
+them into one gzipped archive (`ZPAK1`: magic, JSON manifest, payload).
+The bundle and the archive go into a Node SEA blob, which `postject`
+injects into a copy of the Node binary.
+
+Native addons cannot be loaded from memory, and Slint reads the markup
+and the icons from disk, so on first run `src/resources.ts` unpacks the
+archive into `<cache>/runtime/<content-hash>/` and points `nativeRequire`
+and the UI loader at it. The hash names the directory, so a new build
+unpacks beside the old one and then deletes it; later runs of the same
+build skip the step entirely.
+
+Only the host platform's prebuilt binaries are packed, and the archive
+compresses 51 MB down to 22 MB.
 
 Close a running packaged build before rebuilding: Windows keeps the
 executable locked and the clean step stops with a note saying so.

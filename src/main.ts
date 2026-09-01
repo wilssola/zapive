@@ -13,7 +13,8 @@ import { Db } from "./db.ts";
 import { loadCatalog, translateSlintSource } from "./slint-tr.ts";
 import { setLocale, t } from "./i18n.ts";
 import type { Locale } from "./i18n.ts";
-import { ensureDirs, migrateFromCwd, resourceRoot } from "./paths.ts";
+import { ensureDirs, migrateFromCwd } from "./paths.ts";
+import { runtimeRoot } from "./resources.ts";
 import { startTray, systemDark as readSystemDark } from "./platform.ts";
 
 // The vault and the cache live in the user's own directories; older
@@ -37,10 +38,10 @@ process.env.LANGUAGE = locale === "pt" ? "pt_BR" : "en_US";
 
 // The markup is translated at load time (see slint-tr.ts for why gettext
 // alone leaves it in English on Windows).
-const appSlint = join(resourceRoot(), "ui", "app.slint");
+const appSlint = join(runtimeRoot(), "ui", "app.slint");
 const catalog =
   locale === "pt"
-    ? loadCatalog(join(resourceRoot(), "i18n", "pt_BR.po"))
+    ? loadCatalog(join(runtimeRoot(), "i18n", "pt_BR.po"))
     : new Map<string, string>();
 const ui = slint.loadSource(
   translateSlintSource(readFileSync(appSlint, "utf8"), catalog),

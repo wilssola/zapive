@@ -46,6 +46,7 @@ and reports clicks over stdout.
 | `src/paths.ts` | Per-platform data/cache directories and resource lookup |
 | `src/platform.ts` | Every OS-specific call: clipboard, dialogs, theme, key store, tray |
 | `src/native.ts` | Loads the addons that cannot be bundled (slint-ui, sharp, node-notifier) |
+| `src/resources.ts` | Unpacks the embedded archive (UI, catalogs, native packages) on first run |
 | `scripts/build.mjs` | Bundles and injects the app into a Node executable |
 | `ui/app.slint` | Entire interface: theme globals, screens, overlays |
 | `i18n/*.po` | Slint (`@tr`) translation catalogs, applied at load time |
@@ -132,6 +133,10 @@ attachment button reports that no dialog is available.
 | Windows | `%APPDATA%\Zapive` | `%LOCALAPPDATA%\Zapive\Cache\media` |
 | macOS | `~/Library/Application Support/Zapive` | `~/Library/Caches/Zapive/media` |
 | Linux | `$XDG_DATA_HOME/zapive` | `$XDG_CACHE_HOME/zapive/media` |
+
+The executable also unpacks its embedded resources into
+`<cache>/runtime/<content-hash>/`, which is disposable: deleting it only
+costs one unpack on the next start.
 
 Nothing is written next to the executable. A database left in the working
 directory by an earlier build is moved on the first run.
