@@ -296,13 +296,17 @@ function notificationBody(m: StoredMessage): string {
 
 // Formatted messages render as styled text; plain ones keep the
 // selectable input so text can still be dragged and copied.
+// A styled-text property never accepts null, so unformatted rows carry
+// an empty instance instead.
+const EMPTY_STYLED = StyledText.fromPlainText("");
+
 function styledFor(m: StoredMessage): { styled: unknown; hasStyled: boolean } {
   const body = m.deleted ? "" : m.text;
-  if (!body || !hasMarkup(body)) return { styled: null, hasStyled: false };
+  if (!body || !hasMarkup(body)) return { styled: EMPTY_STYLED, hasStyled: false };
   try {
     return { styled: StyledText.fromMarkdown(toMarkdown(body)), hasStyled: true };
   } catch {
-    return { styled: null, hasStyled: false };
+    return { styled: EMPTY_STYLED, hasStyled: false };
   }
 }
 
