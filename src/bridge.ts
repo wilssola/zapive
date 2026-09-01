@@ -111,6 +111,7 @@ export interface AppWindow {
   gif_send: (id: string) => void;
   gif_search: (query: string) => void;
   gif_hint: string;
+  fav_hint: string;
   gif_key_set: boolean;
   giphy_key: string;
   giphy_key_changed: (key: string) => void;
@@ -391,6 +392,10 @@ export class Bridge implements WAListener {
     this.refreshChats();
     this.refreshStatuses();
     this.refreshCalls();
+    void this.media.preloadAvatars((jid) => {
+      this.patchChatRowByJid(jid);
+      this.patchSenderAvatar(jid);
+    });
   }
 
   importLegacyStore(json: string) {
@@ -824,7 +829,9 @@ export class Bridge implements WAListener {
   // Fills the sticker tab with recently received stickers (lazy decode).
   private async loadStickerPanel() {
     void this.searchGifs("");
-    void this.fillPanel(this.favModel, this.store.starredStickers(32), false);
+    const favs = this.store.starredStickers(32);
+    this.win.fav_hint = favs.length === 0 ? t("fav.empty") : "";
+    void this.fillPanel(this.favModel, favs, false);
     const items = this.store.recentStickers(32);
     await this.fillPanel(this.stickerModel, items, false);
   }
@@ -1402,10 +1409,12 @@ export class Bridge implements WAListener {
     void this.drainAvatars();
   }
 
+  // Three workers keep the list filling quickly without hammering the
+  // server; the queue is already ordered by chat recency.
   private async drainAvatars() {
     if (this.avatarBusy) return;
     this.avatarBusy = true;
-    try {
+    const worker = async () => {
       while (this.avatarQueue.length > 0) {
         const jid = this.avatarQueue.shift()!;
         const img = await this.media.fetchAvatar(jid);
@@ -1418,8 +1427,11 @@ export class Bridge implements WAListener {
           this.avatarTries.set(jid, tries);
           if (tries < AVATAR_RETRIES) this.avatarQueue.push(jid);
         }
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 60));
       }
+    };
+    try {
+      await Promise.all([worker(), worker(), worker()]);
     } finally {
       this.avatarBusy = false;
     }

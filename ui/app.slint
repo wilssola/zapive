@@ -330,6 +330,7 @@ export component AppWindow inherits Window {
     callback picker-opened();
     callback gif-search(string);
     in-out property <string> gif-hint: "";
+    in-out property <string> fav-hint: "";
     in-out property <bool> gif-key-set: false;
     in-out property <string> giphy-key: "";
     callback giphy-key-changed(string);
@@ -1594,6 +1595,12 @@ export component AppWindow inherits Window {
                             }
                         }
                         }
+                    }
+                    if root.picker-tab == "fav" && root.fav-hint != "": Text {
+                        text: root.fav-hint;
+                        color: Theme.text-dim;
+                        font-size: 12px;
+                        wrap: word-wrap;
                     }
                     if root.picker-tab == "fav": ListView {
                         for row in root.fav-rows: Rectangle {

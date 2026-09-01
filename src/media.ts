@@ -148,7 +148,7 @@ export class MediaService {
       try {
         const dir = join(CACHE_DIR, "avatars");
         await mkdir(dir, { recursive: true });
-        const file = join(dir, `${sanitize(jid)}.png`);
+        const file = join(dir, `${avatarFileName(jid)}.png`);
         // Circular crop (alpha mask) so the toast icon is round like
         // WhatsApp's notifications.
         const size = 128;
@@ -181,6 +181,38 @@ export class MediaService {
       return img;
     } catch {
       return null; // transient — don't cache
+    }
+  }
+
+  // Loads avatars cached on disk so the chat list has pictures right
+  // away instead of waiting for the network round-trips.
+  async preloadAvatars(onReady: (jid: string) => void): Promise<void> {
+    const dir = join(CACHE_DIR, "avatars");
+    if (!existsSync(dir)) return;
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith(".png")) continue;
+      const jid = decodeAvatarFileName(file.slice(0, -4));
+      if (!jid || this.avatars.has(jid)) continue;
+      try {
+        const full = join(dir, file);
+        const buf = this.db.decryptBytes(await readFile(full));
+        const { data, info } = await sharp(buf)
+          .resize(96, 96, { fit: "cover" })
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        this.avatars.set(jid, {
+          width: info.width,
+          height: info.height,
+          data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+          displayW: info.width,
+          displayH: info.height,
+        });
+        this.avatarFiles.set(jid, resolve(full));
+        onReady(jid);
+      } catch {
+        // unreadable cache entry: it will be fetched again
+      }
     }
   }
 
@@ -304,7 +336,7 @@ export class MediaService {
   async openverse(query: string): Promise<{ id: string; preview: string; gif: string }[]> {
     const q = query.trim() || "funny";
     const url =
-      "https://api.openverse.org/v1/images/?extension=gif&page_size=24&q=" +
+      "https://api.openverse.org/v1/images/?extension=gif&page_size=20&q=" +
       encodeURIComponent(q);
     try {
       const res = await fetch(url, { headers: { "User-Agent": "Zapive" } });
@@ -711,6 +743,20 @@ function renderBars(levels: number[]): DecodedImage {
     }
   });
   return { width, height, data, displayW: width, displayH: height };
+}
+
+// Avatar files are named from the jid so the cache can be reloaded.
+function avatarFileName(jid: string): string {
+  return Buffer.from(jid, "utf8").toString("base64url");
+}
+
+function decodeAvatarFileName(name: string): string | null {
+  try {
+    const jid = Buffer.from(name, "base64url").toString("utf8");
+    return jid.includes("@") ? jid : null;
+  } catch {
+    return null;
+  }
 }
 
 function sanitize(id: string): string {

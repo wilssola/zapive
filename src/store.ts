@@ -138,6 +138,7 @@ export class Store {
   messages = new Map<string, StoredMessage[]>();
   contacts = new Map<string, string>();
   aliases = new Map<string, string>(); // @lid jid -> phone-number jid
+  starredIds = new Set<string>(); // stars can arrive before the message does
   deletedJids = new Set<string>();
 
   // Resolves a jid through the LID->PN alias table.
@@ -381,6 +382,8 @@ export class Store {
   addMessage(stored: StoredMessage): boolean {
     const list = this.messages.get(stored.jid) ?? [];
     if (list.some((m) => m.id === stored.id)) return false;
+    // A star may have synced before this message was backfilled.
+    if (this.starredIds.has(stored.id)) stored.starred = true;
     list.push(stored);
     list.sort((a, b) => a.timestamp - b.timestamp);
     if (list.length > 500) list.splice(0, list.length - 500);
@@ -416,6 +419,7 @@ export class Store {
 
   calls: CallEntry[] = [];
   callsDirty = false;
+  starredDirty = false;
 
   // Records a call event; returns the entry when it is new or changed.
   upsertCall(ev: {
@@ -559,6 +563,9 @@ export class Store {
   }
 
   setStarred(jid: string, id: string, starred: boolean): StoredMessage | null {
+    if (starred) this.starredIds.add(id);
+    else this.starredIds.delete(id);
+    this.starredDirty = true;
     const m = this.messages.get(jid)?.find((x) => x.id === id);
     if (!m || m.starred === starred) return null;
     m.starred = starred;
@@ -628,6 +635,10 @@ export class Store {
       db.del(`store:msgs:${jid}`);
     }
     this.deletedJids.clear();
+    if (this.starredDirty) {
+      db.set("store:starred", JSON.stringify([...this.starredIds]));
+      this.starredDirty = false;
+    }
     if (this.callsDirty) {
       db.set("store:calls", JSON.stringify(this.calls));
       this.callsDirty = false;
@@ -664,6 +675,8 @@ export class Store {
       const raw = db.get(key);
       if (raw) this.messages.set(jid, hydrate(JSON.parse(raw)));
     }
+    const starred = db.get("store:starred");
+    if (starred) this.starredIds = new Set(JSON.parse(starred));
     const calls = db.get("store:calls");
     if (calls) this.calls = JSON.parse(calls);
     const statuses = db.get("store:statuses");
