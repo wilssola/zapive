@@ -47,6 +47,13 @@ build skip the step entirely.
 Only the host platform's prebuilt binaries are packed, and the archive
 compresses 51 MB down to 22 MB.
 
+The icon lives in `ui/zapive.png`; `node scripts/make-ico.mjs` derives
+`ui/zapive.ico` from it (16–256 px). The window and taskbar use the PNG
+(Slint's `Window.icon`), the tray and the executable use the ICO — the
+build applies it with rcedit *before* injecting the SEA blob, because
+rewriting the PE resource table afterwards would displace the asset —
+and toasts without a contact photo fall back to the PNG.
+
 Close a running packaged build before rebuilding: Windows keeps the
 executable locked and the clean step stops with a note saying so.
 

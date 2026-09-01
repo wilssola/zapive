@@ -212,6 +212,17 @@ writeFileSync(
 sh(process.execPath, ["--experimental-sea-config", seaConfig]);
 copyFileSync(process.execPath, BIN);
 
+// The application icon must land before the blob: rcedit rewrites the
+// PE resource table, which would displace an already-injected asset.
+if (process.platform === "win32") {
+  const { rcedit } = await import("rcedit");
+  await rcedit(BIN, {
+    icon: join(ROOT, "ui", "zapive.ico"),
+    "version-string": { ProductName: "Zapive", FileDescription: "Zapive" },
+  });
+  console.log("   icon applied");
+}
+
 // Windows and macOS refuse to run a binary whose signature no longer
 // matches once the blob is injected, so the signature is dropped first.
 if (process.platform === "win32") {

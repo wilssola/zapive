@@ -186,6 +186,7 @@ if (db.hasPin()) {
 const tray = startTray(
   () => win.show(),
   () => slint.quitEventLoop(),
+  join(runtimeRoot(), "ui", "zapive.ico"),
 );
 process.on("exit", () => tray?.stop());
 

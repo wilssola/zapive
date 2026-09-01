@@ -2,7 +2,12 @@ import type NotifierApi from "node-notifier";
 import { nativeRequire } from "./native.ts";
 
 const notifier = nativeRequire("node-notifier") as typeof NotifierApi;
+import { join } from "node:path";
 import { t } from "./i18n.ts";
+import { runtimeRoot } from "./resources.ts";
+
+// Toasts without a contact photo fall back to the app's own icon.
+const APP_ICON = join(runtimeRoot(), "ui", "zapive.png");
 
 // Native Windows toast notifications with burst coalescing: several
 // messages arriving together become a single summary toast. Clicking a
@@ -27,7 +32,7 @@ export class Notify {
         {
           title,
           message: message || " ",
-          icon: icon ?? undefined,
+          icon: icon ?? APP_ICON,
           appID: "Zapive",
           wait: true, // required for the activation callback
         } as never,

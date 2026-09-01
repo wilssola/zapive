@@ -434,12 +434,17 @@ export function unwrapSecret(stored: string): string {
 export function startTray(
   onShow: () => void,
   onExit: () => void,
+  iconPath?: string,
 ): { stop: () => void } | null {
   if (!IS_WIN) return null;
+  const icon =
+    iconPath && existsSync(iconPath)
+      ? `New-Object System.Drawing.Icon('${iconPath.replace(/'/g, "''")}')`
+      : "[System.Drawing.SystemIcons]::Application";
   const script = [
     "Add-Type -AssemblyName System.Windows.Forms, System.Drawing;",
     "$ni = New-Object System.Windows.Forms.NotifyIcon;",
-    "$ni.Icon = [System.Drawing.SystemIcons]::Application;",
+    `$ni.Icon = ${icon};`,
     "$ni.Text = 'Zapive';",
     "$ni.Visible = $true;",
     "$menu = New-Object System.Windows.Forms.ContextMenuStrip;",
