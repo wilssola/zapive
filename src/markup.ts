@@ -11,24 +11,70 @@ function escapeMd(text: string): string {
 const TOKEN =
   /```([\s\S]+?)```|`([^`\n]+?)`|\*([^*\n]+?)\*|_([^_\n]+?)_|~([^~\n]+?)~/g;
 
+const MENTION = /@(\d{5,20}|all|everyone)\b/gi;
+const URL_RE = /https?:\/\/[^\s<>\]]+/gi;
+
 export function hasMarkup(text: string): boolean {
   TOKEN.lastIndex = 0;
-  return TOKEN.test(text);
+  MENTION.lastIndex = 0;
+  URL_RE.lastIndex = 0;
+  return TOKEN.test(text) || MENTION.test(text) || URL_RE.test(text);
 }
 
-export function toMarkdown(text: string): string {
+// Mentions arrive as @<number>; show the contact name and link it to the
+// conversation so clicking opens that chat.
+function renderLinks(text: string): string {
+  let out = "";
+  let last = 0;
+  URL_RE.lastIndex = 0;
+  for (let m = URL_RE.exec(text); m !== null; m = URL_RE.exec(text)) {
+    out += escapeMd(text.slice(last, m.index));
+    const url = m[0]!;
+    out += `[${escapeMd(url)}](${url})`;
+    last = m.index + url.length;
+  }
+  out += escapeMd(text.slice(last));
+  return out;
+}
+
+function renderMentions(text: string, resolve: (num: string) => string | null): string {
+  let out = "";
+  let last = 0;
+  MENTION.lastIndex = 0;
+  for (let m = MENTION.exec(text); m !== null; m = MENTION.exec(text)) {
+    out += renderLinks(text.slice(last, m.index));
+    const token = m[1]!;
+    if (/^\d+$/.test(token)) {
+      const name = resolve(token);
+      out += name
+        ? `[@${escapeMd(name)}](${token}@s.whatsapp.net)`
+        : `**@${escapeMd(token)}**`;
+    } else {
+      out += `**@${escapeMd(token)}**`;
+    }
+    last = m.index + m[0].length;
+  }
+  out += renderLinks(text.slice(last));
+  return out;
+}
+
+export function toMarkdown(
+  text: string,
+  resolveMention: (num: string) => string | null = () => null,
+): string {
+  const plain = (part: string) => renderMentions(part, resolveMention);
   let out = "";
   let last = 0;
   TOKEN.lastIndex = 0;
   for (let m = TOKEN.exec(text); m !== null; m = TOKEN.exec(text)) {
-    out += escapeMd(text.slice(last, m.index));
+    out += plain(text.slice(last, m.index));
     const [, fence, code, bold, italic, strike] = m;
     if (fence !== undefined || code !== undefined) {
       out += `\`${(fence ?? code)!.replace(/`/g, "")}\``;
     } else if (bold !== undefined) {
-      out += `**${escapeMd(bold)}**`;
+      out += `**${plain(bold)}**`;
     } else if (italic !== undefined) {
-      out += `*${escapeMd(italic)}*`;
+      out += `*${plain(italic)}*`;
     } else if (strike !== undefined) {
       out += `~~${escapeMd(strike)}~~`;
     }

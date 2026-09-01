@@ -1111,6 +1111,13 @@ export component AppWindow inherits Window {
                                 ? transparent
                                 : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
                             border-radius: 7px;
+                            if msg.showSender && msg.senderNumber != "": Text {
+                                text: msg.senderNumber;
+                                font-size: 11px;
+                                color: Theme.text-dim;
+                                x: parent.width - self.width - 9px;
+                                y: 7px;
+                            }
                             content := VerticalLayout {
                                 padding: 6px;
                                 padding-left: 9px;
@@ -1134,16 +1141,16 @@ export component AppWindow inherits Window {
                                             overflow: elide;
                                         }
                                     }
-                                    // Gap before the number; a stretching
-                                    // spacer here would loop with the
-                                    // content-driven bubble width.
-                                    Rectangle { width: 28px; }
-                                    if msg.senderNumber != "": Text {
-                                        text: msg.senderNumber;
-                                        font-size: 11px;
-                                        color: Theme.text-dim;
-                                        vertical-alignment: center;
-                                        horizontal-stretch: 0;
+                                    // Reserves the number's width without
+                                    // depending on the bubble, which would
+                                    // create a layout loop.
+                                    if msg.senderNumber != "": Rectangle {
+                                        width: num-ghost.preferred-width + 24px;
+                                        num-ghost := Text {
+                                            text: msg.senderNumber;
+                                            font-size: 11px;
+                                            visible: false;
+                                        }
                                     }
                                 }
 
@@ -1401,7 +1408,9 @@ export component AppWindow inherits Window {
                                         text: msg.styled;
                                         default-color: Theme.bubble-text;
                                         default-font-size: 14px;
+                                        link-color: Theme.sender;
                                         width: min(self.preferred-width, msg-row.max-text-w);
+                                        link-clicked(target) => { root.open-dm(target); }
                                     }
                                 }
 

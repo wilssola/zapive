@@ -17,6 +17,7 @@ export interface StoredMessage {
   gif?: boolean;
   starred?: boolean;
   sticker?: boolean;
+  mentions?: string[];
   linkTitle?: string;
   linkDesc?: string;
   linkUrl?: string;
@@ -350,10 +351,14 @@ export class Store {
       const ext = content.extendedTextMessage;
       // Link previews ride along with the text as title/description.
       const url = ext?.matchedText ?? "";
+      const mentions = (ext?.contextInfo?.mentionedJid ?? []).filter(
+        (j): j is string => typeof j === "string",
+      );
       return {
         ...base,
         kind: "text",
         text: cleanText(ext?.text ?? ""),
+        ...(mentions.length > 0 ? { mentions } : {}),
         ...(ext?.title || url
           ? {
               linkTitle: cleanText(ext?.title ?? ""),

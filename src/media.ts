@@ -858,6 +858,15 @@ export class MediaService {
     }
   }
 
+  // Hands a URL to the default browser.
+  openExternal(url: string): void {
+    if (!/^https?:\/\//i.test(url)) return;
+    spawn("cmd", ["/c", "start", "", url.replace(/&/g, "^&")], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+  }
+
   play(filePath: string): void {
     if (!filePath) return;
     void this.tempPlainCopy(filePath)

@@ -36,6 +36,8 @@ Everything below is implemented and working against a live account.
 - **WhatsApp formatting** — *bold*, _italic_, ~strike~ and ```monospace```
   render as styled text
 - **Link previews** with thumbnail, title, description and host
+- **Mentions** resolve to contact names and open that chat when clicked;
+  **links** open in the default browser
 - **Text selection** by dragging (blue selection) plus a context menu with
   Copy and Forward
 - **Scroll memory** per conversation, floating jump-to-latest button, and

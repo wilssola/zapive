@@ -303,16 +303,6 @@ function notificationBody(m: StoredMessage): string {
 // an empty instance instead.
 const EMPTY_STYLED = StyledText.fromPlainText("");
 
-function styledFor(m: StoredMessage): { styled: unknown; hasStyled: boolean } {
-  const body = m.deleted ? "" : m.text;
-  if (!body || !hasMarkup(body)) return { styled: EMPTY_STYLED, hasStyled: false };
-  try {
-    return { styled: StyledText.fromMarkdown(toMarkdown(body)), hasStyled: true };
-  } catch {
-    return { styled: EMPTY_STYLED, hasStyled: false };
-  }
-}
-
 function hostOf(url: string | undefined): string {
   if (!url) return "";
   try {
@@ -429,7 +419,11 @@ export class Bridge implements WAListener {
     win.attach_doc = () => void this.handleAttach("doc");
     win.load_older = () => this.handleScrollUpLoad();
     win.paste_clipboard = () => void this.handlePaste();
-    win.open_dm = (jid) => this.openDm(jid);
+    win.open_dm = (target) => {
+      // Styled-text links carry either a jid (mention) or a real URL.
+      if (/^https?:/i.test(target)) this.media.openExternal(target);
+      else this.openDm(target);
+    };
     win.request_forward = (msgId) => {
       if (!this.currentJid) return;
       this.pendingForward = { jid: this.currentJid, id: msgId };
@@ -1854,6 +1848,28 @@ export class Bridge implements WAListener {
     }
   }
 
+  // Formatted or mention-carrying messages render as styled text; plain
+  // ones keep the selectable input.
+  private styledFor(m: StoredMessage): { styled: unknown; hasStyled: boolean } {
+    const body = m.deleted ? "" : m.text;
+    if (!body || !hasMarkup(body)) return { styled: EMPTY_STYLED, hasStyled: false };
+    const resolve = (num: string): string | null => {
+      const jid = `${num}@s.whatsapp.net`;
+      const canon = this.store.canon(jid);
+      const known =
+        this.store.contacts.get(canon) ?? this.store.chats.get(canon)?.name ?? null;
+      return known ?? null;
+    };
+    try {
+      return {
+        styled: StyledText.fromMarkdown(toMarkdown(body, resolve)),
+        hasStyled: true,
+      };
+    } catch {
+      return { styled: EMPTY_STYLED, hasStyled: false };
+    }
+  }
+
   private toRow(m: StoredMessage, prev?: StoredMessage): MessageRow {
     const isGroup = m.jid.endsWith("@g.us");
     // A run also breaks after a pause, so a long stream from one sender
@@ -1916,7 +1932,7 @@ export class Bridge implements WAListener {
           : "",
       sticker: !!m.sticker,
       gif: !!m.gif,
-      ...styledFor(m),
+      ...this.styledFor(m),
       linkTitle: m.linkTitle ?? "",
       linkDesc: m.linkDesc ?? "",
       linkHost: hostOf(m.linkUrl),
