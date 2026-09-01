@@ -233,3 +233,6 @@ msgstr "Desfavoritar"
 
 msgid "Delete"
 msgstr "Apagar"
+
+msgid "Search name or number"
+msgstr "Pesquisar nome ou número"

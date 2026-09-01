@@ -222,6 +222,11 @@ export interface AppWindow {
   request_forward: (msgId: string) => void;
   forward_open: boolean;
   forward_to: (jid: string) => void;
+  forward_rows: ArrayModel<ChatRow>;
+  forward_search: (query: string) => void;
+  forward_preview_text: string;
+  forward_preview_image: SlintImageData;
+  forward_preview_has_image: boolean;
   paste_clipboard: () => void;
   append_composer: (t: string) => void;
   preview_open: boolean;
@@ -384,6 +389,7 @@ export class Bridge implements WAListener {
   private groupsFetched = false;
   private requestedAvatars = new Set<string>();
   private reactionsModel = new ArrayModel<ReactionRow>([]);
+  private forwardModel = new ArrayModel<ChatRow>([]);
   // Message being replied to, and the one waiting for a picked reaction.
   private replyTo: StoredMessage | null = null;
   private reactPickFor: string | null = null;
@@ -491,9 +497,18 @@ export class Bridge implements WAListener {
       if (/^https?:/i.test(target)) this.media.openExternal(target);
       else this.openDm(target);
     };
+    win.forward_rows = this.forwardModel;
+    win.forward_search = (query) => this.fillForwardRows(query);
     win.request_forward = (msgId) => {
       if (!this.currentJid) return;
       this.pendingForward = { jid: this.currentJid, id: msgId };
+      this.fillForwardRows("");
+      // Show what is being forwarded, like WhatsApp's bottom bar.
+      const msg = this.findMessage(msgId);
+      const row = this.rowFor(msgId);
+      win.forward_preview_text = msg ? previewBody(msg) : "";
+      win.forward_preview_image = row?.picture ?? EMPTY_IMAGE;
+      win.forward_preview_has_image = !!row?.mediaReady && !!row?.picW;
       win.forward_open = true;
     };
     win.forward_to = (jid) => void this.handleForwardTo(jid);
@@ -2099,6 +2114,32 @@ export class Bridge implements WAListener {
       this.win.conv_ready = true;
       void this.loadMediaForChat(jid);
     }, 40);
+  }
+
+  private rowFor(id: string) {
+    for (let i = 0; i < this.messagesModel.length; i++) {
+      const row = this.messagesModel.rowData(i);
+      if (row?.id === id) return row;
+    }
+    return null;
+  }
+
+  // Chats offered when forwarding, narrowed by the search box.
+  private fillForwardRows(query: string) {
+    const q = query.trim().toLowerCase();
+    const rows = this.store
+      .sortedChats()
+      .filter((meta) => !isChannel(meta.jid))
+      .filter((meta) => {
+        if (!q) return true;
+        const name = this.store.chatName(meta.jid).toLowerCase();
+        return name.includes(q) || meta.jid.includes(q.replace(/\D/g, ""));
+      })
+      .slice(0, 200)
+      .map((meta) =>
+        this.toChatRow(meta.jid, meta.preview, meta.timestamp, 0, false),
+      );
+    this.forwardModel.splice(0, this.forwardModel.length, ...rows);
   }
 
   private findMessage(id: string): StoredMessage | null {

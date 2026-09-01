@@ -420,6 +420,11 @@ export component AppWindow inherits Window {
 
     // Forward picker
     in-out property <bool> forward-open: false;
+    in-out property <[ChatItem]> forward-rows;
+    in-out property <string> forward-preview-text;
+    in-out property <image> forward-preview-image;
+    in-out property <bool> forward-preview-has-image;
+    callback forward-search(string);
     callback forward-to(string);
 
     public function append-composer(t: string) {
@@ -1294,6 +1299,13 @@ export component AppWindow inherits Window {
                                 ? transparent
                                 : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
                             border-radius: 7px;
+                            num-measure := Text {
+                                text: msg.senderNumber;
+                                font-size: 11px;
+                                visible: false;
+                                width: 0px;
+                                height: 0px;
+                            }
                             if msg.showSender && msg.senderNumber != "": Text {
                                 text: msg.senderNumber;
                                 font-size: 11px;
@@ -1320,7 +1332,10 @@ export component AppWindow inherits Window {
                                             font-weight: 700;
                                             color: Theme.sender;
                                             width: min(self.preferred-width,
-                                                msg-row.content-w - 90px);
+                                                msg-row.content-w - 26px
+                                                    - (msg.senderNumber != ""
+                                                        ? num-measure.preferred-width + 24px
+                                                        : 0px));
                                             overflow: elide;
                                         }
                                     }
@@ -1328,12 +1343,7 @@ export component AppWindow inherits Window {
                                     // depending on the bubble, which would
                                     // create a layout loop.
                                     if msg.senderNumber != "": Rectangle {
-                                        width: num-ghost.preferred-width + 24px;
-                                        num-ghost := Text {
-                                            text: msg.senderNumber;
-                                            font-size: 11px;
-                                            visible: false;
-                                        }
+                                        width: num-measure.preferred-width + 24px;
                                     }
                                 }
 
@@ -2681,8 +2691,43 @@ export component AppWindow inherits Window {
                         clicked => { root.forward-open = false; }
                     }
                 }
+                Rectangle {
+                    height: 38px;
+                    border-radius: 19px;
+                    background: Theme.pill;
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                source: @image-url("icons/search.svg");
+                                colorize: Theme.text-dim;
+                                width: 16px;
+                                height: 16px;
+                            }
+                        }
+                        fwd-search := TextInput {
+                            color: Theme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            single-line: true;
+                            edited => { root.forward-search(self.text); }
+                        }
+                    }
+                    if fwd-search.text == "": Text {
+                        text: @tr("Search name or number");
+                        color: Theme.text-dim;
+                        font-size: 14px;
+                        x: 40px;
+                        vertical-alignment: center;
+                        height: parent.height;
+                    }
+                }
                 ListView {
-                    for chat[i] in root.chats: Rectangle {
+                    for chat[i] in root.forward-rows: Rectangle {
                         height: 56px;
                         background: fwd-touch.has-hover ? Theme.hover : transparent;
                         border-radius: 8px;
@@ -2712,6 +2757,30 @@ export component AppWindow inherits Window {
                                 overflow: elide;
                                 horizontal-stretch: 1;
                             }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 56px;
+                    border-radius: 8px;
+                    background: Theme.pill;
+                    HorizontalLayout {
+                        padding: 8px;
+                        spacing: 10px;
+                        if root.forward-preview-has-image: Image {
+                            source: root.forward-preview-image;
+                            width: 40px;
+                            height: 40px;
+                            image-fit: cover;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: root.forward-preview-text;
+                            color: Theme.text-dim;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
                         }
                     }
                 }
