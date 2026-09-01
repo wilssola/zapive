@@ -333,6 +333,10 @@ export component AppWindow inherits Window {
     callback emoji-pick(string);
     callback sticker-send(string);
     callback picker-opened();
+    callback picker-closed();
+    changed picker-open => {
+        if (!self.picker-open) { root.picker-closed(); }
+    }
     callback gif-search(string);
     in-out property <string> gif-hint: "";
     in-out property <string> fav-hint: "";

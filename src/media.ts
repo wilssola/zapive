@@ -496,6 +496,39 @@ export class MediaService {
     }
   }
 
+  // Decodes a remote animated GIF into small frames for the picker.
+  async previewFrames(url: string): Promise<DecodedImage[]> {
+    const cached = this.previewAnim.get(url);
+    if (cached) return cached;
+    const frames: DecodedImage[] = [];
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "Zapive" } });
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        const meta = await sharp(buf, { animated: true }).metadata();
+        const pages = Math.min(meta.pages ?? 1, 12);
+        for (let page = 0; page < pages; page++) {
+          const { data, info } = await sharp(buf, { page })
+            .resize(96, 96, { fit: "inside", withoutEnlargement: true })
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+          frames.push({
+            width: info.width,
+            height: info.height,
+            data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+            displayW: info.width,
+            displayH: info.height,
+          });
+        }
+      }
+    } catch {
+      // leave empty; the caller falls back to a still frame
+    }
+    this.previewAnim.set(url, frames);
+    return frames;
+  }
+
   // Fetches a remote image (GIF preview) and decodes its first frame.
   async decodeUrl(url: string): Promise<DecodedImage | null> {
     try {
@@ -529,6 +562,7 @@ export class MediaService {
   private plainAudio = new Map<string, string>();
   private waveCache = new Map<string, DecodedImage | null>();
   private stickerAnim = new Map<string, DecodedImage[]>();
+  private previewAnim = new Map<string, DecodedImage[]>();
 
   // Decrypted copy kept around so play/seek doesn't decrypt every time.
   private async plainAudioPath(msgId: string, filePath: string): Promise<string> {

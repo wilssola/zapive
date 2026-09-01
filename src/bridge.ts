@@ -143,6 +143,7 @@ export interface AppWindow {
   emoji_pick: (e: string) => void;
   sticker_send: (id: string) => void;
   picker_opened: () => void;
+  picker_closed: () => void;
   attach_sticker: () => void;
   sidebar_view: string;
   view_changed: (view: string) => void;
@@ -361,6 +362,7 @@ export class Bridge implements WAListener {
     win.rec_cancel = () => this.cancelRecording();
     win.emoji_pick = (e) => win.append_composer(e);
     win.picker_opened = () => void this.loadStickerPanel();
+    win.picker_closed = () => this.stopPickerAnimations();
     win.sticker_send = (id) => void this.sendStickerById(id);
     win.attach_sticker = () => void this.handleAttachSticker();
 
@@ -859,12 +861,65 @@ export class Bridge implements WAListener {
 
   // Fills the sticker tab with recently received stickers (lazy decode).
   private async loadStickerPanel() {
+    this.stopPickerAnimations();
     void this.searchGifs("");
     const favs = this.store.starredStickers(32);
     this.win.fav_hint = favs.length === 0 ? t("fav.empty") : "";
     void this.fillPanel(this.favModel, favs, false);
     const items = this.store.recentStickers(32);
     await this.fillPanel(this.stickerModel, items, false);
+  }
+
+  // Picker cells animate too: frames are cycled by a shared ticker.
+  private pickerAnim = new Map<
+    string,
+    { model: ArrayModel<StickerCell[]>; row: number; col: number; frames: SlintImageData[]; idx: number }
+  >();
+  private pickerTimer: NodeJS.Timeout | null = null;
+
+  private ensurePickerTicker() {
+    if (this.pickerTimer) return;
+    this.pickerTimer = setInterval(() => {
+      if (this.pickerAnim.size === 0) {
+        clearInterval(this.pickerTimer!);
+        this.pickerTimer = null;
+        return;
+      }
+      for (const anim of this.pickerAnim.values()) {
+        anim.idx = (anim.idx + 1) % anim.frames.length;
+        const row = anim.model.rowData(anim.row);
+        if (!row) continue;
+        const copy = [...row];
+        const cell = copy[anim.col];
+        if (!cell) continue;
+        copy[anim.col] = { ...cell, pic: anim.frames[anim.idx]!, ready: true };
+        anim.model.setRowData(anim.row, copy);
+      }
+    }, 110);
+  }
+
+  private stopPickerAnimations() {
+    this.pickerAnim.clear();
+    if (this.pickerTimer) clearInterval(this.pickerTimer);
+    this.pickerTimer = null;
+  }
+
+  private registerPickerCell(
+    model: ArrayModel<StickerCell[]>,
+    id: string,
+    frames: SlintImageData[],
+  ) {
+    if (frames.length < 2) return;
+    for (let r = 0; r < model.length; r++) {
+      const row = model.rowData(r);
+      if (!row) continue;
+      const col = row.findIndex((c) => c.id === id);
+      if (col >= 0) {
+        this.pickerAnim.set(id, { model, row: r, col, frames, idx: 0 });
+        this.ensurePickerTicker();
+        return;
+      }
+    }
   }
 
   // Populates a picker grid; GIF cells use the embedded video thumbnail
@@ -887,7 +942,15 @@ export class Bridge implements WAListener {
         if (thumb?.length) img = await this.media.decodeRaw(Buffer.from(thumb));
       } else {
         const path = await this.media.ensureCached(m.id, m.raw!);
-        if (path) img = await this.media.decodeImage(m.id, path);
+        if (path) {
+          const frames = await this.media.stickerFrames(m.id, path);
+          if (frames.length > 0) {
+            img = frames[0]!;
+            setTimeout(() => this.registerPickerCell(model, m.id, frames), 0);
+          } else {
+            img = await this.media.decodeImage(m.id, path);
+          }
+        }
       }
       if (!img) continue;
       outer: for (let r = 0; r < model.length; r++) {
@@ -922,8 +985,12 @@ export class Bridge implements WAListener {
     this.gifModel.splice(0, this.gifModel.length, ...chunk(cells, 4));
     if (results.length === 0) this.win.gif_hint = t("gif.noResults");
     for (const g of results) {
-      const img = await this.media.decodeUrl(g.preview);
+      const frames = await this.media.previewFrames(g.preview);
+      const img = frames[0] ?? (await this.media.decodeUrl(g.preview));
       if (!img) continue;
+      if (frames.length > 1) {
+        setTimeout(() => this.registerPickerCell(this.gifModel, g.id, frames), 0);
+      }
       outer: for (let r = 0; r < this.gifModel.length; r++) {
         const row = this.gifModel.rowData(r);
         if (!row) continue;
