@@ -834,7 +834,9 @@ export class Bridge implements WAListener {
           : chatJid.endsWith("@g.us") && name
             ? `${name.split(" ")[0]}: `
             : "";
-        meta.preview = who + t("preview.reacted", emoji, snippet);
+        // The raw emoji still carries its variation selector, which
+        // renders as tofu; cleanText drops it like everywhere else.
+        meta.preview = who + t("preview.reacted", cleanText(emoji), snippet);
         meta.timestamp = Math.floor(Date.now() / 1000);
       }
       this.scheduleRefreshChats();
