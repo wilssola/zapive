@@ -983,22 +983,27 @@ export class Bridge implements WAListener {
     const path = await this.media.ensureCached(id, stored.raw);
     if (!path || this.currentJid !== jid) return;
     this.win.video_open = true;
-    const size = await this.media.playVideo(
-      id,
-      path,
-      (img) => {
-        this.win.video_frame = img;
-      },
-      () => {
-        this.win.video_open = false;
-      },
-    );
-    if (!size) {
-      this.win.video_open = false;
-      return;
-    }
-    this.win.video_w = size.width;
-    this.win.video_h = size.height;
+    // GIFs keep looping while zoomed and carry no audio track.
+    const loop = !!stored.gif;
+    const start = async (): Promise<boolean> => {
+      const size = await this.media.playVideo(
+        id,
+        path,
+        (img) => {
+          this.win.video_frame = img;
+        },
+        () => {
+          if (loop && this.win.video_open) void start();
+          else this.win.video_open = false;
+        },
+        !loop,
+      );
+      if (!size) return false;
+      this.win.video_w = size.width;
+      this.win.video_h = size.height;
+      return true;
+    };
+    if (!(await start())) this.win.video_open = false;
   }
 
   // ---- Animated stickers ----

@@ -366,6 +366,7 @@ export class MediaService {
     filePath: string,
     onFrame: (img: DecodedImage) => void,
     onEnd: () => void,
+    withAudio = true,
   ): Promise<{ width: number; height: number } | null> {
     this.stopVideo();
     try {
@@ -383,13 +384,15 @@ export class MediaService {
          "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
         { stdio: ["ignore", "pipe", "ignore"] },
       );
-      const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
-      const audio = spawn(
-        ffplay,
-        ["-nodisp", "-autoexit", "-vn", "-loglevel", "quiet", src],
-        { stdio: "ignore" },
-      );
-      this.videoProcs = [video, audio];
+      this.videoProcs = [video];
+      if (withAudio) {
+        const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
+        this.videoProcs.push(
+          spawn(ffplay, ["-nodisp", "-autoexit", "-vn", "-loglevel", "quiet", src], {
+            stdio: "ignore",
+          }),
+        );
+      }
 
       let pending: Buffer = Buffer.alloc(0);
       video.stdout?.on("data", (chunk: Buffer) => {
