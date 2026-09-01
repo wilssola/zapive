@@ -39,11 +39,12 @@ export class Notify {
           ]
             .join(" ")
             .toLowerCase();
-          console.log(`[notify] ${hint.trim()}`);
-          // SnoreToast says "clicked"; node-notifier rewrites it to "click".
-          if (jid && /activat|click/.test(hint)) {
-            this.onActivate?.(jid);
-          }
+          // Only the ways a toast can end WITHOUT being clicked are
+          // reported by name; a click comes back as an empty result, so
+          // anything that is not one of those counts as an activation.
+          const inert = /timedout|dismissed|hidden|failed|error/.test(hint);
+          console.log(`[notify] ${inert ? "inert" : "activate"} ${hint.trim()}`);
+          if (jid && !inert) this.onActivate?.(jid);
         },
       );
     } catch (err) {

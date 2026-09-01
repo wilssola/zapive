@@ -6,6 +6,7 @@ import {
   formatTime,
   formatDay,
   formatDuration,
+  cleanText,
   previewBody,
   reactionSummary,
   ticksFor,
@@ -15,6 +16,7 @@ import {
 } from "./store.ts";
 import { Notify } from "./notify.ts";
 import { hasMarkup, toMarkdown } from "./markup.ts";
+import type { MentionTarget } from "./markup.ts";
 import { t } from "./i18n.ts";
 import type { Db } from "./db.ts";
 import type { StoredMessage } from "./store.ts";
@@ -2064,12 +2066,19 @@ export class Bridge implements WAListener {
   private styledFor(m: StoredMessage): { styled: unknown; hasStyled: boolean } {
     const body = m.deleted ? "" : m.text;
     if (!body || !hasMarkup(body)) return { styled: EMPTY_STYLED, hasStyled: false };
-    const resolve = (num: string): string | null => {
-      const jid = `${num}@s.whatsapp.net`;
-      const canon = this.store.canon(jid);
-      const known =
-        this.store.contacts.get(canon) ?? this.store.chats.get(canon)?.name ?? null;
-      return known ?? null;
+    const resolve = (num: string): MentionTarget => {
+      // The id is either a phone number or a LID; try both before
+      // falling back on the shape of the number itself.
+      for (const form of [`${num}@s.whatsapp.net`, `${num}@lid`]) {
+        const canon = this.store.canon(form);
+        const name =
+          this.store.contacts.get(canon) ??
+          this.store.chats.get(canon)?.name ??
+          this.store.pushNames.get(canon);
+        if (name) return { name: cleanText(name), jid: canon };
+      }
+      const guess = num.length > 13 ? `${num}@lid` : `${num}@s.whatsapp.net`;
+      return { name: null, jid: this.store.canon(guess) };
     };
     try {
       return {

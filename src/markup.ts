@@ -37,7 +37,17 @@ function renderLinks(text: string): string {
   return out;
 }
 
-function renderMentions(text: string, resolve: (num: string) => string | null): string {
+// Where a mention points: the chat to open and the name to show, when
+// the id belongs to someone we know.
+export interface MentionTarget {
+  name: string | null;
+  jid: string;
+}
+
+function renderMentions(
+  text: string,
+  resolve: (num: string) => MentionTarget | null,
+): string {
   let out = "";
   let last = 0;
   MENTION.lastIndex = 0;
@@ -45,10 +55,12 @@ function renderMentions(text: string, resolve: (num: string) => string | null): 
     out += renderLinks(text.slice(last, m.index));
     const token = m[1]!;
     if (/^\d+$/.test(token)) {
-      const name = resolve(token);
-      out += name
-        ? `[@${escapeMd(name)}](${token}@s.whatsapp.net)`
-        : `**@${escapeMd(token)}**`;
+      // A mention is always a link, named or not: an unknown id still
+      // opens the conversation with that person.
+      const hit = resolve(token);
+      const label = hit?.name ?? token;
+      const jid = hit?.jid ?? `${token}@s.whatsapp.net`;
+      out += `[@${escapeMd(label)}](${jid})`;
     } else {
       out += `**@${escapeMd(token)}**`;
     }
@@ -60,7 +72,7 @@ function renderMentions(text: string, resolve: (num: string) => string | null): 
 
 export function toMarkdown(
   text: string,
-  resolveMention: (num: string) => string | null = () => null,
+  resolveMention: (num: string) => MentionTarget | null = () => null,
 ): string {
   const plain = (part: string) => renderMentions(part, resolveMention);
   let out = "";
