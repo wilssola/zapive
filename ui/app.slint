@@ -1294,7 +1294,9 @@ export component AppWindow inherits Window {
                                 }
 
                                 // Stickers have no bubble, so the timestamp
-                                // gets its own pill like WhatsApp draws it.
+                                // gets its own pill like WhatsApp draws it,
+                                // with breathing room under the artwork.
+                                if msg.sticker: Rectangle { height: 6px; }
                                 HorizontalLayout {
                                     alignment: end;
                                     Rectangle {
