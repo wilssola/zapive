@@ -21,6 +21,7 @@ Everything below is implemented and working against a live account.
 - Filters: **All**, **Unread**, **Archived**; live search by name
 - **Pinned chats** first, with a pin icon; **unread badges** in accent color
 - **@ marker** on chats where an unread message mentions you (by number or `@all`)
+- **Reactions in the list**: `Reacted 😂 to: "..."` as the latest activity
 - Previews prefixed with the sender in groups, `✓` for your own messages
 - Duplicate `@lid`/phone chats merged into one conversation
 - In-place row updates, so refreshes never reset the scroll position

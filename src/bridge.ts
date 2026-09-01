@@ -6,6 +6,7 @@ import {
   formatTime,
   formatDay,
   formatDuration,
+  previewBody,
   reactionSummary,
   ticksFor,
   displayId,
@@ -493,6 +494,7 @@ export class Bridge implements WAListener {
       } catch {
         // already visible
       }
+      void this.media.focusWindow();
       this.openDm(jid);
     };
   }
@@ -697,6 +699,8 @@ export class Bridge implements WAListener {
           rm.key.id,
           raw.key?.participant ?? (raw.key?.fromMe ? "me" : (raw.key?.remoteJid ?? "?")),
           rm.text ?? "",
+          !!raw.key?.fromMe,
+          true,
         );
         continue;
       }
@@ -804,12 +808,33 @@ export class Bridge implements WAListener {
     targetId: string,
     reactor: string,
     emoji: string,
+    fromMe = false,
+    live = false,
   ) {
     if (!remoteJid) return;
     const chatJid = this.store.canon(jidNormalizedUser(remoteJid));
     const updated = this.store.applyReaction(chatJid, targetId, reactor, emoji);
     if (updated && chatJid === this.currentJid) {
       this.patchRow(updated.id, { reactions: reactionSummary(updated) });
+    }
+    // A reaction is the chat's latest activity, and WhatsApp says so in
+    // the list: Reacted <emoji> to: "<what it reacted to>".
+    if (updated && emoji && live) {
+      const meta = this.store.chats.get(chatJid);
+      if (meta) {
+        const snippet = [...previewBody(updated)].slice(0, 32).join("");
+        const name = this.store.chatName(
+          this.store.canon(jidNormalizedUser(reactor)),
+        );
+        const who = fromMe
+          ? "✓ "
+          : chatJid.endsWith("@g.us") && name
+            ? `${name.split(" ")[0]}: `
+            : "";
+        meta.preview = who + t("preview.reacted", emoji, snippet);
+        meta.timestamp = Math.floor(Date.now() / 1000);
+      }
+      this.scheduleRefreshChats();
     }
     this.scheduleSave();
   }

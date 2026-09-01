@@ -72,6 +72,7 @@ const en = {
   "call.video": "Video call",
   "call.voice": "Voice call",
   "preview.gif": "🎬 GIF",
+  "preview.reacted": 'Reacted {0} to: "{1}"',
   "forward.title": "Forward message to",
 } as const;
 
@@ -135,6 +136,7 @@ const pt: Record<MessageKey, string> = {
   "call.video": "Chamada de v\u00eddeo",
   "call.voice": "Chamada de voz",
   "preview.gif": "🎬 GIF",
+  "preview.reacted": 'Reagiu {0} a: "{1}"',
   "forward.title": "Encaminhar mensagem para",
 };
 

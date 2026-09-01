@@ -28,9 +28,21 @@ export class Notify {
           appID: "Zapive",
           wait: true, // required for the activation callback
         } as never,
-        (_err, response) => {
-          // SnoreToast reports "activate" when the toast body is clicked.
-          if (jid && String(response).includes("activate")) this.onActivate?.(jid);
+        (err, response, metadata) => {
+          // SnoreToast reports the click through whichever of the three
+          // arguments it feels like: an "activated" response, an error
+          // carrying the same word, or metadata.activationType.
+          const hint = [
+            err instanceof Error ? err.message : String(err ?? ""),
+            String(response ?? ""),
+            JSON.stringify(metadata ?? {}),
+          ]
+            .join(" ")
+            .toLowerCase();
+          console.log(`[notify] ${hint.trim()}`);
+          if (jid && (hint.includes("activat") || hint.includes("clicked"))) {
+            this.onActivate?.(jid);
+          }
         },
       );
     } catch (err) {

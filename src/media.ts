@@ -857,6 +857,23 @@ export class MediaService {
   }
 
   // Writes text to the clipboard (base64 avoids quoting problems).
+  // Brings the app forward when a toast is clicked: showing the window
+  // is not enough once another app owns the foreground.
+  async focusWindow(): Promise<void> {
+    const script =
+      "$s = New-Object -ComObject WScript.Shell; " +
+      "$p = Get-Process -Name node -ErrorAction SilentlyContinue | " +
+      "Where-Object { $_.MainWindowTitle -eq 'Zapive' } | Select-Object -First 1; " +
+      "if ($p) { [void]$s.AppActivate($p.Id) }";
+    try {
+      await execFileAsync("powershell", ["-NoProfile", "-Command", script], {
+        timeout: 10_000,
+      });
+    } catch {
+      // focus is best-effort
+    }
+  }
+
   async setClipboard(text: string): Promise<void> {
     const b64 = Buffer.from(text, "utf8").toString("base64");
     const script =

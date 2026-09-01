@@ -842,9 +842,9 @@ function dedupeStickers(items: StoredMessage[], limit: number): StoredMessage[] 
   return out;
 }
 
-function computePreview(stored: StoredMessage): string {
-  const body =
-    stored.kind === "image"
+// What a message looks like in the chat list, without the sender prefix.
+export function previewBody(stored: StoredMessage): string {
+  return stored.kind === "image"
       ? t("preview.photo")
       : stored.kind === "audio"
         ? t("preview.audio")
@@ -853,6 +853,10 @@ function computePreview(stored: StoredMessage): string {
         : stored.kind === "doc"
           ? t("preview.document", stored.text)
           : [...stored.text.replace(/\s+/g, " ")].slice(0, 80).join("");
+}
+
+function computePreview(stored: StoredMessage): string {
+  const body = previewBody(stored);
   const prefix = stored.fromMe
     ? "✓ "
     : stored.jid.endsWith("@g.us") && stored.sender
