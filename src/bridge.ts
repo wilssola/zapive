@@ -1983,6 +1983,9 @@ export class Bridge implements WAListener {
     }
     setTimeout(() => {
       this.win.conv_ready = true;
+      // Clear anything the transition re-armed while the list still held
+      // the previous chat's offset.
+      this.win.scroll_armed = at <= 0;
     }, 120);
     this.scheduleRefreshChats();
     void this.loadMediaForChat(jid);

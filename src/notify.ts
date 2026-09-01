@@ -40,7 +40,8 @@ export class Notify {
             .join(" ")
             .toLowerCase();
           console.log(`[notify] ${hint.trim()}`);
-          if (jid && (hint.includes("activat") || hint.includes("clicked"))) {
+          // SnoreToast says "clicked"; node-notifier rewrites it to "click".
+          if (jid && /activat|click/.test(hint)) {
             this.onActivate?.(jid);
           }
         },

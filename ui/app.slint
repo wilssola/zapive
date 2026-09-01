@@ -1199,7 +1199,7 @@ export component AppWindow inherits Window {
                         root.conv-scroll = self.viewport-y;
                         root.stick-bottom =
                             self.viewport-y <= self.height - self.viewport-height + 60px;
-                        if (self.viewport-y < -120px) {
+                        if (self.viewport-y < -120px && root.conv-ready) {
                             root.scroll-armed = true;
                         }
                         if (self.viewport-y >= -4px && self.viewport-height > self.height
