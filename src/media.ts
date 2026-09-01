@@ -299,6 +299,49 @@ export class MediaService {
     }
   }
 
+  // Keyless provider: Openverse indexes openly licensed media and needs
+  // no credentials. Results are .gif files, converted to mp4 on send.
+  async openverse(query: string): Promise<{ id: string; preview: string; gif: string }[]> {
+    const q = query.trim() || "funny";
+    const url =
+      "https://api.openverse.org/v1/images/?extension=gif&page_size=24&q=" +
+      encodeURIComponent(q);
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "Zapive" } });
+      if (!res.ok) return [];
+      const body = (await res.json()) as {
+        results?: { id?: string; url?: string; thumbnail?: string }[];
+      };
+      return (body.results ?? [])
+        .map((r) => ({
+          id: r.id ?? "",
+          preview: r.thumbnail || r.url || "",
+          gif: r.url ?? "",
+        }))
+        .filter((r) => r.id && r.gif);
+    } catch {
+      return [];
+    }
+  }
+
+  // WhatsApp plays "GIFs" as looping mp4, so convert before sending.
+  async gifToMp4(gifPath: string): Promise<string | null> {
+    try {
+      const dir = join(CACHE_DIR, ".tmp");
+      await mkdir(dir, { recursive: true });
+      const out = resolve(join(dir, `gif_${Date.now()}.mp4`));
+      await execFileAsync(this.findFfmpeg()!, [
+        "-hide_banner", "-loglevel", "error", "-y", "-i", gifPath,
+        "-movflags", "faststart", "-pix_fmt", "yuv420p",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        out,
+      ], { timeout: 60_000 });
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
   // Fetches a remote image (GIF preview) and decodes its first frame.
   async decodeUrl(url: string): Promise<DecodedImage | null> {
     try {

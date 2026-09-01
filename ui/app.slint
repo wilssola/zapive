@@ -1293,19 +1293,35 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                // Stickers have no bubble, so the timestamp
+                                // gets its own pill like WhatsApp draws it.
                                 HorizontalLayout {
                                     alignment: end;
-                                    spacing: 4px;
-                                    Text {
-                                        text: msg.time;
-                                        font-size: 10px;
-                                        color: msg.fromMe ? Theme.time-out : Theme.text-dim;
-                                    }
-                                    if msg.ticks != "": Text {
-                                        text: msg.ticks;
-                                        font-size: 10px;
-                                        font-weight: 700;
-                                        color: msg.ticksBlue ? #53bdeb : Theme.time-out;
+                                    Rectangle {
+                                        width: stamp.preferred-width + (msg.sticker ? 14px : 0);
+                                        height: msg.sticker ? 20px : stamp.preferred-height;
+                                        border-radius: 10px;
+                                        background: msg.sticker
+                                            ? (msg.fromMe ? Theme.bubble-out : Theme.bubble-in)
+                                            : transparent;
+                                        stamp := HorizontalLayout {
+                                            spacing: 4px;
+                                            padding-left: msg.sticker ? 7px : 0;
+                                            padding-right: msg.sticker ? 7px : 0;
+                                            Text {
+                                                text: msg.time;
+                                                font-size: 10px;
+                                                color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                vertical-alignment: center;
+                                            }
+                                            if msg.ticks != "": Text {
+                                                text: msg.ticks;
+                                                font-size: 10px;
+                                                font-weight: 700;
+                                                color: msg.ticksBlue ? #53bdeb : Theme.time-out;
+                                                vertical-alignment: center;
+                                            }
+                                        }
                                     }
                                 }
                             }

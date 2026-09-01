@@ -871,14 +871,16 @@ export class Bridge implements WAListener {
   // gif-playback clips already present in local history.
   private async searchGifs(query: string) {
     const key = this.db?.settingGet("giphy_key") ?? "";
-    this.win.gif_key_set = !!key;
-    if (!key) {
-      this.win.gif_hint = t("gif.needKey");
-      void this.fillPanel(this.gifModel, this.store.recentGifs(24), true);
-      return;
-    }
-    this.win.gif_hint = "";
-    const results = await this.media.giphy(key, query);
+    this.win.gif_key_set = true; // search always available (keyless default)
+    this.win.gif_hint = key ? "" : t("gif.keyless");
+    // Giphy when a key is configured, otherwise the keyless provider.
+    const results = key
+      ? await this.media.giphy(key, query)
+      : (await this.media.openverse(query)).map((r) => ({
+          id: r.id,
+          preview: r.preview,
+          mp4: r.gif,
+        }));
     this.gifUrlById.clear();
     const cells: StickerCell[] = [];
     for (const g of results) {
@@ -914,7 +916,11 @@ export class Bridge implements WAListener {
       await this.sendStickerById(id);
       return;
     }
-    const path = await this.media.downloadTemp(url, "mp4");
+    const isGif = url.toLowerCase().includes(".gif");
+    const downloaded = await this.media.downloadTemp(url, isGif ? "gif" : "mp4");
+    if (!downloaded || this.currentJid !== jid) return;
+    // WhatsApp needs mp4 for gif playback.
+    const path = isGif ? await this.media.gifToMp4(downloaded) : downloaded;
     if (!path || this.currentJid !== jid) return;
     try {
       this.echoSent(await this.service.sendGif(jid, path), jid);

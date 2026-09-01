@@ -44,7 +44,7 @@ sending does not.
 | Flag emoji render as letters (🇧🇷 → BR) | Slint font fallback lacks regional indicator sequences |
 | Video opens in the system player | No embedded video surface yet; voice notes play in-app |
 | History only goes back as far as the phone serves | WhatsApp on-demand sync returns ~50 messages per request |
-| Sending a GIF forwards an existing one | Uploading a local mp4 as gif-playback is wired but not exposed in the UI |
+| GIF search catalogue is limited without a key | The keyless provider (Openverse) indexes openly licensed media, not meme GIFs; Giphy needs a free key |
 | No sticker store, packs or emoji-category tabs | Baileys exposes no sticker-pack API; only sent and starred stickers are available |
 | Calls cannot be answered from the desktop | Baileys detects and declines calls only; Zapive notifies and lists them |
 | Windows only | DPAPI, NotifyIcon, WinForms dialogs and DirectShow |
