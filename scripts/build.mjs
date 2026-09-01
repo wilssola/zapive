@@ -39,7 +39,25 @@ function sh(cmd, args, opts = {}) {
 
 // ---- 1. Clean ----
 step("cleaning dist/");
-rmSync(join(ROOT, "dist"), { recursive: true, force: true });
+try {
+  // Windows keeps a running executable locked, so retry briefly and then
+  // say what is holding it instead of dumping an EPERM stack.
+  rmSync(join(ROOT, "dist"), {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 200,
+  });
+} catch (err) {
+  if (err.code === "EPERM" || err.code === "EBUSY" || err.code === "ENOTEMPTY") {
+    console.error(
+      "\n   dist/ is locked, which means a packaged Zapive is still running.\n" +
+        "   Close it (window and tray icon) and run the build again.",
+    );
+    process.exit(1);
+  }
+  throw err;
+}
 mkdirSync(OUT, { recursive: true });
 mkdirSync(WORK, { recursive: true });
 

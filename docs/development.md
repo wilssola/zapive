@@ -40,6 +40,9 @@ three packages that ship native binaries stay outside the bundle and are
 loaded at runtime through `src/native.ts`; only the host platform's
 prebuilt binaries are copied, so the folder stays around 150 MB.
 
+Close a running packaged build before rebuilding: Windows keeps the
+executable locked and the clean step stops with a note saying so.
+
 Build on the platform you are targeting — the Node binary and the native
 addons are platform-specific. On macOS the executable is re-signed ad hoc
 so Gatekeeper allows it locally; a real distribution needs a Developer ID
