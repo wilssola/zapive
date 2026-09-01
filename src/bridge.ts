@@ -63,7 +63,8 @@ export interface AppWindow {
   pairing_mode: boolean;
   pairing_code: string;
   chats: ArrayModel<ChatRow>;
-  selected_chat: number;
+  selected_jid: string;
+  stick_bottom: boolean;
   chat_tab: string;
   search_changed: (text: string) => void;
   tab_changed: (tab: string) => void;
@@ -76,7 +77,7 @@ export interface AppWindow {
   open_dm: (jid: string) => void;
   request_forward: (msgId: string) => void;
   forward_open: boolean;
-  forward_to: (index: number) => void;
+  forward_to: (jid: string) => void;
   paste_clipboard: () => void;
   append_composer: (t: string) => void;
   preview_open: boolean;
@@ -98,7 +99,7 @@ export interface AppWindow {
   remove_pin: (current: string) => void;
   logout: () => void;
   request_pairing_code: (phone: string) => void;
-  open_chat: (index: number) => void;
+  open_chat: (jid: string) => void;
   send_message: (text: string) => void;
   attach_image: () => void;
   attach_audio: () => void;
@@ -148,7 +149,7 @@ export class Bridge implements WAListener {
     win.chats = this.chatsModel;
     win.messages = this.messagesModel;
 
-    win.open_chat = (i) => this.openChatAt(i);
+    win.open_chat = (jid) => this.openDm(jid);
     win.search_changed = (text) => {
       this.searchText = text.trim().toLowerCase();
       this.refreshChats();
@@ -169,7 +170,7 @@ export class Bridge implements WAListener {
       this.pendingForward = { jid: this.currentJid, id: msgId };
       win.forward_open = true;
     };
-    win.forward_to = (i) => void this.handleForwardTo(i);
+    win.forward_to = (jid) => void this.handleForwardTo(jid);
     win.confirm_send_image = (caption) => void this.confirmSendImage(caption);
     win.cancel_send_image = () => {
       this.pendingImage = null;
@@ -301,24 +302,27 @@ export class Bridge implements WAListener {
         if (stored.jid === this.currentJid) addedToCurrent = true;
       }
     }
-    // Older messages may have arrived for the open conversation — rebuild it.
+    // Older messages may have arrived for the open conversation. Rebuild
+    // only when it won't disturb the user's reading position.
     if (addedToCurrent && this.currentJid) {
-      const list = this.store.messagesFor(this.currentJid);
-      const rows = list.map((m, i) => this.toRow(m, i > 0 ? list[i - 1] : undefined));
-      this.messagesModel.splice(0, this.messagesModel.length, ...rows);
-      if (this.scrollUpFetch) {
-        // user was reading the top — stay there
-        setTimeout(() => {
-          try {
-            this.win.scroll_conversation_top();
-          } catch {
-            // layout not ready
-          }
-        }, 60);
-      } else {
-        this.scrollToEnd();
+      if (this.scrollUpFetch || this.win.stick_bottom) {
+        const list = this.store.messagesFor(this.currentJid);
+        const rows = list.map((m, i) => this.toRow(m, i > 0 ? list[i - 1] : undefined));
+        this.messagesModel.splice(0, this.messagesModel.length, ...rows);
+        if (this.scrollUpFetch) {
+          setTimeout(() => {
+            try {
+              this.win.scroll_conversation_top();
+            } catch {
+              // layout not ready
+            }
+          }, 60);
+        } else {
+          this.scrollToEnd();
+        }
+        void this.loadMediaForChat(this.currentJid);
       }
-      void this.loadMediaForChat(this.currentJid);
+      // else: data is stored; the view catches up on next open/scroll-up
     }
     this.scrollUpFetch = false;
     this.scheduleRefreshChats();
@@ -477,7 +481,8 @@ export class Bridge implements WAListener {
     const idx = list.findIndex((m) => m.id === stored.id);
     const prev = idx > 0 ? list[idx - 1] : undefined;
     this.messagesModel.push(this.toRow(stored, prev));
-    this.scrollToEnd();
+    // Don't yank the view down while the user is reading older messages.
+    if (stored.fromMe || this.win.stick_bottom) this.scrollToEnd();
     if (stored.kind !== "text") void this.loadMediaForMessage(stored);
   }
 
@@ -573,16 +578,37 @@ export class Bridge implements WAListener {
     }
   }
 
+  // Updates the chat list model in place (setRowData + push/remove) so the
+  // ListView keeps its scroll position instead of resetting on refresh.
   private refreshChats() {
     this.resolveLidAliases();
-    const visible = this.visibleChats();
-    const rows = visible.map((meta) =>
+    const rows = this.visibleChats().map((meta) =>
       this.toChatRow(meta.jid, meta.preview, meta.timestamp, meta.unread ?? 0),
     );
-    this.chatsModel.splice(0, this.chatsModel.length, ...rows);
-    this.win.selected_chat = this.currentJid
-      ? visible.findIndex((m) => m.jid === this.currentJid)
-      : -1;
+    const model = this.chatsModel;
+    const common = Math.min(model.length, rows.length);
+    for (let i = 0; i < common; i++) {
+      const cur = model.rowData(i);
+      const next = rows[i]!;
+      if (
+        !cur ||
+        cur.jid !== next.jid ||
+        cur.name !== next.name ||
+        cur.preview !== next.preview ||
+        cur.time !== next.time ||
+        cur.unread !== next.unread ||
+        cur.pinned !== next.pinned ||
+        cur.hasAvatar !== next.hasAvatar ||
+        cur.avatar !== next.avatar
+      ) {
+        model.setRowData(i, next);
+      }
+    }
+    if (rows.length > model.length) {
+      model.push(...rows.slice(model.length));
+    } else if (rows.length < model.length) {
+      model.remove(rows.length, model.length - rows.length);
+    }
     this.ensureAvatars();
     this.scheduleSave();
   }
@@ -664,12 +690,6 @@ export class Bridge implements WAListener {
     this.win.current_color_idx = colorIdxOf(jid);
   }
 
-  private openChatAt(index: number) {
-    const row = this.chatsModel.rowData(index);
-    if (!row) return;
-    this.openJid(row.jid, index);
-  }
-
   // Opens (or starts) the conversation with a jid; used by the chat list
   // and by clicking a sender name inside a group.
   openDm(jidRaw: string) {
@@ -679,18 +699,17 @@ export class Bridge implements WAListener {
       this.store.chats.set(jid, { jid, preview: "", timestamp: 0 });
       this.refreshChats();
     }
-    const index = this.visibleChats().findIndex((m) => m.jid === jid);
-    this.openJid(jid, index);
+    this.openJid(jid);
   }
 
   private pendingForward: { jid: string; id: string } | null = null;
 
-  private async handleForwardTo(index: number) {
-    const target = this.chatsModel.rowData(index);
+  private async handleForwardTo(targetJid: string) {
     const pending = this.pendingForward;
     this.pendingForward = null;
     this.win.forward_open = false;
-    if (!target || !pending) return;
+    if (!targetJid || !pending) return;
+    const target = { jid: targetJid };
     const raw = this.store.messagesFor(pending.jid).find((m) => m.id === pending.id)?.raw;
     if (!raw) return;
     try {
@@ -701,9 +720,10 @@ export class Bridge implements WAListener {
     }
   }
 
-  private openJid(jid: string, index: number) {
+  private openJid(jid: string) {
     this.currentJid = jid;
-    this.win.selected_chat = index;
+    this.win.selected_jid = jid;
+    this.win.stick_bottom = true;
     const meta = this.store.chats.get(jid);
     if (meta) meta.unread = 0;
     this.win.current_status = "";

@@ -216,9 +216,9 @@ export component AppWindow inherits Window {
 
     // Chats
     in-out property <[ChatItem]> chats;
-    in-out property <int> selected-chat: -1;
+    in-out property <string> selected-jid: "";
     in-out property <string> chat-tab: "all";
-    callback open-chat(int);
+    callback open-chat(string);
     callback search-changed(string);
     callback tab-changed(string);
 
@@ -233,6 +233,7 @@ export component AppWindow inherits Window {
     in-out property <int> current-color-idx: 0;
     in-out property <[MessageItem]> messages;
     in-out property <bool> attach-open: false;
+    in-out property <bool> stick-bottom: true;
     callback send-message(string);
     callback attach-image();
     callback attach-audio();
@@ -245,7 +246,7 @@ export component AppWindow inherits Window {
 
     // Forward picker
     in-out property <bool> forward-open: false;
-    callback forward-to(int);
+    callback forward-to(string);
 
     public function append-composer(t: string) {
         message-input.text = message-input.text + t;
@@ -531,10 +532,10 @@ export component AppWindow inherits Window {
                     for chat[i] in root.chats: Rectangle {
                         height: 72px;
                         clip: true;
-                        background: i == root.selected-chat ? Theme.selected
+                        background: chat.jid == root.selected-jid ? Theme.selected
                             : touch.has-hover ? Theme.hover : transparent;
                         touch := TouchArea {
-                            clicked => { root.open-chat(i); }
+                            clicked => { root.open-chat(chat.jid); }
                         }
                         HorizontalLayout {
                             padding-left: 13px;
@@ -717,6 +718,8 @@ export component AppWindow inherits Window {
 
                 msg-list := ListView {
                     changed viewport-y => {
+                        root.stick-bottom =
+                            self.viewport-y <= self.height - self.viewport-height + 60px;
                         if (self.viewport-y >= -4px && self.viewport-height > self.height) {
                             root.load-older();
                         }
@@ -1006,7 +1009,7 @@ export component AppWindow inherits Window {
                         background: fwd-touch.has-hover ? Theme.hover : transparent;
                         border-radius: 8px;
                         fwd-touch := TouchArea {
-                            clicked => { root.forward-to(i); }
+                            clicked => { root.forward-to(chat.jid); }
                         }
                         HorizontalLayout {
                             padding-left: 8px;
