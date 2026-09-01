@@ -195,6 +195,7 @@ export interface AppWindow {
   stick_bottom: boolean;
   conv_ready: boolean;
   conv_viewport_h: number;
+  scroll_armed: boolean;
   chat_tab: string;
   search_changed: (text: string) => void;
   tab_changed: (tab: string) => void;
@@ -1960,7 +1961,11 @@ export class Bridge implements WAListener {
     this.messagesModel.splice(0, this.messagesModel.length, ...rows);
     this.win.chat_open = true;
     this.win.conv_ready = false;
-    if (at > 0) this.win.stick_bottom = false;
+    if (at > 0) {
+      this.win.stick_bottom = false;
+      console.log(`[jump] ${jid} at row ${at}/${list.length}`);
+    }
+    this.win.scroll_armed = at <= 0;
     const saved = at > 0 ? 0 : this.scrollPos.get(jid);
     // Anchor across a few layout passes while hidden, then reveal.
     for (const delay of [0, 40, 90]) {

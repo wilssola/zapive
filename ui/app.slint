@@ -324,6 +324,9 @@ export component AppWindow inherits Window {
     callback gif-send(string);
     in-out property <length> conv-scroll: 0;
     in-out property <length> conv-viewport-h: 0;
+    // Cleared when a chat is opened anchored on a message, so landing at
+    // the top does not immediately pull the older rows back in.
+    in-out property <bool> scroll-armed: true;
     in-out property <bool> rec-active: false;
     in-out property <string> rec-elapsed: "0:00";
     in-out property <bool> rec-view-once: false;
@@ -1196,7 +1199,11 @@ export component AppWindow inherits Window {
                         root.conv-scroll = self.viewport-y;
                         root.stick-bottom =
                             self.viewport-y <= self.height - self.viewport-height + 60px;
-                        if (self.viewport-y >= -4px && self.viewport-height > self.height) {
+                        if (self.viewport-y < -120px) {
+                            root.scroll-armed = true;
+                        }
+                        if (self.viewport-y >= -4px && self.viewport-height > self.height
+                            && root.scroll-armed) {
                             root.load-older();
                         }
                     }
