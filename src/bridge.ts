@@ -44,6 +44,16 @@ interface StickerCell {
   ready: boolean;
 }
 
+interface ReactionRow {
+  jid: string;
+  name: string;
+  emoji: string;
+  avatar: SlintImageData;
+  hasAvatar: boolean;
+  initial: string;
+  colorIdx: number;
+}
+
 interface ChatRow {
   jid: string;
   name: string;
@@ -248,6 +258,10 @@ export interface AppWindow {
   audio_seek: (id: string, frac: number) => void;
   audio_rate_label: string;
   audio_cycle_rate: () => void;
+  reaction_rows: ArrayModel<ReactionRow>;
+  reactions_title: string;
+  reactions_open: boolean;
+  show_reactions: (msgId: string) => void;
   mini_audio: boolean;
   mini_audio_name: string;
   mini_audio_avatar: SlintImageData;
@@ -358,6 +372,7 @@ export class Bridge implements WAListener {
   private refreshTimer: NodeJS.Timeout | null = null;
   private groupsFetched = false;
   private requestedAvatars = new Set<string>();
+  private reactionsModel = new ArrayModel<ReactionRow>([]);
   // Chats whose list currently starts mid-conversation (after a jump).
   private truncated = new Set<string>();
   private selfJid = "";
@@ -479,6 +494,8 @@ export class Bridge implements WAListener {
     win.audio_toggle = (id) => void this.toggleAudio(id);
     win.audio_seek = (id, frac) => void this.seekAudio(id, frac);
     win.audio_cycle_rate = () => this.cycleAudioRate();
+    win.reaction_rows = this.reactionsModel;
+    win.show_reactions = (msgId) => this.showReactions(msgId);
     win.mini_audio_toggle = () => void this.toggleAudio(this.audio?.id ?? "");
     win.mini_audio_open = () => {
       const a = this.audio;
@@ -1843,6 +1860,12 @@ export class Bridge implements WAListener {
     if (!avatar) return;
     for (let i = 0; i < this.messagesModel.length; i++) {
       const row = this.messagesModel.rowData(i);
+      for (let r = 0; r < this.reactionsModel.length; r++) {
+        const rr = this.reactionsModel.rowData(r);
+        if (rr && rr.jid === jid && !rr.hasAvatar) {
+          this.reactionsModel.setRowData(r, { ...rr, avatar, hasAvatar: true });
+        }
+      }
       if (row && row.voiceJid === jid && !row.voiceHasAvatar) {
         this.messagesModel.setRowData(i, {
           ...row,
@@ -2042,6 +2065,33 @@ export class Bridge implements WAListener {
       this.win.conv_ready = true;
       void this.loadMediaForChat(jid);
     }, 40);
+  }
+
+  // Lists who reacted to a message, like WhatsApp's reaction sheet.
+  private showReactions(msgId: string) {
+    const jid = this.currentJid;
+    const msg = jid ? this.store.messagesFor(jid).find((m) => m.id === msgId) : null;
+    const entries = Object.entries(msg?.reactions ?? {}).filter(([, e]) => !!e);
+    if (entries.length === 0) return;
+    const rows = entries.map(([reactor, emoji]) => {
+      const who =
+        reactor === "me" ? this.selfJid : this.store.canon(jidNormalizedUser(reactor));
+      const name = reactor === "me" ? t("reactions.you") : this.store.chatName(who);
+      const avatar = this.media.avatarFor(who);
+      this.queueAvatar(who);
+      return {
+        jid: who,
+        name: name || displayId(who),
+        emoji: cleanText(emoji),
+        avatar: avatar ?? EMPTY_IMAGE,
+        hasAvatar: !!avatar,
+        initial: initialOf(name || "?"),
+        colorIdx: colorIdxOf(who),
+      };
+    });
+    this.reactionsModel.splice(0, this.reactionsModel.length, ...rows);
+    this.win.reactions_title = t("reactions.count", rows.length);
+    this.win.reactions_open = true;
   }
 
   private queueAvatar(jid: string) {

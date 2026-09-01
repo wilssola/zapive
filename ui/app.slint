@@ -39,6 +39,16 @@ export struct ChatItem {
     pinned: bool,
 }
 
+export struct ReactionItem {
+    jid: string,
+    name: string,
+    emoji: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+}
+
 export struct CallItem {
     id: string,
     from: string,
@@ -372,6 +382,11 @@ export component AppWindow inherits Window {
     callback audio-toggle(string);
     callback audio-seek(string, float);
     callback audio-cycle-rate();
+    // Who reacted to a message, opened from the reaction chip.
+    in-out property <[ReactionItem]> reaction-rows;
+    in-out property <string> reactions-title;
+    in-out property <bool> reactions-open;
+    callback show-reactions(string);
     in-out property <string> audio-rate-label: "1x";
     // Mini player shown while a voice note plays in another chat.
     in-out property <bool> mini-audio;
@@ -1614,7 +1629,7 @@ export component AppWindow inherits Window {
                                         text: msg.styled;
                                         default-color: Theme.bubble-text;
                                         default-font-size: 14px;
-                                        link-color: Theme.sender;
+                                        link-color: Theme.accent;
                                         width: min(self.preferred-width, msg-row.max-text-w);
                                         link-clicked(target) => { root.open-dm(target); }
                                     }
@@ -1706,6 +1721,10 @@ export component AppWindow inherits Window {
                             background: Theme.pill;
                             border-width: 1.5px;
                             border-color: Theme.conv-bg;
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.show-reactions(msg.id); }
+                            }
                             react-text := Text {
                                 text: msg.reactions;
                                 font-size: 11px;
@@ -2379,6 +2398,85 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Forward picker ----------
+    if root.reactions-open: Rectangle {
+        background: #00000066;
+        TouchArea { clicked => { root.reactions-open = false; } }
+        Rectangle {
+            width: 380px;
+            height: min(440px, 108px + root.reaction-rows.length * 56px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            VerticalBox {
+                padding: 18px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text {
+                        text: root.reactions-title;
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/x.svg");
+                        clicked => { root.reactions-open = false; }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                ListView {
+                    for r in root.reaction-rows: Rectangle {
+                        height: 56px;
+                        background: react-row.has-hover ? Theme.hover : transparent;
+                        react-row := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.reactions-open = false;
+                                root.open-dm(r.jid);
+                            }
+                        }
+                        HorizontalLayout {
+                            padding-left: 4px;
+                            padding-right: 4px;
+                            spacing: 12px;
+                            VerticalLayout {
+                                alignment: center;
+                                Avatar {
+                                    width: 40px;
+                                    height: 40px;
+                                    src: r.avatar;
+                                    has-image: r.hasAvatar;
+                                    initial: r.initial;
+                                    color-idx: r.colorIdx;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: r.name;
+                                    color: Theme.text;
+                                    font-size: 15px;
+                                    overflow: elide;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: r.emoji;
+                                    font-size: 20px;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if root.forward-open: Rectangle {
         background: #000000aa;
         TouchArea { clicked => { root.forward-open = false; } }

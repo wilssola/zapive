@@ -73,6 +73,8 @@ const en = {
   "call.voice": "Voice call",
   "preview.gif": "🎬 GIF",
   "preview.reacted": 'Reacted {0} to: "{1}"',
+  "reactions.count": "{0} reactions",
+  "reactions.you": "You",
   "forward.title": "Forward message to",
 } as const;
 
@@ -137,6 +139,8 @@ const pt: Record<MessageKey, string> = {
   "call.voice": "Chamada de voz",
   "preview.gif": "🎬 GIF",
   "preview.reacted": 'Reagiu {0} a: "{1}"',
+  "reactions.count": "{0} reações",
+  "reactions.you": "Você",
   "forward.title": "Encaminhar mensagem para",
 };
 
