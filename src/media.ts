@@ -236,7 +236,7 @@ export class MediaService {
 
   // ---- Audio playback (ffplay) and waveforms ----
 
-  private playProc: ReturnType<typeof spawn> | null = null;
+  private playProcs = new Set<ReturnType<typeof spawn>>();
   private playToken = 0;
   private plainAudio = new Map<string, string>();
   private waveCache = new Map<string, DecodedImage | null>();
@@ -296,51 +296,56 @@ export class MediaService {
   }
 
   get playing(): boolean {
-    return this.playProc !== null;
+    return this.playProcs.size > 0;
   }
 
   // Starts (or restarts at an offset) playback of a cached audio file.
-  // The token guards against fast successive clicks: decrypting the file
-  // is async, so a stale start must not spawn after a newer one.
+  // Decrypting is async, so a token discards starts that a newer click
+  // has already superseded.
   async playAudio(msgId: string, filePath: string, offsetSec: number): Promise<boolean> {
     this.stopAudio();
-    const token = ++this.playToken;
+    const token = this.playToken;
     try {
       const src = await this.plainAudioPath(msgId, filePath);
       if (token !== this.playToken) return false;
-      this.stopAudio();
       const ffplay = this.findFfmpeg()!.replace(/ffmpeg\.exe$/i, "ffplay.exe");
-      this.playProc = spawn(
+      const proc = spawn(
         ffplay,
         ["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", String(offsetSec), src],
         { stdio: "ignore" },
       );
-      this.playProc.once("exit", () => {
-        this.playProc = null;
+      this.playProcs.add(proc);
+      proc.once("exit", () => this.playProcs.delete(proc));
+      // A stop that arrived while the OS was still creating the process
+      // would be lost, so honor it as soon as it exists.
+      proc.once("spawn", () => {
+        if (token !== this.playToken) this.hardKill(proc);
       });
       return true;
     } catch {
-      this.playProc = null;
       return false;
+    }
+  }
+
+  private hardKill(proc: ReturnType<typeof spawn>) {
+    try {
+      proc.kill();
+      if (proc.pid) {
+        spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
+      }
+    } catch {
+      // already gone
     }
   }
 
   stopAudio(): void {
     this.playToken++;
-    const proc = this.playProc;
-    this.playProc = null;
-    if (!proc) return;
-    try {
-      proc.kill();
-      // ffplay can ignore the soft kill; make sure it really stops.
-      if (proc.pid) {
-        spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
-          stdio: "ignore",
-        });
-      }
-    } catch {
-      // already gone
+    for (const proc of this.playProcs) {
+      this.hardKill(proc);
+      // Covers the case where the process had not been created yet.
+      proc.once("spawn", () => this.hardKill(proc));
     }
+    this.playProcs.clear();
   }
 
   // ---- Voice recording (ffmpeg + DirectShow) ----
