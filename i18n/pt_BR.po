@@ -1,0 +1,148 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: pt_BR\n"
+
+msgid "Connecting..."
+msgstr "Conectando..."
+
+msgid "Enter your PIN to unlock"
+msgstr "Digite seu PIN para desbloquear"
+
+msgid "PIN"
+msgstr "PIN"
+
+msgid "Unlock"
+msgstr "Entrar"
+
+msgid "Log in to WhatsApp"
+msgstr "Entrar no WhatsApp"
+
+msgid "1.  Open WhatsApp on your phone"
+msgstr "1.  Abra o WhatsApp no seu celular"
+
+msgid "2.  Tap Menu and then Linked devices"
+msgstr "2.  Toque em Menu e depois em Aparelhos conectados"
+
+msgid "3.  Tap Link a device"
+msgstr "3.  Toque em Conectar aparelho"
+
+msgid "4.  Point your camera at this code"
+msgstr "4.  Aponte a câmera para este código"
+
+msgid "Log in with phone number  ›"
+msgstr "Entrar com número de telefone  ›"
+
+msgid "Log in with phone number"
+msgstr "Entrar com número de telefone"
+
+msgid "Enter your number with the country code to receive a code to type on your phone."
+msgstr "Digite seu número com o código do país para receber um código e inseri-lo no celular."
+
+msgid "E.g.: 5511999998888"
+msgstr "Ex.: 5511999998888"
+
+msgid "Get code"
+msgstr "Gerar código"
+
+msgid "‹  Back to QR code"
+msgstr "‹  Voltar para o QR code"
+
+msgid "Chats"
+msgstr "Conversas"
+
+msgid "Search chats"
+msgstr "Pesquisar conversa"
+
+msgid "All"
+msgstr "Tudo"
+
+msgid "Unread"
+msgstr "Não lidas"
+
+msgid "Archived"
+msgstr "Arquivadas"
+
+msgid "Select a conversation to start"
+msgstr "Selecione uma conversa para começar"
+
+msgid "Forwarded"
+msgstr "Encaminhada"
+
+msgid "Loading image..."
+msgstr "Carregando imagem..."
+
+msgid "Copy"
+msgstr "Copiar"
+
+msgid "Forward"
+msgstr "Encaminhar"
+
+msgid "Type a message"
+msgstr "Digite uma mensagem"
+
+msgid "Send"
+msgstr "Enviar"
+
+msgid "Document"
+msgstr "Documento"
+
+msgid "Photos"
+msgstr "Fotos"
+
+msgid "Audio"
+msgstr "Áudio"
+
+msgid "Forward message to"
+msgstr "Encaminhar mensagem para"
+
+msgid "Settings"
+msgstr "Configurações"
+
+msgid "Appearance"
+msgstr "Aparência"
+
+msgid "Dark"
+msgstr "Escuro"
+
+msgid "Light"
+msgstr "Claro"
+
+msgid "System"
+msgstr "Sistema"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Security"
+msgstr "Segurança"
+
+msgid "PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI)."
+msgstr "PIN ativo: a chave do cofre exige seu PIN e está vinculada à sua conta Windows (DPAPI)."
+
+msgid "Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch."
+msgstr "Os dados locais são sempre criptografados (chave protegida pela sua conta Windows). Defina um PIN para exigir desbloqueio ao abrir o app."
+
+msgid "Current PIN"
+msgstr "PIN atual"
+
+msgid "New PIN (4 to 10 digits)"
+msgstr "Novo PIN (4 a 10 dígitos)"
+
+msgid "Change PIN"
+msgstr "Alterar PIN"
+
+msgid "Set PIN"
+msgstr "Ativar PIN"
+
+msgid "Remove PIN"
+msgstr "Remover PIN"
+
+msgid "Account"
+msgstr "Conta"
+
+msgid "Log out of WhatsApp"
+msgstr "Sair do WhatsApp"
+
+msgid "Add a caption"
+msgstr "Adicione uma legenda"
