@@ -161,3 +161,27 @@ msgstr "Figurinhas"
 
 msgid "Sticker"
 msgstr "Figurinha"
+
+msgid "Contact info"
+msgstr "Dados do contato"
+
+msgid "Group info"
+msgstr "Dados do grupo"
+
+msgid "About"
+msgstr "Recado"
+
+msgid "Description"
+msgstr "Descrição"
+
+msgid "Shared media"
+msgstr "Mídia compartilhada"
+
+msgid "Archive chat"
+msgstr "Arquivar conversa"
+
+msgid "Unarchive chat"
+msgstr "Desarquivar conversa"
+
+msgid "Clear messages on this device"
+msgstr "Limpar mensagens neste dispositivo"

@@ -57,6 +57,7 @@ const en = {
   "preview.sticker": "🩵 Sticker",
   "preview.video": "🎬 Video",
   "rec.noMic": "No microphone found (install ffmpeg to record)",
+  "info.members": "{0} participants",
   "preview.gif": "🎬 GIF",
   "forward.title": "Forward message to",
 } as const;
@@ -106,6 +107,7 @@ const pt: Record<MessageKey, string> = {
   "preview.sticker": "🩵 Figurinha",
   "preview.video": "🎬 Vídeo",
   "rec.noMic": "Nenhum microfone encontrado (instale o ffmpeg para gravar)",
+  "info.members": "{0} participantes",
   "preview.gif": "🎬 GIF",
   "forward.title": "Encaminhar mensagem para",
 };

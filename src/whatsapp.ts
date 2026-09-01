@@ -311,6 +311,38 @@ export class WhatsAppService {
     }
   }
 
+  // "About" text a contact publishes on their profile.
+  async fetchAbout(jid: string): Promise<string> {
+    try {
+      const r = await this.sock?.fetchStatus(jid);
+      const entry = Array.isArray(r) ? r[0] : r;
+      return (entry as { status?: { status?: string } } | undefined)?.status?.status ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  async fetchGroupInfo(
+    jid: string,
+  ): Promise<{ desc?: string; participants?: unknown[] } | null> {
+    try {
+      return (await this.sock?.groupMetadata(jid)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async setArchived(jid: string, archived: boolean, lastMsg: WAMessage | undefined) {
+    try {
+      await this.sock?.chatModify(
+        { archive: archived, lastMessages: lastMsg ? [lastMsg] : [] } as never,
+        jid,
+      );
+    } catch (err) {
+      console.log("[chat] archive toggle failed:", String(err));
+    }
+  }
+
   async fetchGroups(): Promise<Record<string, { subject?: string }>> {
     if (!this.sock) return {};
     try {

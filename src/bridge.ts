@@ -1,7 +1,14 @@
 import { ArrayModel } from "slint-ui";
 import { jidNormalizedUser, proto } from "@whiskeysockets/baileys";
 import type { WAMessage } from "@whiskeysockets/baileys";
-import { Store, formatTime, formatDay, reactionSummary, ticksFor } from "./store.ts";
+import {
+  Store,
+  formatTime,
+  formatDay,
+  reactionSummary,
+  ticksFor,
+  displayId,
+} from "./store.ts";
 import { Notify } from "./notify.ts";
 import { t } from "./i18n.ts";
 import type { Db } from "./db.ts";
@@ -79,6 +86,23 @@ export interface AppWindow {
   rec_elapsed: string;
   rec_view_once: boolean;
   jump_latest: () => void;
+  info_open: boolean;
+  info_name: string;
+  info_id: string;
+  info_about: string;
+  info_desc: string;
+  info_is_group: boolean;
+  info_members: string;
+  info_archived: boolean;
+  info_avatar: SlintImageData;
+  info_has_avatar: boolean;
+  info_initial: string;
+  info_color_idx: number;
+  info_media: ArrayModel<StickerCell[]>;
+  open_info: () => void;
+  close_info: () => void;
+  toggle_archive: () => void;
+  clear_chat: () => void;
   rec_start: () => void;
   rec_stop: () => void;
   rec_cancel: () => void;
@@ -216,6 +240,7 @@ export class Bridge implements WAListener {
   private gifModel = new ArrayModel<StickerCell[]>([]);
   private stickerRawById = new Map<string, StoredMessage>();
   private scrollPos = new Map<string, number>();
+  private infoMediaModel = new ArrayModel<StickerCell[]>([]);
   private viewer: { items: StoredMessage[]; idx: number } | null = null;
 
   constructor(win: AppWindow, media: MediaService) {
@@ -236,6 +261,13 @@ export class Bridge implements WAListener {
     win.gif_rows = this.gifModel;
     win.gif_send = (id) => void this.sendStickerById(id);
     win.jump_latest = () => this.scrollToEnd();
+    win.info_media = this.infoMediaModel;
+    win.open_info = () => void this.openContactInfo();
+    win.close_info = () => {
+      win.info_open = false;
+    };
+    win.toggle_archive = () => void this.toggleArchive();
+    win.clear_chat = () => this.clearCurrentChat();
     win.rec_start = () => void this.startRecording();
     win.rec_stop = () => void this.stopRecording();
     win.rec_cancel = () => this.cancelRecording();
@@ -735,6 +767,74 @@ export class Bridge implements WAListener {
     } catch (err) {
       console.error("sticker send failed:", err);
     }
+  }
+
+  // ---- Contact / group info panel ----
+
+  private async openContactInfo() {
+    const jid = this.currentJid;
+    if (!jid) return;
+    const isGroup = jid.endsWith("@g.us");
+    const name = this.store.chatName(jid);
+    const avatar = this.media.avatarFor(jid);
+    this.win.info_name = name;
+    this.win.info_id = isGroup ? "" : displayId(jid);
+    this.win.info_is_group = isGroup;
+    this.win.info_about = "";
+    this.win.info_desc = "";
+    this.win.info_members = "";
+    this.win.info_archived = !!this.store.chats.get(jid)?.archived;
+    this.win.info_avatar = avatar ?? EMPTY_IMAGE;
+    this.win.info_has_avatar = !!avatar;
+    this.win.info_initial = initialOf(name);
+    this.win.info_color_idx = colorIdxOf(jid);
+    this.infoMediaModel.splice(0, this.infoMediaModel.length);
+    this.win.info_open = true;
+
+    // Shared media: reuse the thumbnails already cached for the chat.
+    const shots = this.store
+      .messagesFor(jid)
+      .filter((m) => m.kind === "image" && m.raw)
+      .slice(-12)
+      .reverse();
+    void this.fillPanel(this.infoMediaModel, shots, false);
+
+    if (isGroup) {
+      const meta = await this.service.fetchGroupInfo(jid);
+      if (this.currentJid !== jid) return;
+      this.win.info_desc = meta?.desc ?? "";
+      const count = meta?.participants?.length ?? 0;
+      if (count > 0) this.win.info_members = t("info.members", count);
+    } else {
+      const about = await this.service.fetchAbout(jid);
+      if (this.currentJid === jid) this.win.info_about = about;
+    }
+  }
+
+  private async toggleArchive() {
+    const jid = this.currentJid;
+    const meta = jid ? this.store.chats.get(jid) : null;
+    if (!jid || !meta) return;
+    const next = !meta.archived;
+    meta.archived = next;
+    this.win.info_archived = next;
+    this.refreshChats();
+    const last = this.store.messagesFor(jid).at(-1)?.raw;
+    await this.service.setArchived(jid, next, last);
+  }
+
+  // Drops the locally stored history for this conversation.
+  private clearCurrentChat() {
+    const jid = this.currentJid;
+    if (!jid) return;
+    this.store.messages.set(jid, []);
+    this.store.dirtyJids.add(jid);
+    const meta = this.store.chats.get(jid);
+    if (meta) meta.preview = "";
+    this.messagesModel.splice(0, this.messagesModel.length);
+    this.win.info_open = false;
+    this.refreshChats();
+    this.scheduleSave();
   }
 
   // ---- Voice recording ----
