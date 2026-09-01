@@ -1516,7 +1516,8 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     VerticalLayout {
-                                        spacing: 2px;
+                                        alignment: center;
+                                        spacing: 3px;
                                         wave-area := TouchArea {
                                             width: 220px;
                                             height: 30px;
@@ -1562,12 +1563,26 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                         HorizontalLayout {
+                                            spacing: 6px;
                                             Text {
                                                 text: msg.playing && msg.posLabel != ""
                                                     ? msg.posLabel : msg.text;
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 font-size: 11px;
                                                 horizontal-stretch: 1;
+                                            }
+                                            Text {
+                                                text: msg.time;
+                                                font-size: 10px;
+                                                color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                vertical-alignment: center;
+                                            }
+                                            if msg.ticks != "": Text {
+                                                text: msg.ticks;
+                                                font-size: 10px;
+                                                font-weight: 700;
+                                                color: msg.ticksBlue ? #53bdeb : Theme.time-out;
+                                                vertical-alignment: center;
                                             }
                                         }
                                     }
@@ -1782,7 +1797,7 @@ export component AppWindow inherits Window {
                                 // gets its own pill like WhatsApp draws it,
                                 // with breathing room under the artwork.
                                 if msg.sticker: Rectangle { height: 6px; }
-                                HorizontalLayout {
+                                if msg.kind != "audio": HorizontalLayout {
                                     alignment: end;
                                     Rectangle {
                                         width: stamp.preferred-width + (msg.sticker ? 14px : 0);
