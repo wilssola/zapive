@@ -61,6 +61,20 @@ Everything below is implemented and working against a live account.
 - **Shared media** grid built from thumbnails already cached locally
 - Archive / unarchive the conversation, or clear its local messages
 
+## Calls
+
+Baileys can detect and decline calls, but never answer them — so Zapive
+makes sure you never miss one instead:
+
+- **Incoming call popup** with the caller's photo and voice/video label,
+  raising the window even when the app sits in the tray
+- **Native notification** alongside it, so the call is visible anywhere
+- **Decline** ends the call from the desktop; **Dismiss** only hides the
+  popup (the phone keeps ringing)
+- **Calls tab** in the rail with the history: voice/video, and whether the
+  call was answered elsewhere, declined, missed or ended
+- Clicking an entry opens that conversation
+
 ## Channels and communities
 
 - **Channels** (`@newsletter`) have their own rail tab; names are resolved

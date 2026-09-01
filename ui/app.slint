@@ -38,6 +38,19 @@ export struct ChatItem {
     pinned: bool,
 }
 
+export struct CallItem {
+    id: string,
+    from: string,
+    name: string,
+    detail: string,
+    time: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+    video: bool,
+}
+
 export struct StickerCell {
     id: string,
     pic: image,
@@ -226,6 +239,17 @@ export component AppWindow inherits Window {
     in-out property <string> sidebar-view: "chats";
     callback status-open(string);
     callback view-changed(string);
+    // Calls
+    in-out property <[CallItem]> calls;
+    in-out property <bool> call-ringing: false;
+    in-out property <string> call-name: "";
+    in-out property <string> call-detail: "";
+    in-out property <image> call-avatar;
+    in-out property <bool> call-has-avatar: false;
+    in-out property <string> call-initial: "";
+    in-out property <int> call-color-idx: 0;
+    callback decline-call();
+    callback dismiss-call();
     // Status viewer
     in-out property <bool> sv-open: false;
     in-out property <string> sv-name: "";
@@ -526,6 +550,11 @@ export component AppWindow inherits Window {
                     clicked => { root.sidebar-view = "status"; }
                 }
                 IconButton {
+                    icon: @image-url("icons/phone.svg");
+                    active: root.sidebar-view == "calls";
+                    clicked => { root.sidebar-view = "calls"; }
+                }
+                IconButton {
                     icon: @image-url("icons/speakerphone.svg");
                     active: root.sidebar-view == "channels";
                     clicked => {
@@ -641,7 +670,89 @@ export component AppWindow inherits Window {
             }
 
             VerticalBox {
-                visible: root.sidebar-view != "status";
+                visible: root.sidebar-view == "calls";
+                width: 100%;
+                height: 100%;
+                padding: 0;
+                spacing: 0;
+                Rectangle {
+                    height: 56px;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text {
+                            text: @tr("Calls");
+                            color: Theme.text;
+                            font-size: 21px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+                if root.calls.length == 0: Text {
+                    text: @tr("No calls yet");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+                ListView {
+                    for call in root.calls: Rectangle {
+                        height: 68px;
+                        clip: true;
+                        background: call-touch.has-hover ? Theme.hover : transparent;
+                        call-touch := TouchArea {
+                            clicked => { root.open-dm(call.from); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 13px;
+                            padding-right: 15px;
+                            spacing: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 0;
+                                Avatar {
+                                    width: 46px;
+                                    height: 46px;
+                                    src: call.avatar;
+                                    has-image: call.hasAvatar;
+                                    initial: call.initial;
+                                    color-idx: call.colorIdx;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                Text {
+                                    text: call.name;
+                                    color: Theme.text;
+                                    font-size: 15px;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: call.detail;
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 0;
+                                Text {
+                                    text: call.time;
+                                    color: Theme.text-dim;
+                                    font-size: 11px;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            VerticalBox {
+                visible: root.sidebar-view != "status" && root.sidebar-view != "calls";
                 width: 100%;
                 height: 100%;
                 padding: 0;
@@ -1410,6 +1521,104 @@ export component AppWindow inherits Window {
         }
     }
     } // capture-scope
+
+    // ---------- Incoming call ----------
+    if root.call-ringing: Rectangle {
+        background: #000000cc;
+        TouchArea { }
+        Rectangle {
+            width: 340px;
+            height: 380px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 14px;
+            VerticalLayout {
+                padding: 24px;
+                spacing: 14px;
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    Avatar {
+                        width: 120px;
+                        height: 120px;
+                        src: root.call-avatar;
+                        has-image: root.call-has-avatar;
+                        initial: root.call-initial;
+                        color-idx: root.call-color-idx;
+                    }
+                }
+                Text {
+                    text: root.call-name;
+                    color: Theme.text;
+                    font-size: 20px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.call-detail;
+                    color: Theme.accent;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: @tr("Answer on your phone — desktop calls are not supported");
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 14px;
+                    decline-btn := TouchArea {
+                        mouse-cursor: pointer;
+                        width: dtext.preferred-width + 30px;
+                        height: 40px;
+                        clicked => { root.decline-call(); }
+                        Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 20px;
+                            background: decline-btn.has-hover ? #d9534f : #c9302c;
+                        }
+                        dtext := Text {
+                            text: @tr("Decline");
+                            color: white;
+                            font-size: 14px;
+                            font-weight: 700;
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    dismiss-btn := TouchArea {
+                        mouse-cursor: pointer;
+                        width: mtext.preferred-width + 30px;
+                        height: 40px;
+                        clicked => { root.dismiss-call(); }
+                        Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 20px;
+                            background: dismiss-btn.has-hover ? Theme.hover : Theme.chip-bg;
+                        }
+                        mtext := Text {
+                            text: @tr("Dismiss");
+                            color: Theme.text;
+                            font-size: 14px;
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // ---------- Contact / group info ----------
     if root.info-open: Rectangle {

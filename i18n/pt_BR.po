@@ -191,3 +191,18 @@ msgstr "Canais"
 
 msgid "Communities"
 msgstr "Comunidades"
+
+msgid "Calls"
+msgstr "Chamadas"
+
+msgid "No calls yet"
+msgstr "Nenhuma chamada ainda"
+
+msgid "Answer on your phone — desktop calls are not supported"
+msgstr "Atenda pelo celular — chamadas no desktop não são suportadas"
+
+msgid "Decline"
+msgstr "Recusar"
+
+msgid "Dismiss"
+msgstr "Ignorar"

@@ -38,6 +38,15 @@ export function reactionSummary(m: StoredMessage): string {
   return values.length > 1 ? `${unique} ${values.length}` : unique;
 }
 
+export interface CallEntry {
+  id: string;
+  jid: string; // caller (or group) jid
+  video: boolean;
+  group: boolean;
+  status: string; // offer | accept | reject | timeout | terminate
+  timestamp: number;
+}
+
 export interface ChatMeta {
   jid: string;
   name?: string;
@@ -400,6 +409,42 @@ export class Store {
     return this.messages.get(jid) ?? [];
   }
 
+  // ---- Call history ----
+
+  calls: CallEntry[] = [];
+  callsDirty = false;
+
+  // Records a call event; returns the entry when it is new or changed.
+  upsertCall(ev: {
+    id: string;
+    from: string;
+    status: string;
+    isVideo?: boolean;
+    isGroup?: boolean;
+    date?: Date;
+  }): CallEntry | null {
+    const jid = this.canon(jidNormalizedUser(ev.from));
+    const existing = this.calls.find((c) => c.id === ev.id);
+    if (existing) {
+      if (existing.status === ev.status) return null;
+      existing.status = ev.status;
+      this.callsDirty = true;
+      return existing;
+    }
+    const entry: CallEntry = {
+      id: ev.id,
+      jid,
+      video: !!ev.isVideo,
+      group: !!ev.isGroup,
+      status: ev.status,
+      timestamp: Math.floor((ev.date?.getTime() ?? Date.now()) / 1000),
+    };
+    this.calls.unshift(entry);
+    if (this.calls.length > 100) this.calls.length = 100;
+    this.callsDirty = true;
+    return entry;
+  }
+
   // ---- Status/Stories (status@broadcast, 24h lifetime) ----
 
   statuses = new Map<string, StoredMessage[]>(); // author jid -> updates
@@ -562,6 +607,10 @@ export class Store {
       db.del(`store:msgs:${jid}`);
     }
     this.deletedJids.clear();
+    if (this.callsDirty) {
+      db.set("store:calls", JSON.stringify(this.calls));
+      this.callsDirty = false;
+    }
     if (this.statusesDirty) {
       this.pruneStatuses();
       db.set(
@@ -594,6 +643,8 @@ export class Store {
       const raw = db.get(key);
       if (raw) this.messages.set(jid, hydrate(JSON.parse(raw)));
     }
+    const calls = db.get("store:calls");
+    if (calls) this.calls = JSON.parse(calls);
     const statuses = db.get("store:statuses");
     if (statuses) {
       this.statuses = new Map(

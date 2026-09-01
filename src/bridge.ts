@@ -19,6 +19,19 @@ import type { SlintImageData } from "./qr.ts";
 import type { WAListener, WhatsAppService } from "./whatsapp.ts";
 import type { MediaService } from "./media.ts";
 
+interface CallRow {
+  id: string;
+  from: string;
+  name: string;
+  detail: string;
+  time: string;
+  avatar: SlintImageData;
+  hasAvatar: boolean;
+  initial: string;
+  colorIdx: number;
+  video: boolean;
+}
+
 interface StickerCell {
   id: string;
   pic: SlintImageData;
@@ -115,6 +128,16 @@ export interface AppWindow {
   attach_sticker: () => void;
   sidebar_view: string;
   view_changed: (view: string) => void;
+  calls: ArrayModel<CallRow>;
+  call_ringing: boolean;
+  call_name: string;
+  call_detail: string;
+  call_avatar: SlintImageData;
+  call_has_avatar: boolean;
+  call_initial: string;
+  call_color_idx: number;
+  decline_call: () => void;
+  dismiss_call: () => void;
   status_open: (jid: string) => void;
   sv_open: boolean;
   sv_name: string;
@@ -244,6 +267,8 @@ export class Bridge implements WAListener {
   private stickerRawById = new Map<string, StoredMessage>();
   private scrollPos = new Map<string, number>();
   private infoMediaModel = new ArrayModel<StickerCell[]>([]);
+  private callsModel = new ArrayModel<CallRow>([]);
+  private ringing: { id: string; from: string } | null = null;
   private viewer: { items: StoredMessage[]; idx: number } | null = null;
 
   constructor(win: AppWindow, media: MediaService) {
@@ -287,6 +312,12 @@ export class Bridge implements WAListener {
     win.tab_changed = (tab) => {
       this.tab = tab;
       this.refreshChats();
+    };
+    win.calls = this.callsModel;
+    win.decline_call = () => void this.declineCall();
+    win.dismiss_call = () => {
+      this.ringing = null;
+      win.call_ringing = false;
     };
     win.view_changed = (view) => {
       this.view = view;
@@ -332,6 +363,7 @@ export class Bridge implements WAListener {
     );
     this.refreshChats();
     this.refreshStatuses();
+    this.refreshCalls();
   }
 
   importLegacyStore(json: string) {
@@ -803,6 +835,100 @@ export class Bridge implements WAListener {
     } catch (err) {
       console.error("sticker send failed:", err);
     }
+  }
+
+  // ---- Calls ----
+
+  // Baileys reports call state but cannot answer; Zapive shows who is
+  // calling (raising the window even from the tray), lets the user
+  // decline, and keeps a history list.
+  onCall(events: unknown[]) {
+    for (const raw of events) {
+      const ev = raw as {
+        id?: string;
+        from?: string;
+        status?: string;
+        isVideo?: boolean;
+        isGroup?: boolean;
+        date?: Date;
+      };
+      if (!ev.id || !ev.from || !ev.status) continue;
+      const entry = this.store.upsertCall(ev as never);
+      if (!entry) continue;
+
+      if (ev.status === "offer") {
+        const name = this.store.chatName(entry.jid);
+        const detail = entry.video ? t("call.incomingVideo") : t("call.incomingVoice");
+        this.ringing = { id: entry.id, from: ev.from };
+        this.win.call_name = name;
+        this.win.call_detail = detail;
+        this.applyCallAvatar(entry.jid);
+        this.win.call_ringing = true;
+        try {
+          this.win.show(); // bring the window back from the tray
+        } catch {
+          // window already visible
+        }
+        void this.media
+          .fetchAvatar(entry.jid)
+          .then(() => this.media.avatarIcon(entry.jid))
+          .then((icon) => this.notify.push(name, detail, icon));
+      } else if (this.ringing?.id === entry.id) {
+        this.ringing = null;
+        this.win.call_ringing = false;
+      }
+      this.refreshCalls();
+      this.scheduleSave();
+    }
+  }
+
+  private applyCallAvatar(jid: string) {
+    const avatar = this.media.avatarFor(jid);
+    const name = this.store.chatName(jid);
+    this.win.call_avatar = avatar ?? EMPTY_IMAGE;
+    this.win.call_has_avatar = !!avatar;
+    this.win.call_initial = initialOf(name);
+    this.win.call_color_idx = colorIdxOf(jid);
+  }
+
+  private async declineCall() {
+    const call = this.ringing;
+    this.ringing = null;
+    this.win.call_ringing = false;
+    if (call) await this.service.rejectCall(call.id, call.from);
+  }
+
+  private callStatusLabel(status: string): string {
+    if (status === "accept") return t("call.answered");
+    if (status === "reject") return t("call.declined");
+    if (status === "timeout") return t("call.missed");
+    if (status === "offer") return t("call.ringing");
+    return t("call.ended");
+  }
+
+  private refreshCalls() {
+    const rows = this.store.calls.slice(0, 60).map((c) => {
+      const name = this.store.chatName(c.jid);
+      const avatar = this.media.avatarFor(c.jid);
+      if (!this.requestedAvatars.has(c.jid)) {
+        this.requestedAvatars.add(c.jid);
+        this.avatarQueue.push(c.jid);
+        void this.drainAvatars();
+      }
+      return {
+        id: c.id,
+        from: c.jid,
+        name,
+        detail: `${c.video ? t("call.video") : t("call.voice")} · ${this.callStatusLabel(c.status)}`,
+        time: formatTime(c.timestamp),
+        avatar: avatar ?? EMPTY_IMAGE,
+        hasAvatar: !!avatar,
+        initial: initialOf(name),
+        colorIdx: colorIdxOf(c.jid),
+        video: c.video,
+      };
+    });
+    this.callsModel.splice(0, this.callsModel.length, ...rows);
   }
 
   // ---- Contact / group info panel ----

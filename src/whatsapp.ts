@@ -24,6 +24,7 @@ export interface WAListener {
   onContactsUpsert(contacts: unknown[]): void;
   onMessagesUpsert(messages: WAMessage[]): void;
   onMessagesUpdate(updates: { key?: WAMessage["key"]; update?: { status?: unknown } }[]): void;
+  onCall(calls: unknown[]): void;
   onPresence(update: {
     id: string;
     presences: Record<string, { lastKnownPresence?: string }>;
@@ -182,9 +183,21 @@ export class WhatsAppService {
     sock.ev.on("messages.update", (updates) => {
       this.listener.onMessagesUpdate(updates as never);
     });
+    sock.ev.on("call", (calls) => {
+      this.listener.onCall(calls as unknown[]);
+    });
     sock.ev.on("presence.update", (update) => {
       this.listener.onPresence(update as never);
     });
+  }
+
+  // Baileys can detect and decline calls, but never answer them.
+  async rejectCall(callId: string, callFrom: string): Promise<void> {
+    try {
+      await this.sock?.rejectCall(callId, callFrom);
+    } catch (err) {
+      console.log("[call] reject failed:", String(err));
+    }
   }
 
   async subscribePresence(jid: string): Promise<void> {
