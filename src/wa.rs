@@ -63,6 +63,17 @@ pub enum Cmd {
     AudioDecode { id: String, plain: std::path::PathBuf, rate_idx: usize, rate: f64 },
     Waveform { id: String, path: std::path::PathBuf },
     SendVoice { jid: String, samples: Vec<f32>, in_rate: u32, view_once: bool },
+    // Message actions.
+    React { jid: String, id: String, from_me: bool, participant: Option<String>, emoji: String },
+    Revoke { jid: String, id: String },
+    Star { jid: String, id: String, from_me: bool, participant: Option<String>, starred: bool },
+    Forward { jid: String, message: std::sync::Arc<wa::Message> },
+    // Outgoing media (paths are plain files picked by the user).
+    SendImage { jid: String, path: std::path::PathBuf, caption: Option<String> },
+    SendDocument { jid: String, path: std::path::PathBuf },
+    SendAudioFile { jid: String, path: std::path::PathBuf },
+    // Decode a local image for the send-preview overlay.
+    PreviewImage { path: std::path::PathBuf },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.
@@ -400,6 +411,191 @@ async fn executor(
                     }
                 });
             }
+            Cmd::React { jid, id, from_me, participant, emoji } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let key = whatsapp_rust::message_key(
+                        id,
+                        &chat,
+                        from_me,
+                        participant.and_then(|p| parse_jid(&p)).as_ref(),
+                    );
+                    if let Err(e) = client.send_reaction(chat, key, &emoji).await {
+                        eprintln!("[wa] reaction failed: {e}");
+                    }
+                });
+            }
+            Cmd::Revoke { jid, id } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    if let Err(e) = client
+                        .revoke_message(chat, id, whatsapp_rust::send::RevokeType::Sender)
+                        .await
+                    {
+                        eprintln!("[wa] revoke failed: {e}");
+                    }
+                });
+            }
+            Cmd::Star { jid, id, from_me, participant, starred } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let participant = participant.and_then(|p| parse_jid(&p));
+                    let actions = client.chat_actions();
+                    let result = if starred {
+                        actions.star_message(&chat, participant.as_ref(), &id, from_me).await
+                    } else {
+                        actions.unstar_message(&chat, participant.as_ref(), &id, from_me).await
+                    };
+                    if let Err(e) = result {
+                        eprintln!("[wa] star failed: {e}");
+                    }
+                });
+            }
+            Cmd::Forward { jid, message } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(to) = parse_jid(&jid) else { return };
+                    match client.forward_message(to, &message).await {
+                        Ok(sent) => {
+                            use whatsapp_rust::proto_helpers::MessageExt as _;
+                            let id = sent.message_id;
+                            let echoed = message.prepare_for_forward();
+                            ui_apply(move |b| b.echo_sent(&jid, &id, *echoed));
+                        }
+                        Err(e) => eprintln!("[wa] forward failed: {e}"),
+                    }
+                });
+            }
+            Cmd::SendImage { jid, path, caption } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Ok(bytes) = tokio::fs::read(&path).await else { return };
+                    let thumb_src = bytes.clone();
+                    let thumb = tokio::task::spawn_blocking(move || make_jpeg_thumb(&thumb_src))
+                        .await
+                        .ok()
+                        .flatten();
+                    let Some(to) = parse_jid(&jid) else { return };
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Image, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] image upload failed: {e}");
+                            return;
+                        }
+                    };
+                    let message = whatsapp_rust::media::image_message(
+                        upload,
+                        whatsapp_rust::media::ImageOptions {
+                            caption: caption.filter(|c| !c.is_empty()),
+                            jpeg_thumbnail: thumb,
+                            ..Default::default()
+                        },
+                    );
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] image send failed: {e}"),
+                    }
+                });
+            }
+            Cmd::SendDocument { jid, path } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Ok(bytes) = tokio::fs::read(&path).await else { return };
+                    let Some(to) = parse_jid(&jid) else { return };
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "file".into());
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Document, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] document upload failed: {e}");
+                            return;
+                        }
+                    };
+                    let message = whatsapp_rust::media::document_message(
+                        upload,
+                        whatsapp_rust::media::DocumentOptions {
+                            file_name: Some(name),
+                            ..Default::default()
+                        },
+                    );
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] document send failed: {e}"),
+                    }
+                });
+            }
+            Cmd::SendAudioFile { jid, path } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Ok(bytes) = tokio::fs::read(&path).await else { return };
+                    let Some(to) = parse_jid(&jid) else { return };
+                    let mimetype = match path.extension().and_then(|e| e.to_str()) {
+                        Some("ogg") | Some("opus") => "audio/ogg; codecs=opus",
+                        Some("mp3") => "audio/mpeg",
+                        Some("m4a") | Some("aac") => "audio/mp4",
+                        Some("wav") => "audio/wav",
+                        _ => "audio/mpeg",
+                    };
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Audio, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] audio upload failed: {e}");
+                            return;
+                        }
+                    };
+                    let message = whatsapp_rust::media::audio_message(
+                        upload,
+                        whatsapp_rust::media::AudioOptions {
+                            ptt: Some(true),
+                            mimetype: Some(mimetype.to_string()),
+                            ..Default::default()
+                        },
+                    );
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] audio send failed: {e}"),
+                    }
+                });
+            }
+            Cmd::PreviewImage { path } => {
+                tokio::spawn(async move {
+                    let img = tokio::task::spawn_blocking(move || {
+                        std::fs::read(&path)
+                            .ok()
+                            .and_then(|d| crate::media::decode_bytes(&d, 1280))
+                            .map(|img| (path, img))
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some((path, img)) = img {
+                        ui_apply(move |b| b.on_preview_ready(&path, img));
+                    }
+                });
+            }
             Cmd::AudioDecode { id, plain, rate_idx, rate } => {
                 tokio::spawn(async move {
                     let buffer = tokio::task::spawn_blocking(move || {
@@ -648,6 +844,18 @@ async fn executor(
             }
         }
     }
+}
+
+// Small jpeg preview embedded in outgoing image messages.
+fn make_jpeg_thumb(data: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(data).ok()?;
+    let small = img.resize(72, 72, image::imageops::FilterType::Triangle).to_rgb8();
+    let mut out = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut out);
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 70)
+        .encode_image(&small)
+        .ok()?;
+    Some(out)
 }
 
 // A view-once wrapper around any content message.

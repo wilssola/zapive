@@ -12,7 +12,7 @@ use crate::store::{
 };
 use crate::vault::Vault;
 use crate::wa::{Cmd, HistoryChunk, MediaWant, QuoteRef, WaService};
-use crate::{AppWindow, ChatItem, MessageItem};
+use crate::{AppWindow, ChatItem, MessageItem, ReactionItem};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -22,6 +22,10 @@ use whatsapp_rust::types::events::MessageBatch;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 const MAX_HISTORY_BATCHES: u32 = 20;
+
+// Curated emoji palette for the picker (variation selectors stripped so
+// every glyph renders in Slint).
+const EMOJIS: &str = "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😜 🤪 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👹 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙌 👏 🤝 👍 👎 👊 ✊ 🤛 🤜 🤞 ✌ 🤟 🤘 👌 🤏 👈 👉 👆 👇 ☝ ✋ 🤚 🖐 🖖 👋 🤙 💪 🙏 ❤ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💕 💞 💓 💯 💥 💫 🔥 ⭐ 🌟 ⚡ 🎉 🎈 🎁 🏆 ⚽ 🎮 🎵 ☕ 🍻 🍕 🍔 🎂 🍫 🚀 ✈ 🚗 💰";
 
 pub struct Bridge {
     ui: AppWindow,
@@ -70,6 +74,13 @@ pub struct Bridge {
     recorder: Option<crate::audio::Recorder>,
     rec_timer: slint::Timer,
     rec_started: Option<Instant>,
+    // Message actions and outgoing media.
+    reactions_model: Rc<VecModel<ReactionItem>>,
+    forward_model: Rc<VecModel<ChatItem>>,
+    react_pick_for: Option<String>,
+    pending_forward: Option<(String, String)>,
+    pending_image: Option<std::path::PathBuf>,
+    last_paste: Option<Instant>,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -143,8 +154,22 @@ fn defer(f: impl FnOnce(&mut Bridge) + 'static) {
 pub fn install(ui: &AppWindow, wa: WaService) {
     let chats_model = Rc::new(VecModel::<ChatItem>::default());
     let messages_model = Rc::new(VecModel::<MessageItem>::default());
+    let reactions_model = Rc::new(VecModel::<ReactionItem>::default());
+    let forward_model = Rc::new(VecModel::<ChatItem>::default());
     ui.set_chats(ModelRc::from(chats_model.clone()));
     ui.set_messages(ModelRc::from(messages_model.clone()));
+    ui.set_reaction_rows(ModelRc::from(reactions_model.clone()));
+    ui.set_forward_rows(ModelRc::from(forward_model.clone()));
+    let emoji_rows: Vec<ModelRc<SharedString>> = EMOJIS
+        .split(' ')
+        .collect::<Vec<_>>()
+        .chunks(8)
+        .map(|chunk| {
+            let row: Vec<SharedString> = chunk.iter().map(|e| SharedString::from(*e)).collect();
+            ModelRc::from(Rc::new(VecModel::from(row)))
+        })
+        .collect();
+    ui.set_emoji_rows(ModelRc::from(Rc::new(VecModel::from(emoji_rows))));
     wire_callbacks(ui);
     let bridge = Bridge {
         ui: ui.clone_strong(),
@@ -188,6 +213,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         recorder: None,
         rec_timer: slint::Timer::default(),
         rec_started: None,
+        reactions_model,
+        forward_model,
+        react_pick_for: None,
+        pending_forward: None,
+        pending_image: None,
+        last_paste: None,
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -298,6 +329,70 @@ fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
+    ui.on_react_to(|id, emoji| {
+        let (id, emoji) = (id.to_string(), emoji.to_string());
+        defer(move |b| {
+            b.ui.set_react_bar_id("".into());
+            b.send_reaction(&id, &emoji);
+        });
+    });
+    ui.on_react_pick(|id| {
+        let id = id.to_string();
+        defer(move |b| {
+            // The full picker doubles as the reaction picker.
+            b.react_pick_for = Some(id.clone());
+            b.ui.set_picker_open(true);
+        });
+    });
+    ui.on_emoji_pick(|emoji| {
+        let emoji = emoji.to_string();
+        defer(move |b| {
+            if let Some(target) = b.react_pick_for.take() {
+                b.ui.set_picker_open(false);
+                b.send_reaction(&target, &emoji);
+            } else {
+                b.ui.invoke_append_composer(emoji.into());
+            }
+        });
+    });
+    ui.on_show_reactions(|id| {
+        let id = id.to_string();
+        defer(move |b| b.show_reactions(&id));
+    });
+    ui.on_toggle_star(|id| {
+        let id = id.to_string();
+        defer(move |b| b.toggle_star(&id));
+    });
+    ui.on_delete_message(|id| {
+        let id = id.to_string();
+        defer(move |b| b.delete_message(&id));
+    });
+    ui.on_request_forward(|id| {
+        let id = id.to_string();
+        defer(move |b| b.request_forward(&id));
+    });
+    ui.on_forward_search(|query| {
+        let query = query.to_string();
+        defer(move |b| b.fill_forward_rows(&query));
+    });
+    ui.on_forward_to(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.handle_forward_to(&jid));
+    });
+    ui.on_attach_image(|| defer(|b| b.handle_attach("image")));
+    ui.on_attach_audio(|| defer(|b| b.handle_attach("audio")));
+    ui.on_attach_doc(|| defer(|b| b.handle_attach("doc")));
+    ui.on_confirm_send_image(|caption| {
+        let caption = caption.to_string();
+        defer(move |b| b.confirm_send_image(&caption));
+    });
+    ui.on_cancel_send_image(|| {
+        defer(|b| {
+            b.pending_image = None;
+            b.ui.set_preview_open(false);
+        });
+    });
+    ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
     ui.set_audio_rate_label("1x".into());
     ui.on_audio_toggle(|id| {
         let id = id.to_string();
@@ -1802,6 +1897,242 @@ impl Bridge {
         wanted.dedup();
         for jid in wanted {
             self.queue_avatar(&jid);
+        }
+    }
+
+    // ---- message actions ----
+
+    // The participant that goes into a message key inside a group.
+    fn key_participant(&self, m: &StoredMessage) -> Option<String> {
+        if !is_group(&m.jid) {
+            return None;
+        }
+        Some(if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() })
+            .filter(|p| !p.is_empty())
+    }
+
+    fn send_reaction(&mut self, id: &str, emoji: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        // Reacting again with the same emoji removes it, like WhatsApp.
+        let mine = m.reactions.get("me").cloned().unwrap_or_default();
+        let next = if clean_text(&mine) == clean_text(emoji) { "" } else { emoji };
+        self.wa.send(Cmd::React {
+            jid: m.jid.clone(),
+            id: id.to_string(),
+            from_me: m.from_me,
+            participant: self.key_participant(&m),
+            emoji: next.to_string(),
+        });
+        if self.store.apply_reaction(&m.jid, id, "me", next) {
+            let summary = self
+                .store
+                .messages_for(&m.jid)
+                .iter()
+                .find(|x| x.id == id)
+                .map(reaction_summary)
+                .unwrap_or_default();
+            self.patch_row(id, |row| row.reactions = summary.into());
+        }
+        self.schedule_save();
+    }
+
+    // Lists who reacted to a message, like WhatsApp's reaction sheet.
+    fn show_reactions(&mut self, id: &str) {
+        let Some(m) = self.find_message(id) else { return };
+        let entries: Vec<(String, String)> = m
+            .reactions
+            .iter()
+            .filter(|(_, e)| !e.is_empty())
+            .map(|(r, e)| (r.clone(), e.clone()))
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        let rows: Vec<ReactionItem> = entries
+            .iter()
+            .map(|(reactor, emoji)| {
+                let who = if reactor == "me" {
+                    self.self_jid.clone()
+                } else {
+                    self.store.canon_owned(&normalize_jid(reactor))
+                };
+                let name =
+                    if reactor == "me" { t("reactions.you") } else { self.store.chat_name(&who) };
+                let name = if name.is_empty() { display_id(&who) } else { name };
+                let avatar = self.avatar_for(&who);
+                ReactionItem {
+                    jid: who.clone().into(),
+                    name: name.clone().into(),
+                    emoji: clean_text(emoji).into(),
+                    hasAvatar: avatar.is_some(),
+                    avatar: avatar.unwrap_or_else(empty_image),
+                    initial: initial_of(&name).into(),
+                    colorIdx: color_idx_of(&who),
+                }
+            })
+            .collect();
+        for (reactor, _) in &entries {
+            if reactor != "me" {
+                let who = self.store.canon_owned(&normalize_jid(reactor));
+                self.queue_avatar(&who);
+            }
+        }
+        let count = rows.len();
+        self.reactions_model.set_vec(rows);
+        self.ui.set_reactions_title(ta("reactions.count", &[&count.to_string()]).into());
+        self.ui.set_reactions_open(true);
+    }
+
+    fn toggle_star(&mut self, id: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        let next = !m.starred;
+        self.wa.send(Cmd::Star {
+            jid: m.jid.clone(),
+            id: id.to_string(),
+            from_me: m.from_me,
+            participant: self.key_participant(&m),
+            starred: next,
+        });
+        if self.store.set_starred(&m.jid, id, next) {
+            self.patch_row(id, |row| row.starred = next);
+        }
+    }
+
+    fn delete_message(&mut self, id: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        self.wa.send(Cmd::Revoke { jid: m.jid.clone(), id: id.to_string() });
+        if self.store.mark_deleted(&m.jid, id) {
+            self.patch_row(id, |row| {
+                row.deleted = true;
+                row.kind = "text".into();
+                row.text = t("msg.deleted").into();
+            });
+            self.schedule_refresh_chats();
+        }
+    }
+
+    fn request_forward(&mut self, id: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(m) = self.find_message(id) else { return };
+        let preview = preview_body(m);
+        let image = self.decoded.get(id).map(|(img, _, _)| img.clone());
+        self.pending_forward = Some((jid, id.to_string()));
+        self.fill_forward_rows("");
+        // Show what is being forwarded, like WhatsApp's bottom bar.
+        self.ui.set_forward_preview_text(preview.into());
+        self.ui.set_forward_preview_has_image(image.is_some());
+        self.ui.set_forward_preview_image(image.unwrap_or_else(empty_image));
+        self.ui.set_forward_open(true);
+    }
+
+    // Chats offered when forwarding, narrowed by the search box.
+    fn fill_forward_rows(&mut self, query: &str) {
+        let q = query.trim().to_lowercase();
+        let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
+        let rows: Vec<ChatItem> = self
+            .store
+            .sorted_chats()
+            .into_iter()
+            .filter(|meta| !is_channel(&meta.jid))
+            .filter(|meta| {
+                if q.is_empty() {
+                    return true;
+                }
+                let name = self.store.chat_name(&meta.jid).to_lowercase();
+                name.contains(&q) || (!digits.is_empty() && meta.jid.contains(&digits))
+            })
+            .take(200)
+            .map(|meta| self.to_chat_row(&meta.jid, &meta.preview, meta.timestamp, 0, false))
+            .collect();
+        self.forward_model.set_vec(rows);
+    }
+
+    fn handle_forward_to(&mut self, target: &str) {
+        let pending = self.pending_forward.take();
+        self.ui.set_forward_open(false);
+        let (Some((source, id)), false) = (pending, target.is_empty()) else { return };
+        let raw = self.store.messages_for(&source).iter().find(|m| m.id == id).and_then(|m| m.raw.clone());
+        if let Some(message) = raw {
+            self.wa.send(Cmd::Forward { jid: target.to_string(), message });
+        }
+    }
+
+    // ---- outgoing media ----
+
+    fn handle_attach(&mut self, kind: &'static str) {
+        if self.current_jid.is_none() {
+            return;
+        }
+        std::thread::spawn(move || {
+            let dialog = rfd::FileDialog::new();
+            let dialog = match kind {
+                "image" => dialog
+                    .add_filter(t("picker.images"), &["jpg", "jpeg", "png", "webp", "bmp"]),
+                "audio" => dialog
+                    .add_filter(t("picker.audio"), &["mp3", "ogg", "opus", "m4a", "aac", "wav"]),
+                _ => dialog.add_filter(t("picker.all"), &["*"]),
+            };
+            if let Some(path) = dialog.pick_file() {
+                ui_apply(move |b| b.on_picked(kind, path));
+            }
+        });
+    }
+
+    fn on_picked(&mut self, kind: &str, path: std::path::PathBuf) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        match kind {
+            // WhatsApp-style confirmation: caption field before sending.
+            "image" => self.wa.send(Cmd::PreviewImage { path }),
+            "audio" => self.wa.send(Cmd::SendAudioFile { jid, path }),
+            _ => self.wa.send(Cmd::SendDocument { jid, path }),
+        }
+    }
+
+    pub fn on_preview_ready(&mut self, path: &std::path::Path, img: crate::media::Decoded) {
+        self.pending_image = Some(path.to_path_buf());
+        self.ui.set_preview_image(image_of(&img));
+        self.ui.set_preview_open(true);
+    }
+
+    fn confirm_send_image(&mut self, caption: &str) {
+        let path = self.pending_image.take();
+        self.ui.set_preview_open(false);
+        let (Some(jid), Some(path)) = (self.current_jid.clone(), path) else { return };
+        let caption = caption.trim();
+        self.wa.send(Cmd::SendImage {
+            jid,
+            path,
+            caption: (!caption.is_empty()).then(|| caption.to_string()),
+        });
+    }
+
+    // Fired on any Ctrl+V while a chat is open; only acts when the
+    // clipboard holds an image (text pastes normally into the composer).
+    fn handle_paste(&mut self) {
+        if self.current_jid.is_none() || self.ui.get_preview_open() {
+            return;
+        }
+        if let Some(last) = self.last_paste
+            && last.elapsed() < Duration::from_millis(400)
+        {
+            return;
+        }
+        self.last_paste = Some(Instant::now());
+        let Ok(mut clipboard) = arboard::Clipboard::new() else { return };
+        let Ok(img) = clipboard.get_image() else { return };
+        let (w, h) = (img.width as u32, img.height as u32);
+        let Some(buffer) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
+            return;
+        };
+        let path = std::env::temp_dir().join(format!(
+            "zapive_paste_{}.png",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ));
+        if image::DynamicImage::ImageRgba8(buffer).save(&path).is_ok() {
+            self.wa.send(Cmd::PreviewImage { path });
         }
     }
 

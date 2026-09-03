@@ -38,6 +38,7 @@ arboard = "3"
 kamadak-exif = "0.5"
 ureq = "3"
 cpal = "0.16"
+rfd = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.19"
