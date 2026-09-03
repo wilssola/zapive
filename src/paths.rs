@@ -1,8 +1,6 @@
 // Where Zapive keeps its files, per platform. Nothing is written next to
 // the executable: the vault and the media cache live in the user's own
-// directories. File names differ from the Node build's (`vault.db` vs
-// `zapive.db`, `media-v2` vs `media`) so both apps can coexist during the
-// migration period without touching each other's data.
+// directories.
 use std::path::PathBuf;
 
 const APP: &str = "Zapive";
@@ -58,10 +56,69 @@ pub fn wa_session_path() -> PathBuf {
 }
 
 pub fn media_cache() -> PathBuf {
-    cache_dir().join("media-v2")
+    cache_dir().join("media")
 }
 
 pub fn ensure_dirs() {
+    remove_node_era();
     let _ = std::fs::create_dir_all(data_dir());
     let _ = std::fs::create_dir_all(media_cache());
+}
+
+// The Node build left its vault, its unencrypted media cache and the
+// unpacked runtime (node_modules with .node DLLs) behind; none of it is
+// readable by this build, so the first run sweeps it. The Rust cache
+// briefly lived at `media-v2` and moves onto the freed-up name.
+fn remove_node_era() {
+    let data = data_dir();
+    // zapive.pid and zapive.ico stay: this build reuses those names (the
+    // pid file is the single-instance lock — deleting it would let a
+    // second instance through).
+    for name in ["zapive.db", "zapive.db-wal", "zapive.db-shm"] {
+        let _ = std::fs::remove_file(data.join(name));
+    }
+    for dir in ["auth_info", "auth_info.bak"] {
+        let _ = std::fs::remove_dir_all(data.join(dir));
+    }
+    let _ = std::fs::remove_file(data.join("data_store.json"));
+    let _ = std::fs::remove_file(data.join("data_store.json.bak"));
+    let cache = cache_dir();
+    let _ = std::fs::remove_dir_all(cache.join("runtime"));
+    let media = cache.join("media");
+    let old = cache.join("media-v2");
+    if old.is_dir() {
+        let _ = std::fs::remove_dir_all(&media);
+        let _ = std::fs::rename(&old, &media);
+    } else if media_is_node_era(&media) {
+        let _ = std::fs::remove_dir_all(&media);
+    }
+}
+
+// Every file this build writes is sealed and starts with the ZENC1 magic;
+// the Node cache kept plain files, which is how a leftover is recognized.
+fn media_is_node_era(dir: &std::path::Path) -> bool {
+    fn first_file(dir: &std::path::Path, depth: u8) -> Option<PathBuf> {
+        for entry in std::fs::read_dir(dir).ok()?.flatten() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|n| n == ".tmp") {
+                continue;
+            }
+            if path.is_file() {
+                return Some(path);
+            }
+            if depth > 0 && path.is_dir() {
+                if let Some(found) = first_file(&path, depth - 1) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    let Some(sample) = first_file(dir, 2) else { return false };
+    let mut magic = [0u8; 5];
+    use std::io::Read;
+    match std::fs::File::open(sample).and_then(|mut f| f.read_exact(&mut magic).map(|_| ())) {
+        Ok(()) => &magic != b"ZENC1",
+        Err(_) => false,
+    }
 }

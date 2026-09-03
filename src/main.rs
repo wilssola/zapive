@@ -58,9 +58,6 @@ fn main() {
             .expect("failed to build the tokio runtime")
     });
 
-    if let Err(e) = ffmpeg_next::init() {
-        eprintln!("[media] ffmpeg init failed: {e}");
-    }
 
     // Developer probe: exercises the whole in-process audio path
     // (opus encode -> decode with atempo -> waveform) and exits.
@@ -214,7 +211,12 @@ fn audio_selftest() {
 #[cfg(windows)]
 fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_icon::menu::MenuId)> {
     use tray_icon::menu::{Menu, MenuItem};
-    let img = image::load_from_memory(include_bytes!("../ui/zapive.png")).ok()?.into_rgba8();
+    // The tray wants a small icon; feeding it the full-size art comes out
+    // garbled in the shell.
+    let img = image::load_from_memory(include_bytes!("../ui/zapive.png"))
+        .ok()?
+        .resize_exact(32, 32, image::imageops::FilterType::Triangle)
+        .into_rgba8();
     let (w, h) = img.dimensions();
     let icon = tray_icon::Icon::from_rgba(img.into_raw(), w, h).ok()?;
     let open = MenuItem::new(i18n::t("tray.open"), true, None);

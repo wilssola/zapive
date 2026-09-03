@@ -1,0 +1,29 @@
+name: build
+
+on:
+  push:
+    branches: [master, rust]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Desktop libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Smoke build
+        run: cargo build --locked
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Smoke build
+        run: cargo build --locked
