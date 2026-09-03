@@ -857,7 +857,7 @@ async fn executor(
                                     tokio::task::spawn_blocking(move || {
                                         let mut res = ureq::get(&url).call().ok()?;
                                         let bytes = res.body_mut().read_to_vec().ok()?;
-                                        crate::media::decode_cover(&bytes, 96)
+                                        crate::media::decode_cover(&bytes, 64)
                                     })
                                     .await
                                     .ok()
@@ -1023,7 +1023,7 @@ async fn executor(
                                 return Some((None, fresh)); // remembered "no picture"
                             }
                             let img = crate::media::read_cached(&key, &path)
-                                .and_then(|b| crate::media::decode_cover(&b, 96))?;
+                                .and_then(|b| crate::media::decode_cover(&b, 64))?;
                             Some((Some(img), fresh))
                         })
                         .await
@@ -1046,7 +1046,7 @@ async fn executor(
                             let img = tokio::task::spawn_blocking(move || {
                                 let mut res = ureq::get(&url).call().ok()?;
                                 let bytes = res.body_mut().read_to_vec().ok()?;
-                                let img = crate::media::decode_cover(&bytes, 96)?;
+                                let img = crate::media::decode_cover(&bytes, 64)?;
                                 let _ = std::fs::write(&path, key.encrypt_bytes(&bytes));
                                 Some(img)
                             })

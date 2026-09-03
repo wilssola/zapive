@@ -6,7 +6,16 @@ description = "Native WhatsApp desktop client"
 publish = false
 
 [dependencies]
-slint = "1.17"
+# FemtoVG (OpenGL) renders; the software renderer stays as the fallback
+# for GL-less sessions like RDP.
+slint = { version = "1.17", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+    "compat-1-2",
+] }
 # default features pull in `simd`, which needs nightly (portable_simd); pick the
 # stable set explicitly instead.
 whatsapp-rust = { version = "=0.7.0", default-features = false, features = [
