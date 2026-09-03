@@ -6,7 +6,10 @@ mod paths;
 mod platform;
 mod qr;
 mod single;
+mod store;
+mod vault;
 mod wa;
+mod wa_map;
 
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;

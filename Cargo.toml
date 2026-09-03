@@ -21,11 +21,24 @@ image = "0.25"
 qrcode = "0.14"
 ffmpeg-next = "9"
 sys-locale = "0.3"
+# Must resolve to the same libsqlite3-sys (0.37) that whatsapp-rust's
+# diesel links, or cargo refuses the duplicate native sqlite3.
+rusqlite = { version = "0.39", features = ["bundled"] }
+aes-gcm = "0.10"
+scrypt = { version = "0.11", default-features = false }
+rand = "0.9"
+zeroize = "1"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.19"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
