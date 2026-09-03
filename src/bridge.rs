@@ -61,6 +61,9 @@ pub struct Bridge {
     media_path: HashMap<String, String>,
     decoded: HashMap<String, (slint::Image, i32, i32)>,
     decoded_order: std::collections::VecDeque<String>,
+    // Hydrated chats, most-recent last; cold ones live only in the vault.
+    warm_order: std::collections::VecDeque<String>,
+    hover_jid: String,
     animated: HashMap<String, Anim>,
     anim_timer: slint::Timer,
     stick_requeued: bool,
@@ -128,6 +131,8 @@ const RATE_LABELS: [&str; 5] = ["1x", "1.5x", "2x", "2.5x", "3x"];
 
 const DECODE_CACHE_MAX: usize = 50;
 const MAX_ANIMATIONS: usize = 6;
+// How many chats keep their message lists in RAM at once.
+const WARM_MAX: usize = 8;
 
 fn image_of(d: &crate::media::Decoded) -> slint::Image {
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(d.w, d.h);
@@ -233,6 +238,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         media_path: HashMap::new(),
         decoded: HashMap::new(),
         decoded_order: std::collections::VecDeque::new(),
+        warm_order: std::collections::VecDeque::new(),
+        hover_jid: String::new(),
         animated: HashMap::new(),
         anim_timer: slint::Timer::default(),
         stick_requeued: false,
@@ -316,6 +323,10 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_open_chat(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.open_dm(&jid, None));
+    });
+    ui.on_chat_hover(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.chat_hover(&jid));
     });
     ui.on_open_dm(|target| {
         let target = target.to_string();
@@ -984,6 +995,16 @@ impl Bridge {
         if self.history_pending || self.history_batches >= MAX_HISTORY_BATCHES {
             return;
         }
+        // With lazy loading the map may be empty at boot; sample chats that
+        // actually have stored messages and anchor on the oldest of them.
+        if self.store.total_messages() == 0
+            && let Some(vault) = self.vault.as_ref()
+        {
+            for key in vault.keys("store:msgs:").into_iter().take(10) {
+                let jid = key["store:msgs:".len()..].to_string();
+                self.store.hydrate(vault, &jid);
+            }
+        }
         let Some(anchor) = self.store.oldest_message() else {
             // No message to anchor on yet (fresh pairing) — retry once
             // messages start flowing in.
@@ -1224,7 +1245,42 @@ impl Bridge {
 
     // Opens (or starts) the conversation with a jid; used by the chat list
     // and by clicking a sender name inside a group.
+    // Hydrates a chat and rotates the warm set, evicting the coldest.
+    fn warm_chat(&mut self, jid: &str) {
+        let Some(vault) = self.vault.as_ref() else { return };
+        let jid = self.store.canon_owned(jid);
+        self.store.hydrate(vault, &jid);
+        self.warm_order.retain(|j| j != &jid);
+        self.warm_order.push_back(jid);
+        while self.warm_order.len() > WARM_MAX {
+            let evictable = self.warm_order.iter().position(|j| {
+                Some(j.as_str()) != self.current_jid.as_deref()
+                    && !self.store.dirty_jids.contains(j)
+            });
+            let Some(idx) = evictable else { break };
+            if let Some(old) = self.warm_order.remove(idx) {
+                self.store.evict(&old);
+            }
+        }
+    }
+
+    // Mouse resting on a chat row usually precedes a click; preload the
+    // tail so the open feels instant.
+    pub fn chat_hover(&mut self, jid: &str) {
+        if self.hover_jid == jid || self.store.hydrated.contains(self.store.canon(jid)) {
+            return;
+        }
+        self.hover_jid = jid.to_string();
+        let jid = jid.to_string();
+        self.once(120, move |b| {
+            if b.hover_jid == jid {
+                b.warm_chat(&jid);
+            }
+        });
+    }
+
     pub fn open_dm(&mut self, jid_raw: &str, jump_to: Option<&str>) {
+        self.warm_chat(jid_raw);
         if jid_raw.is_empty() {
             return;
         }
@@ -2345,6 +2401,17 @@ impl Bridge {
 
     // Fills the sticker tab with recent/starred stickers (lazy decode).
     fn load_sticker_panel(&mut self) {
+        // Sticker/GIF history scans hydrated chats only; wake the most
+        // recent ones without disturbing the warm LRU.
+        if let Some(vault) = self.vault.as_ref() {
+            let recent: Vec<String> = {
+                let sorted = self.store.sorted_chats();
+                sorted.iter().take(15).map(|m| m.jid.clone()).collect()
+            };
+            for jid in recent {
+                self.store.hydrate(vault, &jid);
+            }
+        }
         self.wa.send(Cmd::GifSearch(String::new()));
         let favs = self.store.starred_stickers(32);
         self.ui
@@ -2736,6 +2803,7 @@ impl Bridge {
         let pending = self.pending_forward.take();
         self.ui.set_forward_open(false);
         let (Some((source, id)), false) = (pending, target.is_empty()) else { return };
+        self.warm_chat(&source);
         let raw = self.store.messages_for(&source).iter().find(|m| m.id == id).and_then(|m| m.raw.clone());
         if let Some(message) = raw {
             self.wa.send(Cmd::Forward { jid: target.to_string(), message });

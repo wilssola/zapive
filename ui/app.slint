@@ -320,6 +320,9 @@ export component AppWindow inherits Window {
     in-out property <string> selected-jid: "";
     in-out property <string> chat-tab: "all";
     callback open-chat(string);
+    // Fired when the pointer settles on a chat row: the backend preloads
+    // that chat's messages so a likely click opens instantly.
+    callback chat-hover(string);
     callback search-changed(string);
     callback tab-changed(string);
 
@@ -939,6 +942,9 @@ export component AppWindow inherits Window {
                             : touch.has-hover ? Theme.hover : transparent;
                         touch := TouchArea {
                             clicked => { root.open-chat(chat.jid); }
+                            changed has-hover => {
+                                if (self.has-hover) { root.chat-hover(chat.jid); }
+                            }
                         }
                         HorizontalLayout {
                             padding-left: 13px;

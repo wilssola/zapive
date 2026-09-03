@@ -305,6 +305,9 @@ pub struct Store {
     // Author jid -> updates (status@broadcast, 24h lifetime).
     pub statuses: HashMap<String, Vec<StoredMessage>>,
     pub dirty_jids: HashSet<String>,
+    // Chats whose message list has been read from the vault this run.
+    // Cold chats keep only their ChatMeta in RAM; bodies load on demand.
+    pub hydrated: HashSet<String>,
     pub calls_dirty: bool,
     pub starred_dirty: bool,
     pub statuses_dirty: bool,
@@ -596,6 +599,39 @@ impl Store {
         self.messages.get(jid).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    // Loads a chat's message list from the vault, merging with whatever
+    // arrived over the socket while the chat was cold.
+    pub fn hydrate(&mut self, vault: &Vault, jid: &str) {
+        let jid = self.canon_owned(jid);
+        if !self.hydrated.insert(jid.clone()) {
+            return;
+        }
+        let Some(text) = vault.get(&format!("store:msgs:{jid}")) else { return };
+        let Ok(mut disk) = serde_json::from_str::<Vec<StoredMessage>>(&text) else { return };
+        let live = self.messages.entry(jid).or_default();
+        if !live.is_empty() {
+            let known: HashSet<String> = disk.iter().map(|m| m.id.clone()).collect();
+            for m in live.drain(..) {
+                if !known.contains(&m.id) {
+                    disk.push(m);
+                }
+            }
+            disk.sort_by_key(|m| m.timestamp);
+        }
+        *live = disk;
+    }
+
+    // Drops a hydrated chat back to metadata-only. Dirty chats stay: their
+    // unsaved messages would be lost.
+    pub fn evict(&mut self, jid: &str) {
+        let jid = self.canon_owned(jid);
+        if self.dirty_jids.contains(&jid) {
+            return;
+        }
+        self.messages.remove(&jid);
+        self.hydrated.remove(&jid);
+    }
+
     // Records a call event; returns true when it is new or changed.
     pub fn upsert_call(
         &mut self,
@@ -838,13 +874,22 @@ impl Store {
             self.statuses_dirty = false;
         }
         let mut saved = 0;
-        for jid in self.dirty_jids.drain() {
+        let dirty: Vec<String> = self.dirty_jids.drain().collect();
+        for jid in dirty {
+            // A cold chat that only collected new arrivals must merge with
+            // the vault first, or the write would truncate its history.
+            let was_cold = !self.hydrated.contains(&jid);
+            self.hydrate(vault, &jid);
             if let Some(list) = self.messages.get(&jid) {
                 // Only the last 300 survive the disk (500 in memory).
                 let tail: Vec<&StoredMessage> =
                     list.iter().skip(list.len().saturating_sub(300)).collect();
                 vault.set(&format!("store:msgs:{jid}"), &to_json(&tail));
                 saved += 1;
+            }
+            if was_cold {
+                self.messages.remove(&jid);
+                self.hydrated.remove(&jid);
             }
         }
         if saved > 0 {
@@ -871,12 +916,8 @@ impl Store {
         if let Some(v) = read(vault, "store:aliases") {
             self.aliases = v;
         }
-        for key in vault.keys("store:msgs:") {
-            let jid = key["store:msgs:".len()..].to_string();
-            if let Some(list) = read::<Vec<StoredMessage>>(vault, &key) {
-                self.messages.insert(jid, list);
-            }
-        }
+        // Message bodies stay on disk; chats hydrate on open/hover. The
+        // list itself renders from ChatMeta.preview alone.
         if let Some(v) = read(vault, "store:starred") {
             self.starred_ids = v;
         }
