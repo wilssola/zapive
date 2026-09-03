@@ -372,7 +372,7 @@ async fn executor(
 ) {
     let mut media_key = crate::vault::KeyHandle::default();
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
-    let avatar_sem = Arc::new(tokio::sync::Semaphore::new(3));
+    let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
     // Bumped on every play/stop; running frame loops exit when it moves.
     let video_gen = Arc::new(std::sync::atomic::AtomicU64::new(0));
     while let Some(cmd) = cmd_rx.recv().await {
@@ -1003,7 +1003,40 @@ async fn executor(
             Cmd::FetchAvatar(jid) => {
                 let client = session.client.clone();
                 let sem = avatar_sem.clone();
+                let key = media_key.clone();
                 tokio::spawn(async move {
+                    let path = crate::media::avatar_cache_path(&jid);
+                    // Disk first: the sealed cache fills the list instantly;
+                    // the network only refreshes stale entries.
+                    let hit = {
+                        let key = key.clone();
+                        let path = path.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let meta = std::fs::metadata(&path).ok()?;
+                            let fresh = meta
+                                .modified()
+                                .ok()
+                                .and_then(|m| m.elapsed().ok())
+                                .map(|age| age.as_secs() < 7 * 24 * 3600)
+                                .unwrap_or(false);
+                            if meta.len() == 0 {
+                                return Some((None, fresh)); // remembered "no picture"
+                            }
+                            let img = crate::media::read_cached(&key, &path)
+                                .and_then(|b| crate::media::decode_cover(&b, 96))?;
+                            Some((Some(img), fresh))
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    };
+                    if let Some((img, fresh)) = hit {
+                        let jid2 = jid.clone();
+                        ui_apply(move |b| b.on_avatar(&jid2, img, true));
+                        if fresh {
+                            return;
+                        }
+                    }
                     let _permit = sem.acquire_owned().await;
                     let Some(target) = parse_jid(&jid) else { return };
                     let result = client.contacts().get_profile_picture(&target, true).await;
@@ -1013,7 +1046,9 @@ async fn executor(
                             let img = tokio::task::spawn_blocking(move || {
                                 let mut res = ureq::get(&url).call().ok()?;
                                 let bytes = res.body_mut().read_to_vec().ok()?;
-                                crate::media::decode_cover(&bytes, 96)
+                                let img = crate::media::decode_cover(&bytes, 96)?;
+                                let _ = std::fs::write(&path, key.encrypt_bytes(&bytes));
+                                Some(img)
                             })
                             .await
                             .ok()
@@ -1027,11 +1062,13 @@ async fn executor(
                             }
                         }
                         // Confirmed: this jid has no picture (or hides it).
-                        Ok(None) => ui_apply(move |b| b.on_avatar(&jid, None, true)),
+                        Ok(None) => {
+                            let _ = std::fs::write(&path, []);
+                            ui_apply(move |b| b.on_avatar(&jid, None, true));
+                        }
                         Err(_) => ui_apply(move |b| b.on_avatar(&jid, None, false)),
                     }
-                    // Pace the workers like the Node build's 60ms gap.
-                    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 });
             }
             Cmd::Start | Cmd::Resume => {

@@ -92,6 +92,15 @@ pub async fn ensure_cached(
     }
 }
 
+// Sealed avatar cache: one file per jid, so the chat list fills from
+// disk instead of asking the server for every picture on every boot.
+// An empty file remembers "this jid has no picture".
+pub fn avatar_cache_path(jid: &str) -> PathBuf {
+    let dir = media_cache().join("avatars");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join(format!("{}.avatar", sanitize(jid)))
+}
+
 pub fn read_cached(key: &KeyHandle, path: &PathBuf) -> Option<Vec<u8>> {
     let data = std::fs::read(path).ok()?;
     key.decrypt_bytes(&data).ok()

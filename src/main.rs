@@ -131,6 +131,8 @@ fn main() {
     #[cfg(windows)]
     let tray = make_tray();
     #[cfg(windows)]
+    stamp_window_icons();
+    #[cfg(windows)]
     let tray_poll = slint::Timer::default();
     #[cfg(windows)]
     if let Some((_tray, open_id, exit_id)) = &tray {
@@ -206,6 +208,44 @@ fn audio_selftest() {
     let strip = audio::message_waveform(&samples);
     println!("[selftest] message waveform {} points, peak {}", strip.len(), strip.iter().max().unwrap_or(&0));
     let _ = std::fs::remove_file(&tmp);
+}
+
+// The tray crate's hidden message window carries no window icon, and
+// Task Manager renders whatever garbage WM_GETICON hands back. Stamp the
+// real .ico onto every window this process owns.
+#[cfg(windows)]
+fn stamp_window_icons() {
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM};
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IMAGE_ICON,
+        LR_LOADFROMFILE, LoadImageW, SendMessageW, WM_SETICON,
+    };
+    use windows::core::PCWSTR;
+    unsafe extern "system" fn stamp(hwnd: HWND, lp: LPARAM) -> BOOL {
+        unsafe {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == GetCurrentProcessId() {
+                let [small, big] = *(lp.0 as *const [isize; 2]);
+                let _ = SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(small));
+                let _ = SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(big));
+            }
+        }
+        true.into()
+    }
+    unsafe {
+        use std::os::windows::ffi::OsStrExt;
+        let ico = paths::data_dir().join("zapive.ico");
+        let wide: Vec<u16> = ico.as_os_str().encode_wide().chain([0]).collect();
+        let load = |size: i32| {
+            LoadImageW(None, PCWSTR(wide.as_ptr()), IMAGE_ICON, size, size, LR_LOADFROMFILE)
+                .map(|h| h.0 as isize)
+                .unwrap_or(0)
+        };
+        let handles = [load(16), load(32)];
+        let _ = EnumWindows(Some(stamp), LPARAM(&handles as *const _ as isize));
+    }
 }
 
 #[cfg(windows)]
