@@ -61,6 +61,15 @@ pub struct Bridge {
     anim_timer: slint::Timer,
     stick_requeued: bool,
     media_key: crate::vault::KeyHandle,
+    // Voice-note playback and recording.
+    audio: Option<AudioState>,
+    audio_rate_idx: usize,
+    audio_buffers: HashMap<(String, usize), crate::audio::AudioBuffer>,
+    audio_timer: slint::Timer,
+    waves: HashMap<String, slint::Image>,
+    recorder: Option<crate::audio::Recorder>,
+    rec_timer: slint::Timer,
+    rec_started: Option<Instant>,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -70,6 +79,21 @@ struct Anim {
     idx: usize,
     looping: bool,
 }
+
+// The note being played (or paused); the mini player takes over when the
+// user leaves its conversation.
+struct AudioState {
+    id: String,
+    jid: String,
+    duration: f64,
+    paused: bool,
+    // Waiting for the decoded buffer; holds where to start, in source secs.
+    pending_offset: Option<f64>,
+    player: Option<crate::audio::Player>,
+}
+
+const RATES: [f64; 5] = [1.0, 1.5, 2.0, 2.5, 3.0];
+const RATE_LABELS: [&str; 5] = ["1x", "1.5x", "2x", "2.5x", "3x"];
 
 const DECODE_CACHE_MAX: usize = 50;
 const MAX_ANIMATIONS: usize = 6;
@@ -156,6 +180,14 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         anim_timer: slint::Timer::default(),
         stick_requeued: false,
         media_key: crate::vault::KeyHandle::default(),
+        audio: None,
+        audio_rate_idx: 0,
+        audio_buffers: HashMap::new(),
+        audio_timer: slint::Timer::default(),
+        waves: HashMap::new(),
+        recorder: None,
+        rec_timer: slint::Timer::default(),
+        rec_started: None,
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -266,6 +298,34 @@ fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
+    ui.set_audio_rate_label("1x".into());
+    ui.on_audio_toggle(|id| {
+        let id = id.to_string();
+        defer(move |b| b.toggle_audio(&id));
+    });
+    ui.on_audio_seek(|id, frac| {
+        let id = id.to_string();
+        defer(move |b| b.seek_audio(&id, frac));
+    });
+    ui.on_audio_cycle_rate(|| defer(|b| b.cycle_audio_rate()));
+    ui.on_mini_audio_toggle(|| {
+        defer(|b| {
+            if let Some(id) = b.audio.as_ref().map(|a| a.id.clone()) {
+                b.toggle_audio(&id);
+            }
+        });
+    });
+    ui.on_mini_audio_open(|| {
+        defer(|b| {
+            if let Some((jid, id)) = b.audio.as_ref().map(|a| (a.jid.clone(), a.id.clone())) {
+                b.open_dm(&jid, Some(&id));
+            }
+        });
+    });
+    ui.on_mini_audio_close(|| defer(|b| b.stop_audio()));
+    ui.on_rec_start(|| defer(|b| b.start_recording()));
+    ui.on_rec_stop(|| defer(|b| b.stop_recording(true)));
+    ui.on_rec_cancel(|| defer(|b| b.stop_recording(false)));
     ui.on_play_audio(|path| {
         // Documents (and, until phase 4, audio files) open with whatever
         // the OS associates; the handler needs a decrypted copy.
@@ -1022,6 +1082,8 @@ impl Bridge {
         self.load_media_for_chat(jid);
         self.queue_row_avatars(jid);
         self.queue_avatar(jid);
+        // Playback follows the user: the mini bar takes over elsewhere.
+        self.sync_mini_player();
         // Thin conversation: ask the phone for this chat's older messages.
         let list = self.store.messages_for(jid);
         if list.len() < 20
@@ -1254,9 +1316,13 @@ impl Bridge {
             hasLinkThumb: false,
             linkThumbW: 0,
             linkThumbH: 0,
-            wave: empty_image(),
-            hasWave: false,
-            playing: false,
+            hasWave: self.waves.contains_key(&m.id),
+            wave: self.waves.get(&m.id).cloned().unwrap_or_else(empty_image),
+            playing: self
+                .audio
+                .as_ref()
+                .map(|a| a.id == m.id && !a.paused && a.player.is_some())
+                .unwrap_or(false),
             progress: 0.0,
             posLabel: "".into(),
             senderJid: sender_jid.into(),
@@ -1566,6 +1632,16 @@ impl Bridge {
             row.mediaPath = path_str.into();
             row.mediaReady = true;
         });
+        // Voice notes draw their amplitude bars once the file is here.
+        let is_audio = self
+            .current_jid
+            .as_ref()
+            .and_then(|jid| self.store.messages_for(jid).iter().find(|m| m.id == id))
+            .map(|m| m.kind == MessageKind::Audio)
+            .unwrap_or(false);
+        if is_audio && !self.waves.contains_key(id) {
+            self.wa.send(Cmd::Waveform { id: id.to_string(), path: path.to_path_buf() });
+        }
         self.restick();
     }
 
@@ -1727,6 +1803,261 @@ impl Bridge {
         for jid in wanted {
             self.queue_avatar(&jid);
         }
+    }
+
+    // ---- audio (player, mini player, recording) ----
+
+    fn plain_audio_path(&self, id: &str) -> Option<std::path::PathBuf> {
+        let cached = std::path::PathBuf::from(self.media_path.get(id)?);
+        crate::media::temp_plain(&self.media_key, &cached)
+    }
+
+    fn toggle_audio(&mut self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        if let Some(a) = &mut self.audio
+            && a.id == id
+        {
+            if let Some(player) = &a.player {
+                if a.paused {
+                    player.resume();
+                    a.paused = false;
+                } else {
+                    player.pause();
+                    a.paused = true;
+                }
+                let (aid, ajid, paused) = (a.id.clone(), a.jid.clone(), a.paused);
+                if Some(&ajid) == self.current_jid.as_ref() {
+                    self.patch_row(&aid, |row| row.playing = !paused);
+                }
+                self.ui.set_mini_audio_playing(!paused);
+            }
+            return;
+        }
+        self.start_audio(id, 0.0);
+    }
+
+    fn start_audio(&mut self, id: &str, offset_secs: f64) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id) else { return };
+        let duration = (m.duration_sec.max(1)) as f64;
+        self.stop_audio();
+        self.audio = Some(AudioState {
+            id: id.to_string(),
+            jid,
+            duration,
+            paused: false,
+            pending_offset: Some(offset_secs),
+            player: None,
+        });
+        self.spin_audio_at(offset_secs);
+    }
+
+    // Starts (or requests the decode for) the current note at a source
+    // position, honoring the selected speed.
+    fn spin_audio_at(&mut self, offset_secs: f64) {
+        let rate_idx = self.audio_rate_idx;
+        let rate = RATES[rate_idx];
+        let Some(a) = &mut self.audio else { return };
+        let id = a.id.clone();
+        if let Some(buffer) = self.audio_buffers.get(&(id.clone(), rate_idx)) {
+            let player = crate::audio::Player::start(buffer, offset_secs / rate);
+            if let Some(a) = &mut self.audio {
+                a.player = player;
+                a.paused = false;
+                a.pending_offset = None;
+            }
+            self.ensure_audio_timer();
+            let jid = self.audio.as_ref().map(|a| a.jid.clone()).unwrap_or_default();
+            if Some(&jid) == self.current_jid.as_ref() {
+                self.patch_row(&id, |row| row.playing = true);
+            }
+            self.ui.set_mini_audio_playing(true);
+            return;
+        }
+        a.pending_offset = Some(offset_secs);
+        let Some(plain) = self.plain_audio_path(&id) else {
+            self.audio = None;
+            return;
+        };
+        self.wa.send(Cmd::AudioDecode { id, plain, rate_idx, rate });
+    }
+
+    pub fn on_audio_ready(&mut self, id: &str, rate_idx: usize, buffer: crate::audio::AudioBuffer) {
+        if self.audio_buffers.len() > 8 {
+            self.audio_buffers.clear();
+        }
+        self.audio_buffers.insert((id.to_string(), rate_idx), buffer);
+        if let Some(a) = &self.audio
+            && a.id == id
+            && rate_idx == self.audio_rate_idx
+            && let Some(offset) = a.pending_offset
+        {
+            self.spin_audio_at(offset);
+        }
+    }
+
+    fn seek_audio(&mut self, id: &str, frac: f32) {
+        let matches = self.audio.as_ref().map(|a| a.id == id).unwrap_or(false);
+        if matches {
+            let duration = self.audio.as_ref().map(|a| a.duration).unwrap_or(1.0);
+            self.spin_audio_at((frac as f64).clamp(0.0, 1.0) * duration);
+        } else {
+            let duration = self
+                .current_jid
+                .as_ref()
+                .and_then(|jid| self.store.messages_for(jid).iter().find(|m| m.id == id))
+                .map(|m| m.duration_sec.max(1) as f64)
+                .unwrap_or(0.0);
+            self.start_audio(id, (frac as f64).clamp(0.0, 1.0) * duration);
+        }
+    }
+
+    fn cycle_audio_rate(&mut self) {
+        // The old player ran at the previous rate: its source position is
+        // output position times that rate; capture it before restarting.
+        let prev_rate = RATES[self.audio_rate_idx];
+        self.audio_rate_idx = (self.audio_rate_idx + 1) % RATES.len();
+        self.ui.set_audio_rate_label(RATE_LABELS[self.audio_rate_idx].into());
+        let offset = self.audio.as_mut().map(|a| {
+            let pos = a.player.as_ref().map(|p| p.position_secs() * prev_rate).unwrap_or(0.0);
+            a.player = None;
+            pos.min(a.duration)
+        });
+        if let Some(offset) = offset {
+            // The running note restarts at its position, new speed.
+            self.spin_audio_at(offset);
+        }
+    }
+
+    fn ensure_audio_timer(&mut self) {
+        if self.audio_timer.running() {
+            return;
+        }
+        self.audio_timer.start(slint::TimerMode::Repeated, Duration::from_millis(250), || {
+            apply_now(|b| b.tick_audio());
+        });
+    }
+
+    fn tick_audio(&mut self) {
+        let rate = RATES[self.audio_rate_idx];
+        let Some(a) = &self.audio else {
+            self.audio_timer.stop();
+            return;
+        };
+        let Some(player) = &a.player else { return };
+        if player.finished() {
+            self.stop_audio();
+            return;
+        }
+        let pos = (player.position_secs() * rate).min(a.duration);
+        let progress = (pos / a.duration).min(1.0) as f32;
+        let label = crate::store::format_duration(pos as u32);
+        let (id, jid, paused) = (a.id.clone(), a.jid.clone(), a.paused);
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.patch_row(&id, |row| {
+                row.playing = !paused;
+                row.progress = progress;
+                row.posLabel = label.into();
+            });
+        }
+        self.ui.set_mini_audio_progress(progress);
+    }
+
+    fn stop_audio(&mut self) {
+        if let Some(a) = self.audio.take() {
+            if Some(&a.jid) == self.current_jid.as_ref() {
+                self.patch_row(&a.id, |row| {
+                    row.playing = false;
+                    row.progress = 0.0;
+                    row.posLabel = "".into();
+                });
+            }
+        }
+        self.ui.set_mini_audio(false);
+        self.ui.set_mini_audio_playing(false);
+        self.audio_timer.stop();
+    }
+
+    // Shows or hides the mini bar depending on where the note lives.
+    fn sync_mini_player(&mut self) {
+        let show = match (&self.audio, &self.current_jid) {
+            (Some(a), Some(current)) => &a.jid != current,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if !show {
+            self.ui.set_mini_audio(false);
+            return;
+        }
+        let Some(a) = &self.audio else { return };
+        let name = self.store.chat_name(&a.jid);
+        let avatar = self.avatar_for(&a.jid);
+        self.ui.set_mini_audio_name(name.clone().into());
+        self.ui.set_mini_audio_avatar_has(avatar.is_some());
+        self.ui.set_mini_audio_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui.set_mini_audio_initial(initial_of(&name).into());
+        self.ui.set_mini_audio_color_idx(color_idx_of(&a.jid));
+        self.ui.set_mini_audio_playing(!a.paused);
+        self.ui.set_mini_audio(true);
+    }
+
+    pub fn on_wave(&mut self, id: &str, img: crate::media::Decoded) {
+        let image = image_of(&img);
+        self.waves.insert(id.to_string(), image.clone());
+        self.patch_row(id, |row| {
+            row.wave = image;
+            row.hasWave = true;
+        });
+    }
+
+    fn start_recording(&mut self) {
+        if self.recorder.is_some() || self.current_jid.is_none() {
+            return;
+        }
+        match crate::audio::Recorder::start() {
+            Some(recorder) => {
+                self.recorder = Some(recorder);
+                self.rec_started = Some(Instant::now());
+                self.ui.set_rec_elapsed("0:00".into());
+                self.ui.set_rec_active(true);
+                self.rec_timer.start(
+                    slint::TimerMode::Repeated,
+                    Duration::from_millis(500),
+                    || {
+                        apply_now(|b| {
+                            if let Some(started) = b.rec_started {
+                                let secs = started.elapsed().as_secs() as u32;
+                                b.ui.set_rec_elapsed(
+                                    crate::store::format_duration(secs).into(),
+                                );
+                            }
+                        });
+                    },
+                );
+            }
+            None => self.ui.set_status_text(t("rec.noMic").into()),
+        }
+    }
+
+    fn stop_recording(&mut self, send: bool) {
+        self.rec_timer.stop();
+        self.rec_started = None;
+        self.ui.set_rec_active(false);
+        let view_once = self.ui.get_rec_view_once();
+        self.ui.set_rec_view_once(false);
+        let Some(recorder) = self.recorder.take() else { return };
+        if !send {
+            return;
+        }
+        let (samples, in_rate) = recorder.stop();
+        // Anything shorter than half a second is a misclick.
+        if (samples.len() as f64) < in_rate as f64 / 2.0 {
+            return;
+        }
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.wa.send(Cmd::SendVoice { jid, samples, in_rate, view_once });
     }
 
     // ---- helpers ----

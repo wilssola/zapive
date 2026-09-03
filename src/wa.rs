@@ -59,6 +59,10 @@ pub enum Cmd {
     // Decodes an embedded thumbnail (link previews, video posters).
     DecodeThumb { id: String, bytes: Vec<u8>, link: bool },
     FetchAvatar(String),
+    // Voice notes: full decode at a speed, waveform bars, send recording.
+    AudioDecode { id: String, plain: std::path::PathBuf, rate_idx: usize, rate: f64 },
+    Waveform { id: String, path: std::path::PathBuf },
+    SendVoice { jid: String, samples: Vec<f32>, in_rate: u32, view_once: bool },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.
@@ -396,6 +400,90 @@ async fn executor(
                     }
                 });
             }
+            Cmd::AudioDecode { id, plain, rate_idx, rate } => {
+                tokio::spawn(async move {
+                    let buffer = tokio::task::spawn_blocking(move || {
+                        crate::audio::decode_with_tempo(&plain, rate)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    match buffer {
+                        Some(buffer) => {
+                            ui_apply(move |b| b.on_audio_ready(&id, rate_idx, buffer))
+                        }
+                        None => eprintln!("[audio] decode failed for {id}"),
+                    }
+                });
+            }
+            Cmd::Waveform { id, path } => {
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let wave = tokio::task::spawn_blocking(move || {
+                        crate::media::temp_plain(&key, &path)
+                            .and_then(|p| crate::audio::waveform(&p))
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = wave {
+                        ui_apply(move |b| b.on_wave(&id, img));
+                    }
+                });
+            }
+            Cmd::SendVoice { jid, samples, in_rate, view_once } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let wave = crate::audio::message_waveform(&samples);
+                    let tmp = std::env::temp_dir().join(format!(
+                        "zapive_voice_{}.ogg",
+                        std::process::id()
+                    ));
+                    let encode_path = tmp.clone();
+                    let seconds = tokio::task::spawn_blocking(move || {
+                        crate::audio::encode_voice_ogg(&samples, in_rate, &encode_path)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    let Some(seconds) = seconds else {
+                        eprintln!("[audio] voice encode failed");
+                        return;
+                    };
+                    let Ok(bytes) = tokio::fs::read(&tmp).await else { return };
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    let Some(to) = parse_jid(&jid) else { return };
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Audio, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[audio] voice upload failed: {e}");
+                            return;
+                        }
+                    };
+                    let mut message = whatsapp_rust::media::audio_message(
+                        upload,
+                        whatsapp_rust::media::AudioOptions {
+                            ptt: Some(true),
+                            duration_seconds: Some(seconds),
+                            waveform: Some(wave),
+                            ..Default::default()
+                        },
+                    );
+                    if view_once {
+                        message = wrap_view_once(message);
+                    }
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[audio] voice send failed: {e}"),
+                    }
+                });
+            }
             Cmd::FetchAvatar(jid) => {
                 let client = session.client.clone();
                 let sem = avatar_sem.clone();
@@ -560,6 +648,16 @@ async fn executor(
             }
         }
     }
+}
+
+// A view-once wrapper around any content message.
+fn wrap_view_once(inner: wa::Message) -> wa::Message {
+    use whatsapp_rust::waproto::buffa::MessageField;
+    let mut wrapper = wa::message::FutureProofMessage::default();
+    wrapper.message = MessageField::some(inner);
+    let mut out = wa::Message::default();
+    out.view_once_message_v2 = MessageField::some(wrapper);
+    out
 }
 
 fn format_pair_code(code: &str) -> String {

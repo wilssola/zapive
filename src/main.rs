@@ -1,5 +1,6 @@
 slint::include_modules!();
 
+mod audio;
 mod bridge;
 mod i18n;
 mod markup;
@@ -59,6 +60,14 @@ fn main() {
 
     if let Err(e) = ffmpeg_next::init() {
         eprintln!("[media] ffmpeg init failed: {e}");
+    }
+
+    // Developer probe: exercises the whole in-process audio path
+    // (opus encode -> decode with atempo -> waveform) and exits.
+    if std::env::args().any(|a| a == "--audio-selftest") {
+        audio_selftest();
+        single::release_single_instance();
+        return;
     }
 
     let ui = AppWindow::new().expect("failed to create the main window");
@@ -123,6 +132,39 @@ fn main() {
     ui.run().expect("event loop failed");
     wa.send(wa::Cmd::Shutdown);
     single::release_single_instance();
+}
+
+fn audio_selftest() {
+    // Two seconds of 440Hz at 16kHz mono in, opus out.
+    let in_rate = 16_000u32;
+    let samples: Vec<f32> = (0..in_rate * 2)
+        .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / in_rate as f32).sin() * 0.5)
+        .collect();
+    let tmp = std::env::temp_dir().join("zapive_selftest.ogg");
+    match audio::encode_voice_ogg(&samples, in_rate, &tmp) {
+        Some(secs) => println!("[selftest] encoded {secs}s voice note at {}", tmp.display()),
+        None => {
+            println!("[selftest] FAIL: encode");
+            return;
+        }
+    }
+    for rate in [1.0, 1.5, 3.0] {
+        match audio::decode_with_tempo(&tmp, rate) {
+            Some(buf) => println!(
+                "[selftest] decode at {rate}x: {:.2}s ({} samples)",
+                buf.duration_secs(),
+                buf.samples.len()
+            ),
+            None => println!("[selftest] FAIL: decode at {rate}x"),
+        }
+    }
+    match audio::waveform(&tmp) {
+        Some(w) => println!("[selftest] waveform {}x{}", w.w, w.h),
+        None => println!("[selftest] FAIL: waveform"),
+    }
+    let strip = audio::message_waveform(&samples);
+    println!("[selftest] message waveform {} points, peak {}", strip.len(), strip.iter().max().unwrap_or(&0));
+    let _ = std::fs::remove_file(&tmp);
 }
 
 #[cfg(windows)]
