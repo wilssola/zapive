@@ -3506,6 +3506,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kamadak-exif"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef4fc70d0ab7e5b6bafa30216a6b48705ea964cdfc29c050f2412295eba58077"
+dependencies = [
+ "mutate_once",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3938,6 +3947,12 @@ dependencies = [
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "mutate_once"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d2233c9842d08cfe13f9eac96e207ca6a2ea10b80259ebe8ad0268be27d2af"
 
 [[package]]
 name = "natord"
@@ -6881,6 +6896,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "972d7902c8735f2695410b8aed7df6ed12a47394aa1c8d7af49f0497b731a94d"
 dependencies = [
  "base64 0.23.1",
+ "flate2",
  "log",
  "percent-encoding",
  "rustls",
@@ -8181,6 +8197,7 @@ dependencies = [
  "chrono",
  "ffmpeg-next",
  "image",
+ "kamadak-exif",
  "libc",
  "qrcode",
  "rand 0.9.5",
@@ -8194,6 +8211,7 @@ dependencies = [
  "sys-locale",
  "tokio",
  "tray-icon",
+ "ureq",
  "url",
  "whatsapp-rust",
  "windows 0.58.0",

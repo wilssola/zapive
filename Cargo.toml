@@ -16,7 +16,7 @@ whatsapp-rust = { version = "=0.7.0", default-features = false, features = [
     "tokio-runtime",
     "ureq-client",
 ] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 image = "0.25"
 qrcode = "0.14"
 ffmpeg-next = "9"
@@ -35,6 +35,8 @@ chrono = "0.4"
 regex = "1"
 url = "2"
 arboard = "3"
+kamadak-exif = "0.5"
+ureq = "3"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.19"

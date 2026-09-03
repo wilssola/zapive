@@ -27,7 +27,19 @@ pub struct QuoteRef {
     pub message: Arc<wa::Message>,
 }
 
-#[derive(Debug)]
+// What to do with a media file once cached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaWant {
+    // Decode the full image for the bubble.
+    Image,
+    // Decode (possibly animated) sticker frames.
+    Sticker,
+    // Extract looping GIF frames from the clip.
+    Gif,
+    // Just cache the file (audio, documents, video clips).
+    File,
+}
+
 pub enum Cmd {
     // Spawns the connection loop; sent once the bridge is installed so no
     // early event is lost.
@@ -41,6 +53,12 @@ pub enum Cmd {
     FetchHistory { jid: String, oldest_id: String, from_me: bool, ts_ms: i64 },
     SubscribePresence(String),
     FetchGroups,
+    // Media pipeline: the vault key arrives once the vault unlocks.
+    MediaKey(crate::vault::KeyHandle),
+    Media { id: String, mimetype: String, message: std::sync::Arc<wa::Message>, want: MediaWant },
+    // Decodes an embedded thumbnail (link previews, video posters).
+    DecodeThumb { id: String, bytes: Vec<u8>, link: bool },
+    FetchAvatar(String),
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.
@@ -310,8 +328,108 @@ async fn executor(
     mut cmd_rx: mpsc::UnboundedReceiver<Cmd>,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
 ) {
+    let mut media_key = crate::vault::KeyHandle::default();
+    let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
+    let avatar_sem = Arc::new(tokio::sync::Semaphore::new(3));
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
+            Cmd::MediaKey(key) => {
+                media_key = key;
+            }
+            Cmd::Media { id, mimetype, message, want } => {
+                let client = session.client.clone();
+                let key = media_key.clone();
+                let sem = media_sem.clone();
+                tokio::spawn(async move {
+                    let _permit = sem.acquire_owned().await;
+                    let Some(path) =
+                        crate::media::ensure_cached(&client, &key, &id, &mimetype, &message).await
+                    else {
+                        ui_apply(move |b| b.on_media_missing(&id));
+                        return;
+                    };
+                    match want {
+                        MediaWant::File => ui_apply(move |b| b.on_media_file(&id, &path)),
+                        MediaWant::Image => {
+                            let decoded = crate::media::read_cached(&key, &path)
+                                .and_then(|d| crate::media::decode_bytes(&d, 1280));
+                            match decoded {
+                                Some(img) => ui_apply(move |b| b.on_media_image(&id, &path, img)),
+                                None => ui_apply(move |b| b.on_media_missing(&id)),
+                            }
+                        }
+                        MediaWant::Sticker => {
+                            let frames = crate::media::read_cached(&key, &path)
+                                .map(|d| crate::media::sticker_frames(&d, 180, 24))
+                                .unwrap_or_default();
+                            ui_apply(move |b| b.on_media_sticker(&id, &path, frames));
+                        }
+                        MediaWant::Gif => {
+                            let frames = tokio::task::spawn_blocking(move || {
+                                crate::media::temp_plain(&key, &path)
+                                    .map(|p| crate::video::frames(&p, 320, 15.0, 45))
+                                    .map(|f| (path, f))
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+                            match frames {
+                                Some((path, frames)) if !frames.is_empty() => {
+                                    ui_apply(move |b| b.on_media_gif(&id, &path, frames));
+                                }
+                                Some((path, _)) => ui_apply(move |b| b.on_media_file(&id, &path)),
+                                None => ui_apply(move |b| b.on_media_missing(&id)),
+                            }
+                        }
+                    }
+                });
+            }
+            Cmd::DecodeThumb { id, bytes, link } => {
+                tokio::spawn(async move {
+                    if let Some(img) =
+                        tokio::task::spawn_blocking(move || crate::media::decode_bytes(&bytes, 1280))
+                            .await
+                            .ok()
+                            .flatten()
+                    {
+                        ui_apply(move |b| b.on_thumb(&id, link, img));
+                    }
+                });
+            }
+            Cmd::FetchAvatar(jid) => {
+                let client = session.client.clone();
+                let sem = avatar_sem.clone();
+                tokio::spawn(async move {
+                    let _permit = sem.acquire_owned().await;
+                    let Some(target) = parse_jid(&jid) else { return };
+                    let result = client.contacts().get_profile_picture(&target, true).await;
+                    match result {
+                        Ok(Some(pic)) => {
+                            let url = pic.url.clone();
+                            let img = tokio::task::spawn_blocking(move || {
+                                let mut res = ureq::get(&url).call().ok()?;
+                                let bytes = res.body_mut().read_to_vec().ok()?;
+                                crate::media::decode_cover(&bytes, 96)
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+                            match img {
+                                Some(img) => {
+                                    ui_apply(move |b| b.on_avatar(&jid, Some(img), true))
+                                }
+                                // The URL fetch failed: transient, retryable.
+                                None => ui_apply(move |b| b.on_avatar(&jid, None, false)),
+                            }
+                        }
+                        // Confirmed: this jid has no picture (or hides it).
+                        Ok(None) => ui_apply(move |b| b.on_avatar(&jid, None, true)),
+                        Err(_) => ui_apply(move |b| b.on_avatar(&jid, None, false)),
+                    }
+                    // Pace the workers like the Node build's 60ms gap.
+                    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                });
+            }
             Cmd::Start | Cmd::Resume => {
                 let client = session.client.clone();
                 tokio::spawn(async move { client.run().await });

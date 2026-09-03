@@ -11,7 +11,7 @@ use crate::store::{
     reaction_summary, ticks_for,
 };
 use crate::vault::Vault;
-use crate::wa::{Cmd, HistoryChunk, QuoteRef, WaService};
+use crate::wa::{Cmd, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{AppWindow, ChatItem, MessageItem};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -49,8 +49,41 @@ pub struct Bridge {
     refresh_queued: bool,
     save_queued: bool,
     pending_registered: bool,
+    // Media caches (pixels live UI-side; files live encrypted on disk).
+    avatars: HashMap<String, Option<slint::Image>>,
+    requested_avatars: HashSet<String>,
+    avatar_tries: HashMap<String, u32>,
+    media_inflight: HashSet<String>,
+    media_path: HashMap<String, String>,
+    decoded: HashMap<String, (slint::Image, i32, i32)>,
+    decoded_order: std::collections::VecDeque<String>,
+    animated: HashMap<String, Anim>,
+    anim_timer: slint::Timer,
+    stick_requeued: bool,
+    media_key: crate::vault::KeyHandle,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
+}
+
+struct Anim {
+    frames: Vec<slint::Image>,
+    idx: usize,
+    looping: bool,
+}
+
+const DECODE_CACHE_MAX: usize = 50;
+const MAX_ANIMATIONS: usize = 6;
+
+fn image_of(d: &crate::media::Decoded) -> slint::Image {
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(d.w, d.h);
+    buf.make_mut_bytes().copy_from_slice(&d.rgba);
+    slint::Image::from_rgba8(buf)
+}
+
+// WhatsApp-style thumbnail box: fit within 330x380, never upscale.
+fn bubble_fit(w: i32, h: i32) -> (i32, i32) {
+    let scale = (330.0 / w as f64).min(380.0 / h as f64).min(1.0);
+    (((w as f64 * scale).round() as i32).max(1), ((h as f64 * scale).round() as i32).max(1))
 }
 
 thread_local! {
@@ -112,6 +145,17 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         refresh_queued: false,
         save_queued: false,
         pending_registered: false,
+        avatars: HashMap::new(),
+        requested_avatars: HashSet::new(),
+        avatar_tries: HashMap::new(),
+        media_inflight: HashSet::new(),
+        media_path: HashMap::new(),
+        decoded: HashMap::new(),
+        decoded_order: std::collections::VecDeque::new(),
+        animated: HashMap::new(),
+        anim_timer: slint::Timer::default(),
+        stick_requeued: false,
+        media_key: crate::vault::KeyHandle::default(),
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -222,6 +266,17 @@ fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
+    ui.on_play_audio(|path| {
+        // Documents (and, until phase 4, audio files) open with whatever
+        // the OS associates; the handler needs a decrypted copy.
+        let path = path.to_string();
+        defer(move |b| {
+            let cached = std::path::PathBuf::from(&path);
+            if let Some(plain) = crate::media::temp_plain(&b.media_key, &cached) {
+                crate::platform::open_path(&plain.to_string_lossy());
+            }
+        });
+    });
     ui.on_copy_text(|id| {
         let id = id.to_string();
         defer(move |b| {
@@ -238,7 +293,10 @@ impl Bridge {
 
     // Called from main once the vault is open (or right away without PIN).
     pub fn boot(&mut self, vault: Vault, registered: bool) {
+        crate::media::clean_tmp();
         self.store.load_from(&vault);
+        self.media_key = vault.key_handle();
+        self.wa.send(Cmd::MediaKey(vault.key_handle()));
         self.vault = Some(vault);
         println!(
             "[store] loaded chats={} msgChats={} total={}",
@@ -356,6 +414,14 @@ impl Bridge {
         self.store = Store::default();
         self.chats_model.set_vec(Vec::new());
         self.messages_model.set_vec(Vec::new());
+        self.avatars.clear();
+        self.requested_avatars.clear();
+        self.avatar_tries.clear();
+        self.media_inflight.clear();
+        self.media_path.clear();
+        self.decoded.clear();
+        self.decoded_order.clear();
+        self.animated.clear();
         if let Some(vault) = &self.vault {
             vault.del_prefix("store:");
         }
@@ -406,6 +472,8 @@ impl Bridge {
             } else if self.ui.get_stick_bottom() {
                 self.rebuild_conversation(&jid);
                 self.scroll_to_end();
+                self.load_media_for_chat(&jid);
+                self.queue_row_avatars(&jid);
             }
             // else: data is stored; the view catches up on next open.
         }
@@ -730,13 +798,14 @@ impl Bridge {
 
     fn to_chat_row(&self, jid: &str, preview: &str, timestamp: i64, unread: u32, mentioned: bool) -> ChatItem {
         let name = self.store.chat_name(jid);
+        let avatar = self.avatar_for(jid);
         ChatItem {
             jid: jid.into(),
             name: name.clone().into(),
             preview: preview.into(),
             time: format_time(timestamp).into(),
-            avatar: empty_image(),
-            hasAvatar: false,
+            hasAvatar: avatar.is_some(),
+            avatar: avatar.unwrap_or_else(empty_image),
             initial: initial_of(&name).into(),
             colorIdx: color_idx_of(jid),
             unread: unread as i32,
@@ -839,6 +908,7 @@ impl Bridge {
                 model.remove(model.row_count() - 1);
             }
         }
+        self.ensure_avatars();
         self.schedule_save();
     }
 
@@ -860,9 +930,10 @@ impl Bridge {
 
     fn apply_header(&mut self, jid: &str) {
         let name = self.store.chat_name(jid);
+        let avatar = self.avatar_for(jid);
         self.ui.set_current_chat_name(name.clone().into());
-        self.ui.set_current_avatar(empty_image());
-        self.ui.set_current_avatar_has(false);
+        self.ui.set_current_avatar_has(avatar.is_some());
+        self.ui.set_current_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_current_initial(initial_of(&name).into());
         self.ui.set_current_color_idx(color_idx_of(jid));
     }
@@ -948,6 +1019,9 @@ impl Bridge {
             b.ui.set_scroll_armed(!anchored_top);
         });
         self.schedule_refresh_chats();
+        self.load_media_for_chat(jid);
+        self.queue_row_avatars(jid);
+        self.queue_avatar(jid);
         // Thin conversation: ask the phone for this chat's older messages.
         let list = self.store.messages_for(jid);
         if list.len() < 20
@@ -1001,10 +1075,13 @@ impl Bridge {
         let boundary = self.to_row(&list[cut], list.get(cut - 1));
         self.messages_model.set_row_data(cut, boundary);
 
+        let jid_owned = jid.to_string();
         self.once(40, move |b| {
             let added = b.ui.get_conv_viewport_h() - before_h;
             b.ui.invoke_set_conversation_scroll(before_y - added);
             b.ui.set_conv_ready(true);
+            b.load_media_for_chat(&jid_owned);
+            b.queue_row_avatars(&jid_owned);
         });
     }
 
@@ -1014,11 +1091,18 @@ impl Bridge {
         let prev = list.len().checked_sub(2).and_then(|i| list.get(i));
         let row = self.to_row(stored, prev);
         let from_me = stored.from_me;
+        let needs_media =
+            stored.kind != MessageKind::Text || !stored.link_title.is_empty() || !stored.link_url.is_empty();
+        let stored = stored.clone();
         self.messages_model.push(row);
         // Don't yank the view down while the user is reading older rows.
         if from_me || self.ui.get_stick_bottom() {
             self.scroll_to_end();
         }
+        if needs_media {
+            self.request_media(&stored);
+        }
+        self.queue_row_avatars(jid);
     }
 
     fn scroll_to_end(&mut self) {
@@ -1115,22 +1199,28 @@ impl Bridge {
             },
             firstOfRun: first_of_run,
             time: format_time(m.timestamp).into(),
-            picture: empty_image(),
-            picW: pic_w,
-            picH: pic_h,
-            mediaPath: "".into(),
-            mediaReady: false,
+            // Rebuilt rows keep already-decoded media so scrollback and
+            // re-opens draw instantly.
+            picture: self
+                .decoded
+                .get(&m.id)
+                .map(|(img, _, _)| img.clone())
+                .unwrap_or_else(empty_image),
+            picW: self.decoded.get(&m.id).map(|&(_, w, _)| w).unwrap_or(pic_w),
+            picH: self.decoded.get(&m.id).map(|&(_, _, h)| h).unwrap_or(pic_h),
+            mediaPath: self.media_path.get(&m.id).cloned().unwrap_or_default().into(),
+            mediaReady: self.media_path.contains_key(&m.id),
             reactions: reaction_summary(m).into(),
             dayLabel: day_label.into(),
             ticks: ticks.into(),
             ticksBlue: ticks_blue,
-            senderAvatar: empty_image(),
-            senderHasAvatar: false,
+            senderHasAvatar: self.avatar_for(&sender_jid).is_some(),
+            senderAvatar: self.avatar_for(&sender_jid).unwrap_or_else(empty_image),
             senderInitial: initial_of(if m.sender.is_empty() { "?" } else { &m.sender }).into(),
             senderColorIdx: color_idx_of(if sender_jid.is_empty() { &m.jid } else { &sender_jid }),
             voiceJid: voice_jid.clone().into(),
-            voiceAvatar: empty_image(),
-            voiceHasAvatar: false,
+            voiceHasAvatar: self.avatar_for(&voice_jid).is_some(),
+            voiceAvatar: self.avatar_for(&voice_jid).unwrap_or_else(empty_image),
             voiceInitial: initial_of(if m.from_me {
                 let name = self.store.chat_name(&self.self_jid);
                 if name.is_empty() { "?".to_string() } else { name }
@@ -1247,6 +1337,396 @@ impl Bridge {
         self.ui.set_reply_open(false);
         self.ui.set_reply_name("".into());
         self.ui.set_reply_text("".into());
+    }
+
+    // ---- media (results arrive from the tokio side) ----
+
+    fn avatar_for(&self, jid: &str) -> Option<slint::Image> {
+        self.avatars.get(jid).cloned().flatten()
+    }
+
+    fn queue_avatar(&mut self, jid: &str) {
+        if jid.is_empty() || self.requested_avatars.contains(jid) {
+            return;
+        }
+        self.requested_avatars.insert(jid.to_string());
+        self.wa.send(Cmd::FetchAvatar(jid.to_string()));
+    }
+
+    fn ensure_avatars(&mut self) {
+        let jids: Vec<String> = self
+            .store
+            .sorted_chats()
+            .into_iter()
+            .map(|meta| meta.jid.clone())
+            .filter(|jid| !self.requested_avatars.contains(jid))
+            .collect();
+        for jid in jids {
+            self.queue_avatar(&jid);
+        }
+    }
+
+    pub fn on_avatar(&mut self, jid: &str, img: Option<crate::media::Decoded>, resolved: bool) {
+        match (img, resolved) {
+            (Some(decoded), _) => {
+                let image = image_of(&decoded);
+                self.avatars.insert(jid.to_string(), Some(image.clone()));
+                self.patch_avatar_everywhere(jid, &image);
+            }
+            (None, true) => {
+                // Confirmed: no picture. The initial stays.
+                self.avatars.insert(jid.to_string(), None);
+            }
+            (None, false) => {
+                // Transient failure — retry a few times, spaced out.
+                let tries = self.avatar_tries.entry(jid.to_string()).or_insert(0);
+                *tries += 1;
+                if *tries < 3 {
+                    self.requested_avatars.remove(jid);
+                    let jid = jid.to_string();
+                    self.once(1500, move |b| b.queue_avatar(&jid));
+                }
+            }
+        }
+    }
+
+    fn patch_avatar_everywhere(&mut self, jid: &str, image: &slint::Image) {
+        // Chat list row.
+        for i in 0..self.chats_model.row_count() {
+            if let Some(mut row) = self.chats_model.row_data(i)
+                && row.jid == jid
+            {
+                row.avatar = image.clone();
+                row.hasAvatar = true;
+                self.chats_model.set_row_data(i, row);
+                break;
+            }
+        }
+        // Conversation header.
+        if Some(&jid.to_string()) == self.current_jid.as_ref() {
+            self.ui.set_current_avatar(image.clone());
+            self.ui.set_current_avatar_has(true);
+        }
+        // Sender and voice-note avatars inside message rows.
+        for i in 0..self.messages_model.row_count() {
+            let Some(mut row) = self.messages_model.row_data(i) else { continue };
+            let mut changed = false;
+            if row.senderJid == jid && !row.senderHasAvatar {
+                row.senderAvatar = image.clone();
+                row.senderHasAvatar = true;
+                changed = true;
+            }
+            if row.voiceJid == jid && !row.voiceHasAvatar {
+                row.voiceAvatar = image.clone();
+                row.voiceHasAvatar = true;
+                changed = true;
+            }
+            if changed {
+                self.messages_model.set_row_data(i, row);
+            }
+        }
+    }
+
+    // Requests download/decoding for every media-bearing message of a chat,
+    // newest first.
+    fn load_media_for_chat(&mut self, jid: &str) {
+        let pending: Vec<StoredMessage> = self
+            .store
+            .messages_for(jid)
+            .iter()
+            .rev()
+            .filter(|m| {
+                m.kind != MessageKind::Text || !m.link_title.is_empty() || !m.link_url.is_empty()
+            })
+            .cloned()
+            .collect();
+        for m in pending {
+            self.request_media(&m);
+        }
+    }
+
+    fn request_media(&mut self, m: &StoredMessage) {
+        if m.deleted || self.media_inflight.contains(&m.id) {
+            return;
+        }
+        let Some(raw) = m.raw.clone() else { return };
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        let inner = raw.get_base_message();
+        match m.kind {
+            MessageKind::Text => {
+                // Link preview thumbnail travels inside the message itself.
+                if let Some(thumb) = inner
+                    .extended_text_message
+                    .as_option()
+                    .and_then(|e| e.jpeg_thumbnail.as_ref())
+                    .filter(|t| !t.is_empty())
+                {
+                    self.media_inflight.insert(m.id.clone());
+                    self.wa.send(Cmd::DecodeThumb {
+                        id: m.id.clone(),
+                        bytes: thumb.to_vec(),
+                        link: true,
+                    });
+                }
+                return;
+            }
+            MessageKind::Image => {
+                self.media_inflight.insert(m.id.clone());
+                self.wa.send(Cmd::Media {
+                    id: m.id.clone(),
+                    mimetype: m.mimetype.clone(),
+                    message: raw,
+                    want: if m.sticker { MediaWant::Sticker } else { MediaWant::Image },
+                });
+            }
+            MessageKind::Video => {
+                self.media_inflight.insert(m.id.clone());
+                if m.gif {
+                    self.wa.send(Cmd::Media {
+                        id: m.id.clone(),
+                        mimetype: m.mimetype.clone(),
+                        message: raw,
+                        want: MediaWant::Gif,
+                    });
+                    return;
+                }
+                // Poster from the embedded thumbnail; the clip itself is
+                // cached for the click-to-play path.
+                if let Some(thumb) = inner
+                    .video_message
+                    .as_option()
+                    .and_then(|v| v.jpeg_thumbnail.as_ref())
+                    .filter(|t| !t.is_empty())
+                {
+                    self.wa.send(Cmd::DecodeThumb {
+                        id: m.id.clone(),
+                        bytes: thumb.to_vec(),
+                        link: false,
+                    });
+                }
+                self.wa.send(Cmd::Media {
+                    id: m.id.clone(),
+                    mimetype: m.mimetype.clone(),
+                    message: raw,
+                    want: MediaWant::File,
+                });
+            }
+            MessageKind::Audio | MessageKind::Doc => {
+                self.media_inflight.insert(m.id.clone());
+                self.wa.send(Cmd::Media {
+                    id: m.id.clone(),
+                    mimetype: m.mimetype.clone(),
+                    message: raw,
+                    want: MediaWant::File,
+                });
+            }
+        }
+    }
+
+    fn remember_decoded(&mut self, id: &str, image: slint::Image, w: i32, h: i32) {
+        if !self.decoded.contains_key(id) {
+            self.decoded_order.push_back(id.to_string());
+            if self.decoded_order.len() > DECODE_CACHE_MAX
+                && let Some(evicted) = self.decoded_order.pop_front()
+            {
+                self.decoded.remove(&evicted);
+            }
+        }
+        self.decoded.insert(id.to_string(), (image, w, h));
+    }
+
+    // A late-loading image must not push the newest message out of view;
+    // debounced so a burst of images re-anchors only once.
+    fn restick(&mut self) {
+        if !self.ui.get_stick_bottom() || self.stick_requeued {
+            return;
+        }
+        self.stick_requeued = true;
+        self.once(120, |b| {
+            b.stick_requeued = false;
+            if b.ui.get_stick_bottom() {
+                b.ui.invoke_scroll_conversation_end();
+            }
+        });
+    }
+
+    pub fn on_media_missing(&mut self, id: &str) {
+        self.media_inflight.remove(id);
+        self.patch_row(id, |row| {
+            row.kind = "text".into();
+            row.text = t("media.unavailable").into();
+        });
+    }
+
+    pub fn on_media_file(&mut self, id: &str, path: &std::path::Path) {
+        self.media_inflight.remove(id);
+        let path_str = path.to_string_lossy().into_owned();
+        self.media_path.insert(id.to_string(), path_str.clone());
+        self.patch_row(id, |row| {
+            row.mediaPath = path_str.into();
+            row.mediaReady = true;
+        });
+        self.restick();
+    }
+
+    pub fn on_media_image(&mut self, id: &str, path: &std::path::Path, img: crate::media::Decoded) {
+        self.media_inflight.remove(id);
+        let image = image_of(&img);
+        let (pic_w, pic_h) = bubble_fit(img.w as i32, img.h as i32);
+        self.remember_decoded(id, image.clone(), pic_w, pic_h);
+        let path_str = path.to_string_lossy().into_owned();
+        self.media_path.insert(id.to_string(), path_str.clone());
+        self.patch_row(id, |row| {
+            row.picture = image;
+            row.picW = pic_w;
+            row.picH = pic_h;
+            row.mediaPath = path_str.into();
+            row.mediaReady = true;
+        });
+        self.restick();
+    }
+
+    pub fn on_media_sticker(&mut self, id: &str, path: &std::path::Path, frames: Vec<crate::media::Decoded>) {
+        self.media_inflight.remove(id);
+        if frames.is_empty() {
+            self.on_media_missing(id);
+            return;
+        }
+        let images: Vec<slint::Image> = frames.iter().map(image_of).collect();
+        let (w, h) = (frames[0].w as i32, frames[0].h as i32);
+        self.remember_decoded(id, images[0].clone(), w, h);
+        let path_str = path.to_string_lossy().into_owned();
+        self.media_path.insert(id.to_string(), path_str.clone());
+        let first = images[0].clone();
+        self.patch_row(id, |row| {
+            row.picture = first;
+            row.picW = w;
+            row.picH = h;
+            row.mediaPath = path_str.into();
+            row.mediaReady = true;
+        });
+        if images.len() > 1 {
+            self.start_animation(id, images, true);
+        }
+        self.restick();
+    }
+
+    pub fn on_media_gif(&mut self, id: &str, path: &std::path::Path, frames: Vec<crate::media::Decoded>) {
+        self.media_inflight.remove(id);
+        if frames.is_empty() {
+            self.on_media_missing(id);
+            return;
+        }
+        let images: Vec<slint::Image> = frames.iter().map(image_of).collect();
+        let (pic_w, pic_h) = bubble_fit(frames[0].w as i32, frames[0].h as i32);
+        self.remember_decoded(id, images[0].clone(), pic_w, pic_h);
+        let path_str = path.to_string_lossy().into_owned();
+        self.media_path.insert(id.to_string(), path_str.clone());
+        let first = images[0].clone();
+        self.patch_row(id, |row| {
+            row.picture = first;
+            row.picW = pic_w;
+            row.picH = pic_h;
+            row.mediaPath = path_str.into();
+            row.mediaReady = true;
+        });
+        if images.len() > 1 {
+            // Like WhatsApp, a GIF plays once and rests on its first frame.
+            self.start_animation(id, images, false);
+        }
+        self.restick();
+    }
+
+    pub fn on_thumb(&mut self, id: &str, link: bool, img: crate::media::Decoded) {
+        let image = image_of(&img);
+        let (w, h) = (img.w as i32, img.h as i32);
+        if link {
+            self.media_inflight.remove(id);
+            self.patch_row(id, |row| {
+                row.linkThumb = image;
+                row.hasLinkThumb = true;
+                row.linkThumbW = w;
+                row.linkThumbH = h;
+            });
+        } else {
+            // Video poster: the bubble keeps its box; ready comes with the
+            // clip download.
+            let (pic_w, pic_h) = bubble_fit(w, h);
+            self.patch_row(id, |row| {
+                row.picture = image;
+                row.picW = pic_w;
+                row.picH = pic_h;
+            });
+        }
+        self.restick();
+    }
+
+    fn start_animation(&mut self, id: &str, frames: Vec<slint::Image>, looping: bool) {
+        if self.animated.len() >= MAX_ANIMATIONS
+            && let Some(oldest) = self.animated.keys().next().cloned()
+        {
+            self.animated.remove(&oldest);
+        }
+        self.animated.insert(id.to_string(), Anim { frames, idx: 0, looping });
+        if !self.anim_timer.running() {
+            self.anim_timer.start(
+                slint::TimerMode::Repeated,
+                Duration::from_millis(66),
+                || apply_now(|b| b.tick_animations()),
+            );
+        }
+    }
+
+    fn tick_animations(&mut self) {
+        if self.animated.is_empty() {
+            self.anim_timer.stop();
+            return;
+        }
+        let mut finished = Vec::new();
+        let mut patches: Vec<(String, slint::Image)> = Vec::new();
+        for (id, anim) in self.animated.iter_mut() {
+            if anim.looping {
+                anim.idx = (anim.idx + 1) % anim.frames.len();
+            } else if anim.idx + 1 < anim.frames.len() {
+                anim.idx += 1;
+            } else {
+                finished.push(id.clone());
+                patches.push((id.clone(), anim.frames[0].clone()));
+                continue;
+            }
+            patches.push((id.clone(), anim.frames[anim.idx].clone()));
+        }
+        for id in finished {
+            self.animated.remove(&id);
+        }
+        for (id, frame) in patches {
+            self.patch_row(&id, |row| row.picture = frame);
+        }
+    }
+
+    // Group senders and voice notes want their pictures; collected after
+    // the rows are built (to_row itself is read-only).
+    fn queue_row_avatars(&mut self, jid: &str) {
+        let mut wanted: Vec<String> = Vec::new();
+        for m in self.store.messages_for(jid) {
+            if is_group(jid) && !m.from_me && !m.sender_jid.is_empty() {
+                wanted.push(self.store.canon_owned(&m.sender_jid));
+            }
+            if m.kind == MessageKind::Audio {
+                wanted.push(if m.from_me {
+                    self.self_jid.clone()
+                } else if m.sender_jid.is_empty() {
+                    jid.to_string()
+                } else {
+                    self.store.canon_owned(&m.sender_jid)
+                });
+            }
+        }
+        wanted.sort();
+        wanted.dedup();
+        for jid in wanted {
+            self.queue_avatar(&jid);
+        }
     }
 
     // ---- helpers ----

@@ -3,6 +3,8 @@ slint::include_modules!();
 mod bridge;
 mod i18n;
 mod markup;
+mod media;
+mod video;
 mod paths;
 mod platform;
 mod qr;
