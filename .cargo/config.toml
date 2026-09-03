@@ -1,8 +1,3 @@
-# Static CRT so the vcpkg x64-windows-static FFmpeg libraries link cleanly
-# and the shipped executable needs no VC++ redistributable.
+# Static CRT so the shipped executable needs no VC++ redistributable.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
-
-[env]
-# bindgen (ffmpeg-sys-next) needs libclang; scoop's LLVM lives here.
-LIBCLANG_PATH = { value = "C:\\Users\\Wilssola\\scoop\\apps\\llvm\\current\\bin", force = false }

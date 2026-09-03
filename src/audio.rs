@@ -1,8 +1,9 @@
-// Voice-note audio, fully in-process: FFmpeg decodes (with the atempo
-// chain for the 1x-3x speeds, pitch preserved) and cpal plays. Replaces
-// the external ffplay of the Node build.
+// Voice-note audio, fully in-process and FFmpeg-free: opus-pure (a Rust
+// port of libopus) handles the ogg/opus voice notes, Symphonia decodes
+// everything else (AAC video soundtracks, mp3/wav/flac documents), a
+// small WSOLA pass gives the 1x-3x speeds with pitch preserved, and
+// cpal plays.
 use crate::media::Decoded;
-use ffmpeg_next as ff;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -21,92 +22,190 @@ impl AudioBuffer {
     }
 }
 
-// ffplay capped atempo at 2x, so higher speeds chain filters; same here.
-fn tempo_chain(rate: f64) -> String {
-    let mut parts = Vec::new();
-    let mut rest = rate;
-    while rest > 2.0 {
-        parts.push("atempo=2.0".to_string());
-        rest /= 2.0;
+// ---- decoding (opus for voice notes, Symphonia for the rest) ----
+
+// Mono samples at the source rate, whatever the container.
+fn decode_any(path: &Path) -> Option<(Vec<f32>, u32)> {
+    let mut head = [0u8; 64];
+    {
+        use std::io::Read;
+        let mut f = std::fs::File::open(path).ok()?;
+        let _ = f.read(&mut head);
     }
-    if (rest - 1.0).abs() > 1e-3 {
-        parts.push(format!("atempo={rest:.4}"));
+    if head.starts_with(b"OggS") && head.windows(8).any(|w| w == b"OpusHead") {
+        return decode_opus_ogg(path);
     }
-    if parts.is_empty() { "anull".to_string() } else { parts.join(",") }
+    decode_symphonia(path)
 }
 
-fn decode_filtered(path: &Path, filter: &str, out_rate: u32) -> Option<Vec<f32>> {
-    let mut input = ff::format::input(path).ok()?;
-    let stream = input.streams().best(ff::media::Type::Audio)?;
-    let stream_index = stream.index();
-    let time_base = stream.time_base();
-    let context = ff::codec::context::Context::from_parameters(stream.parameters()).ok()?;
-    let mut decoder = context.decoder().audio().ok()?;
-
-    let mut graph = ff::filter::Graph::new();
-    let layout = if decoder.channel_layout().is_empty() {
-        ff::channel_layout::ChannelLayout::MONO
-    } else {
-        decoder.channel_layout()
-    };
-    let args = format!(
-        "time_base={}/{}:sample_rate={}:sample_fmt={}:channel_layout=0x{:x}",
-        time_base.numerator(),
-        time_base.denominator(),
-        decoder.rate(),
-        decoder.format().name(),
-        layout.bits()
-    );
-    graph.add(&ff::filter::find("abuffer")?, "in", &args).ok()?;
-    graph.add(&ff::filter::find("abuffersink")?, "out", "").ok()?;
-    let spec = format!("{filter},aformat=sample_fmts=flt:sample_rates={out_rate}:channel_layouts=mono");
-    graph.output("in", 0).ok()?.input("out", 0).ok()?.parse(&spec).ok()?;
-    graph.validate().ok()?;
-
-    let mut samples = Vec::new();
-    let mut drain = |graph: &mut ff::filter::Graph, samples: &mut Vec<f32>| {
-        let mut filtered = ff::frame::Audio::empty();
-        while graph.get("out").unwrap().sink().frame(&mut filtered).is_ok() {
-            let count = filtered.samples();
-            let data = filtered.data(0);
-            let floats: &[f32] = bytemuck_cast(&data[..count * 4]);
-            samples.extend_from_slice(floats);
-        }
-    };
-    let mut receive = |decoder: &mut ff::decoder::Audio,
-                       graph: &mut ff::filter::Graph,
-                       samples: &mut Vec<f32>| {
-        let mut frame = ff::frame::Audio::empty();
-        while decoder.receive_frame(&mut frame).is_ok() {
-            if graph.get("in").unwrap().source().add(&frame).is_ok() {
-                drain(graph, samples);
+fn decode_opus_ogg(path: &Path) -> Option<(Vec<f32>, u32)> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = ogg::PacketReader::new(std::io::BufReader::new(file));
+    let mut decoder: Option<opus_pure::OpusDecoder> = None;
+    let mut channels = 1usize;
+    let mut pre_skip = 0usize;
+    let mut seen_tags = false;
+    let mut pcm = Vec::new();
+    // One packet decodes at most 120ms: 5760 samples per channel at 48k.
+    let mut scratch = vec![0f32; 5760 * 2];
+    while let Ok(Some(packet)) = reader.read_packet() {
+        let Some(dec) = decoder.as_mut() else {
+            if packet.data.starts_with(b"OpusHead") && packet.data.len() >= 19 {
+                channels = (packet.data[9] as usize).clamp(1, 2);
+                pre_skip = u16::from_le_bytes([packet.data[10], packet.data[11]]) as usize;
+                decoder = opus_pure::OpusDecoder::new(OUT_RATE as i32, channels).ok();
             }
-        }
-    };
-    for (stream, packet) in input.packets() {
-        if stream.index() != stream_index {
+            continue;
+        };
+        if !seen_tags {
+            seen_tags = true; // OpusTags
             continue;
         }
-        if decoder.send_packet(&packet).is_ok() {
-            receive(&mut decoder, &mut graph, &mut samples);
+        let Ok(n) = dec.decode(&packet.data, 5760, &mut scratch) else { continue };
+        // The decoder can ring slightly past full scale; keep the player
+        // fed with clamped samples.
+        for frame in scratch[..n * channels].chunks(channels) {
+            let s = frame.iter().sum::<f32>() / channels as f32;
+            pcm.push(s.clamp(-1.0, 1.0));
         }
     }
-    let _ = decoder.send_eof();
-    receive(&mut decoder, &mut graph, &mut samples);
-    let _ = graph.get("in").unwrap().source().flush();
-    drain(&mut graph, &mut samples);
-    Some(samples)
+    if pre_skip < pcm.len() {
+        pcm.drain(..pre_skip);
+    }
+    if pcm.is_empty() { None } else { Some((pcm, OUT_RATE)) }
 }
 
-fn bytemuck_cast(bytes: &[u8]) -> &[f32] {
-    // The FFmpeg frame buffer is properly aligned for its sample format.
-    unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4) }
+fn decode_symphonia(path: &Path) -> Option<(Vec<f32>, u32)> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::CODEC_TYPE_NULL;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::probe::Hint;
+    let file = std::fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &Default::default(), &Default::default())
+        .ok()?;
+    let mut format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL && t.codec_params.sample_rate.is_some())?
+        .clone();
+    let mut decoder =
+        symphonia::default::get_codecs().make(&track.codec_params, &Default::default()).ok()?;
+    let rate = track.codec_params.sample_rate?;
+    let mut mono = Vec::new();
+    let mut sbuf: Option<SampleBuffer<f32>> = None;
+    while let Ok(packet) = format.next_packet() {
+        if packet.track_id() != track.id {
+            continue;
+        }
+        let Ok(decoded) = decoder.decode(&packet) else { continue };
+        let spec = *decoded.spec();
+        let buf = sbuf.get_or_insert_with(|| SampleBuffer::new(decoded.capacity() as u64, spec));
+        buf.copy_interleaved_ref(decoded);
+        let ch = spec.channels.count().max(1);
+        for frame in buf.samples().chunks(ch) {
+            mono.push(frame.iter().sum::<f32>() / ch as f32);
+        }
+    }
+    if mono.is_empty() { None } else { Some((mono, rate)) }
+}
+
+// Plain linear resample; opus itself sets the quality floor at these rates.
+fn resample(samples: &[f32], from: u32, to: u32) -> Vec<f32> {
+    if from == to || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let ratio = to as f64 / from as f64;
+    let out_len = (samples.len() as f64 * ratio) as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let src = i as f64 / ratio;
+        let lo = src.floor() as usize;
+        let hi = (lo + 1).min(samples.len() - 1);
+        let t = (src - lo as f64) as f32;
+        out.push(samples[lo] * (1.0 - t) + samples[hi] * t);
+    }
+    out
+}
+
+// WSOLA time-stretch: replaces FFmpeg's atempo. Overlapping Hann windows
+// are taken from the input at `factor` times the output pace, each shifted
+// within a small search range to line up with its natural continuation,
+// then overlap-added — speed changes, pitch does not.
+fn time_stretch(input: &[f32], factor: f64) -> Vec<f32> {
+    const WIN: usize = 1024; // ~21ms at 48k
+    const HOP: usize = WIN / 2;
+    const SEARCH: usize = 320; // ~6.7ms each way
+    if (factor - 1.0).abs() < 1e-3 || input.len() < WIN * 2 {
+        return input.to_vec();
+    }
+    let window: Vec<f32> = (0..WIN)
+        .map(|i| {
+            let x = std::f32::consts::PI * i as f32 / (WIN - 1) as f32;
+            x.sin() * x.sin()
+        })
+        .collect();
+    let out_len = (input.len() as f64 / factor) as usize;
+    let mut out = vec![0f32; out_len + WIN];
+    let mut norm = vec![0f32; out_len + WIN];
+    let mut prev: usize = 0; // input position of the previous segment
+    let mut pos_out = 0usize;
+    while pos_out < out_len {
+        let ideal = (pos_out as f64 * factor) as usize;
+        let best = if pos_out == 0 {
+            0
+        } else {
+            // The natural continuation of the last segment is `prev + HOP`;
+            // pick the candidate near `ideal` that best matches it.
+            let target = (prev + HOP).min(input.len().saturating_sub(WIN));
+            let lo = ideal.saturating_sub(SEARCH);
+            let hi = (ideal + SEARCH).min(input.len().saturating_sub(WIN));
+            let mut best = lo;
+            let mut best_score = f32::NEG_INFINITY;
+            let reference = &input[target..target + WIN.min(256)];
+            let mut cand = lo;
+            while cand <= hi {
+                let probe = &input[cand..cand + reference.len()];
+                let score: f32 = reference.iter().zip(probe).map(|(a, b)| a * b).sum();
+                if score > best_score {
+                    best_score = score;
+                    best = cand;
+                }
+                cand += 4;
+            }
+            best
+        };
+        if best + WIN > input.len() {
+            break;
+        }
+        for i in 0..WIN {
+            out[pos_out + i] += input[best + i] * window[i];
+            norm[pos_out + i] += window[i];
+        }
+        prev = best;
+        pos_out += HOP;
+    }
+    out.truncate(out_len);
+    for (sample, w) in out.iter_mut().zip(norm.iter()) {
+        if *w > 1e-3 {
+            *sample /= w;
+        }
+    }
+    out
 }
 
 // Decodes the whole (small) voice note with the speed applied, so seeking
 // and pausing are just cursor moves.
 pub fn decode_with_tempo(path: &Path, rate: f64) -> Option<AudioBuffer> {
-    let samples = decode_filtered(path, &tempo_chain(rate), OUT_RATE)?;
+    let (samples, in_rate) = decode_any(path)?;
+    let samples = resample(&samples, in_rate, OUT_RATE);
+    let samples = time_stretch(&samples, rate);
     if samples.is_empty() {
         return None;
     }
@@ -121,7 +220,7 @@ const BAR_GAP: usize = 2;
 const WAVE_H: usize = 30;
 
 pub fn waveform(path: &Path) -> Option<Decoded> {
-    let samples = decode_filtered(path, "anull", 8000)?;
+    let (samples, _) = decode_any(path)?;
     if samples.is_empty() {
         return None;
     }
@@ -250,7 +349,7 @@ impl Player {
     }
 }
 
-// ---- recording (cpal capture; FFmpeg encodes the opus voice note) ----
+// ---- recording (cpal capture; libopus encodes the voice note) ----
 
 pub struct Recorder {
     _stream: cpal::Stream,
@@ -304,67 +403,58 @@ pub fn encode_voice_ogg(samples: &[f32], in_rate: u32, out_path: &Path) -> Optio
     if samples.is_empty() {
         return None;
     }
-    // Resample to 48kHz mono with a plain linear pass (voice quality is
-    // set by opus itself at these rates).
-    let ratio = OUT_RATE as f64 / in_rate as f64;
-    let out_len = (samples.len() as f64 * ratio) as usize;
-    let mut pcm = Vec::with_capacity(out_len);
-    for i in 0..out_len {
-        let src = i as f64 / ratio;
-        let lo = src.floor() as usize;
-        let hi = (lo + 1).min(samples.len() - 1);
-        let t = src - lo as f64;
-        pcm.push(samples[lo] as f64 * (1.0 - t) + samples[hi] as f64 * t);
-    }
+    let pcm = resample(samples, in_rate, OUT_RATE);
     let seconds = (pcm.len() as f64 / OUT_RATE as f64).round() as u32;
 
-    let codec = ff::encoder::find_by_name("libopus")?;
-    let mut output = ff::format::output(out_path).ok()?;
-    let mut encoder = ff::codec::context::Context::new_with_codec(codec).encoder().audio().ok()?;
-    encoder.set_rate(OUT_RATE as i32);
-    encoder.set_channel_layout(ff::channel_layout::ChannelLayout::MONO);
-    encoder.set_format(ff::format::Sample::F32(ff::format::sample::Type::Planar));
-    encoder.set_bit_rate(32_000);
-    encoder.set_time_base(ff::Rational::new(1, OUT_RATE as i32));
-    let mut encoder = encoder.open_as(codec).ok()?;
-    {
-        let mut stream = output.add_stream(codec).ok()?;
-        stream.set_parameters(&encoder);
-        stream.set_time_base(ff::Rational::new(1, OUT_RATE as i32));
-    }
-    output.write_header().ok()?;
+    let mut encoder =
+        opus_pure::OpusEncoder::new(OUT_RATE as i32, 1, opus_pure::Application::Voip).ok()?;
+    encoder.bitrate_bps = 32_000;
+    // libopus reports a 312-sample lookahead at 48k; the port matches it.
+    let pre_skip: u64 = 312;
 
-    let frame_size = encoder.frame_size().max(960) as usize;
-    let mut pts: i64 = 0;
-    let mut write_packets = |encoder: &mut ff::encoder::Audio, output: &mut ff::format::context::Output| {
-        let mut packet = ff::Packet::empty();
-        while encoder.receive_packet(&mut packet).is_ok() {
-            packet.set_stream(0);
-            let _ = packet.write_interleaved(output);
-        }
-    };
-    for chunk in pcm.chunks(frame_size) {
-        let mut frame = ff::frame::Audio::new(
-            ff::format::Sample::F32(ff::format::sample::Type::Planar),
-            frame_size,
-            ff::channel_layout::ChannelLayout::MONO,
-        );
-        frame.set_rate(OUT_RATE);
-        frame.set_pts(Some(pts));
-        pts += chunk.len() as i64;
-        let plane = frame.plane_mut::<f32>(0);
-        for (slot, &s) in plane.iter_mut().zip(chunk.iter()) {
-            *slot = s as f32;
-        }
-        for slot in plane.iter_mut().skip(chunk.len()) {
-            *slot = 0.0;
-        }
-        if encoder.send_frame(&frame).is_ok() {
-            write_packets(&mut encoder, &mut output);
-        }
+    let file = std::fs::File::create(out_path).ok()?;
+    let mut writer = ogg::PacketWriter::new(std::io::BufWriter::new(file));
+    let serial: u32 = 0x5a41_5049; // "ZAPI"
+    use ogg::writing::PacketWriteEndInfo;
+    let mut head = Vec::with_capacity(19);
+    head.extend_from_slice(b"OpusHead");
+    head.push(1); // version
+    head.push(1); // channels
+    head.extend_from_slice(&(pre_skip as u16).to_le_bytes());
+    head.extend_from_slice(&OUT_RATE.to_le_bytes());
+    head.extend_from_slice(&0u16.to_le_bytes()); // output gain
+    head.push(0); // channel mapping family
+    writer.write_packet(head, serial, PacketWriteEndInfo::EndPage, 0).ok()?;
+    let mut tags = Vec::new();
+    tags.extend_from_slice(b"OpusTags");
+    tags.extend_from_slice(&(6u32).to_le_bytes());
+    tags.extend_from_slice(b"zapive");
+    tags.extend_from_slice(&0u32.to_le_bytes());
+    writer.write_packet(tags, serial, PacketWriteEndInfo::EndPage, 0).ok()?;
+
+    const FRAME: usize = 960; // 20ms at 48k
+    let mut granule = pre_skip;
+    let chunks: Vec<&[f32]> = pcm.chunks(FRAME).collect();
+    let mut padded = [0f32; FRAME];
+    for (i, chunk) in chunks.iter().enumerate() {
+        let frame: &[f32] = if chunk.len() == FRAME {
+            chunk
+        } else {
+            padded[..chunk.len()].copy_from_slice(chunk);
+            padded[chunk.len()..].fill(0.0);
+            &padded
+        };
+        let mut packet = vec![0u8; 4000];
+        let Ok(n) = encoder.encode(frame, FRAME, &mut packet) else { continue };
+        packet.truncate(n);
+        let bytes = packet;
+        granule += FRAME as u64;
+        let end = if i + 1 == chunks.len() {
+            PacketWriteEndInfo::EndStream
+        } else {
+            PacketWriteEndInfo::NormalPacket
+        };
+        writer.write_packet(bytes, serial, end, granule).ok()?;
     }
-    let _ = encoder.send_eof();
-    write_packets(&mut encoder, &mut output);
-    output.write_trailer().ok()?;
     Some(seconds.max(1))
 }
