@@ -18,9 +18,20 @@ whatsapp-rust = { version = "=0.7.0", default-features = false, features = [
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 image = "0.25"
+qrcode = "0.14"
+ffmpeg-next = "9"
+sys-locale = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.19"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 slint-build = "1.17"
