@@ -74,6 +74,11 @@ pub enum Cmd {
     SendAudioFile { jid: String, path: std::path::PathBuf },
     // Decode a local image for the send-preview overlay.
     PreviewImage { path: std::path::PathBuf },
+    // Calls, channels and the info panel.
+    RejectCall { id: String, from: String },
+    FetchChannel(String),
+    FetchChatInfo { jid: String, group: bool },
+    Archive { jid: String, archived: bool },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.
@@ -270,6 +275,21 @@ impl EventHandler for Pump {
                     }
                     ui_apply(move |b| b.on_history_chunk(chunk));
                 });
+            }
+            Event::IncomingCall(call) => {
+                let from = call.from.to_non_ad_string();
+                let id = call.action.call_id().to_string();
+                let video = call.notify.as_deref().map(|n| n.contains("video")).unwrap_or(false);
+                let group = call.group.is_some();
+                let ts = call.timestamp.timestamp();
+                ui_apply(move |b| b.on_incoming_call(&id, &from, video, group, ts));
+            }
+            Event::MissedCall(missed) => {
+                let id = missed.call_id.clone();
+                ui_apply(move |b| b.on_call_status(&id, "timeout"));
+            }
+            Event::CallEndedElsewhere(_) => {
+                ui_apply(|b| b.on_call_dismissed());
             }
             Event::ChatPresence(update) => {
                 let chat = update.source.chat.to_non_ad_string();
@@ -593,6 +613,87 @@ async fn executor(
                     .flatten();
                     if let Some((path, img)) = img {
                         ui_apply(move |b| b.on_preview_ready(&path, img));
+                    }
+                });
+            }
+            Cmd::RejectCall { id, from } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(peer) = parse_jid(&from) else { return };
+                    if let Err(e) = client.voip().reject_call(&id, &peer, &peer).await {
+                        eprintln!("[wa] call reject failed: {e}");
+                    }
+                });
+            }
+            Cmd::FetchChannel(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    match client.newsletter().get_metadata(&target).await {
+                        Ok(meta) => {
+                            let name = meta.name.clone();
+                            let url = meta.picture_url.clone().or(meta.preview_url.clone());
+                            let avatar = match url {
+                                Some(url) => {
+                                    tokio::task::spawn_blocking(move || {
+                                        let mut res = ureq::get(&url).call().ok()?;
+                                        let bytes = res.body_mut().read_to_vec().ok()?;
+                                        crate::media::decode_cover(&bytes, 96)
+                                    })
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                }
+                                None => None,
+                            };
+                            ui_apply(move |b| b.on_channel_meta(&jid, &name, avatar));
+                        }
+                        Err(e) => eprintln!("[wa] channel metadata failed for {jid}: {e}"),
+                    }
+                });
+            }
+            Cmd::FetchChatInfo { jid, group } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    if group {
+                        match client.groups().get_metadata(&target).await {
+                            Ok(meta) => {
+                                let desc = meta.description.clone().unwrap_or_default();
+                                let members = meta
+                                    .size
+                                    .map(|s| s as usize)
+                                    .unwrap_or(meta.participants.len());
+                                ui_apply(move |b| b.on_chat_info(&jid, "", &desc, members));
+                            }
+                            Err(e) => eprintln!("[wa] group info failed: {e}"),
+                        }
+                    } else {
+                        match client.contacts().get_user_info(&[target.clone()]).await {
+                            Ok(map) => {
+                                let about = map
+                                    .get(&target)
+                                    .and_then(|info| info.status.clone())
+                                    .unwrap_or_default();
+                                ui_apply(move |b| b.on_chat_info(&jid, &about, "", 0));
+                            }
+                            Err(e) => eprintln!("[wa] user info failed: {e}"),
+                        }
+                    }
+                });
+            }
+            Cmd::Archive { jid, archived } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    let actions = client.chat_actions();
+                    let result = if archived {
+                        actions.archive_chat(&target, None).await
+                    } else {
+                        actions.unarchive_chat(&target, None).await
+                    };
+                    if let Err(e) = result {
+                        eprintln!("[wa] archive failed: {e}");
                     }
                 });
             }

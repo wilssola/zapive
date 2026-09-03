@@ -12,7 +12,7 @@ use crate::store::{
 };
 use crate::vault::Vault;
 use crate::wa::{Cmd, HistoryChunk, MediaWant, QuoteRef, WaService};
-use crate::{AppWindow, ChatItem, MessageItem, ReactionItem};
+use crate::{AppWindow, CallItem, ChatItem, MessageItem, ReactionItem, StickerCell};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -84,6 +84,13 @@ pub struct Bridge {
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String)>,
     notify_queued: bool,
+    // Status/stories, calls, channels and the info panel.
+    status_model: Rc<VecModel<ChatItem>>,
+    calls_model: Rc<VecModel<CallItem>>,
+    info_media_model: Rc<VecModel<ModelRc<StickerCell>>>,
+    viewer: Option<(Vec<StoredMessage>, usize)>,
+    ringing: Option<(String, String)>,
+    requested_channels: HashSet<String>,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -159,10 +166,16 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let messages_model = Rc::new(VecModel::<MessageItem>::default());
     let reactions_model = Rc::new(VecModel::<ReactionItem>::default());
     let forward_model = Rc::new(VecModel::<ChatItem>::default());
+    let status_model = Rc::new(VecModel::<ChatItem>::default());
+    let calls_model = Rc::new(VecModel::<CallItem>::default());
+    let info_media_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
     ui.set_chats(ModelRc::from(chats_model.clone()));
     ui.set_messages(ModelRc::from(messages_model.clone()));
     ui.set_reaction_rows(ModelRc::from(reactions_model.clone()));
     ui.set_forward_rows(ModelRc::from(forward_model.clone()));
+    ui.set_statuses(ModelRc::from(status_model.clone()));
+    ui.set_calls(ModelRc::from(calls_model.clone()));
+    ui.set_info_media(ModelRc::from(info_media_model.clone()));
     let emoji_rows: Vec<ModelRc<SharedString>> = EMOJIS
         .split(' ')
         .collect::<Vec<_>>()
@@ -224,6 +237,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        status_model,
+        calls_model,
+        info_media_model,
+        viewer: None,
+        ringing: None,
+        requested_channels: HashSet::new(),
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -398,6 +417,24 @@ fn wire_callbacks(ui: &AppWindow) {
         });
     });
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
+    ui.on_status_open(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.open_status_viewer(&jid));
+    });
+    ui.on_status_next(|| defer(|b| b.step_status(1)));
+    ui.on_status_prev(|| defer(|b| b.step_status(-1)));
+    ui.on_status_close(|| {
+        defer(|b| {
+            b.viewer = None;
+            b.ui.set_sv_open(false);
+        });
+    });
+    ui.on_decline_call(|| defer(|b| b.decline_call()));
+    ui.on_dismiss_call(|| defer(|b| b.on_call_dismissed()));
+    ui.on_open_info(|| defer(|b| b.open_contact_info()));
+    ui.on_close_info(|| defer(|b| b.ui.set_info_open(false)));
+    ui.on_toggle_archive(|| defer(|b| b.toggle_archive()));
+    ui.on_clear_chat(|| defer(|b| b.clear_current_chat()));
     ui.on_save_pin(|current, next| {
         let (current, next) = (current.to_string(), next.to_string());
         defer(move |b| b.handle_save_pin(&current, &next));
@@ -475,6 +512,8 @@ impl Bridge {
         self.ui.set_pin_set(self.vault.as_ref().is_some_and(|v| v.has_pin()));
         self.ui.set_screen(if registered { "main" } else { "login" }.into());
         self.refresh_chats();
+        self.refresh_statuses();
+        self.refresh_calls();
         self.wa.send(Cmd::Start);
     }
 
@@ -610,6 +649,7 @@ impl Bridge {
                 entry.community = parent.clone().unwrap_or_default();
             }
         }
+        self.resolve_channel_names();
         self.schedule_refresh_chats();
     }
 
@@ -680,6 +720,7 @@ impl Bridge {
                 if let Some(entry) = crate::wa_map::status_entry(&mut self.store, inbound)
                     && self.store.add_status(entry)
                 {
+                    self.refresh_statuses();
                     self.schedule_save();
                 }
                 continue;
@@ -1770,12 +1811,13 @@ impl Bridge {
         let path_str = path.to_string_lossy().into_owned();
         self.media_path.insert(id.to_string(), path_str.clone());
         self.patch_row(id, |row| {
-            row.picture = image;
+            row.picture = image.clone();
             row.picW = pic_w;
             row.picH = pic_h;
             row.mediaPath = path_str.into();
             row.mediaReady = true;
         });
+        self.feed_viewer(id, &image);
         self.restick();
     }
 
@@ -1846,10 +1888,11 @@ impl Bridge {
             // clip download.
             let (pic_w, pic_h) = bubble_fit(w, h);
             self.patch_row(id, |row| {
-                row.picture = image;
+                row.picture = image.clone();
                 row.picW = pic_w;
                 row.picH = pic_h;
             });
+            self.feed_viewer(id, &image);
         }
         self.restick();
     }
@@ -1920,6 +1963,297 @@ impl Bridge {
         for jid in wanted {
             self.queue_avatar(&jid);
         }
+    }
+
+    // ---- status/stories ----
+
+    fn refresh_statuses(&mut self) {
+        let authors = self.store.status_authors();
+        let rows: Vec<ChatItem> = authors
+            .iter()
+            .map(|(jid, latest, _count)| {
+                self.to_chat_row(jid, "", latest.timestamp, 0, false)
+            })
+            .collect();
+        self.status_model.set_vec(rows);
+    }
+
+    fn open_status_viewer(&mut self, jid: &str) {
+        let Some(items) = self.store.statuses.get(jid).cloned() else { return };
+        if items.is_empty() {
+            return;
+        }
+        self.viewer = Some((items, 0));
+        self.show_status();
+    }
+
+    fn step_status(&mut self, delta: i32) {
+        let Some((items, idx)) = &mut self.viewer else { return };
+        let next = *idx as i32 + delta;
+        if next < 0 || next >= items.len() as i32 {
+            self.viewer = None;
+            self.ui.set_sv_open(false);
+            return;
+        }
+        *idx = next as usize;
+        self.show_status();
+    }
+
+    fn show_status(&mut self) {
+        let Some((items, idx)) = &self.viewer else { return };
+        let (count, idx_now) = (items.len(), *idx);
+        let item = items[idx_now].clone();
+        self.ui.set_sv_name(self.store.chat_name(&item.jid).into());
+        self.ui.set_sv_time(format_time(item.timestamp).into());
+        self.ui.set_sv_text(item.text.clone().into());
+        self.ui.set_sv_index(idx_now as i32 + 1);
+        self.ui.set_sv_count(count as i32);
+        let has_image = item.kind == MessageKind::Image;
+        self.ui.set_sv_has_image(false);
+        if has_image {
+            if let Some((img, _, _)) = self.decoded.get(&item.id) {
+                self.ui.set_sv_image(img.clone());
+                self.ui.set_sv_has_image(true);
+            } else if let Some(raw) = item.raw.clone() {
+                // Instant thumbnail while the full image downloads.
+                use whatsapp_rust::proto_helpers::MessageExt as _;
+                let inner = raw.get_base_message();
+                let thumb = inner
+                    .image_message
+                    .as_option()
+                    .and_then(|m| m.jpeg_thumbnail.as_ref())
+                    .or_else(|| {
+                        inner.video_message.as_option().and_then(|m| m.jpeg_thumbnail.as_ref())
+                    })
+                    .filter(|t| !t.is_empty());
+                if let Some(thumb) = thumb {
+                    self.wa.send(Cmd::DecodeThumb {
+                        id: item.id.clone(),
+                        bytes: thumb.to_vec(),
+                        link: false,
+                    });
+                }
+                if inner.image_message.is_set() && !self.media_inflight.contains(&item.id) {
+                    self.media_inflight.insert(item.id.clone());
+                    self.wa.send(Cmd::Media {
+                        id: item.id.clone(),
+                        mimetype: item.mimetype.clone(),
+                        message: raw,
+                        want: MediaWant::Image,
+                    });
+                }
+            }
+        }
+        self.ui.set_sv_open(true);
+    }
+
+    // Puts a freshly decoded bitmap on the open viewer when it matches.
+    fn feed_viewer(&mut self, id: &str, image: &slint::Image) {
+        if let Some((items, idx)) = &self.viewer
+            && items[*idx].id == id
+        {
+            self.ui.set_sv_image(image.clone());
+            self.ui.set_sv_has_image(true);
+        }
+    }
+
+    // ---- calls ----
+
+    fn refresh_calls(&mut self) {
+        let rows: Vec<CallItem> = self
+            .store
+            .calls
+            .iter()
+            .take(60)
+            .map(|call| {
+                let name = self.store.chat_name(&call.jid);
+                let avatar = self.avatar_for(&call.jid);
+                let label = t(match call.status.as_str() {
+                    "accept" => "call.answered",
+                    "reject" => "call.declined",
+                    "timeout" => "call.missed",
+                    "offer" => "call.ringing",
+                    _ => "call.ended",
+                });
+                let kind = t(if call.video { "call.video" } else { "call.voice" });
+                CallItem {
+                    id: call.id.clone().into(),
+                    from: call.jid.clone().into(),
+                    name: name.clone().into(),
+                    detail: format!("{kind} · {label}").into(),
+                    time: format_time(call.timestamp).into(),
+                    hasAvatar: avatar.is_some(),
+                    avatar: avatar.unwrap_or_else(empty_image),
+                    initial: initial_of(&name).into(),
+                    colorIdx: color_idx_of(&call.jid),
+                    video: call.video,
+                }
+            })
+            .collect();
+        self.calls_model.set_vec(rows);
+    }
+
+    pub fn on_incoming_call(&mut self, id: &str, from: &str, video: bool, group: bool, ts: i64) {
+        if self.store.upsert_call(id, from, "offer", video, group, ts).is_none() {
+            return;
+        }
+        self.refresh_calls();
+        self.schedule_save();
+        let jid = self.store.canon_owned(&normalize_jid(from));
+        let name = self.store.chat_name(&jid);
+        let detail = t(if video { "call.incomingVideo" } else { "call.incomingVoice" });
+        let avatar = self.avatar_for(&jid);
+        self.queue_avatar(&jid);
+        self.ringing = Some((id.to_string(), from.to_string()));
+        self.ui.set_call_name(name.clone().into());
+        self.ui.set_call_detail(detail.clone().into());
+        self.ui.set_call_has_avatar(avatar.is_some());
+        self.ui.set_call_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui.set_call_initial(initial_of(&name).into());
+        self.ui.set_call_color_idx(color_idx_of(&jid));
+        self.ui.set_call_ringing(true);
+        let _ = self.ui.show(); // raise from the tray
+        crate::platform::toast(&name, &detail, None);
+    }
+
+    pub fn on_call_status(&mut self, id: &str, status: &str) {
+        // upsert_call keeps the original caller when the id is known.
+        if let Some(existing) = self.store.calls.iter().find(|c| c.id == id).cloned()
+            && self
+                .store
+                .upsert_call(id, &existing.jid, status, existing.video, existing.group, 0)
+                .is_some()
+        {
+            self.refresh_calls();
+            self.schedule_save();
+        }
+        if self.ringing.as_ref().map(|(rid, _)| rid == id).unwrap_or(false) {
+            self.ringing = None;
+            self.ui.set_call_ringing(false);
+        }
+    }
+
+    pub fn on_call_dismissed(&mut self) {
+        self.ringing = None;
+        self.ui.set_call_ringing(false);
+    }
+
+    fn decline_call(&mut self) {
+        if let Some((id, from)) = self.ringing.take() {
+            self.wa.send(Cmd::RejectCall { id: id.clone(), from: from.clone() });
+            if self.store.upsert_call(&id, &from, "reject", false, false, 0).is_some() {
+                self.refresh_calls();
+            }
+        }
+        self.ui.set_call_ringing(false);
+    }
+
+    // ---- channels & info panel ----
+
+    // Channels arrive as jids only; ask the server for their names.
+    fn resolve_channel_names(&mut self) {
+        let wanted: Vec<String> = self
+            .store
+            .sorted_chats()
+            .into_iter()
+            .filter(|meta| is_channel(&meta.jid) && meta.name.is_empty())
+            .map(|meta| meta.jid.clone())
+            .filter(|jid| !self.requested_channels.contains(jid))
+            .collect();
+        for jid in wanted {
+            self.requested_channels.insert(jid.clone());
+            self.wa.send(Cmd::FetchChannel(jid));
+        }
+    }
+
+    pub fn on_channel_meta(&mut self, jid: &str, name: &str, avatar: Option<crate::media::Decoded>) {
+        if !name.is_empty() {
+            self.store.set_name(jid, name);
+        }
+        if let Some(decoded) = avatar {
+            let image = image_of(&decoded);
+            self.avatars.insert(jid.to_string(), Some(image.clone()));
+            self.patch_avatar_everywhere(jid, &image);
+        }
+        self.schedule_refresh_chats();
+    }
+
+    fn open_contact_info(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let group = is_group(&jid);
+        let name = self.store.chat_name(&jid);
+        let avatar = self.avatar_for(&jid);
+        let archived = self.store.chats.get(&jid).map(|c| c.archived).unwrap_or(false);
+        self.ui.set_info_name(name.clone().into());
+        self.ui.set_info_id(display_id(&jid).into());
+        self.ui.set_info_about("".into());
+        self.ui.set_info_desc("".into());
+        self.ui.set_info_is_group(group);
+        self.ui.set_info_members("".into());
+        self.ui.set_info_archived(archived);
+        self.ui.set_info_has_avatar(avatar.is_some());
+        self.ui.set_info_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui.set_info_initial(initial_of(&name).into());
+        self.ui.set_info_color_idx(color_idx_of(&jid));
+        // Shared media: the last 12 pictures already decoded.
+        let cells: Vec<StickerCell> = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .rev()
+            .filter(|m| m.kind == MessageKind::Image && !m.sticker)
+            .filter_map(|m| {
+                self.decoded.get(&m.id).map(|(img, _, _)| StickerCell {
+                    id: m.id.clone().into(),
+                    pic: img.clone(),
+                    ready: true,
+                })
+            })
+            .take(12)
+            .collect();
+        let grid: Vec<ModelRc<StickerCell>> = cells
+            .chunks(4)
+            .map(|chunk| ModelRc::from(Rc::new(VecModel::from(chunk.to_vec()))))
+            .collect();
+        self.info_media_model.set_vec(grid);
+        self.ui.set_info_open(true);
+        self.wa.send(Cmd::FetchChatInfo { jid, group });
+    }
+
+    pub fn on_chat_info(&mut self, jid: &str, about: &str, desc: &str, members: usize) {
+        if Some(&jid.to_string()) != self.current_jid.as_ref() || !self.ui.get_info_open() {
+            return;
+        }
+        self.ui.set_info_about(about.into());
+        self.ui.set_info_desc(desc.into());
+        if members > 0 {
+            self.ui.set_info_members(ta("info.members", &[&members.to_string()]).into());
+        }
+    }
+
+    fn toggle_archive(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let next = !self.store.chats.get(&jid).map(|c| c.archived).unwrap_or(false);
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.archived = next;
+        }
+        self.ui.set_info_archived(next);
+        self.wa.send(Cmd::Archive { jid, archived: next });
+        self.schedule_refresh_chats();
+    }
+
+    fn clear_current_chat(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.store.messages.remove(&jid);
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.preview = String::new();
+        }
+        if let Some(vault) = &self.vault {
+            vault.del(&format!("store:msgs:{jid}"));
+        }
+        self.messages_model.set_vec(Vec::new());
+        self.ui.set_info_open(false);
+        self.schedule_refresh_chats();
     }
 
     // ---- notifications ----
