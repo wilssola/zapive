@@ -11,6 +11,7 @@ mod platform;
 mod qr;
 mod single;
 mod store;
+mod update;
 mod vault;
 mod wa;
 mod wa_map;

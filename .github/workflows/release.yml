@@ -1,0 +1,113 @@
+name: release
+
+# Every push to master versions itself: the bump comes from the
+# conventional-commit history since the last tag (feat! -> major,
+# feat -> minor, anything else -> patch), and the three platform
+# binaries land on a GitHub Release the app's self-updater consumes.
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute next version
+        id: bump
+        run: |
+          last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.1.0)
+          range="$last..HEAD"
+          git rev-parse "$last" >/dev/null 2>&1 || range="HEAD"
+          commits=$(git log --format=%s $range)
+          if [ -z "$commits" ]; then
+            echo "no commits since $last; skipping"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          major=$(echo "$last" | sed 's/^v//' | cut -d. -f1)
+          minor=$(echo "$last" | sed 's/^v//' | cut -d. -f2)
+          patch=$(echo "$last" | sed 's/^v//' | cut -d. -f3)
+          if echo "$commits" | grep -qE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE'; then
+            major=$((major+1)); minor=0; patch=0
+          elif echo "$commits" | grep -qE '^feat(\(.+\))?:'; then
+            minor=$((minor+1)); patch=0
+          else
+            patch=$((patch+1))
+          fi
+          version="$major.$minor.$patch"
+          tag="v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$tag"
+          git push origin "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64
+            bin: zapive.exe
+          - os: ubuntu-latest
+            target: linux-x86_64
+            bin: zapive
+          - os: macos-latest
+            target: macos-aarch64
+            bin: zapive
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Desktop libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Stamp version
+        shell: bash
+        run: |
+          sed -i.bak 's/^version = ".*"/version = "${{ needs.version.outputs.version }}"/' Cargo.toml
+          rm -f Cargo.toml.bak
+      - name: Build
+        run: cargo build --release
+      - name: Package
+        shell: bash
+        run: |
+          cd target/release
+          7z a "../../zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zapive-${{ matrix.target }}
+          path: zapive-${{ matrix.target }}.zip
+
+  release:
+    needs: [version, build]
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.version.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --title "Zapive ${{ needs.version.outputs.tag }}" \
+            --generate-notes \
+            zapive-*.zip

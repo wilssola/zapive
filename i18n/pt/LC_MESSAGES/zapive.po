@@ -239,3 +239,18 @@ msgstr "Pesquisar nome ou número"
 
 msgid "Close"
 msgstr "Fechar"
+
+msgid "Version {} is available"
+msgstr "Versão {} disponível"
+
+msgid "Downloading update…"
+msgstr "Baixando atualização…"
+
+msgid "Update installed"
+msgstr "Atualização instalada"
+
+msgid "Update"
+msgstr "Atualizar"
+
+msgid "Restart"
+msgstr "Reiniciar"

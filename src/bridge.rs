@@ -328,6 +328,20 @@ fn wire_callbacks(ui: &AppWindow) {
         let jid = jid.to_string();
         defer(move |b| b.chat_hover(&jid));
     });
+    ui.on_update_apply(|| {
+        defer(|b| {
+            b.ui.set_update_state(2);
+            b.wa.send(Cmd::ApplyUpdate);
+        });
+    });
+    ui.on_update_restart(|| {
+        defer(|_| {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe).spawn();
+            }
+            let _ = slint::quit_event_loop();
+        });
+    });
     ui.on_open_dm(|target| {
         let target = target.to_string();
         defer(move |b| {
@@ -575,6 +589,7 @@ impl Bridge {
 
     // Called from main once the vault is open (or right away without PIN).
     pub fn boot(&mut self, vault: Vault, registered: bool) {
+        self.once(10_000, |b| b.update_tick());
         crate::media::clean_tmp();
         self.store.load_from(&vault);
         self.media_key = vault.key_handle();
@@ -2575,6 +2590,34 @@ impl Bridge {
     pub fn on_video_ended(&mut self, id: &str) {
         if self.video_id.as_deref() == Some(id) {
             self.close_video();
+        }
+    }
+
+    // ---- self-update ----
+
+    fn update_tick(&mut self) {
+        self.wa.send(Cmd::CheckUpdate);
+        // Check again every 6 hours while the app stays open.
+        self.once(21_600_000, |b| b.update_tick());
+    }
+
+    pub fn on_update_available(&mut self, version: &str) {
+        self.ui.set_update_version(version.into());
+        if self.ui.get_update_state() == 0 {
+            self.ui.set_update_state(1);
+        }
+    }
+
+    pub fn on_update_applied(&mut self, result: Result<String, String>) {
+        match result {
+            Ok(version) => {
+                self.ui.set_update_version(version.into());
+                self.ui.set_update_state(3);
+            }
+            Err(e) => {
+                eprintln!("[update] failed: {e}");
+                self.ui.set_update_state(1);
+            }
         }
     }
 

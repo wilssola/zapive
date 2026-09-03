@@ -81,6 +81,9 @@ pub enum Cmd {
     ZoomFrames { id: String, path: std::path::PathBuf },
     PlayVideo { id: String, path: std::path::PathBuf },
     StopVideo,
+    // Self-update.
+    CheckUpdate,
+    ApplyUpdate,
     // Calls, channels and the info panel.
     RejectCall { id: String, from: String },
     FetchChannel(String),
@@ -834,6 +837,25 @@ async fn executor(
             }
             Cmd::StopVideo => {
                 video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            Cmd::CheckUpdate => {
+                tokio::spawn(async move {
+                    let found = tokio::task::spawn_blocking(crate::update::check)
+                        .await
+                        .ok()
+                        .flatten();
+                    if let Some(version) = found {
+                        ui_apply(move |b| b.on_update_available(&version));
+                    }
+                });
+            }
+            Cmd::ApplyUpdate => {
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(crate::update::apply)
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()));
+                    ui_apply(move |b| b.on_update_applied(result));
+                });
             }
             Cmd::RejectCall { id, from } => {
                 let client = session.client.clone();

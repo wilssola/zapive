@@ -36,6 +36,15 @@ fraction of the resources — about **140–180 MB of RAM** connected with
 - System tray with minimize-to-tray, single-instance lock, light/dark
   theme following the system, English/Portuguese UI.
 
+**Self-updating**
+- Every push to `master` is versioned automatically from the
+  conventional-commit history, built for Windows, Linux and macOS by CI
+  and published to GitHub Releases.
+- The app checks for releases on launch and every 6 hours; a banner
+  offers the download and swaps the executable in place — restart and
+  you are on the new version. (While the repository is private, set
+  `ZAPIVE_GH_TOKEN` so the updater can reach the release assets.)
+
 **Privacy & security**
 - Chats, settings, media and avatars are envelope-encrypted on disk: a
   random data key sealed by Windows DPAPI (machine + user bound) and

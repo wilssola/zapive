@@ -1,8 +1,9 @@
 name: build
 
+# Smoke builds for branches and PRs; master pushes go through release.yml.
 on:
   push:
-    branches: [master, rust]
+    branches: [rust]
   pull_request:
 
 jobs:

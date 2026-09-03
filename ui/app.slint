@@ -323,6 +323,12 @@ export component AppWindow inherits Window {
     // Fired when the pointer settles on a chat row: the backend preloads
     // that chat's messages so a likely click opens instantly.
     callback chat-hover(string);
+    // Self-update: 0 = idle, 1 = update available, 2 = downloading,
+    // 3 = installed (restart pending).
+    in-out property <int> update-state: 0;
+    in-out property <string> update-version;
+    callback update-apply();
+    callback update-restart();
     callback search-changed(string);
     callback tab-changed(string);
 
@@ -905,6 +911,50 @@ export component AppWindow inherits Window {
                         search-box := LineEdit {
                             placeholder-text: @tr("Search chats");
                             edited => { root.search-changed(self.text); }
+                        }
+                    }
+                }
+
+                // Self-update banner: appears under the search box when a
+                // new release is available, downloading, or installed.
+                Rectangle {
+                    height: root.update-state > 0 ? 42px : 0;
+                    visible: root.update-state > 0;
+                    background: Theme.accent.with-alpha(0.15);
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        Text {
+                            text: root.update-state == 1
+                                ? @tr("Version {} is available", root.update-version)
+                                : root.update-state == 2 ? @tr("Downloading update…")
+                                : @tr("Update installed");
+                            color: Theme.text;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        if root.update-state == 1 || root.update-state == 3: Rectangle {
+                            width: update-btn-text.preferred-width + 22px;
+                            height: 28px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 14px;
+                            background: Theme.accent;
+                            update-btn-text := Text {
+                                text: root.update-state == 1 ? @tr("Update") : @tr("Restart");
+                                color: white;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                            TouchArea {
+                                clicked => {
+                                    if (root.update-state == 1) { root.update-apply(); }
+                                    else { root.update-restart(); }
+                                }
+                            }
                         }
                     }
                 }
