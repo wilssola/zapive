@@ -23,6 +23,42 @@ pub fn open_path(target: &str) {
         .spawn();
 }
 
+// Toast identity: the header name/icon come from the AppUserModelID
+// registration, not the toast payload. Re-registered every launch.
+pub fn register_app_id(icon_path: &str) {
+    unsafe {
+        use windows::core::w;
+        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("Zapive"));
+    }
+    let key = r"HKCU\Software\Classes\AppUserModelId\Zapive";
+    for (name, value) in [("DisplayName", "Zapive"), ("IconUri", icon_path)] {
+        let _ = std::process::Command::new("reg")
+            .args(["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"])
+            .output();
+    }
+}
+
+// A native toast; clicking it reopens the conversation.
+pub fn toast(title: &str, body: &str, jid: Option<String>) {
+    use tauri_winrt_notification::Toast;
+    let toast = Toast::new("Zapive")
+        .title(title)
+        .text1(if body.is_empty() { " " } else { body });
+    let result = match jid {
+        Some(jid) => toast
+            .on_activated(move |_| {
+                let jid = jid.clone();
+                crate::bridge::ui_apply(move |b| b.on_notification_activated(&jid));
+                Ok(())
+            })
+            .show(),
+        None => toast.show(),
+    };
+    if let Err(e) = result {
+        eprintln!("[notify] toast failed: {e}");
+    }
+}
+
 // Whether Windows apps are set to dark mode (defaults dark on error).
 pub fn system_dark() -> bool {
     let out = std::process::Command::new("reg")

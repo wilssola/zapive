@@ -125,9 +125,53 @@ fn main() {
         }
     }
 
+    // Toast identity (header name and icon) comes from the AppUserModelID.
+    let icon_file = paths::data_dir().join("zapive.ico");
+    let _ = std::fs::write(&icon_file, include_bytes!("../ui/zapive.ico"));
+    platform::register_app_id(&icon_file.to_string_lossy());
+
     // Tray icon (Windows): keeps the app alive with the window hidden.
     #[cfg(windows)]
-    let _tray = make_tray();
+    let tray = make_tray();
+    #[cfg(windows)]
+    let tray_poll = slint::Timer::default();
+    #[cfg(windows)]
+    if let Some((_tray, open_id, exit_id)) = &tray {
+        ui.window().on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+        let handle = ui.as_weak();
+        let (open_id, exit_id) = (open_id.clone(), exit_id.clone());
+        tray_poll.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(100),
+            move || {
+                let show = |handle: &slint::Weak<AppWindow>| {
+                    if let Some(ui) = handle.upgrade() {
+                        let _ = ui.show();
+                        platform::focus_window();
+                    }
+                };
+                while let Ok(event) = tray_icon::TrayIconEvent::receiver().try_recv() {
+                    if matches!(
+                        event,
+                        tray_icon::TrayIconEvent::Click {
+                            button: tray_icon::MouseButton::Left,
+                            button_state: tray_icon::MouseButtonState::Up,
+                            ..
+                        }
+                    ) {
+                        show(&handle);
+                    }
+                }
+                while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+                    if event.id() == &open_id {
+                        show(&handle);
+                    } else if event.id() == &exit_id {
+                        slint::quit_event_loop().ok();
+                    }
+                }
+            },
+        );
+    }
 
     ui.run().expect("event loop failed");
     wa.send(wa::Cmd::Shutdown);
@@ -168,13 +212,21 @@ fn audio_selftest() {
 }
 
 #[cfg(windows)]
-fn make_tray() -> Option<tray_icon::TrayIcon> {
+fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_icon::menu::MenuId)> {
+    use tray_icon::menu::{Menu, MenuItem};
     let img = image::load_from_memory(include_bytes!("../ui/zapive.png")).ok()?.into_rgba8();
     let (w, h) = img.dimensions();
     let icon = tray_icon::Icon::from_rgba(img.into_raw(), w, h).ok()?;
-    tray_icon::TrayIconBuilder::new()
+    let open = MenuItem::new(i18n::t("tray.open"), true, None);
+    let exit = MenuItem::new(i18n::t("tray.exit"), true, None);
+    let (open_id, exit_id) = (open.id().clone(), exit.id().clone());
+    let menu = Menu::new();
+    menu.append_items(&[&open, &exit]).ok()?;
+    let tray = tray_icon::TrayIconBuilder::new()
         .with_icon(icon)
         .with_tooltip("Zapive")
+        .with_menu(Box::new(menu))
         .build()
-        .ok()
+        .ok()?;
+    Some((tray, open_id, exit_id))
 }

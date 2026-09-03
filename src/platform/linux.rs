@@ -6,6 +6,12 @@ pub fn open_path(target: &str) {
     let _ = std::process::Command::new("xdg-open").arg(target).spawn();
 }
 
+pub fn register_app_id(_icon_path: &str) {}
+
+pub fn toast(title: &str, body: &str, _jid: Option<String>) {
+    let _ = std::process::Command::new("notify-send").args([title, body]).spawn();
+}
+
 pub fn system_dark() -> bool {
     std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "color-scheme"])

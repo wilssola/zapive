@@ -81,6 +81,9 @@ pub struct Bridge {
     pending_forward: Option<(String, String)>,
     pending_image: Option<std::path::PathBuf>,
     last_paste: Option<Instant>,
+    // Toast coalescing: bursts flush as one summary after 1200ms.
+    notify_queue: Vec<(String, String, String)>,
+    notify_queued: bool,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -219,6 +222,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         pending_forward: None,
         pending_image: None,
         last_paste: None,
+        notify_queue: Vec::new(),
+        notify_queued: false,
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -393,6 +398,14 @@ fn wire_callbacks(ui: &AppWindow) {
         });
     });
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
+    ui.on_save_pin(|current, next| {
+        let (current, next) = (current.to_string(), next.to_string());
+        defer(move |b| b.handle_save_pin(&current, &next));
+    });
+    ui.on_remove_pin(|current| {
+        let current = current.to_string();
+        defer(move |b| b.handle_remove_pin(&current));
+    });
     ui.set_audio_rate_label("1x".into());
     ui.on_audio_toggle(|id| {
         let id = id.to_string();
@@ -710,14 +723,23 @@ impl Bridge {
             }
             if Some(&jid) == self.current_jid.as_ref() {
                 self.push_message_row(&jid);
-            } else if !from_me
-                && let Some(meta) = self.store.chats.get_mut(&jid)
-            {
-                meta.unread += 1;
-                if mentions_me {
-                    meta.mentioned = true;
+            } else if !from_me {
+                if let Some(meta) = self.store.chats.get_mut(&jid) {
+                    meta.unread += 1;
+                    if mentions_me {
+                        meta.mentioned = true;
+                    }
                 }
-                // Toast notifications land in phase 7.
+                if let Some(m) = self.store.messages_for(&jid).last().cloned() {
+                    let body = self.store.named_mentions(&notification_body(&m));
+                    let title = self.store.chat_name(&jid);
+                    let text = if is_group(&jid) && !m.sender.is_empty() {
+                        format!("{}: {body}", m.sender)
+                    } else {
+                        body
+                    };
+                    self.push_notification(title, text, jid.clone());
+                }
             }
         }
         self.schedule_refresh_chats();
@@ -1900,6 +1922,80 @@ impl Bridge {
         }
     }
 
+    // ---- notifications ----
+
+    fn push_notification(&mut self, title: String, text: String, jid: String) {
+        self.notify_queue.push((title, text, jid));
+        if !self.notify_queued {
+            self.notify_queued = true;
+            self.once(1200, |b| b.flush_notifications());
+        }
+    }
+
+    fn flush_notifications(&mut self) {
+        self.notify_queued = false;
+        let queue = std::mem::take(&mut self.notify_queue);
+        match queue.len() {
+            0 => {}
+            1 => {
+                let (title, text, jid) = queue.into_iter().next().expect("one entry");
+                crate::platform::toast(&title, &text, Some(jid));
+            }
+            n => {
+                // A burst becomes one summary, targeting the latest chat.
+                let mut names: Vec<&str> = Vec::new();
+                for (title, _, _) in &queue {
+                    if !names.contains(&title.as_str()) {
+                        names.push(title);
+                        if names.len() == 3 {
+                            break;
+                        }
+                    }
+                }
+                let text = if names.len() == 1 {
+                    ta("notify.fromOne", &[&n.to_string(), names[0]])
+                } else {
+                    ta("notify.newMessages", &[&n.to_string(), &names.join(", ")])
+                };
+                let jid = queue.last().map(|(_, _, jid)| jid.clone());
+                crate::platform::toast(&t("notify.appName"), &text, jid);
+            }
+        }
+    }
+
+    pub fn on_notification_activated(&mut self, jid: &str) {
+        let _ = self.ui.show();
+        crate::platform::focus_window();
+        self.open_dm(jid, None);
+    }
+
+    // ---- PIN ----
+
+    fn handle_save_pin(&mut self, current: &str, next: &str) {
+        let Some(vault) = &mut self.vault else { return };
+        let status = match vault.change_pin(current, Some(next)) {
+            Ok(()) => {
+                self.ui.set_pin_set(true);
+                t("pin.saved")
+            }
+            Err(crate::vault::PinError::WrongPin) => t("pin.wrongCurrent"),
+            Err(crate::vault::PinError::BadFormat) => t("pin.format"),
+        };
+        self.ui.set_settings_status(status.into());
+    }
+
+    fn handle_remove_pin(&mut self, current: &str) {
+        let Some(vault) = &mut self.vault else { return };
+        let status = match vault.change_pin(current, None) {
+            Ok(()) => {
+                self.ui.set_pin_set(false);
+                t("pin.removed")
+            }
+            Err(_) => t("pin.wrongCurrent"),
+        };
+        self.ui.set_settings_status(status.into());
+    }
+
     // ---- message actions ----
 
     // The participant that goes into a message key inside a group.
@@ -2403,6 +2499,22 @@ impl Bridge {
         });
         self.oneshots.retain(|timer| timer.running());
         self.oneshots.push(timer);
+    }
+}
+
+// Every media kind gets a translated one-liner in notifications.
+fn notification_body(m: &StoredMessage) -> String {
+    if m.sticker {
+        return t("preview.sticker");
+    }
+    match m.kind {
+        MessageKind::Image => t("preview.photo"),
+        MessageKind::Audio => t("preview.audio"),
+        MessageKind::Doc => ta("preview.document", &[&m.text]),
+        MessageKind::Video => {
+            if m.gif { t("preview.gif") } else { t("preview.video") }
+        }
+        MessageKind::Text => m.text.clone(),
     }
 }
 

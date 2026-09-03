@@ -10,6 +10,19 @@ pub fn open_path(target: &str) {
     let _ = std::process::Command::new("open").arg(target).spawn();
 }
 
+pub fn register_app_id(_icon_path: &str) {}
+
+// Banner via osascript; activation callbacks are unreliable on macOS, so
+// clicking focuses nothing (parity with the Node build).
+pub fn toast(title: &str, body: &str, _jid: Option<String>) {
+    let script = format!(
+        "display notification \"{}\" with title \"{}\"",
+        body.replace('"', "'"),
+        title.replace('"', "'")
+    );
+    let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+}
+
 pub fn system_dark() -> bool {
     std::process::Command::new("defaults")
         .args(["read", "-g", "AppleInterfaceStyle"])
