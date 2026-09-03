@@ -109,7 +109,7 @@ pub fn from_history(store: &mut Store, web: &wa::WebMessageInfo) -> Option<Store
     normalize(store, &meta, web.message.as_option()?, &reactions, status)
 }
 
-fn normalize(
+pub fn normalize(
     store: &mut Store,
     meta: &LiveMeta,
     message: &wa::Message,

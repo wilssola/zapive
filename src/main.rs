@@ -2,6 +2,7 @@ slint::include_modules!();
 
 mod bridge;
 mod i18n;
+mod markup;
 mod paths;
 mod platform;
 mod qr;
@@ -11,6 +12,7 @@ mod vault;
 mod wa;
 mod wa_map;
 
+use slint::ComponentHandle;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
@@ -23,12 +25,22 @@ fn main() {
         return;
     }
 
-    // Language: system locale for now; the vault setting takes over in
-    // phase 2 (settings live behind the PIN there).
+    let mut app_vault = match vault::Vault::new() {
+        Ok(vault) => vault,
+        Err(e) => {
+            eprintln!("[vault] cannot open: {e}");
+            single::release_single_instance();
+            return;
+        }
+    };
+
+    // Language: the saved setting wins; "system" falls back to the locale.
+    let language = app_vault.setting_get("language").unwrap_or_else(|| "system".into());
     let system_pt = sys_locale::get_locale()
         .map(|l| l.to_lowercase().starts_with("pt"))
         .unwrap_or(false);
-    if system_pt {
+    let use_pt = language == "pt" || (language == "system" && system_pt);
+    if use_pt {
         i18n::set_locale(i18n::Locale::Pt);
         slint::select_bundled_translation("pt").ok();
     } else {
@@ -43,34 +55,64 @@ fn main() {
             .expect("failed to build the tokio runtime")
     });
 
-    // Phase-0 spike: statically linked FFmpeg with the codecs the app needs.
-    match ffmpeg_next::init() {
-        Ok(()) => {
-            let opus = ffmpeg_next::decoder::find_by_name("opus").is_some();
-            let h264 = ffmpeg_next::encoder::find_by_name("libopenh264").is_some();
-            println!("[spike] ffmpeg ready (opus decode: {opus}, h264 encode: {h264})");
-        }
-        Err(e) => eprintln!("[spike] ffmpeg init failed: {e}"),
+    if let Err(e) = ffmpeg_next::init() {
+        eprintln!("[media] ffmpeg init failed: {e}");
     }
 
     let ui = AppWindow::new().expect("failed to create the main window");
+    ui.set_language_mode(language.as_str().into());
+
+    // Theme: explicit modes win; "system" follows the OS with a slow poll.
+    let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
+    ui.set_theme_mode(theme.as_str().into());
+    ui.set_dark_theme(match theme.as_str() {
+        "light" => false,
+        "system" => platform::system_dark(),
+        _ => true,
+    });
+    let theme_poll = slint::Timer::default();
+    {
+        let handle = ui.as_weak();
+        theme_poll.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(15),
+            move || {
+                if let Some(ui) = handle.upgrade()
+                    && ui.get_theme_mode() == "system"
+                {
+                    ui.set_dark_theme(platform::system_dark());
+                }
+            },
+        );
+    }
 
     let (wa, registered) = match wa::WaService::start(rt) {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("[wa] failed to start: {e}");
-            // The window still opens so the error is visible in the UI.
             ui.set_screen("login".into());
             ui.set_status_text(i18n::ta("status.connectFailed", &[&e]).into());
             ui.run().expect("event loop failed");
+            single::release_single_instance();
             return;
         }
     };
-    ui.set_screen(if registered { "main" } else { "login" }.into());
 
     bridge::install(&ui, wa.clone());
-    // Connect only now, so no pairing event beats the bridge install.
-    wa.send(wa::Cmd::Start);
+
+    // With a PIN the vault stays locked until the user types it; without
+    // one it opens right away, bound to the OS account.
+    if app_vault.has_pin() {
+        bridge::ui_apply(move |b| b.park_locked_vault(app_vault, registered));
+    } else {
+        match app_vault.open() {
+            Ok(()) => bridge::ui_apply(move |b| b.boot(app_vault, registered)),
+            Err(e) => {
+                eprintln!("[vault] open failed: {e}");
+                ui.set_status_text(i18n::ta("status.connectFailed", &[&e]).into());
+            }
+        }
+    }
 
     // Tray icon (Windows): keeps the app alive with the window hidden.
     #[cfg(windows)]

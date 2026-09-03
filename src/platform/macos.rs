@@ -10,6 +10,14 @@ pub fn open_path(target: &str) {
     let _ = std::process::Command::new("open").arg(target).spawn();
 }
 
+pub fn system_dark() -> bool {
+    std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleInterfaceStyle"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("dark"))
+        .unwrap_or(false)
+}
+
 // ---- vault key wrapping: the login keychain holds the secret itself ----
 
 const SERVICE: &str = "Zapive";

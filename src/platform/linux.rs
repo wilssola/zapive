@@ -6,6 +6,14 @@ pub fn open_path(target: &str) {
     let _ = std::process::Command::new("xdg-open").arg(target).spawn();
 }
 
+pub fn system_dark() -> bool {
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("dark"))
+        .unwrap_or(true)
+}
+
 // ---- vault key wrapping: the Secret Service holds the secret itself ----
 
 pub fn wrap_secret(inner: &str) -> String {

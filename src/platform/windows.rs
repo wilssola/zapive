@@ -23,6 +23,22 @@ pub fn open_path(target: &str) {
         .spawn();
 }
 
+// Whether Windows apps are set to dark mode (defaults dark on error).
+pub fn system_dark() -> bool {
+    let out = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            "/v",
+            "AppsUseLightTheme",
+        ])
+        .output();
+    match out {
+        Ok(out) => !String::from_utf8_lossy(&out.stdout).contains("0x1"),
+        Err(_) => true,
+    }
+}
+
 // ---- vault key wrapping: DPAPI binds the data key to this Windows user ----
 
 use windows::Win32::Foundation::{HLOCAL, LocalFree};
