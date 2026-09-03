@@ -74,6 +74,13 @@ pub enum Cmd {
     SendAudioFile { jid: String, path: std::path::PathBuf },
     // Decode a local image for the send-preview overlay.
     PreviewImage { path: std::path::PathBuf },
+    // Stickers, GIFs and the video player.
+    SendSticker { jid: String, path: std::path::PathBuf },
+    GifSearch(String),
+    SendGifUrl { jid: String, url: String },
+    ZoomFrames { id: String, path: std::path::PathBuf },
+    PlayVideo { id: String, path: std::path::PathBuf },
+    StopVideo,
     // Calls, channels and the info panel.
     RejectCall { id: String, from: String },
     FetchChannel(String),
@@ -366,6 +373,8 @@ async fn executor(
     let mut media_key = crate::vault::KeyHandle::default();
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(3));
+    // Bumped on every play/stop; running frame loops exit when it moves.
+    let video_gen = Arc::new(std::sync::atomic::AtomicU64::new(0));
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             Cmd::MediaKey(key) => {
@@ -615,6 +624,216 @@ async fn executor(
                         ui_apply(move |b| b.on_preview_ready(&path, img));
                     }
                 });
+            }
+            Cmd::SendSticker { jid, path } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let webp = tokio::task::spawn_blocking(move || {
+                        let data = std::fs::read(&path).ok()?;
+                        crate::media::to_webp_sticker(&data)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    let Some(webp) = webp else {
+                        eprintln!("[wa] sticker encode failed");
+                        return;
+                    };
+                    let Some(to) = parse_jid(&jid) else { return };
+                    let len = webp.len() as u64;
+                    let upload = match client
+                        .upload(webp, whatsapp_rust::wacore::download::MediaType::Sticker, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] sticker upload failed: {e}");
+                            return;
+                        }
+                    };
+                    use whatsapp_rust::waproto::buffa::MessageField;
+                    let mut sticker = wa::message::StickerMessage::default();
+                    sticker.url = Some(upload.url);
+                    sticker.direct_path = Some(upload.direct_path);
+                    sticker.media_key = Some(upload.media_key.to_vec().into());
+                    sticker.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec().into());
+                    sticker.file_sha256 = Some(upload.file_sha256.to_vec().into());
+                    sticker.file_length = Some(len);
+                    sticker.mimetype = Some("image/webp".into());
+                    sticker.width = Some(512);
+                    sticker.height = Some(512);
+                    sticker.media_key_timestamp = Some(upload.media_key_timestamp);
+                    let mut message = wa::Message::default();
+                    message.sticker_message = MessageField::some(sticker);
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] sticker send failed: {e}"),
+                    }
+                });
+            }
+            Cmd::GifSearch(query) => {
+                tokio::spawn(async move {
+                    let results = tokio::task::spawn_blocking(move || {
+                        let q = if query.trim().is_empty() { "funny" } else { query.trim() };
+                        let url = format!(
+                            "https://api.openverse.org/v1/images/?extension=gif&page_size=20&q={}",
+                            urlencode(q)
+                        );
+                        let mut res = ureq::get(&url).header("User-Agent", "Zapive").call().ok()?;
+                        let text = res.body_mut().read_to_string().ok()?;
+                        let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+                        let mut out = Vec::new();
+                        for item in json.get("results")?.as_array()?.iter().take(12) {
+                            let id = item.get("id")?.as_str()?.to_string();
+                            let gif_url = item.get("url")?.as_str()?.to_string();
+                            let thumb_url = item
+                                .get("thumbnail")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or(&gif_url)
+                                .to_string();
+                            let Some(mut thumb) =
+                                ureq::get(&thumb_url).header("User-Agent", "Zapive").call().ok()
+                            else {
+                                continue;
+                            };
+                            let Some(bytes) = thumb.body_mut().read_to_vec().ok() else { continue };
+                            if let Some(img) = crate::media::decode_cover(&bytes, 84) {
+                                out.push((id, gif_url, img));
+                            }
+                        }
+                        Some(out)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                    ui_apply(move |b| b.on_gif_results(results));
+                });
+            }
+            Cmd::SendGifUrl { jid, url } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let mp4 = tokio::task::spawn_blocking(move || {
+                        let mut res = ureq::get(&url).header("User-Agent", "Zapive").call().ok()?;
+                        let bytes = res.body_mut().read_to_vec().ok()?;
+                        let stamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis())
+                            .unwrap_or(0);
+                        let gif = std::env::temp_dir().join(format!("zapive_gif_{stamp}.gif"));
+                        let mp4 = std::env::temp_dir().join(format!("zapive_gif_{stamp}.mp4"));
+                        std::fs::write(&gif, bytes).ok()?;
+                        let result = crate::video::gif_to_mp4(&gif, &mp4);
+                        let _ = std::fs::remove_file(&gif);
+                        result.map(|_| mp4)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    let Some(mp4) = mp4 else {
+                        eprintln!("[wa] gif conversion failed");
+                        return;
+                    };
+                    let Ok(bytes) = tokio::fs::read(&mp4).await else { return };
+                    let _ = tokio::fs::remove_file(&mp4).await;
+                    let Some(to) = parse_jid(&jid) else { return };
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Video, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] gif upload failed: {e}");
+                            return;
+                        }
+                    };
+                    let message = whatsapp_rust::media::video_message(
+                        upload,
+                        whatsapp_rust::media::VideoOptions {
+                            gif_playback: Some(true),
+                            ..Default::default()
+                        },
+                    );
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] gif send failed: {e}"),
+                    }
+                });
+            }
+            Cmd::ZoomFrames { id, path } => {
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let frames = tokio::task::spawn_blocking(move || {
+                        crate::media::temp_plain(&key, &path)
+                            .map(|p| crate::video::frames(&p, 720, 15.0, 90))
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                    if !frames.is_empty() {
+                        ui_apply(move |b| b.on_zoom_frames(&id, frames));
+                    }
+                });
+            }
+            Cmd::PlayVideo { id, path } => {
+                video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let generation = video_gen.load(std::sync::atomic::Ordering::SeqCst);
+                let key = media_key.clone();
+                let gen_handle = video_gen.clone();
+                tokio::spawn(async move {
+                    let Some(plain) = ({
+                        let key = key.clone();
+                        let path = path.clone();
+                        tokio::task::spawn_blocking(move || crate::media::temp_plain(&key, &path))
+                            .await
+                            .ok()
+                            .flatten()
+                    }) else {
+                        return;
+                    };
+                    // Soundtrack decoded whole; playback starts UI-side in
+                    // sync with the first frame.
+                    let audio_plain = plain.clone();
+                    let audio = tokio::task::spawn_blocking(move || {
+                        crate::audio::decode_with_tempo(&audio_plain, 1.0)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    let id_for_audio = id.clone();
+                    if let Some(buffer) = audio {
+                        ui_apply(move |b| b.on_video_audio(&id_for_audio, buffer));
+                    }
+                    // Paced frame loop on a blocking thread; a newer
+                    // generation (or StopVideo) ends it.
+                    tokio::task::spawn_blocking(move || {
+                        let frames = crate::video::frames(&plain, 560, 15.0, 900);
+                        let started = std::time::Instant::now();
+                        for (i, frame) in frames.into_iter().enumerate() {
+                            if gen_handle.load(std::sync::atomic::Ordering::SeqCst) != generation {
+                                return;
+                            }
+                            let due = std::time::Duration::from_millis((i as u64) * 1000 / 15);
+                            if let Some(wait) = due.checked_sub(started.elapsed()) {
+                                std::thread::sleep(wait);
+                            }
+                            let id = id.clone();
+                            ui_apply(move |b| b.on_video_frame(&id, frame));
+                        }
+                        let id_done = id.clone();
+                        ui_apply(move |b| b.on_video_ended(&id_done));
+                    });
+                });
+            }
+            Cmd::StopVideo => {
+                video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             Cmd::RejectCall { id, from } => {
                 let client = session.client.clone();
@@ -945,6 +1164,20 @@ async fn executor(
             }
         }
     }
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 // Small jpeg preview embedded in outgoing image messages.

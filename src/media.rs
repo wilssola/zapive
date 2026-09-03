@@ -114,6 +114,17 @@ pub fn clean_tmp() {
     let _ = std::fs::remove_dir_all(media_cache().join(".tmp"));
 }
 
+// A 512x512 webp sticker with transparent padding, like WhatsApp makes.
+pub fn to_webp_sticker(data: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(data).ok()?;
+    let fitted = img.resize(512, 512, imageops::FilterType::Triangle).to_rgba8();
+    let mut canvas = image::RgbaImage::new(512, 512);
+    let (x, y) = ((512 - fitted.width()) / 2, (512 - fitted.height()) / 2);
+    imageops::overlay(&mut canvas, &fitted, x as i64, y as i64);
+    let encoder = webp::Encoder::from_rgba(&canvas, 512, 512);
+    Some(encoder.encode(90.0).to_vec())
+}
+
 fn exif_rotation(data: &[u8]) -> u32 {
     let mut cursor = std::io::Cursor::new(data);
     exif::Reader::new()

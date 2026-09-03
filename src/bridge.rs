@@ -91,6 +91,16 @@ pub struct Bridge {
     viewer: Option<(Vec<StoredMessage>, usize)>,
     ringing: Option<(String, String)>,
     requested_channels: HashSet<String>,
+    // Sticker/GIF pickers and the video overlay.
+    sticker_model: Rc<VecModel<ModelRc<StickerCell>>>,
+    fav_model: Rc<VecModel<ModelRc<StickerCell>>>,
+    gif_model: Rc<VecModel<ModelRc<StickerCell>>>,
+    gif_url_by_id: HashMap<String, String>,
+    zoom_frames: Vec<slint::Image>,
+    zoom_idx: usize,
+    zoom_timer: slint::Timer,
+    video_audio: Option<crate::audio::Player>,
+    video_id: Option<String>,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -169,6 +179,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let status_model = Rc::new(VecModel::<ChatItem>::default());
     let calls_model = Rc::new(VecModel::<CallItem>::default());
     let info_media_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
+    let sticker_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
+    let fav_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
+    let gif_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
+    ui.set_sticker_rows(ModelRc::from(sticker_model.clone()));
+    ui.set_fav_rows(ModelRc::from(fav_model.clone()));
+    ui.set_gif_rows(ModelRc::from(gif_model.clone()));
     ui.set_chats(ModelRc::from(chats_model.clone()));
     ui.set_messages(ModelRc::from(messages_model.clone()));
     ui.set_reaction_rows(ModelRc::from(reactions_model.clone()));
@@ -243,6 +259,15 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         viewer: None,
         ringing: None,
         requested_channels: HashSet::new(),
+        sticker_model,
+        fav_model,
+        gif_model,
+        gif_url_by_id: HashMap::new(),
+        zoom_frames: Vec::new(),
+        zoom_idx: 0,
+        zoom_timer: slint::Timer::default(),
+        video_audio: None,
+        video_id: None,
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -417,6 +442,47 @@ fn wire_callbacks(ui: &AppWindow) {
         });
     });
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
+    ui.on_picker_opened(|| defer(|b| b.load_sticker_panel()));
+    ui.on_picker_closed(|| defer(|_| {}));
+    ui.on_sticker_send(|id| {
+        let id = id.to_string();
+        defer(move |b| b.send_sticker_by_id(&id));
+    });
+    ui.on_attach_sticker(|| {
+        defer(|b| {
+            if b.current_jid.is_none() {
+                return;
+            }
+            std::thread::spawn(|| {
+                let picked = rfd::FileDialog::new()
+                    .add_filter(t("picker.images"), &["jpg", "jpeg", "png", "webp"])
+                    .pick_file();
+                if let Some(path) = picked {
+                    ui_apply(move |b| {
+                        if let Some(jid) = b.current_jid.clone() {
+                            b.wa.send(Cmd::SendSticker { jid, path });
+                        }
+                    });
+                }
+            });
+        });
+    });
+    ui.on_gif_search(|query| {
+        let query = query.to_string();
+        defer(move |b| {
+            b.ui.set_gif_hint("".into());
+            b.wa.send(Cmd::GifSearch(query));
+        });
+    });
+    ui.on_gif_send(|id| {
+        let id = id.to_string();
+        defer(move |b| b.send_gif_by_id(&id));
+    });
+    ui.on_open_video(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_video(&id));
+    });
+    ui.on_close_video(|| defer(|b| b.close_video()));
     ui.on_status_open(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.open_status_viewer(&jid));
@@ -2254,6 +2320,195 @@ impl Bridge {
         self.messages_model.set_vec(Vec::new());
         self.ui.set_info_open(false);
         self.schedule_refresh_chats();
+    }
+
+    // ---- sticker & GIF pickers ----
+
+    fn sticker_grid(&self, items: Vec<&StoredMessage>) -> Vec<ModelRc<StickerCell>> {
+        let cells: Vec<StickerCell> = items
+            .iter()
+            .map(|m| {
+                let ready = self.decoded.contains_key(&m.id);
+                StickerCell {
+                    id: m.id.clone().into(),
+                    pic: self
+                        .decoded
+                        .get(&m.id)
+                        .map(|(img, _, _)| img.clone())
+                        .unwrap_or_else(empty_image),
+                    ready,
+                }
+            })
+            .collect();
+        cells.chunks(4).map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec())))).collect()
+    }
+
+    // Fills the sticker tab with recent/starred stickers (lazy decode).
+    fn load_sticker_panel(&mut self) {
+        self.wa.send(Cmd::GifSearch(String::new()));
+        let favs = self.store.starred_stickers(32);
+        self.ui
+            .set_fav_hint(if favs.is_empty() { t("fav.empty").into() } else { "".into() });
+        let fav_pending: Vec<StoredMessage> =
+            favs.iter().filter(|m| !self.decoded.contains_key(&m.id)).map(|m| (*m).clone()).collect();
+        let fav_grid = self.sticker_grid(favs);
+        self.fav_model.set_vec(fav_grid);
+        let recents = self.store.recent_stickers(32);
+        let recent_pending: Vec<StoredMessage> = recents
+            .iter()
+            .filter(|m| !self.decoded.contains_key(&m.id))
+            .map(|m| (*m).clone())
+            .collect();
+        let recent_grid = self.sticker_grid(recents);
+        self.sticker_model.set_vec(recent_grid);
+        for m in fav_pending.into_iter().chain(recent_pending) {
+            self.request_media(&m);
+        }
+    }
+
+    fn send_sticker_by_id(&mut self, id: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        // Panel stickers are past messages: forwarding reuses their CDN copy.
+        let raw = self
+            .store
+            .messages
+            .values()
+            .flatten()
+            .find(|m| m.id == id && m.sticker)
+            .and_then(|m| m.raw.clone());
+        if let Some(message) = raw {
+            self.ui.set_picker_open(false);
+            self.wa.send(Cmd::Forward { jid, message });
+        }
+    }
+
+    pub fn on_gif_results(&mut self, results: Vec<(String, String, crate::media::Decoded)>) {
+        self.gif_url_by_id.clear();
+        if results.is_empty() {
+            self.ui.set_gif_hint(t("gif.noResults").into());
+            self.gif_model.set_vec(Vec::new());
+            return;
+        }
+        let cells: Vec<StickerCell> = results
+            .iter()
+            .map(|(id, url, img)| {
+                self.gif_url_by_id.insert(id.clone(), url.clone());
+                StickerCell { id: id.clone().into(), pic: image_of(img), ready: true }
+            })
+            .collect();
+        let grid: Vec<ModelRc<StickerCell>> =
+            cells.chunks(4).map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec())))).collect();
+        self.gif_model.set_vec(grid);
+        self.ui.set_gif_hint("".into());
+    }
+
+    fn send_gif_by_id(&mut self, id: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.ui.set_picker_open(false);
+        if let Some(url) = self.gif_url_by_id.get(id).cloned() {
+            self.wa.send(Cmd::SendGifUrl { jid, url });
+            return;
+        }
+        // A history GIF: forward the original message.
+        let raw = self
+            .store
+            .messages
+            .values()
+            .flatten()
+            .find(|m| m.id == id && m.gif)
+            .and_then(|m| m.raw.clone());
+        if let Some(message) = raw {
+            self.wa.send(Cmd::Forward { jid, message });
+        }
+    }
+
+    // ---- video overlay (GIF zoom and click-to-play) ----
+
+    fn open_video(&mut self, id: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(path) = self.media_path.get(id).map(std::path::PathBuf::from) else { return };
+        self.close_video();
+        self.video_id = Some(id.to_string());
+        // The bubble's frames show instantly while the sharper set loads.
+        if m.gif {
+            if let Some(anim) = self.animated.get(id) {
+                self.zoom_frames = anim.frames.clone();
+            } else if let Some((img, _, _)) = self.decoded.get(id) {
+                self.zoom_frames = vec![img.clone()];
+            }
+            self.start_zoom_loop();
+            self.ui.set_video_w(m.media_w.max(320) as i32);
+            self.ui.set_video_h(m.media_h.max(240) as i32);
+            self.ui.set_video_open(true);
+            self.wa.send(Cmd::ZoomFrames { id: id.to_string(), path });
+            return;
+        }
+        self.ui.set_video_w(m.media_w.max(320) as i32);
+        self.ui.set_video_h(m.media_h.max(240) as i32);
+        self.ui.set_video_open(true);
+        self.wa.send(Cmd::PlayVideo { id: id.to_string(), path });
+    }
+
+    fn close_video(&mut self) {
+        self.wa.send(Cmd::StopVideo);
+        self.zoom_timer.stop();
+        self.zoom_frames.clear();
+        self.zoom_idx = 0;
+        self.video_audio = None;
+        self.video_id = None;
+        self.ui.set_video_open(false);
+    }
+
+    fn start_zoom_loop(&mut self) {
+        if let Some(first) = self.zoom_frames.first() {
+            self.ui.set_video_frame(first.clone());
+        }
+        if self.zoom_frames.len() < 2 {
+            return;
+        }
+        self.zoom_timer.start(slint::TimerMode::Repeated, Duration::from_millis(66), || {
+            apply_now(|b| {
+                if b.zoom_frames.is_empty() {
+                    b.zoom_timer.stop();
+                    return;
+                }
+                b.zoom_idx = (b.zoom_idx + 1) % b.zoom_frames.len();
+                b.ui.set_video_frame(b.zoom_frames[b.zoom_idx].clone());
+            });
+        });
+    }
+
+    pub fn on_zoom_frames(&mut self, id: &str, frames: Vec<crate::media::Decoded>) {
+        if self.video_id.as_deref() != Some(id) || frames.is_empty() {
+            return;
+        }
+        let (w, h) = (frames[0].w as i32, frames[0].h as i32);
+        self.zoom_frames = frames.iter().map(image_of).collect();
+        self.zoom_idx = 0;
+        self.ui.set_video_w(w);
+        self.ui.set_video_h(h);
+        self.start_zoom_loop();
+    }
+
+    pub fn on_video_audio(&mut self, id: &str, buffer: crate::audio::AudioBuffer) {
+        if self.video_id.as_deref() == Some(id) {
+            self.video_audio = crate::audio::Player::start(&buffer, 0.0);
+        }
+    }
+
+    pub fn on_video_frame(&mut self, id: &str, frame: crate::media::Decoded) {
+        if self.video_id.as_deref() != Some(id) {
+            return;
+        }
+        self.ui.set_video_w(frame.w as i32);
+        self.ui.set_video_h(frame.h as i32);
+        self.ui.set_video_frame(image_of(&frame));
+    }
+
+    pub fn on_video_ended(&mut self, id: &str) {
+        if self.video_id.as_deref() == Some(id) {
+            self.close_video();
+        }
     }
 
     // ---- notifications ----

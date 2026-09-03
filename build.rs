@@ -12,5 +12,21 @@ fn main() {
         for lib in ["strmiids", "mfuuid", "uuid", "ole32", "oleaut32"] {
             println!("cargo:rustc-link-lib={lib}");
         }
+        embed_windows_resources();
     }
 }
+
+// Application icon and version info on the executable itself.
+#[cfg(windows)]
+fn embed_windows_resources() {
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon("ui/zapive.ico");
+    res.set("ProductName", "Zapive");
+    res.set("FileDescription", "Zapive");
+    if let Err(e) = res.compile() {
+        println!("cargo:warning=winresource failed: {e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn embed_windows_resources() {}
