@@ -29,7 +29,8 @@ checks that a signer certificate was embedded instead of the status.
 ## macOS signing
 
 ```sh
-bash packaging/macos/make-self-signed-cert.sh
+bash packaging/macos/make-self-signed-cert.sh   # needs openssl
+pwsh packaging/macos/make-self-signed-cert.ps1  # same p12, from Windows
 ```
 
 Repository secrets: `MACOS_P12_BASE64`, `MACOS_P12_PASSWORD`. The workflow

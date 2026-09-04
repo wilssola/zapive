@@ -6,3 +6,7 @@ build/
 dist/
 # Generated from Cargo.lock by the flatpak workflow.
 packaging/flatpak/cargo-sources.json
+# Signing certificates: private keys, never committed.
+*.pfx
+*.p12
+
