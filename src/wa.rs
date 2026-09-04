@@ -1,7 +1,9 @@
 // The WhatsApp side of the app. Owns the whatsapp-rust client on the
 // tokio runtime; the UI talks to it through the Cmd channel, and events
 // flow back through bridge::ui_apply. Mirrors src/whatsapp.ts on master.
-use crate::bridge::ui_apply;
+// wa_apply parks events while the vault is still PIN-locked (the client
+// connects before unlock) and replays them at boot.
+use crate::bridge::wa_apply as ui_apply;
 use crate::i18n::t;
 use crate::paths::wa_session_path;
 use std::sync::Arc;
@@ -845,7 +847,9 @@ async fn executor(
                         .ok()
                         .flatten();
                     if let Some(version) = found {
-                        ui_apply(move |b| b.on_update_available(&version));
+                        // Direct apply: the banner must show on the lock
+                        // and login screens, not wait in the backlog.
+                        crate::bridge::ui_apply(move |b| b.on_update_available(&version));
                     }
                 });
             }
@@ -854,7 +858,7 @@ async fn executor(
                     let result = tokio::task::spawn_blocking(crate::update::apply)
                         .await
                         .unwrap_or_else(|e| Err(e.to_string()));
-                    ui_apply(move |b| b.on_update_applied(result));
+                    crate::bridge::ui_apply(move |b| b.on_update_applied(result));
                 });
             }
             Cmd::RejectCall { id, from } => {

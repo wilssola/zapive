@@ -53,6 +53,9 @@ pub struct Bridge {
     refresh_queued: bool,
     save_queued: bool,
     pending_registered: bool,
+    // WhatsApp events that arrived before the vault was open (the client
+    // connects while the PIN screen is still up); replayed by boot.
+    locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
     // Media caches (pixels live UI-side; files live encrypted on disk).
     avatars: HashMap<String, Option<slint::Image>>,
     requested_avatars: HashSet<String>,
@@ -156,6 +159,29 @@ pub fn ui_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || apply_now(f));
 }
 
+// WhatsApp events: the client connects (and receives) while the vault is
+// still locked behind the PIN screen, but the store isn't loaded yet —
+// processing an event then would build on empty state and a later save
+// would clobber the vault. Park them and let boot replay in order.
+pub fn wa_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
+    let _ = slint::invoke_from_event_loop(move || {
+        BRIDGE.with(|cell| {
+            if let Some(bridge) = cell.borrow_mut().as_mut() {
+                if bridge.vault.as_ref().is_none_or(|v| v.locked()) {
+                    // ~10k events covers hours on the lock screen; past
+                    // that, keep the newest.
+                    if bridge.locked_backlog.len() >= 10_000 {
+                        drop(bridge.locked_backlog.remove(0));
+                    }
+                    bridge.locked_backlog.push(Box::new(f));
+                } else {
+                    f(bridge);
+                }
+            }
+        });
+    });
+}
+
 fn apply_now(f: impl FnOnce(&mut Bridge)) {
     BRIDGE.with(|cell| {
         if let Some(bridge) = cell.borrow_mut().as_mut() {
@@ -231,6 +257,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         refresh_queued: false,
         save_queued: false,
         pending_registered: false,
+        locked_backlog: Vec::new(),
         avatars: HashMap::new(),
         requested_avatars: HashSet::new(),
         avatar_tries: HashMap::new(),
@@ -278,6 +305,9 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
+    // Update checks start here, not at boot: the banner must also reach
+    // the lock and login screens.
+    apply_now(|b| b.once(10_000, |b| b.update_tick()));
 }
 
 fn wire_callbacks(ui: &AppWindow) {
@@ -589,7 +619,6 @@ impl Bridge {
 
     // Called from main once the vault is open (or right away without PIN).
     pub fn boot(&mut self, vault: Vault, registered: bool) {
-        self.once(10_000, |b| b.update_tick());
         crate::media::clean_tmp();
         self.store.load_from(&vault);
         self.media_key = vault.key_handle();
@@ -607,6 +636,10 @@ impl Bridge {
         self.refresh_statuses();
         self.refresh_calls();
         self.wa.send(Cmd::Start);
+        // Events that arrived while the PIN screen was up.
+        for f in std::mem::take(&mut self.locked_backlog) {
+            f(self);
+        }
     }
 
     fn handle_unlock(&mut self, pin: &str) {
@@ -1240,7 +1273,11 @@ impl Bridge {
         self.once(2000, |b| {
             b.save_queued = false;
             if let Some(vault) = b.vault.take() {
-                b.store.save_to(&vault);
+                // Never write through a locked vault: the store isn't
+                // loaded yet and every set() would be dropped anyway.
+                if !vault.locked() {
+                    b.store.save_to(&vault);
+                }
                 b.vault = Some(vault);
             }
         });
@@ -2665,6 +2702,11 @@ impl Bridge {
     pub fn on_notification_activated(&mut self, jid: &str) {
         let _ = self.ui.show();
         crate::platform::focus_window();
+        // Locked: just surface the PIN screen; opening a chat would touch
+        // the (still empty) store.
+        if self.vault.as_ref().is_none_or(|v| v.locked()) {
+            return;
+        }
         self.open_dm(jid, None);
     }
 

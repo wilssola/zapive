@@ -251,10 +251,12 @@ impl Vault {
     }
 
     pub fn set(&self, k: &str, v: &str) {
-        let encoded = self.key.with(|key| {
-            let key = key.expect("vault is locked");
-            encrypt_str(v, key)
-        });
+        // Dropping the write beats panicking: callers race the PIN unlock
+        // (the WhatsApp client connects while the vault is still locked).
+        let Some(encoded) = self.key.with(|key| key.map(|key| encrypt_str(v, key))) else {
+            eprintln!("[vault] write to {k} dropped: vault is locked");
+            return;
+        };
         let _ = self.conn.execute(
             "INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
             [k, &encoded],

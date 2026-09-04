@@ -602,6 +602,11 @@ impl Store {
     // Loads a chat's message list from the vault, merging with whatever
     // arrived over the socket while the chat was cold.
     pub fn hydrate(&mut self, vault: &Vault, jid: &str) {
+        // A locked vault reads as "no data": marking the chat hydrated
+        // here would let a later save truncate its history on disk.
+        if vault.locked() {
+            return;
+        }
         let jid = self.canon_owned(jid);
         if !self.hydrated.insert(jid.clone()) {
             return;
