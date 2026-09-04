@@ -1,6 +1,6 @@
 [package]
 name = "zapive"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 description = "Native WhatsApp desktop client"
 publish = false
