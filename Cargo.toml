@@ -18,12 +18,16 @@ slint = { version = "1.17", default-features = false, features = [
 ] }
 # default features pull in `simd`, which needs nightly (portable_simd); pick the
 # stable set explicitly instead.
+# `voip-mlow` brings the call media plane (relay transport + the pure-Rust
+# MLOW codec). `voip-libopus` is deliberately left out: it links C libopus,
+# and the PCM path already encodes with MLOW.
 whatsapp-rust = { version = "=0.7.0", default-features = false, features = [
     "signal",
     "sqlite-storage",
     "tokio-transport",
     "tokio-runtime",
     "ureq-client",
+    "voip-mlow",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 image = "0.25"

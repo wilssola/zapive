@@ -60,6 +60,7 @@ export struct CallItem {
     initial: string,
     colorIdx: int,
     video: bool,
+    group: bool,
 }
 
 export struct StickerCell {
@@ -343,17 +344,12 @@ export component AppWindow inherits Window {
     in-out property <string> sidebar-view: "chats";
     callback status-open(string);
     callback view-changed(string);
-    // Calls
+    // Calls (the ringing/in-call UI lives in CallWindow)
     in-out property <[CallItem]> calls;
-    in-out property <bool> call-ringing: false;
-    in-out property <string> call-name: "";
-    in-out property <string> call-detail: "";
-    in-out property <image> call-avatar;
-    in-out property <bool> call-has-avatar: false;
-    in-out property <string> call-initial: "";
-    in-out property <int> call-color-idx: 0;
-    callback decline-call();
-    callback dismiss-call();
+    // Voice calls only make sense one-to-one, so groups, channels and
+    // status hide the button.
+    in-out property <bool> current-callable: false;
+    callback start-call(string);
     // Status viewer
     in-out property <bool> sv-open: false;
     in-out property <string> sv-name: "";
@@ -385,6 +381,7 @@ export component AppWindow inherits Window {
     in-out property <bool> chat-open: false;
     in-out property <string> sync-banner: "";
     in-out property <string> current-chat-name;
+    in-out property <string> current-jid: "";
     in-out property <string> current-status: "";
     in-out property <image> current-avatar;
     in-out property <bool> current-avatar-has: false;
@@ -939,10 +936,20 @@ export component AppWindow inherits Window {
                             VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 0;
+                                spacing: 4px;
                                 Text {
                                     text: call.time;
                                     color: Theme.text-dim;
                                     font-size: 11px;
+                                    horizontal-alignment: right;
+                                }
+                                // Redial, the way the phone's call log does.
+                                if !call.group: IconButton {
+                                    icon: @image-url("icons/phone.svg");
+                                    icon-size: 18px;
+                                    width: 30px;
+                                    height: 30px;
+                                    clicked => { root.start-call(call.from); }
                                 }
                             }
                         }
@@ -1301,6 +1308,13 @@ export component AppWindow inherits Window {
                                     color: root.current-status == "online" ? Theme.text-dim : Theme.accent;
                                     font-size: 12px;
                                 }
+                            }
+                        }
+                        if root.current-callable: VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                icon: @image-url("icons/phone.svg");
+                                clicked => { root.start-call(root.current-jid); }
                             }
                         }
                     }
@@ -2440,104 +2454,6 @@ export component AppWindow inherits Window {
     }
     } // capture-scope
 
-    // ---------- Incoming call ----------
-    if root.call-ringing: Rectangle {
-        background: #000000cc;
-        TouchArea { }
-        Rectangle {
-            width: 340px;
-            height: 380px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 14px;
-            VerticalLayout {
-                padding: 24px;
-                spacing: 14px;
-                alignment: center;
-                HorizontalLayout {
-                    alignment: center;
-                    Avatar {
-                        width: 120px;
-                        height: 120px;
-                        src: root.call-avatar;
-                        has-image: root.call-has-avatar;
-                        initial: root.call-initial;
-                        color-idx: root.call-color-idx;
-                    }
-                }
-                Text {
-                    text: root.call-name;
-                    color: Theme.text;
-                    font-size: 20px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: root.call-detail;
-                    color: Theme.accent;
-                    font-size: 14px;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: @tr("Answer on your phone — desktop calls are not supported");
-                    color: Theme.text-dim;
-                    font-size: 12px;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                }
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: 14px;
-                    decline-btn := TouchArea {
-                        mouse-cursor: pointer;
-                        width: dtext.preferred-width + 30px;
-                        height: 40px;
-                        clicked => { root.decline-call(); }
-                        Rectangle {
-                            width: parent.width;
-                            height: parent.height;
-                            border-radius: 20px;
-                            background: decline-btn.has-hover ? #d9534f : #c9302c;
-                        }
-                        dtext := Text {
-                            text: @tr("Decline");
-                            color: white;
-                            font-size: 14px;
-                            font-weight: 700;
-                            width: parent.width;
-                            height: parent.height;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                    dismiss-btn := TouchArea {
-                        mouse-cursor: pointer;
-                        width: mtext.preferred-width + 30px;
-                        height: 40px;
-                        clicked => { root.dismiss-call(); }
-                        Rectangle {
-                            width: parent.width;
-                            height: parent.height;
-                            border-radius: 20px;
-                            background: dismiss-btn.has-hover ? Theme.hover : Theme.chip-bg;
-                        }
-                        mtext := Text {
-                            text: @tr("Dismiss");
-                            color: Theme.text;
-                            font-size: 14px;
-                            width: parent.width;
-                            height: parent.height;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // ---------- Contact / group info ----------
     if root.info-open: Rectangle {
         background: #00000066;
@@ -3299,6 +3215,150 @@ export component AppWindow inherits Window {
             x: parent.width - self.width - 16px;
             y: 16px;
             clicked => { root.lightbox-open = false; }
+        }
+    }
+}
+
+// One round call button with its caption underneath.
+component CallAction inherits TouchArea {
+    in property <string> label;
+    in property <image> icon;
+    in property <color> tint;
+    in property <color> icon-tint: #ffffff;
+    // The hang-up glyph is the handset upside down.
+    in property <bool> rotated: false;
+    mouse-cursor: pointer;
+    width: 74px;
+    height: 92px;
+    VerticalLayout {
+        spacing: 8px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 60px;
+                height: 60px;
+                border-radius: 30px;
+                background: root.tint;
+                opacity: root.has-hover ? 0.85 : 1.0;
+                Image {
+                    source: root.icon;
+                    colorize: root.icon-tint;
+                    width: 27px;
+                    height: 27px;
+                    transform-rotation: root.rotated ? 135deg : 0deg;
+                }
+            }
+        }
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// The call screen: a window of its own, the way WhatsApp Desktop puts
+// calls outside the chat list. Incoming calls ring here instead of
+// covering the conversation with a modal.
+export component CallWindow inherits Window {
+    // Not translated: the platform layer finds this window by its title.
+    title: "Zapive Call";
+    icon: @image-url("zapive.png");
+    width: 360px;
+    height: 540px;
+    background: Theme.dark ? #111b21 : #f0f2f5;
+    init => {
+        Theme.dark = root.dark-theme;
+    }
+    in-out property <bool> dark-theme: true;
+    changed dark-theme => {
+        Theme.dark = self.dark-theme;
+    }
+
+    // "incoming" | "outgoing" | "connecting" | "active" | "ended"
+    in-out property <string> state: "incoming";
+    in-out property <string> peer-name: "";
+    in-out property <string> detail: "";
+    in-out property <string> timer: "";
+    in-out property <image> avatar;
+    in-out property <bool> has-avatar: false;
+    in-out property <string> initial: "";
+    in-out property <int> color-idx: 0;
+    in-out property <bool> muted: false;
+    callback accept();
+    callback decline();
+    callback hangup();
+    callback toggle-mute();
+
+    VerticalLayout {
+        padding: 28px;
+        spacing: 16px;
+        alignment: center;
+
+        Text {
+            text: root.peer-name;
+            color: Theme.text;
+            font-size: 26px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.timer != "" ? root.timer : root.detail;
+            color: Theme.text-dim;
+            font-size: 14px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Rectangle { height: 8px; }
+        HorizontalLayout {
+            alignment: center;
+            Avatar {
+                width: 160px;
+                height: 160px;
+                src: root.avatar;
+                has-image: root.has-avatar;
+                initial: root.initial;
+                color-idx: root.color-idx;
+            }
+        }
+        Rectangle { height: 8px; }
+
+        // Ringing: decline on the left, answer on the right, as on the
+        // phone. Everything else gets mute plus a single hang-up.
+        HorizontalLayout {
+            alignment: center;
+            spacing: 44px;
+            if root.state == "incoming": CallAction {
+                label: @tr("Decline");
+                icon: @image-url("icons/phone.svg");
+                tint: #ea0038;
+                rotated: true;
+                clicked => { root.decline(); }
+            }
+            if root.state == "incoming": CallAction {
+                label: @tr("Accept");
+                icon: @image-url("icons/phone.svg");
+                tint: #00a884;
+                clicked => { root.accept(); }
+            }
+            // Muting only means something once the media plane is up.
+            if root.state == "active": CallAction {
+                label: root.muted ? @tr("Unmute") : @tr("Mute");
+                icon: @image-url("icons/microphone.svg");
+                tint: root.muted ? #ea0038 : (Theme.dark ? #2a3942 : #d1d7db);
+                icon-tint: root.muted ? #ffffff : Theme.text;
+                clicked => { root.toggle-mute(); }
+            }
+            if root.state != "incoming" && root.state != "ended": CallAction {
+                label: @tr("End");
+                icon: @image-url("icons/phone.svg");
+                tint: #ea0038;
+                rotated: true;
+                clicked => { root.hangup(); }
+            }
         }
     }
 }

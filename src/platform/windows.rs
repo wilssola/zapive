@@ -29,6 +29,20 @@ pub fn focus_window() {
     }
 }
 
+// A ringing call has to be seen, so the call window is pulled forward the
+// same way the tray pulls the main one. Its title is deliberately not
+// translated: that is what identifies the window here.
+pub fn focus_call_window() {
+    unsafe {
+        if let Ok(hwnd) = FindWindowW(None, w!("Zapive Call")) {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}
+
 // Windows only lets the process that owns the foreground hand it over. A
 // second instance the user just launched holds that right, so it passes
 // it to the instance that will actually raise its window.

@@ -13,8 +13,10 @@ use whatsapp_rust::bot::{Bot, BotHandle};
 use whatsapp_rust::client::Client;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::store::SqliteStore;
+use whatsapp_rust::types::call::{CallAction, ElsewhereOutcome, IncomingCall};
 use whatsapp_rust::types::events::{Event, EventHandler};
 use whatsapp_rust::types::presence::ReceiptType;
+use whatsapp_rust::voip::CallHandle;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 // After this many unclean drops in a row the retry loop stops and the
@@ -88,6 +90,13 @@ pub enum Cmd {
     ApplyUpdate,
     // Calls, channels and the info panel.
     RejectCall { id: String, from: String },
+    // Answers the parked offer with that id and drives the media plane.
+    AcceptCall { id: String },
+    // Places a 1:1 voice call.
+    StartCall { jid: String },
+    // Ends whichever call is live, telling the peer.
+    HangupCall,
+    SetCallMuted(bool),
     FetchChannel(String),
     FetchChatInfo { jid: String, group: bool },
     Archive { jid: String, archived: bool },
@@ -168,6 +177,123 @@ async fn build_session(
 
 fn parse_jid(jid: &str) -> Option<whatsapp_rust::Jid> {
     jid.parse().ok()
+}
+
+// ---- call plumbing ----
+
+// Offers waiting for the user to pick up. Answering needs the offer
+// itself (it carries the encrypted callKey and the relay), and the event
+// that delivered it is long gone by then. Only a handful can ring at
+// once, so a small vector is plenty.
+static PENDING_OFFERS: std::sync::LazyLock<std::sync::Mutex<Vec<(String, IncomingCall)>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+// The call whose media plane is live, if any. Mute and hangup reach it
+// from the UI thread through the command channel.
+static LIVE_CALL: std::sync::LazyLock<std::sync::Mutex<Option<LiveCall>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+struct LiveCall {
+    id: String,
+    handle: Arc<CallHandle>,
+    // Mirrors the handle's mute so the capture side can send silence
+    // instead of the room.
+    muted: Arc<AtomicBool>,
+    peer: whatsapp_rust::Jid,
+    creator: whatsapp_rust::Jid,
+}
+
+fn stash_offer(id: &str, offer: IncomingCall) {
+    let Ok(mut offers) = PENDING_OFFERS.lock() else { return };
+    offers.retain(|(known, _)| known != id);
+    offers.push((id.to_string(), offer));
+    if offers.len() > 8 {
+        offers.remove(0);
+    }
+}
+
+fn take_offer(id: &str) -> Option<IncomingCall> {
+    let mut offers = PENDING_OFFERS.lock().ok()?;
+    let at = offers.iter().position(|(known, _)| known == id)?;
+    Some(offers.remove(at).1)
+}
+
+fn take_live() -> Option<LiveCall> {
+    LIVE_CALL.lock().ok()?.take()
+}
+
+// Hanging up during setup: the handle only exists once accept/call has
+// come back, so the request is parked here and the call tears itself
+// down the moment it is connected.
+static CANCEL_PENDING: AtomicBool = AtomicBool::new(false);
+
+// Owns a connected call until it ends: publishes the state the call
+// screen renders, drains the engine's diagnostics, and tears the audio
+// devices down on the way out.
+async fn run_call(handle: CallHandle, audio: crate::call::CallAudio, outgoing: bool) {
+    use whatsapp_rust::voip::CallEvent;
+    let id = handle.call_id().to_string();
+    let handle = Arc::new(handle);
+    if let Ok(mut live) = LIVE_CALL.lock() {
+        *live = Some(LiveCall {
+            id: id.clone(),
+            handle: handle.clone(),
+            muted: audio.muted_flag(),
+            peer: handle.peer_jid(),
+            creator: handle.call_creator().clone(),
+        });
+    }
+    // The event stream is a single shared queue; drain it so the engine
+    // never stalls on a full channel, and surface the terminal ones.
+    // The user hung up while the handshake was still running.
+    if CANCEL_PENDING.swap(false, Ordering::SeqCst) {
+        handle.hangup().await;
+        return;
+    }
+    let events = handle.events();
+    let watched = id.clone();
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            match event {
+                CallEvent::RelayAllocated => {
+                    let id = watched.clone();
+                    ui_apply(move |b| b.on_call_media_ready(&id));
+                }
+                CallEvent::RelayAllocateFailed(code) => {
+                    eprintln!("[call] relay refused the allocate ({code})");
+                }
+                CallEvent::RelayAllocateTimedOut | CallEvent::RelayReconnectTimedOut => {
+                    eprintln!("[call] relay went unresponsive");
+                }
+                CallEvent::AudioFormatMismatch { expected_rate, .. } => {
+                    eprintln!("[call] peer picked a rate other than {expected_rate}");
+                }
+                _ => {}
+            }
+        }
+    });
+    // The callee is already talking once accept() returns; the caller
+    // waits for the peer's <accept> stanza.
+    if !outgoing {
+        let id = id.clone();
+        ui_apply(move |b| b.on_call_status(&id, "accept"));
+    }
+    handle.wait_ended().await;
+    drop(audio);
+    if let Ok(mut live) = LIVE_CALL.lock()
+        && live.as_ref().is_some_and(|call| call.id == id)
+    {
+        *live = None;
+    }
+    let ended = id.clone();
+    ui_apply(move |b| b.on_call_status(&ended, "terminate"));
+}
+
+// Both call paths fail the same way: tell the user, and make sure the
+// call screen does not sit there pretending to connect.
+fn fail_call(reason: &str) {
+    let reason = reason.to_string();
+    ui_apply(move |b| b.on_call_failed(&reason));
 }
 
 // Sync event tap on the library's dispatch thread: converts each event
@@ -288,20 +414,64 @@ impl EventHandler for Pump {
                     ui_apply(move |b| b.on_history_chunk(chunk));
                 });
             }
+            // Every <call> stanza arrives as IncomingCall, not just the
+            // offers: preaccept, accept, reject, terminate and the
+            // transport chatter all land here. Only an <offer> may ring.
             Event::IncomingCall(call) => {
                 let from = call.from.to_non_ad_string();
                 let id = call.action.call_id().to_string();
-                let video = call.notify.as_deref().map(|n| n.contains("video")).unwrap_or(false);
-                let group = call.group.is_some();
                 let ts = call.timestamp.timestamp();
-                ui_apply(move |b| b.on_incoming_call(&id, &from, video, group, ts));
+                match &call.action {
+                    CallAction::Offer { is_video, .. } => {
+                        // An offer replayed from the offline queue is long
+                        // dead. The library turns most of those into
+                        // MissedCall already; this is the belt to that
+                        // brace, since ringing for one is the worst
+                        // possible outcome.
+                        if call.offline {
+                            ui_apply(move |b| b.on_call_missed(&id, &from, ts));
+                            return;
+                        }
+                        let video = *is_video
+                            || call.notify.as_deref().is_some_and(|n| n.contains("video"));
+                        let group = call.group.is_some();
+                        // Answering needs the offer itself (the encrypted
+                        // callKey and the relay live on it), so park it
+                        // until the user picks up or it goes stale.
+                        stash_offer(&id, call.clone());
+                        ui_apply(move |b| b.on_incoming_call(&id, &from, video, group, ts));
+                    }
+                    CallAction::Accept { .. } => {
+                        ui_apply(move |b| b.on_call_status(&id, "accept"));
+                    }
+                    // A reason means one of the peer's devices bowed out
+                    // (`busy`), not that the person declined: the rest of
+                    // their devices keep ringing, so the call is still on.
+                    CallAction::Reject { reason: None, .. } => {
+                        ui_apply(move |b| b.on_call_status(&id, "reject"));
+                    }
+                    CallAction::Terminate { .. } => {
+                        ui_apply(move |b| b.on_call_status(&id, "terminate"));
+                    }
+                    _ => {}
+                }
             }
             Event::MissedCall(missed) => {
                 let id = missed.call_id.clone();
-                ui_apply(move |b| b.on_call_status(&id, "timeout"));
+                let from = missed.from.to_non_ad_string();
+                let ts = missed.timestamp.timestamp();
+                ui_apply(move |b| b.on_call_missed(&id, &from, ts));
             }
-            Event::CallEndedElsewhere(_) => {
-                ui_apply(|b| b.on_call_dismissed());
+            // Another of our devices picked the call up (or turned it
+            // down); either way this one stops ringing.
+            Event::CallEndedElsewhere(elsewhere) => {
+                let id = elsewhere.call_id.clone();
+                let status = match elsewhere.outcome {
+                    ElsewhereOutcome::Rejected => "reject",
+                    // Accepted, and whatever outcome the server adds next.
+                    _ => "accept",
+                };
+                ui_apply(move |b| b.on_call_status(&id, status));
             }
             Event::ChatPresence(update) => {
                 let chat = update.source.chat.to_non_ad_string();
@@ -864,11 +1034,113 @@ async fn executor(
             Cmd::RejectCall { id, from } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
+                    // The parked offer carries the creator and the ringing
+                    // generation, which a bare id cannot reconstruct.
+                    if let Some(offer) = take_offer(&id) {
+                        if let Err(e) = client.voip().reject(&offer).await {
+                            eprintln!("[wa] call reject failed: {e}");
+                        }
+                        return;
+                    }
                     let Some(peer) = parse_jid(&from) else { return };
                     if let Err(e) = client.voip().reject_call(&id, &peer, &peer).await {
                         eprintln!("[wa] call reject failed: {e}");
                     }
                 });
+            }
+            Cmd::AcceptCall { id } => {
+                let client = session.client.clone();
+                CANCEL_PENDING.store(false, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let Some(offer) = take_offer(&id) else {
+                        fail_call(&t("call.gone"));
+                        return;
+                    };
+                    let Some(audio) = crate::call::CallAudio::start() else {
+                        // No devices means no call; decline rather than
+                        // leave the caller listening to nothing.
+                        if let Err(e) = client.voip().reject(&offer).await {
+                            eprintln!("[wa] call reject failed: {e}");
+                        }
+                        fail_call(&t("call.noDevices"));
+                        return;
+                    };
+                    // preaccept -> callKey decrypt -> accept -> relay.
+                    match client
+                        .voip()
+                        .accept(&offer)
+                        .audio(audio.mic(), audio.speaker())
+                        .start()
+                        .await
+                    {
+                        Ok(handle) => run_call(handle, audio, false).await,
+                        Err(e) => {
+                            eprintln!("[wa] call accept failed: {e}");
+                            fail_call(&t("call.failed"));
+                        }
+                    }
+                });
+            }
+            Cmd::StartCall { jid } => {
+                let client = session.client.clone();
+                CANCEL_PENDING.store(false, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let Some(peer) = parse_jid(&jid) else {
+                        fail_call(&t("call.failed"));
+                        return;
+                    };
+                    let Some(audio) = crate::call::CallAudio::start() else {
+                        fail_call(&t("call.noDevices"));
+                        return;
+                    };
+                    match client
+                        .voip()
+                        .call(&peer)
+                        .audio(audio.mic(), audio.speaker())
+                        .start()
+                        .await
+                    {
+                        Ok(handle) => {
+                            // The call id is minted here, so the screen
+                            // only learns it now.
+                            let id = handle.call_id().to_string();
+                            ui_apply(move |b| b.on_outgoing_call(&id));
+                            run_call(handle, audio, true).await;
+                        }
+                        Err(e) => {
+                            eprintln!("[wa] outgoing call failed: {e}");
+                            fail_call(&t("call.failed"));
+                        }
+                    }
+                });
+            }
+            Cmd::HangupCall => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(live) = take_live() else {
+                        // Nothing connected yet: leave the note for the
+                        // setup task to find.
+                        CANCEL_PENDING.store(true, Ordering::SeqCst);
+                        return;
+                    };
+                    // terminate() tears the local media down as well, but
+                    // hangup() is what guarantees it when the stanza
+                    // cannot be sent.
+                    if let Err(e) =
+                        client.voip().terminate(&live.id, &live.peer, &live.creator).await
+                    {
+                        eprintln!("[wa] call terminate failed: {e}");
+                    }
+                    live.handle.hangup().await;
+                });
+            }
+            Cmd::SetCallMuted(muted) => {
+                if let Ok(live) = LIVE_CALL.lock()
+                    && let Some(call) = live.as_ref()
+                {
+                    call.handle.set_muted(muted);
+                    call.muted.store(muted, Ordering::SeqCst);
+                }
             }
             Cmd::FetchChannel(jid) => {
                 let client = session.client.clone();
@@ -1222,6 +1494,13 @@ async fn executor(
                 }
             }
             Cmd::Shutdown => {
+                // Leaving a call ringing on the peer's phone after the app
+                // is gone would be the worst kind of goodbye.
+                if let Some(live) = take_live() {
+                    let _ =
+                        session.client.voip().terminate(&live.id, &live.peer, &live.creator).await;
+                    live.handle.hangup().await;
+                }
                 session.client.disconnect().await;
                 return;
             }

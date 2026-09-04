@@ -7,12 +7,12 @@ use crate::markup::{MentionTarget, has_markup, to_markdown};
 use crate::qr::{empty_image, qr_image};
 use crate::store::{
     MessageKind, Store, StoredMessage, clean_text, display_id, format_day,
-    format_number, format_time, is_channel, is_group, normalize_jid, preview_body,
-    reaction_summary, ticks_for,
+    format_number, format_time, is_channel, is_group, normalize_jid, now_secs,
+    preview_body, reaction_summary, ticks_for,
 };
 use crate::vault::Vault;
 use crate::wa::{Cmd, HistoryChunk, MediaWant, QuoteRef, WaService};
-use crate::{AppWindow, CallItem, ChatItem, MessageItem, ReactionItem, StickerCell};
+use crate::{AppWindow, CallItem, CallWindow, ChatItem, MessageItem, ReactionItem, StickerCell};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -22,6 +22,15 @@ use whatsapp_rust::types::events::MessageBatch;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 const MAX_HISTORY_BATCHES: u32 = 20;
+
+// An offer older than this never rings. The server replays queued call
+// stanzas on reconnect and the locked-vault backlog replays its own on
+// unlock, so without this the app announces calls that ended hours ago.
+const STALE_CALL_SECS: i64 = 75;
+// How long an unanswered offer keeps ringing before it counts as missed.
+const RING_TIMEOUT_MS: u64 = 45_000;
+// How long the call screen stays up after the call ends.
+const CALL_LINGER_MS: u64 = 2_000;
 
 // Curated emoji palette for the picker (variation selectors stripped so
 // every glyph renders in Slint).
@@ -95,7 +104,11 @@ pub struct Bridge {
     calls_model: Rc<VecModel<CallItem>>,
     info_media_model: Rc<VecModel<ModelRc<StickerCell>>>,
     viewer: Option<(Vec<StoredMessage>, usize)>,
-    ringing: Option<(String, String)>,
+    // The call screen: its own window, created the first time one rings.
+    call_ui: Option<CallWindow>,
+    call: Option<ActiveCall>,
+    call_timer: slint::Timer,
+    ringer: Option<crate::call::Ringer>,
     requested_channels: HashSet<String>,
     // Sticker/GIF pickers and the video overlay.
     sticker_model: Rc<VecModel<ModelRc<StickerCell>>>,
@@ -115,6 +128,22 @@ struct Anim {
     frames: Vec<slint::Image>,
     idx: usize,
     looping: bool,
+}
+
+// Whatever the call screen is currently showing. One at a time: a second
+// offer arriving mid-call is turned down rather than queued.
+struct ActiveCall {
+    // Empty until the server hands back the id of an outgoing call.
+    id: String,
+    // Canonical peer jid, for the name and the avatar.
+    jid: String,
+    // The sender jid exactly as it arrived; a reject stanza needs it.
+    from: String,
+    outgoing: bool,
+    video: bool,
+    // "incoming" | "outgoing" | "connecting" | "active" | "ended"
+    state: &'static str,
+    started: Option<Instant>,
 }
 
 // The note being played (or paused); the mini player takes over when the
@@ -291,7 +320,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         calls_model,
         info_media_model,
         viewer: None,
-        ringing: None,
+        call_ui: None,
+        call: None,
+        call_timer: slint::Timer::default(),
+        ringer: None,
         requested_channels: HashSet::new(),
         sticker_model,
         fav_model,
@@ -553,8 +585,10 @@ fn wire_callbacks(ui: &AppWindow) {
             b.ui.set_sv_open(false);
         });
     });
-    ui.on_decline_call(|| defer(|b| b.decline_call()));
-    ui.on_dismiss_call(|| defer(|b| b.on_call_dismissed()));
+    ui.on_start_call(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.start_call(&jid));
+    });
     ui.on_open_info(|| defer(|b| b.open_contact_info()));
     ui.on_close_info(|| defer(|b| b.ui.set_info_open(false)));
     ui.on_toggle_archive(|| defer(|b| b.toggle_archive()));
@@ -1302,6 +1336,11 @@ impl Bridge {
     fn apply_header(&mut self, jid: &str) {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
+        self.ui.set_current_jid(jid.into());
+        // Calls are one-to-one: groups, channels and status cannot ring.
+        self.ui.set_current_callable(
+            !is_group(jid) && !is_channel(jid) && jid != "status@broadcast",
+        );
         self.ui.set_current_chat_name(name.clone().into());
         self.ui.set_current_avatar_has(avatar.is_some());
         self.ui.set_current_avatar(avatar.unwrap_or_else(empty_image));
@@ -2259,81 +2298,418 @@ impl Bridge {
                 let label = t(match call.status.as_str() {
                     "accept" => "call.answered",
                     "reject" => "call.declined",
-                    "timeout" => "call.missed",
+                    "timeout" => {
+                        if call.outgoing { "call.noAnswer" } else { "call.missed" }
+                    }
                     "offer" => "call.ringing",
+                    "outgoing" => "call.calling",
                     _ => "call.ended",
                 });
                 let kind = t(if call.video { "call.video" } else { "call.voice" });
+                let arrow = t(if call.outgoing { "call.out" } else { "call.in" });
                 CallItem {
                     id: call.id.clone().into(),
                     from: call.jid.clone().into(),
                     name: name.clone().into(),
-                    detail: format!("{kind} · {label}").into(),
+                    detail: format!("{arrow} · {kind} · {label}").into(),
                     time: format_time(call.timestamp).into(),
                     hasAvatar: avatar.is_some(),
                     avatar: avatar.unwrap_or_else(empty_image),
                     initial: initial_of(&name).into(),
                     colorIdx: color_idx_of(&call.jid),
                     video: call.video,
+                    group: call.group,
                 }
             })
             .collect();
         self.calls_model.set_vec(rows);
     }
 
-    pub fn on_incoming_call(&mut self, id: &str, from: &str, video: bool, group: bool, ts: i64) {
-        if self.store.upsert_call(id, from, "offer", video, group, ts).is_none() {
-            return;
+    // ---- the call screen ----
+
+    // Created the first time a call needs it, then reused: building a
+    // window is expensive and the callbacks only get wired once.
+    fn call_window(&mut self) -> Option<CallWindow> {
+        if let Some(win) = &self.call_ui {
+            return Some(win.clone_strong());
         }
-        self.refresh_calls();
-        self.schedule_save();
-        let jid = self.store.canon_owned(&normalize_jid(from));
-        let name = self.store.chat_name(&jid);
-        let detail = t(if video { "call.incomingVideo" } else { "call.incomingVoice" });
-        let avatar = self.avatar_for(&jid);
-        self.queue_avatar(&jid);
-        self.ringing = Some((id.to_string(), from.to_string()));
-        self.ui.set_call_name(name.clone().into());
-        self.ui.set_call_detail(detail.clone().into());
-        self.ui.set_call_has_avatar(avatar.is_some());
-        self.ui.set_call_avatar(avatar.unwrap_or_else(empty_image));
-        self.ui.set_call_initial(initial_of(&name).into());
-        self.ui.set_call_color_idx(color_idx_of(&jid));
-        self.ui.set_call_ringing(true);
-        let _ = self.ui.show(); // raise from the tray
-        crate::platform::toast(&name, &detail, None);
+        let win = match CallWindow::new() {
+            Ok(win) => win,
+            Err(e) => {
+                eprintln!("[call] cannot open the call window: {e}");
+                return None;
+            }
+        };
+        win.on_accept(|| defer(|b| b.accept_call()));
+        win.on_decline(|| defer(|b| b.decline_call()));
+        win.on_hangup(|| defer(|b| b.hangup_call()));
+        win.on_toggle_mute(|| defer(|b| b.toggle_call_mute()));
+        // Closing the window means the same as decline (or hang up, once
+        // the call is up), matching WhatsApp's own call window.
+        win.window().on_close_requested(|| {
+            defer(|b| b.decline_call());
+            slint::CloseRequestResponse::HideWindow
+        });
+        self.call_ui = Some(win.clone_strong());
+        Some(win)
     }
 
-    pub fn on_call_status(&mut self, id: &str, status: &str) {
-        // upsert_call keeps the original caller when the id is known.
-        if let Some(existing) = self.store.calls.iter().find(|c| c.id == id).cloned()
-            && self
-                .store
-                .upsert_call(id, &existing.jid, status, existing.video, existing.group, 0)
-                .is_some()
-        {
+    // Pushes the current call onto the screen. Safe to call repeatedly;
+    // every state change goes through here.
+    fn paint_call(&mut self) {
+        let Some(call) = self.call.as_ref() else { return };
+        let (jid, state, video) = (call.jid.clone(), call.state, call.video);
+        let name = self.store.chat_name(&jid);
+        let avatar = self.avatar_for(&jid);
+        let detail = t(match state {
+            "incoming" => {
+                if video {
+                    "call.incomingVideo"
+                } else {
+                    "call.incomingVoice"
+                }
+            }
+            "outgoing" => "call.calling",
+            "connecting" => "call.connecting",
+            "active" => "call.inCall",
+            _ => "call.ended",
+        });
+        self.queue_avatar(&jid);
+        let dark = self.ui.get_dark_theme();
+        let Some(win) = self.call_window() else { return };
+        // The call window carries its own copy of the theme global.
+        win.set_dark_theme(dark);
+        win.set_state(state.into());
+        win.set_peer_name(name.clone().into());
+        win.set_detail(detail.into());
+        win.set_has_avatar(avatar.is_some());
+        win.set_avatar(avatar.unwrap_or_else(empty_image));
+        win.set_initial(initial_of(&name).into());
+        win.set_color_idx(color_idx_of(&jid));
+    }
+
+    fn show_call_window(&mut self) {
+        let Some(win) = self.call_window() else { return };
+        win.set_muted(false);
+        win.set_timer("".into());
+        if let Err(e) = win.show() {
+            eprintln!("[call] cannot show the call window: {e}");
+            return;
+        }
+        crate::platform::focus_call_window();
+    }
+
+    // Dropping the ringer stops the stream; None means silence.
+    fn set_ring(&mut self, kind: Option<crate::call::Ring>) {
+        self.ringer = None;
+        if let Some(kind) = kind {
+            self.ringer = crate::call::Ringer::start(kind);
+        }
+    }
+
+    fn tick_call(&mut self) {
+        let Some(started) = self.call.as_ref().and_then(|call| call.started) else {
+            self.call_timer.stop();
+            return;
+        };
+        let secs = started.elapsed().as_secs();
+        let text = if secs >= 3600 {
+            format!("{}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
+        } else {
+            format!("{}:{:02}", secs / 60, secs % 60)
+        };
+        if let Some(win) = self.call_ui.as_ref() {
+            win.set_timer(text.into());
+        }
+    }
+
+    // The peer picked up (or we did): start counting.
+    fn mark_call_active(&mut self) {
+        self.set_ring(None);
+        let Some(call) = self.call.as_mut() else { return };
+        if call.state == "active" {
+            return;
+        }
+        call.state = "active";
+        call.started = Some(Instant::now());
+        self.paint_call();
+        self.tick_call();
+        self.call_timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
+            apply_now(|b| b.tick_call())
+        });
+    }
+
+    // Leaves the reason on screen for a moment, the way the phone does,
+    // then puts the window away.
+    fn end_call_ui(&mut self, reason: &str) {
+        self.set_ring(None);
+        self.call_timer.stop();
+        let reason = t(reason);
+        let Some(call) = self.call.as_mut() else { return };
+        call.state = "ended";
+        call.started = None;
+        if let Some(win) = self.call_ui.as_ref() {
+            win.set_state("ended".into());
+            win.set_timer("".into());
+            win.set_detail(reason.into());
+            win.set_muted(false);
+        }
+        self.once(CALL_LINGER_MS, |b| b.close_call_window());
+    }
+
+    fn close_call_window(&mut self) {
+        // A new call may have started while the ended screen lingered.
+        if self.call.as_ref().is_some_and(|call| call.state != "ended") {
+            return;
+        }
+        self.call = None;
+        self.set_ring(None);
+        self.call_timer.stop();
+        if let Some(win) = self.call_ui.as_ref() {
+            let _ = win.hide();
+        }
+    }
+
+    // ---- call actions ----
+
+    pub fn start_call(&mut self, jid: &str) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        if is_group(&jid) || is_channel(&jid) || jid == "status@broadcast" {
+            return;
+        }
+        if self.call.as_ref().is_some_and(|call| call.state != "ended") {
+            return;
+        }
+        self.call = Some(ActiveCall {
+            id: String::new(),
+            jid: jid.clone(),
+            from: jid.clone(),
+            outgoing: true,
+            video: false,
+            state: "outgoing",
+            started: None,
+        });
+        self.paint_call();
+        self.show_call_window();
+        self.set_ring(Some(crate::call::Ring::Back));
+        self.wa.send(Cmd::StartCall { jid });
+    }
+
+    fn accept_call(&mut self) {
+        let Some(call) = self.call.as_mut() else { return };
+        if call.state != "incoming" {
+            return;
+        }
+        call.state = "connecting";
+        let id = call.id.clone();
+        self.set_ring(None);
+        self.paint_call();
+        self.wa.send(Cmd::AcceptCall { id });
+    }
+
+    // Doubles as the hang-up for a call already up, so the window's close
+    // button always does the right thing.
+    fn decline_call(&mut self) {
+        let Some(call) = self.call.as_ref() else {
+            self.close_call_window();
+            return;
+        };
+        match call.state {
+            "incoming" => {
+                let (id, from) = (call.id.clone(), call.from.clone());
+                self.wa.send(Cmd::RejectCall { id: id.clone(), from: from.clone() });
+                self.record_call(&id, &from, "reject", false);
+                self.end_call_ui("call.declined");
+            }
+            "ended" => self.close_call_window(),
+            _ => self.hangup_call(),
+        }
+    }
+
+    fn hangup_call(&mut self) {
+        if self.call.is_none() {
+            return;
+        }
+        self.wa.send(Cmd::HangupCall);
+        self.end_call_ui("call.ended");
+    }
+
+    fn toggle_call_mute(&mut self) {
+        let Some(win) = self.call_ui.as_ref() else { return };
+        let muted = !win.get_muted();
+        win.set_muted(muted);
+        self.wa.send(Cmd::SetCallMuted(muted));
+    }
+
+    // ---- call events ----
+
+    fn record_call(&mut self, id: &str, from: &str, status: &str, outgoing: bool) {
+        if id.is_empty() {
+            return;
+        }
+        let known = self.store.calls.iter().find(|c| c.id == id).cloned();
+        let (video, group, outgoing) = match &known {
+            Some(entry) => (entry.video, entry.group, entry.outgoing),
+            None => (false, false, outgoing),
+        };
+        // A finished call stays "answered" in the log; the terminate that
+        // follows it is the hang-up, not a separate outcome.
+        if known.as_ref().is_some_and(|entry| entry.status == "accept") && status == "terminate" {
+            return;
+        }
+        let from = known.map(|entry| entry.jid).unwrap_or_else(|| from.to_string());
+        if from.is_empty() {
+            return;
+        }
+        if self.store.upsert_call(id, &from, status, video, group, 0, outgoing).is_some() {
             self.refresh_calls();
             self.schedule_save();
         }
-        if self.ringing.as_ref().map(|(rid, _)| rid == id).unwrap_or(false) {
-            self.ringing = None;
-            self.ui.set_call_ringing(false);
+    }
+
+    // Files a call the log has not seen before, with everything the
+    // stanza carried. Later outcomes go through record_call, which keeps
+    // what is already known.
+    fn record_call_new(
+        &mut self,
+        id: &str,
+        from: &str,
+        status: &str,
+        video: bool,
+        group: bool,
+        ts: i64,
+    ) {
+        if self.store.upsert_call(id, from, status, video, group, ts, false).is_some() {
+            self.refresh_calls();
+            self.schedule_save();
         }
     }
 
-    pub fn on_call_dismissed(&mut self) {
-        self.ringing = None;
-        self.ui.set_call_ringing(false);
-    }
-
-    fn decline_call(&mut self) {
-        if let Some((id, from)) = self.ringing.take() {
-            self.wa.send(Cmd::RejectCall { id: id.clone(), from: from.clone() });
-            if self.store.upsert_call(&id, &from, "reject", false, false, 0).is_some() {
-                self.refresh_calls();
+    pub fn on_incoming_call(&mut self, id: &str, from: &str, video: bool, group: bool, ts: i64) {
+        // Offers replayed from the offline queue, and offers that waited
+        // in the locked-vault backlog while the PIN screen was up, arrive
+        // long after they stopped ringing. Log them, never announce them.
+        let stale = ts > 0 && now_secs() - ts > STALE_CALL_SECS;
+        if stale {
+            // A replay of a call already in the log tells us nothing new;
+            // recording it again would only overwrite its real outcome.
+            if !self.store.calls.iter().any(|c| c.id == id) {
+                self.record_call_new(id, from, "timeout", video, group, ts);
             }
+            return;
         }
-        self.ui.set_call_ringing(false);
+        self.record_call_new(id, from, "offer", video, group, ts);
+        // Already on a call: turn this one down rather than take the
+        // screen away from the call in progress.
+        if self.call.as_ref().is_some_and(|call| call.state != "ended") {
+            self.wa.send(Cmd::RejectCall { id: id.to_string(), from: from.to_string() });
+            self.record_call(id, from, "reject", false);
+            return;
+        }
+        let jid = self.store.canon_owned(&normalize_jid(from));
+        self.call = Some(ActiveCall {
+            id: id.to_string(),
+            jid: jid.clone(),
+            from: from.to_string(),
+            outgoing: false,
+            video,
+            state: "incoming",
+            started: None,
+        });
+        self.paint_call();
+        self.show_call_window();
+        self.set_ring(Some(crate::call::Ring::In));
+        let name = self.store.chat_name(&jid);
+        let detail = t(if video { "call.incomingVideo" } else { "call.incomingVoice" });
+        crate::platform::toast(&name, &detail, None);
+        // Nobody home: stop ringing and file it as missed.
+        let id = id.to_string();
+        self.once(RING_TIMEOUT_MS, move |b| b.ring_timeout(&id));
+    }
+
+    fn ring_timeout(&mut self, id: &str) {
+        if !self.call.as_ref().is_some_and(|call| call.state == "incoming" && call.id == id) {
+            return;
+        }
+        self.record_call(id, "", "timeout", false);
+        self.end_call_ui("call.missed");
+    }
+
+    // A call that must not ring: an offline-queue replay, or one the peer
+    // gave up on before we ever saw the offer.
+    pub fn on_call_missed(&mut self, id: &str, from: &str, ts: i64) {
+        match self.store.calls.iter().find(|c| c.id == id) {
+            // Only a call still shown as ringing becomes a missed one; an
+            // outcome already recorded stands.
+            Some(entry) if entry.status != "offer" => {}
+            Some(_) => self.record_call(id, from, "timeout", false),
+            None => self.record_call_new(id, from, "timeout", false, false, ts),
+        }
+        if self.call.as_ref().is_some_and(|call| call.id == id) {
+            self.end_call_ui("call.missed");
+        }
+    }
+
+    pub fn on_call_status(&mut self, id: &str, status: &str) {
+        self.record_call(id, "", status, false);
+        // An outgoing call has no id until the server mints one, so an
+        // empty id matches whatever is on screen.
+        let Some(call) = self.call.as_ref() else { return };
+        if !call.id.is_empty() && call.id != id {
+            return;
+        }
+        // The screen is already showing the outcome; nothing left to do.
+        if call.state == "ended" {
+            return;
+        }
+        match (status, call.state) {
+            // Still ringing here, so the accept came from another of our
+            // devices: this one stops.
+            ("accept", "incoming") => self.end_call_ui("call.elsewhere"),
+            ("accept", _) => self.mark_call_active(),
+            // Peer-device "busy" rejects never get here, so a reject is
+            // always someone turning the call down.
+            ("reject", _) => self.end_call_ui("call.declined"),
+            (_, "incoming") => self.end_call_ui("call.missed"),
+            _ => self.end_call_ui("call.ended"),
+        }
+    }
+
+    // The outgoing call reached the server; from here on it has an id.
+    pub fn on_outgoing_call(&mut self, id: &str) {
+        let jid = match self.call.as_mut() {
+            Some(call) if call.outgoing && call.id.is_empty() => {
+                call.id = id.to_string();
+                call.jid.clone()
+            }
+            _ => return,
+        };
+        if self.store.upsert_call(id, &jid, "outgoing", false, false, 0, true).is_some() {
+            self.refresh_calls();
+            self.schedule_save();
+        }
+    }
+
+    // The relay is up. For the callee that is the whole handshake done;
+    // the caller still waits for the peer to pick up.
+    pub fn on_call_media_ready(&mut self, id: &str) {
+        if self.call.as_ref().is_some_and(|call| call.id == id && call.state == "connecting") {
+            self.mark_call_active();
+        }
+    }
+
+    pub fn on_call_failed(&mut self, reason: &str) {
+        self.set_ring(None);
+        self.call_timer.stop();
+        let Some(call) = self.call.as_mut() else { return };
+        call.state = "ended";
+        call.started = None;
+        if let Some(win) = self.call_ui.as_ref() {
+            win.set_state("ended".into());
+            win.set_timer("".into());
+            win.set_detail(reason.into());
+        }
+        self.once(CALL_LINGER_MS * 2, |b| b.close_call_window());
     }
 
     // ---- channels & info panel ----

@@ -2,6 +2,12 @@ pub fn focus_window() {
     let _ = std::process::Command::new("wmctrl").args(["-a", "Zapive"]).spawn();
 }
 
+// A ringing call has to be seen. The title is deliberately not
+// translated: that is what identifies the window here.
+pub fn focus_call_window() {
+    let _ = std::process::Command::new("wmctrl").args(["-a", "Zapive Call"]).spawn();
+}
+
 // Only Windows guards the foreground; wmctrl needs no handover.
 pub fn allow_foreground(_pid: u32) {}
 

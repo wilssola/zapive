@@ -5,6 +5,7 @@ slint::include_modules!();
 
 mod audio;
 mod bridge;
+mod call;
 mod i18n;
 mod markup;
 mod media;

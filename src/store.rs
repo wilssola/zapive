@@ -142,8 +142,12 @@ pub struct CallEntry {
     pub jid: String, // caller (or group) jid
     pub video: bool,
     pub group: bool,
-    pub status: String, // offer | accept | reject | timeout | terminate
+    pub status: String, // offer | outgoing | accept | reject | timeout | terminate
     pub timestamp: i64,
+    // Calls placed from here. Defaulted so vaults written before calls
+    // could be placed still load.
+    #[serde(default)]
+    pub outgoing: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -175,7 +179,7 @@ fn is_zero_i64(n: &i64) -> bool {
     *n == 0
 }
 
-fn now_secs() -> i64 {
+pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -646,6 +650,7 @@ impl Store {
         video: bool,
         group: bool,
         timestamp: i64,
+        outgoing: bool,
     ) -> Option<CallEntry> {
         let jid = self.canon_owned(&normalize_jid(from));
         if let Some(existing) = self.calls.iter_mut().find(|c| c.id == id) {
@@ -663,6 +668,7 @@ impl Store {
             group,
             status: status.to_string(),
             timestamp: if timestamp > 0 { timestamp } else { now_secs() },
+            outgoing,
         };
         self.calls.insert(0, entry.clone());
         self.calls.truncate(100);

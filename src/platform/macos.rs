@@ -6,6 +6,12 @@ pub fn focus_window() {
     let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
 }
 
+// Same handling as the main window: the process comes forward and the
+// call window, just shown, is the one on top.
+pub fn focus_call_window() {
+    focus_window();
+}
+
 // Only Windows guards the foreground; the AppleScript above needs no
 // handover.
 pub fn allow_foreground(_pid: u32) {}
