@@ -82,13 +82,13 @@ jobs:
             target: macos-aarch64
             bin: zapive
     runs-on: ${{ matrix.os }}
-    env:
-      # Azure Artifact Signing (formerly Trusted Signing; the action kept
-      # the old name) is optional: the signing steps only run when the
-      # secrets are configured, so forks and local setups still release
-      # unsigned binaries. AZURE_TS_ENDPOINT is the regional URI, e.g.
-      # https://brs.codesigning.azure.net for Brazil South.
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+    # Azure Artifact Signing (formerly Trusted Signing; the action kept
+    # the old name) is optional: the signing steps only run when the
+    # secrets are configured, so forks and local setups still release
+    # unsigned binaries. AZURE_TS_ENDPOINT is the regional URI, e.g.
+    # https://brs.codesigning.azure.net for Brazil South.
+    # env:
+    #   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
     steps:
       # The tag points at the version-bump commit the version job pushed,
       # so the build compiles exactly what the tag says.
@@ -107,41 +107,41 @@ jobs:
 
       # ---- Windows: sign, then wrap the exe in an installer that creates
       # ---- the Start Menu (and optional Desktop) shortcuts.
-      - name: Sign binary (Azure Artifact Signing)
-        if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
-        uses: azure/trusted-signing-action@v2
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
-          files-folder: target/release
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+      # - name: Sign binary (Azure Artifact Signing)
+      #   if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
+      #   uses: azure/trusted-signing-action@v2
+      #   with:
+      #     azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      #     endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+      #     signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+      #     certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+      #     files-folder: target/release
+      #     files-folder-filter: exe
+      #     file-digest: SHA256
+      #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
+      #     timestamp-digest: SHA256
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} packaging\windows\zapive.iss
-      - name: Sign installer (Azure Artifact Signing)
-        if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
-        uses: azure/trusted-signing-action@v2
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
-          files-folder: dist
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+      # - name: Sign installer (Azure Artifact Signing)
+      #   if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
+      #   uses: azure/trusted-signing-action@v2
+      #   with:
+      #     azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      #     endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+      #     signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+      #     certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+      #     files-folder: dist
+      #     files-folder-filter: exe
+      #     file-digest: SHA256
+      #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
+      #     timestamp-digest: SHA256
 
       # ---- Linux: AppImage (desktop entry + icon, no terminal window).
       - name: Build AppImage (Linux)
