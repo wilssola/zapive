@@ -24,6 +24,8 @@ jobs:
           fetch-depth: 0
       - name: Compute next version
         id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.1.0)
           range="$last..HEAD"
@@ -50,19 +52,36 @@ jobs:
           fi
           version="$major.$minor.$patch"
           tag="v$version"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           # Keep the sources in sync with the released version: bump
           # Cargo.toml (and the zapive entry in Cargo.lock), push that
           # commit to master and point the tag at it. Pushes made with
           # GITHUB_TOKEN never retrigger this workflow, so no loop.
           sed -i 's/^version = ".*"/version = "'"$version"'"/' Cargo.toml
           perl -0pi -e 's/(name = "zapive"\nversion = ")[^"]+/${1}'"$version"'/' Cargo.lock
-          git add Cargo.toml Cargo.lock
-          git commit -m "chore(release): $tag"
-          git push origin HEAD:master
-          git tag "$tag"
-          git push origin "$tag"
+          # The bump lands through the GraphQL API instead of `git commit`:
+          # GitHub signs every commit it creates itself, so the release
+          # commit shows up as verified without any key to manage.
+          # expectedHeadOid aborts the mutation if master moved meanwhile.
+          sha=$(gh api graphql -f query='
+            mutation($repo:String!,$branch:String!,$oid:GitObjectID!,$msg:String!,$toml:Base64String!,$lock:Base64String!) {
+              createCommitOnBranch(input:{
+                branch:{repositoryNameWithOwner:$repo, branchName:$branch},
+                expectedHeadOid:$oid,
+                message:{headline:$msg},
+                fileChanges:{additions:[
+                  {path:"Cargo.toml", contents:$toml},
+                  {path:"Cargo.lock", contents:$lock}
+                ]}
+              }) { commit { oid } }
+            }' \
+            -f repo="$GITHUB_REPOSITORY" \
+            -f branch="${GITHUB_REF_NAME}" \
+            -f oid="$(git rev-parse HEAD)" \
+            -f msg="chore(release): $tag" \
+            -f toml="$(base64 -w0 Cargo.toml)" \
+            -f lock="$(base64 -w0 Cargo.lock)" \
+            --jq '.data.createCommitOnBranch.commit.oid')
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$sha"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
