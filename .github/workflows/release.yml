@@ -19,7 +19,7 @@ jobs:
       tag: ${{ steps.bump.outputs.tag }}
       version: ${{ steps.bump.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Compute next version
@@ -98,7 +98,7 @@ jobs:
     steps:
       # The tag points at the version-bump commit the version job pushed,
       # so the build compiles exactly what the tag says.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.tag }}
       - name: Desktop libraries (Linux)
@@ -202,7 +202,7 @@ jobs:
           mkdir -p dist
           cd target/release
           7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zapive-${{ matrix.target }}
           path: dist/*
@@ -212,10 +212,10 @@ jobs:
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: Publish release

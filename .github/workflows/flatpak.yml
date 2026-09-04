@@ -10,7 +10,7 @@ jobs:
   bundle:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install flatpak-builder
         run: |
           sudo apt-get update
@@ -27,7 +27,7 @@ jobs:
             --repo=flatpak-repo builddir packaging/flatpak/io.github.wilssola.Zapive.yml
       - name: Bundle
         run: flatpak build-bundle flatpak-repo zapive.flatpak io.github.wilssola.Zapive
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zapive-flatpak
           path: zapive.flatpak
