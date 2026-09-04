@@ -11,6 +11,10 @@ fn lock_path() -> PathBuf {
     data_dir().join("zapive.pid")
 }
 
+fn raise_path() -> PathBuf {
+    data_dir().join("zapive.raise")
+}
+
 #[cfg(windows)]
 fn alive(pid: u32) -> bool {
     use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED};
@@ -48,11 +52,27 @@ pub fn claim_single_instance() -> bool {
         && let Ok(pid) = text.trim().parse::<u32>()
         && alive(pid)
     {
-        crate::platform::focus_window();
+        // Leave the window alone and ask its own process to raise it: a
+        // window parked in the tray is hidden, and unhiding it from here
+        // would desync the toolkit, which then stops honouring the close
+        // button. Handing the foreground right over first is what lets
+        // the older process take focus.
+        crate::platform::allow_foreground(pid);
+        let _ = std::fs::write(raise_path(), b"");
         return false;
     }
+    // A marker left by a launch that raced with a shutdown would raise the
+    // window the moment this instance starts polling.
+    let _ = std::fs::remove_file(raise_path());
     let _ = std::fs::write(&lock, std::process::id().to_string());
     true
+}
+
+// Polled by the running instance: true means another launch asked for the
+// window. Removing the file is the same act as taking the request, so a
+// burst of launches raises the window once.
+pub fn take_raise_request() -> bool {
+    std::fs::remove_file(raise_path()).is_ok()
 }
 
 // Called on the way out; only removes the lock this process wrote.
@@ -62,5 +82,6 @@ pub fn release_single_instance() {
         && text.trim() == std::process::id().to_string()
     {
         let _ = std::fs::remove_file(&lock);
+        let _ = std::fs::remove_file(raise_path());
     }
 }

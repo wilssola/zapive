@@ -71,8 +71,13 @@ fn main() {
         return;
     }
 
+    // The login entry passes --autostart; on Windows that means booting
+    // straight into the tray instead of popping the window open.
+    let autostarted = std::env::args().any(|a| a == "--autostart");
+
     let ui = AppWindow::new().expect("failed to create the main window");
     ui.set_language_mode(language.as_str().into());
+    ui.set_autostart(platform::autostart_enabled());
 
     // Theme: explicit modes win; "system" follows the OS with a slow poll.
     let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
@@ -147,12 +152,6 @@ fn main() {
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(100),
             move || {
-                let show = |handle: &slint::Weak<AppWindow>| {
-                    if let Some(ui) = handle.upgrade() {
-                        let _ = ui.show();
-                        platform::focus_window();
-                    }
-                };
                 while let Ok(event) = tray_icon::TrayIconEvent::receiver().try_recv() {
                     if matches!(
                         event,
@@ -162,15 +161,31 @@ fn main() {
                             ..
                         }
                     ) {
-                        show(&handle);
+                        raise_window(&handle);
                     }
                 }
                 while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
                     if event.id() == &open_id {
-                        show(&handle);
+                        raise_window(&handle);
                     } else if event.id() == &exit_id {
                         slint::quit_event_loop().ok();
                     }
+                }
+            },
+        );
+    }
+
+    // A second launch drops a marker and leaves this window untouched, so
+    // the raise happens here, on the side that owns it.
+    let raise_poll = slint::Timer::default();
+    {
+        let handle = ui.as_weak();
+        raise_poll.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(200),
+            move || {
+                if single::take_raise_request() {
+                    raise_window(&handle);
                 }
             },
         );
@@ -187,7 +202,9 @@ fn main() {
     let park_in_tray = false;
 
     if park_in_tray {
-        ui.show().expect("failed to show the main window");
+        if !autostarted {
+            ui.show().expect("failed to show the main window");
+        }
         slint::run_event_loop_until_quit().expect("event loop failed");
         let _ = ui.hide();
     } else {
@@ -195,6 +212,17 @@ fn main() {
     }
     wa.send(wa::Cmd::Shutdown);
     single::release_single_instance();
+}
+
+// Coming back from the tray goes through Slint: the toolkit tracks the
+// window's visibility itself, and showing it any other way leaves it
+// convinced the window is still hidden. focus_window() only raises what
+// is already on screen.
+fn raise_window(handle: &slint::Weak<AppWindow>) {
+    if let Some(ui) = handle.upgrade() {
+        let _ = ui.show();
+        platform::focus_window();
+    }
 }
 
 fn audio_selftest() {

@@ -254,3 +254,9 @@ msgstr "Atualizar"
 
 msgid "Restart"
 msgstr "Reiniciar"
+
+msgid "Startup"
+msgstr "Inicialização"
+
+msgid "Open Zapive when I sign in"
+msgstr "Abrir o Zapive ao entrar no sistema"

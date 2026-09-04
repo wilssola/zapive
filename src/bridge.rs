@@ -340,6 +340,9 @@ fn wire_callbacks(ui: &AppWindow) {
         let mode = mode.to_string();
         defer(move |b| b.handle_theme(&mode));
     });
+    ui.on_autostart_changed(|on| {
+        defer(move |b| b.handle_autostart(on));
+    });
     ui.on_language_changed(|mode| {
         let mode = mode.to_string();
         defer(move |b| {
@@ -672,6 +675,17 @@ impl Bridge {
             "light" => self.ui.set_dark_theme(false),
             _ => self.ui.set_dark_theme(crate::platform::system_dark()),
         }
+    }
+
+    // The OS is the only source of truth here (a Run entry, an autostart
+    // .desktop, a LaunchAgent), so the chip is refreshed from it rather
+    // than from what was asked for: a rejected write shows as unchanged.
+    fn handle_autostart(&mut self, on: bool) {
+        match crate::platform::autostart_set(on) {
+            Ok(()) => self.ui.set_settings_status("".into()),
+            Err(e) => self.ui.set_settings_status(ta("autostart.failed", &[&e]).into()),
+        }
+        self.ui.set_autostart(crate::platform::autostart_enabled());
     }
 
     fn handle_pairing(&mut self, phone: &str) {

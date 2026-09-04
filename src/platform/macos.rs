@@ -6,6 +6,60 @@ pub fn focus_window() {
     let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
 }
 
+// Only Windows guards the foreground; the AppleScript above needs no
+// handover.
+pub fn allow_foreground(_pid: u32) {}
+
+// ---- start at login: a LaunchAgent with RunAtLoad ----
+
+const AGENT: &str = "io.github.wilssola.Zapive";
+
+fn autostart_file() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{AGENT}.plist"))
+}
+
+pub fn autostart_enabled() -> bool {
+    autostart_file().is_file()
+}
+
+pub fn autostart_set(on: bool) -> Result<(), String> {
+    let file = autostart_file();
+    let path = file.to_string_lossy().to_string();
+    if !on {
+        let _ = std::process::Command::new("launchctl").args(["unload", &path]).status();
+        return match std::fs::remove_file(&file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        };
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = exe.display().to_string().replace('&', "&amp;").replace('<', "&lt;");
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>{AGENT}</string>
+    <key>ProgramArguments</key>
+    <array><string>{exe}</string><string>--autostart</string></array>
+    <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+"#
+    );
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&file, plist).map_err(|e| e.to_string())?;
+    // Registers it for this session too, so the toggle does not need a
+    // logout to take effect.
+    let _ = std::process::Command::new("launchctl").args(["load", &path]).status();
+    Ok(())
+}
+
 pub fn open_path(target: &str) {
     let _ = std::process::Command::new("open").arg(target).spawn();
 }

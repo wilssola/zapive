@@ -1,6 +1,6 @@
 use std::os::windows::process::CommandExt as _;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, IsIconic, IsWindowVisible, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow,
+    AllowSetForegroundWindow, FindWindowW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
 };
 use windows::core::w;
 
@@ -14,22 +14,62 @@ fn quiet(program: &str) -> std::process::Command {
     cmd
 }
 
-// Brings the running Zapive window to the foreground (used when a second
-// instance starts, and when a notification is clicked).
+// Brings the running Zapive window to the foreground. Callers make the
+// window visible through Slint first: unhiding it behind Slint's back
+// leaves the toolkit believing it is still parked in the tray, and the
+// next click on X then hides nothing.
 pub fn focus_window() {
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, w!("Zapive")) {
-            // Parked in the tray the window is hidden, which is not the
-            // same as minimized and needs its own call.
-            if !IsWindowVisible(hwnd).as_bool() {
-                let _ = ShowWindow(hwnd, SW_SHOW);
-            }
             if IsIconic(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_RESTORE);
             }
             let _ = SetForegroundWindow(hwnd);
         }
     }
+}
+
+// Windows only lets the process that owns the foreground hand it over. A
+// second instance the user just launched holds that right, so it passes
+// it to the instance that will actually raise its window.
+pub fn allow_foreground(pid: u32) {
+    unsafe {
+        let _ = AllowSetForegroundWindow(pid);
+    }
+}
+
+// ---- start with Windows: a per-user Run entry, no elevation needed ----
+
+const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+
+pub fn autostart_enabled() -> bool {
+    quiet("reg")
+        .args(["query", RUN_KEY, "/v", "Zapive"])
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
+pub fn autostart_set(on: bool) -> Result<(), String> {
+    if !on && !autostart_enabled() {
+        return Ok(());
+    }
+    let out = if on {
+        // Rewritten on every enable so a moved or updated install keeps a
+        // valid path. --autostart is what makes the login launch land in
+        // the tray instead of popping the window open.
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let command = format!("\"{}\" --autostart", exe.display());
+        quiet("reg")
+            .args(["add", RUN_KEY, "/v", "Zapive", "/t", "REG_SZ", "/d", &command, "/f"])
+            .output()
+    } else {
+        quiet("reg").args(["delete", RUN_KEY, "/v", "Zapive", "/f"]).output()
+    };
+    let out = out.map_err(|e| e.to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
 // Opens a file or URL with whatever the system associates with it.

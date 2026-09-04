@@ -514,7 +514,9 @@ export component AppWindow inherits Window {
     // Settings
     in-out property <bool> settings-open: false;
     in-out property <bool> pin-set: false;
+    in-out property <bool> autostart: false;
     in-out property <string> settings-status: "";
+    callback autostart-changed(bool);
     callback save-pin(string, string);
     callback remove-pin(string);
     callback logout();
@@ -3031,7 +3033,9 @@ export component AppWindow inherits Window {
         TouchArea { clicked => { root.settings-open = false; } }
         Rectangle {
             width: 440px;
-            height: 620px;
+            // Grown with the Startup section; the window's preferred
+            // height (700px) still clears it.
+            height: 690px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
@@ -3101,6 +3105,21 @@ export component AppWindow inherits Window {
                         label: @tr("System");
                         active: root.language-mode == "system";
                         clicked => { root.language-mode = "system"; root.language-changed("system"); }
+                    }
+                }
+                Text {
+                    text: @tr("Startup");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterChip {
+                        label: @tr("Open Zapive when I sign in");
+                        active: root.autostart;
+                        clicked => { root.autostart-changed(!root.autostart); }
                     }
                 }
                 Text {
