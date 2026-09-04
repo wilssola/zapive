@@ -2,8 +2,9 @@ name: release
 
 # Every push to master versions itself: the bump comes from the
 # conventional-commit history since the last tag (feat! -> major,
-# feat -> minor, anything else -> patch), and the three platform
-# binaries land on a GitHub Release the app's self-updater consumes.
+# feat -> minor, anything else -> patch). Each platform ships a
+# user-facing installer/executable (Setup.exe, AppImage, DMG) plus the
+# small zapive-<target>.zip payload the in-app self-updater consumes.
 on:
   push:
     branches: [master]
@@ -28,8 +29,12 @@ jobs:
           range="$last..HEAD"
           git rev-parse "$last" >/dev/null 2>&1 || range="HEAD"
           commits=$(git log --format=%s $range)
+          # chore commits never bump the version; a push made only of
+          # chores ships no release at all. (chore!: still counts as a
+          # breaking change below.)
+          commits=$(echo "$commits" | grep -vE '^chore(\(.+\))?:' || true)
           if [ -z "$commits" ]; then
-            echo "no commits since $last; skipping"
+            echo "no releasable commits since $last; skipping"
             echo "tag=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -47,6 +52,15 @@ jobs:
           tag="v$version"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Keep the sources in sync with the released version: bump
+          # Cargo.toml (and the zapive entry in Cargo.lock), push that
+          # commit to master and point the tag at it. Pushes made with
+          # GITHUB_TOKEN never retrigger this workflow, so no loop.
+          sed -i 's/^version = ".*"/version = "'"$version"'"/' Cargo.toml
+          perl -0pi -e 's/(name = "zapive"\nversion = ")[^"]+/${1}'"$version"'/' Cargo.lock
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): $tag"
+          git push origin HEAD:master
           git tag "$tag"
           git push origin "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -68,31 +82,89 @@ jobs:
             target: macos-aarch64
             bin: zapive
     runs-on: ${{ matrix.os }}
+    env:
+      # Azure Artifact Signing (formerly Trusted Signing; the action kept
+      # the old name) is optional: the signing steps only run when the
+      # secrets are configured, so forks and local setups still release
+      # unsigned binaries. AZURE_TS_ENDPOINT is the regional URI, e.g.
+      # https://brs.codesigning.azure.net for Brazil South.
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
     steps:
+      # The tag points at the version-bump commit the version job pushed,
+      # so the build compiles exactly what the tag says.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
       - name: Desktop libraries (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Stamp version
-        shell: bash
-        run: |
-          sed -i.bak 's/^version = ".*"/version = "${{ needs.version.outputs.version }}"/' Cargo.toml
-          rm -f Cargo.toml.bak
       - name: Build
-        run: cargo build --release
-      - name: Package
+        run: cargo build --release --locked
+
+      # ---- Windows: sign, then wrap the exe in an installer that creates
+      # ---- the Start Menu (and optional Desktop) shortcuts.
+      - name: Sign binary (Azure Artifact Signing)
+        if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
+        uses: azure/trusted-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: target/release
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Build installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} packaging\windows\zapive.iss
+      - name: Sign installer (Azure Artifact Signing)
+        if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
+        uses: azure/trusted-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # ---- Linux: AppImage (desktop entry + icon, no terminal window).
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: bash packaging/linux/make-appimage.sh "${{ needs.version.outputs.version }}"
+
+      # ---- macOS: .app bundle (icon + no Terminal window) inside a DMG.
+      - name: Build app bundle and DMG (macOS)
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/make-bundle.sh "${{ needs.version.outputs.version }}"
+
+      # The self-updater downloads this bare-binary zip; on Windows it is
+      # zipped after signing, so updated installs stay signed.
+      - name: Updater payload
         shell: bash
         run: |
+          mkdir -p dist
           cd target/release
-          7z a "../../zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
+          7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
       - uses: actions/upload-artifact@v4
         with:
           name: zapive-${{ matrix.target }}
-          path: zapive-${{ matrix.target }}.zip
+          path: dist/*
 
   release:
     needs: [version, build]
@@ -112,10 +184,22 @@ jobs:
           tag="${{ needs.version.outputs.tag }}"
           prev=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || echo "")
           range=${prev:+$prev..}$tag
-          # Commit subjects only: trailers and bodies stay out of the notes.
-          notes=$(git log --format='- %s' "$range")
+          # Commit subjects only: trailers and bodies stay out of the
+          # notes, and so does the version-bump commit itself.
+          notes=$(git log --format='- %s' "$range" | grep -v '^- chore(release):' || true)
+          # Checksums: listed in the notes and shipped as an asset, so a
+          # download can always be verified against the release page.
+          sha256sum Zapive-* zapive-*.zip > SHA256SUMS.txt
+          {
+            echo "$notes"
+            echo
+            echo "## SHA-256"
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+          } > notes.md
           gh release create "$tag" \
             --repo "${{ github.repository }}" \
             --title "Zapive $tag" \
-            --notes "$notes" \
-            zapive-*.zip
+            --notes-file notes.md \
+            Zapive-* zapive-*.zip SHA256SUMS.txt

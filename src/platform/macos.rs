@@ -12,9 +12,17 @@ pub fn open_path(target: &str) {
 
 pub fn register_app_id(_icon_path: &str) {}
 
-// Banner via osascript; activation callbacks are unreliable on macOS, so
-// clicking focuses nothing (parity with the Node build).
+// Banner through the user notification center under our own bundle id, so
+// launches from Zapive.app show the app icon instead of the script icon.
+// osascript stays as the fallback for bare-binary dev runs.
 pub fn toast(title: &str, body: &str, _jid: Option<String>) {
+    static BUNDLE: std::sync::Once = std::sync::Once::new();
+    BUNDLE.call_once(|| {
+        let _ = notify_rust::set_application("io.github.wilssola.Zapive");
+    });
+    if notify_rust::Notification::new().summary(title).body(body).show().is_ok() {
+        return;
+    }
     let script = format!(
         "display notification \"{}\" with title \"{}\"",
         body.replace('"', "'"),

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Zapive
+Comment=Native WhatsApp desktop client
+Comment[pt_BR]=Cliente WhatsApp nativo para desktop
+Exec=zapive
+Icon=io.github.wilssola.Zapive
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=whatsapp;chat;messaging;
+StartupWMClass=zapive

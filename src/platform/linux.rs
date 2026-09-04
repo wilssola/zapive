@@ -8,8 +8,21 @@ pub fn open_path(target: &str) {
 
 pub fn register_app_id(_icon_path: &str) {}
 
+// D-Bus notification tagged with our desktop entry, so the banner carries
+// the app icon and works inside the Flatpak sandbox (where notify-send may
+// not exist). notify-send stays as the fallback.
 pub fn toast(title: &str, body: &str, _jid: Option<String>) {
-    let _ = std::process::Command::new("notify-send").args([title, body]).spawn();
+    let sent = notify_rust::Notification::new()
+        .summary(title)
+        .body(body)
+        .appname("Zapive")
+        .icon("io.github.wilssola.Zapive")
+        .hint(notify_rust::Hint::DesktopEntry("io.github.wilssola.Zapive".into()))
+        .show()
+        .is_ok();
+    if !sent {
+        let _ = std::process::Command::new("notify-send").args([title, body]).spawn();
+    }
 }
 
 pub fn system_dark() -> bool {

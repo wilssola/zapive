@@ -1,3 +1,8 @@
 target/
 *.log
 .idea/
+# Packaging outputs (release workflow scratch space).
+build/
+dist/
+# Generated from Cargo.lock by the flatpak workflow.
+packaging/flatpak/cargo-sources.json

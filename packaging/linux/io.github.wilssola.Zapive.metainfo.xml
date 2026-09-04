@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.wilssola.Zapive</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>Zapive</name>
+  <summary>Native WhatsApp desktop client</summary>
+  <developer id="io.github.wilssola">
+    <name>Wilssola</name>
+  </developer>
+  <description>
+    <p>
+      Zapive is a native desktop client for WhatsApp written in Rust, with a
+      familiar WhatsApp Web style interface. Messages, media and settings are
+      stored locally in an encrypted vault, with an optional PIN lock.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.wilssola.Zapive.desktop</launchable>
+  <categories>
+    <category>Network</category>
+    <category>InstantMessaging</category>
+  </categories>
+  <url type="homepage">https://github.com/wilssola/zapive</url>
+  <url type="bugtracker">https://github.com/wilssola/zapive/issues</url>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+    <content_attribute id="social-audio">intense</content_attribute>
+    <content_attribute id="social-contacts">intense</content_attribute>
+  </content_rating>
+  <!-- TODO before Flathub submission: real screenshots are required for
+       desktop applications (https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/). -->
+  <releases>
+    <release version="0.2.0" date="2026-09-03"/>
+  </releases>
+</component>

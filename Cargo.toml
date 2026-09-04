@@ -70,6 +70,10 @@ windows = { version = "0.58", features = [
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Notifications with the app's own identity: the notification center on
+# macOS (bundle icon instead of the osascript script icon) and D-Bus on
+# Linux (works inside Flatpak, carries the desktop-entry icon).
+notify-rust = "4"
 
 [build-dependencies]
 slint-build = "1.17"

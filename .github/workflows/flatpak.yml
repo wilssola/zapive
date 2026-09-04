@@ -1,0 +1,33 @@
+name: flatpak
+
+# Prepared, not published: builds an installable zapive.flatpak bundle from
+# packaging/flatpak/io.github.wilssola.Zapive.yml on demand, so the manifest
+# stays verified until we submit to Flathub (see packaging/flatpak/README.md).
+on:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder python3-aiohttp python3-toml
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Generate offline cargo sources
+        run: |
+          curl -fsSL -o /tmp/flatpak-cargo-generator.py \
+            https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+          python3 /tmp/flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+      - name: Build
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --force-clean \
+            --repo=flatpak-repo builddir packaging/flatpak/io.github.wilssola.Zapive.yml
+      - name: Bundle
+        run: flatpak build-bundle flatpak-repo zapive.flatpak io.github.wilssola.Zapive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zapive-flatpak
+          path: zapive.flatpak

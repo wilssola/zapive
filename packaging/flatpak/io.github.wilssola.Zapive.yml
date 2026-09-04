@@ -1,0 +1,43 @@
+# Flatpak manifest for Zapive. Built locally / in CI against the repo
+# checkout (type: dir); for the actual Flathub submission switch the source
+# to a git tag as described in packaging/flatpak/README.md.
+#
+# cargo-sources.json is generated from Cargo.lock by flatpak-cargo-generator
+# (the flatpak workflow does it) so cargo can run fully offline inside the
+# sandbox, as Flathub requires.
+app-id: io.github.wilssola.Zapive
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: zapive
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # Desktop notifications (notify-rust goes through D-Bus).
+  - --talk-name=org.freedesktop.Notifications
+  # Vault key wrapping uses the Secret Service (secret-tool / keyring).
+  - --talk-name=org.freedesktop.secrets
+  - --filesystem=xdg-download
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/zapive/cargo
+modules:
+  - name: zapive
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release
+      - install -Dm755 target/release/zapive /app/bin/zapive
+      - install -Dm644 packaging/linux/io.github.wilssola.Zapive.desktop /app/share/applications/io.github.wilssola.Zapive.desktop
+      - install -Dm644 packaging/linux/io.github.wilssola.Zapive.metainfo.xml /app/share/metainfo/io.github.wilssola.Zapive.metainfo.xml
+      - install -Dm644 ui/zapive.png /app/share/icons/hicolor/1024x1024/apps/io.github.wilssola.Zapive.png
+    sources:
+      - type: dir
+        path: ../..
+      - cargo-sources.json
