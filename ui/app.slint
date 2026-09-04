@@ -245,6 +245,55 @@ component MenuRow inherits TouchArea {
     }
 }
 
+// Self-update banner: lives in the sidebar, and on the lock and login
+// screens so a new release is never missed behind the PIN.
+component UpdateBanner inherits Rectangle {
+    in property <int> state;
+    in property <string> version;
+    callback apply-update();
+    callback restart();
+    height: root.state > 0 ? 42px : 0;
+    visible: root.state > 0;
+    background: Theme.accent.with-alpha(0.15);
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 8px;
+        Text {
+            text: root.state == 1
+                ? @tr("Version {} is available", root.version)
+                : root.state == 2 ? @tr("Downloading update…")
+                : @tr("Update installed");
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.state == 1 || root.state == 3: Rectangle {
+            width: update-btn-text.preferred-width + 22px;
+            height: 28px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 14px;
+            background: Theme.accent;
+            update-btn-text := Text {
+                text: root.state == 1 ? @tr("Update") : @tr("Restart");
+                color: white;
+                font-size: 13px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (root.state == 1) { root.apply-update(); }
+                    else { root.restart(); }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Zapive";
     icon: @image-url("zapive.png");
@@ -493,6 +542,17 @@ export component AppWindow inherits Window {
         spacing: 14px;
         HorizontalBox {
             alignment: center;
+            UpdateBanner {
+                width: 360px;
+                border-radius: 8px;
+                state: root.update-state;
+                version: root.update-version;
+                apply-update => { root.update-apply(); }
+                restart => { root.update-restart(); }
+            }
+        }
+        HorizontalBox {
+            alignment: center;
             spacing: 10px;
             Image {
                 source: @image-url("icons/lock.svg");
@@ -539,6 +599,17 @@ export component AppWindow inherits Window {
     // ---------- Login ----------
     if root.screen == "login": VerticalBox {
         alignment: center;
+        HorizontalBox {
+            alignment: center;
+            UpdateBanner {
+                width: 820px;
+                border-radius: 8px;
+                state: root.update-state;
+                version: root.update-version;
+                apply-update => { root.update-apply(); }
+                restart => { root.update-restart(); }
+            }
+        }
         HorizontalBox {
             alignment: center;
             Rectangle {
@@ -915,48 +986,12 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Self-update banner: appears under the search box when a
-                // new release is available, downloading, or installed.
-                Rectangle {
-                    height: root.update-state > 0 ? 42px : 0;
-                    visible: root.update-state > 0;
-                    background: Theme.accent.with-alpha(0.15);
-                    HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 12px;
-                        spacing: 8px;
-                        Text {
-                            text: root.update-state == 1
-                                ? @tr("Version {} is available", root.update-version)
-                                : root.update-state == 2 ? @tr("Downloading update…")
-                                : @tr("Update installed");
-                            color: Theme.text;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
-                        }
-                        if root.update-state == 1 || root.update-state == 3: Rectangle {
-                            width: update-btn-text.preferred-width + 22px;
-                            height: 28px;
-                            y: (parent.height - self.height) / 2;
-                            border-radius: 14px;
-                            background: Theme.accent;
-                            update-btn-text := Text {
-                                text: root.update-state == 1 ? @tr("Update") : @tr("Restart");
-                                color: white;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
-                            }
-                            TouchArea {
-                                clicked => {
-                                    if (root.update-state == 1) { root.update-apply(); }
-                                    else { root.update-restart(); }
-                                }
-                            }
-                        }
-                    }
+                // Self-update banner under the search box.
+                UpdateBanner {
+                    state: root.update-state;
+                    version: root.update-version;
+                    apply-update => { root.update-apply(); }
+                    restart => { root.update-restart(); }
                 }
 
                 Rectangle {
