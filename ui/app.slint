@@ -1,4 +1,4 @@
-import { Button, LineEdit, ListView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 
 export global Theme {
     in-out property <bool> dark: true;
@@ -350,6 +350,17 @@ export component AppWindow inherits Window {
     // status hide the button.
     in-out property <bool> current-callable: false;
     callback start-call(string);
+    callback start-video-call(string);
+    // Audio and camera pickers in Settings. The first entry of each list
+    // is the "system default" label.
+    in-out property <[string]> mic-devices;
+    in-out property <[string]> speaker-devices;
+    in-out property <[string]> camera-devices;
+    in-out property <string> mic-device;
+    in-out property <string> speaker-device;
+    in-out property <string> camera-device;
+    callback device-changed(string, string);
+    callback settings-opened();
     // Status viewer
     in-out property <bool> sv-open: false;
     in-out property <string> sv-name: "";
@@ -772,6 +783,7 @@ export component AppWindow inherits Window {
                     clicked => {
                         root.settings-status = "";
                         root.settings-open = true;
+                        root.settings-opened();
                     }
                 }
             }
@@ -1308,6 +1320,13 @@ export component AppWindow inherits Window {
                                     color: root.current-status == "online" ? Theme.text-dim : Theme.accent;
                                     font-size: 12px;
                                 }
+                            }
+                        }
+                        if root.current-callable: VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                icon: @image-url("icons/video.svg");
+                                clicked => { root.start-video-call(root.current-jid); }
                             }
                         }
                         if root.current-callable: VerticalLayout {
@@ -2949,9 +2968,9 @@ export component AppWindow inherits Window {
         TouchArea { clicked => { root.settings-open = false; } }
         Rectangle {
             width: 440px;
-            // Grown with the Startup section; the window's preferred
-            // height (700px) still clears it.
-            height: 690px;
+            // Never taller than the window: the body scrolls instead, so
+            // the sections can keep growing.
+            height: min(720px, parent.height - 48px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
@@ -2961,6 +2980,7 @@ export component AppWindow inherits Window {
                 padding: 24px;
                 spacing: 13px;
                 HorizontalLayout {
+                    vertical-stretch: 0;
                     Text {
                         text: @tr("Settings");
                         color: Theme.text;
@@ -2973,6 +2993,11 @@ export component AppWindow inherits Window {
                         clicked => { root.settings-open = false; }
                     }
                 }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                    spacing: 13px;
+                    padding-right: 12px;
                 Text {
                     text: @tr("Appearance");
                     color: Theme.accent;
@@ -3039,6 +3064,57 @@ export component AppWindow inherits Window {
                     }
                 }
                 Text {
+                    text: @tr("Calls");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: @tr("Microphone");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                }
+                ComboBox {
+                    model: root.mic-devices;
+                    current-value: root.mic-device;
+                    selected(value) => {
+                        root.mic-device = value;
+                        root.device-changed("mic", value);
+                    }
+                }
+                Text {
+                    text: @tr("Speaker");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                }
+                ComboBox {
+                    model: root.speaker-devices;
+                    current-value: root.speaker-device;
+                    selected(value) => {
+                        root.speaker-device = value;
+                        root.device-changed("speaker", value);
+                    }
+                }
+                Text {
+                    text: @tr("Camera");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                }
+                ComboBox {
+                    model: root.camera-devices;
+                    current-value: root.camera-device;
+                    selected(value) => {
+                        root.camera-device = value;
+                        root.device-changed("camera", value);
+                    }
+                }
+                Text {
+                    text: @tr("A device picked here is used for every call. Changes apply to the next call.");
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                Text {
                     text: @tr("Security");
                     color: Theme.accent;
                     font-size: 14px;
@@ -3086,7 +3162,7 @@ export component AppWindow inherits Window {
                     font-size: 13px;
                     wrap: word-wrap;
                 }
-                Rectangle { vertical-stretch: 1; }
+                Rectangle { height: 6px; }
                 Text {
                     text: @tr("Account");
                     color: Theme.accent;
@@ -3116,6 +3192,8 @@ export component AppWindow inherits Window {
                             background: logout-btn.has-hover ? #d9534f : #c9302c;
                             z: -1;
                         }
+                    }
+                }
                     }
                 }
             }
@@ -3266,8 +3344,10 @@ export component CallWindow inherits Window {
     // Not translated: the platform layer finds this window by its title.
     title: "Zapive Call";
     icon: @image-url("zapive.png");
-    width: 360px;
-    height: 540px;
+    // Preferred, not fixed: a fixed width/height binding would override
+    // the resize the host does when a call turns into a video one.
+    preferred-width: 360px;
+    preferred-height: 540px;
     background: Theme.dark ? #111b21 : #f0f2f5;
     init => {
         Theme.dark = root.dark-theme;
@@ -3287,19 +3367,70 @@ export component CallWindow inherits Window {
     in-out property <string> initial: "";
     in-out property <int> color-idx: 0;
     in-out property <bool> muted: false;
+    // Video: `video-call` means this call has a picture at all, `video-on`
+    // is our own camera, `peer-video` is theirs, and `video-wanted` is the
+    // peer asking us to switch ours on.
+    in-out property <bool> video-call: false;
+    in-out property <bool> video-on: false;
+    in-out property <bool> peer-video: false;
+    in-out property <bool> video-wanted: false;
+    in-out property <image> remote-video;
+    in-out property <bool> has-remote-video: false;
+    in-out property <image> local-video;
+    in-out property <bool> has-local-video: false;
     callback accept();
     callback decline();
     callback hangup();
     callback toggle-mute();
+    callback toggle-video();
+
+    // The peer's picture fills the window; the name and controls float on
+    // top of it, the way WhatsApp lays a video call out.
+    if root.has-remote-video: Image {
+        source: root.remote-video;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+    // The self-view sits in the corner, small enough to stay out of the way.
+    if root.has-local-video: Rectangle {
+        width: 116px;
+        height: 88px;
+        x: parent.width - self.width - 16px;
+        y: 16px;
+        border-radius: 8px;
+        clip: true;
+        background: #000000;
+        Image {
+            source: root.local-video;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+        }
+    }
+
+    // Video is bright and busy; the name needs its own ground to stay
+    // readable on top of it.
+    if root.has-remote-video: Rectangle {
+        width: parent.width;
+        height: 110px;
+        background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+    }
+    if root.has-remote-video: Rectangle {
+        width: parent.width;
+        height: 150px;
+        y: parent.height - self.height;
+        background: @linear-gradient(0deg, #000000b0 0%, #00000000 100%);
+    }
 
     VerticalLayout {
         padding: 28px;
         spacing: 16px;
-        alignment: center;
 
+        Rectangle { vertical-stretch: root.has-remote-video ? 0 : 1; }
         Text {
             text: root.peer-name;
-            color: Theme.text;
+            color: root.has-remote-video ? #ffffff : Theme.text;
             font-size: 26px;
             font-weight: 700;
             horizontal-alignment: center;
@@ -3307,13 +3438,12 @@ export component CallWindow inherits Window {
         }
         Text {
             text: root.timer != "" ? root.timer : root.detail;
-            color: Theme.text-dim;
+            color: root.has-remote-video ? #d0d8dc : Theme.text-dim;
             font-size: 14px;
             horizontal-alignment: center;
             wrap: word-wrap;
         }
-        Rectangle { height: 8px; }
-        HorizontalLayout {
+        if !root.has-remote-video: HorizontalLayout {
             alignment: center;
             Avatar {
                 width: 160px;
@@ -3324,13 +3454,14 @@ export component CallWindow inherits Window {
                 color-idx: root.color-idx;
             }
         }
-        Rectangle { height: 8px; }
+        // Pushes the controls to the bottom edge of the picture.
+        Rectangle { vertical-stretch: 1; }
 
         // Ringing: decline on the left, answer on the right, as on the
         // phone. Everything else gets mute plus a single hang-up.
         HorizontalLayout {
             alignment: center;
-            spacing: 44px;
+            spacing: root.state == "incoming" ? 44px : 12px;
             if root.state == "incoming": CallAction {
                 label: @tr("Decline");
                 icon: @image-url("icons/phone.svg");
@@ -3340,9 +3471,22 @@ export component CallWindow inherits Window {
             }
             if root.state == "incoming": CallAction {
                 label: @tr("Accept");
-                icon: @image-url("icons/phone.svg");
+                icon: root.video-call
+                    ? @image-url("icons/video.svg")
+                    : @image-url("icons/phone.svg");
                 tint: #00a884;
                 clicked => { root.accept(); }
+            }
+            // The camera can only be switched once the call is up. It
+            // lights up when the peer has asked for video.
+            if root.state == "active": CallAction {
+                label: root.video-on ? @tr("Stop video") : @tr("Video");
+                icon: @image-url("icons/video.svg");
+                tint: root.video-wanted
+                    ? #00a884
+                    : (root.video-on ? #2a3942 : (Theme.dark ? #2a3942 : #d1d7db));
+                icon-tint: root.video-wanted || root.video-on ? #ffffff : Theme.text;
+                clicked => { root.toggle-video(); }
             }
             // Muting only means something once the media plane is up.
             if root.state == "active": CallAction {

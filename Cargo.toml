@@ -1,6 +1,6 @@
 [package]
 name = "zapive"
-version = "0.4.0"
+version = "0.3.0"
 edition = "2024"
 description = "Native WhatsApp desktop client"
 publish = false
@@ -50,6 +50,10 @@ arboard = "3"
 kamadak-exif = "0.5"
 ureq = "3"
 cpal = "0.16"
+# Camera capture for video calls: MSMF/AVFoundation/V4L2 behind one API.
+# `decoding` is off on purpose -- it pulls mozjpeg (C); the `image` crate
+# already decodes MJPEG in pure Rust.
+nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
 rfd = "0.15"
 webp = "0.3"
 ogg = "0.9.2"

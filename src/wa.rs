@@ -13,10 +13,11 @@ use whatsapp_rust::bot::{Bot, BotHandle};
 use whatsapp_rust::client::Client;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::store::SqliteStore;
+use whatsapp_rust::async_channel;
 use whatsapp_rust::types::call::{CallAction, ElsewhereOutcome, IncomingCall};
 use whatsapp_rust::types::events::{Event, EventHandler};
 use whatsapp_rust::types::presence::ReceiptType;
-use whatsapp_rust::voip::CallHandle;
+use whatsapp_rust::voip::{CallHandle, VideoFrame, VideoUpgradeToken};
 use whatsapp_rust::waproto::whatsapp as wa;
 
 // After this many unclean drops in a row the retry loop stops and the
@@ -91,12 +92,16 @@ pub enum Cmd {
     // Calls, channels and the info panel.
     RejectCall { id: String, from: String },
     // Answers the parked offer with that id and drives the media plane.
-    AcceptCall { id: String },
-    // Places a 1:1 voice call.
-    StartCall { jid: String },
+    // `video` opens the camera as part of answering.
+    AcceptCall { id: String, video: bool },
+    // Places a 1:1 call; `video` starts it as a video call.
+    StartCall { jid: String, video: bool },
     // Ends whichever call is live, telling the peer.
     HangupCall,
     SetCallMuted(bool),
+    // Turns the camera on or off mid-call. Turning it on also answers a
+    // pending upgrade request from the peer.
+    SetCallVideo(bool),
     FetchChannel(String),
     FetchChatInfo { jid: String, group: bool },
     Archive { jid: String, archived: bool },
@@ -201,6 +206,11 @@ struct LiveCall {
     muted: Arc<AtomicBool>,
     peer: whatsapp_rust::Jid,
     creator: whatsapp_rust::Jid,
+    // Dropping this closes the camera and stops the encoder.
+    camera: Option<crate::camera::CameraFeed>,
+    // The peer asked to add video and is waiting on an answer; accepting
+    // needs this exact token.
+    upgrade: Option<VideoUpgradeToken>,
 }
 
 fn stash_offer(id: &str, offer: IncomingCall) {
@@ -227,13 +237,57 @@ fn take_live() -> Option<LiveCall> {
 // down the moment it is connected.
 static CANCEL_PENDING: AtomicBool = AtomicBool::new(false);
 
+// Opens the camera and the decode side of a video call. The returned
+// sender goes to the voip facade; the receiver is drained by a decode
+// thread that pushes finished pictures at the call screen.
+fn open_video() -> Option<(crate::camera::CameraFeed, async_channel::Sender<VideoFrame>)> {
+    use crate::camera::{PREVIEW_BUSY, REMOTE_BUSY};
+    let (sink_tx, sink_rx) = async_channel::bounded::<VideoFrame>(2);
+    let camera = crate::camera::CameraFeed::start(Some(&crate::call::devices().camera), |pic| {
+        // One frame in flight at a time. Without this a UI thread that
+        // falls behind would queue megabytes of RGBA per second.
+        if PREVIEW_BUSY.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        crate::bridge::ui_apply(move |b| b.on_call_preview(pic));
+    })?;
+    let spawned = std::thread::Builder::new()
+        .name("zapive-video-decode".into())
+        .spawn(move || {
+            let Some(mut remote) = crate::camera::RemoteVideo::new() else {
+                eprintln!("[call] no H.264 decoder; peer video will not show");
+                return;
+            };
+            // Every access unit must be decoded to keep the reference
+            // frames intact; only the handoff to the UI is skippable.
+            while let Ok(frame) = sink_rx.recv_blocking() {
+                let Some(pic) = remote.decode(&frame) else { continue };
+                if REMOTE_BUSY.swap(true, Ordering::AcqRel) {
+                    continue;
+                }
+                crate::bridge::ui_apply(move |b| b.on_call_remote_video(pic));
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("[call] cannot start the video decoder: {e}");
+        return None;
+    }
+    Some((camera, sink_tx))
+}
+
 // Owns a connected call until it ends: publishes the state the call
 // screen renders, drains the engine's diagnostics, and tears the audio
 // devices down on the way out.
-async fn run_call(handle: CallHandle, audio: crate::call::CallAudio, outgoing: bool) {
+async fn run_call(
+    handle: CallHandle,
+    audio: crate::call::CallAudio,
+    camera: Option<crate::camera::CameraFeed>,
+    outgoing: bool,
+) {
     use whatsapp_rust::voip::CallEvent;
     let id = handle.call_id().to_string();
     let handle = Arc::new(handle);
+    let has_video = camera.is_some();
     if let Ok(mut live) = LIVE_CALL.lock() {
         *live = Some(LiveCall {
             id: id.clone(),
@@ -241,7 +295,13 @@ async fn run_call(handle: CallHandle, audio: crate::call::CallAudio, outgoing: b
             muted: audio.muted_flag(),
             peer: handle.peer_jid(),
             creator: handle.call_creator().clone(),
+            camera,
+            upgrade: None,
         });
+    }
+    if has_video {
+        let id = id.clone();
+        ui_apply(move |b| b.on_call_video(&id, true));
     }
     // The event stream is a single shared queue; drain it so the engine
     // never stalls on a full channel, and surface the terminal ones.
@@ -267,6 +327,37 @@ async fn run_call(handle: CallHandle, audio: crate::call::CallAudio, outgoing: b
                 }
                 CallEvent::AudioFormatMismatch { expected_rate, .. } => {
                     eprintln!("[call] peer picked a rate other than {expected_rate}");
+                }
+                // The peer wants to add video, or has answered our own
+                // request. A request is parked until the user agrees: the
+                // camera must never come on by itself.
+                CallEvent::VideoStateChanged { state, upgrade_token, .. } => {
+                    if state.is_upgrade_request() {
+                        if let Ok(mut live) = LIVE_CALL.lock()
+                            && let Some(call) = live.as_mut()
+                            && call.id == watched
+                        {
+                            call.upgrade = upgrade_token;
+                        }
+                        let id = watched.clone();
+                        ui_apply(move |b| b.on_call_video_requested(&id));
+                    } else if state.is_inactive_for_call_mode() {
+                        let id = watched.clone();
+                        ui_apply(move |b| b.on_call_peer_video(&id, false));
+                    } else {
+                        let id = watched.clone();
+                        ui_apply(move |b| b.on_call_peer_video(&id, true));
+                    }
+                }
+                // A peer that lost the picture asks for a fresh IDR.
+                CallEvent::RtcpReceived { packet_types, .. }
+                    if packet_types.contains(&206) || packet_types.contains(&205) =>
+                {
+                    if let Ok(live) = LIVE_CALL.lock()
+                        && let Some(camera) = live.as_ref().and_then(|c| c.camera.as_ref())
+                    {
+                        camera.request_keyframe();
+                    }
                 }
                 _ => {}
             }
@@ -1048,7 +1139,7 @@ async fn executor(
                     }
                 });
             }
-            Cmd::AcceptCall { id } => {
+            Cmd::AcceptCall { id, video } => {
                 let client = session.client.clone();
                 CANCEL_PENDING.store(false, Ordering::SeqCst);
                 tokio::spawn(async move {
@@ -1065,15 +1156,19 @@ async fn executor(
                         fail_call(&t("call.noDevices"));
                         return;
                     };
+                    // Answering an audio-only offer with video is not on
+                    // the table: the peer never offered to receive it.
+                    let vision = video.then(open_video).flatten();
+                    let voip = client.voip();
+                    let mut builder = voip.accept(&offer).audio(audio.mic(), audio.speaker());
+                    if let Some((camera, sink)) = &vision {
+                        builder = builder.video(camera.source(), sink.clone());
+                    }
                     // preaccept -> callKey decrypt -> accept -> relay.
-                    match client
-                        .voip()
-                        .accept(&offer)
-                        .audio(audio.mic(), audio.speaker())
-                        .start()
-                        .await
-                    {
-                        Ok(handle) => run_call(handle, audio, false).await,
+                    match builder.start().await {
+                        Ok(handle) => {
+                            run_call(handle, audio, vision.map(|(c, _)| c), false).await;
+                        }
                         Err(e) => {
                             eprintln!("[wa] call accept failed: {e}");
                             fail_call(&t("call.failed"));
@@ -1081,7 +1176,7 @@ async fn executor(
                     }
                 });
             }
-            Cmd::StartCall { jid } => {
+            Cmd::StartCall { jid, video } => {
                 let client = session.client.clone();
                 CANCEL_PENDING.store(false, Ordering::SeqCst);
                 tokio::spawn(async move {
@@ -1093,19 +1188,23 @@ async fn executor(
                         fail_call(&t("call.noDevices"));
                         return;
                     };
-                    match client
-                        .voip()
-                        .call(&peer)
-                        .audio(audio.mic(), audio.speaker())
-                        .start()
-                        .await
-                    {
+                    let vision = video.then(open_video).flatten();
+                    if video && vision.is_none() {
+                        fail_call(&t("call.noCamera"));
+                        return;
+                    }
+                    let voip = client.voip();
+                    let mut builder = voip.call(&peer).audio(audio.mic(), audio.speaker());
+                    if let Some((camera, sink)) = &vision {
+                        builder = builder.video(camera.source(), sink.clone());
+                    }
+                    match builder.start().await {
                         Ok(handle) => {
                             // The call id is minted here, so the screen
                             // only learns it now.
                             let id = handle.call_id().to_string();
                             ui_apply(move |b| b.on_outgoing_call(&id));
-                            run_call(handle, audio, true).await;
+                            run_call(handle, audio, vision.map(|(c, _)| c), true).await;
                         }
                         Err(e) => {
                             eprintln!("[wa] outgoing call failed: {e}");
@@ -1132,6 +1231,56 @@ async fn executor(
                         eprintln!("[wa] call terminate failed: {e}");
                     }
                     live.handle.hangup().await;
+                });
+            }
+            Cmd::SetCallVideo(on) => {
+                let handle = LIVE_CALL
+                    .lock()
+                    .ok()
+                    .and_then(|live| live.as_ref().map(|call| (call.handle.clone(), call.id.clone())));
+                let Some((handle, id)) = handle else { continue };
+                tokio::spawn(async move {
+                    if !on {
+                        if let Err(e) = handle.stop_video().await {
+                            eprintln!("[wa] stopping video failed: {e}");
+                        }
+                        if let Ok(mut live) = LIVE_CALL.lock()
+                            && let Some(call) = live.as_mut()
+                        {
+                            // Dropping the feed is what releases the camera.
+                            call.camera = None;
+                            call.upgrade = None;
+                        }
+                        ui_apply(move |b| b.on_call_video(&id, false));
+                        return;
+                    }
+                    let Some((camera, sink)) = open_video() else {
+                        fail_call(&t("call.noCamera"));
+                        return;
+                    };
+                    // A parked request from the peer has to be answered with
+                    // its own token; anything else is a fresh upgrade.
+                    let token = LIVE_CALL
+                        .lock()
+                        .ok()
+                        .and_then(|mut live| live.as_mut().and_then(|call| call.upgrade.take()));
+                    let started = match token {
+                        Some(token) => {
+                            handle.accept_video(token, camera.source(), sink.clone()).await
+                        }
+                        None => handle.start_video(camera.source(), sink.clone()).await,
+                    };
+                    if let Err(e) = started {
+                        eprintln!("[wa] starting video failed: {e}");
+                        fail_call(&t("call.noCamera"));
+                        return;
+                    }
+                    if let Ok(mut live) = LIVE_CALL.lock()
+                        && let Some(call) = live.as_mut()
+                    {
+                        call.camera = Some(camera);
+                    }
+                    ui_apply(move |b| b.on_call_video(&id, true));
                 });
             }
             Cmd::SetCallMuted(muted) => {

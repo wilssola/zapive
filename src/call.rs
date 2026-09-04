@@ -20,6 +20,72 @@ const FRAME: usize = 960;
 // letting the delay grow for the rest of the call.
 const MAX_PLAYOUT: usize = CALL_RATE as usize / 2;
 
+// Which devices calls should use, by name. The picker in Settings writes
+// these; the call machinery runs on tokio threads and reads them when a
+// call starts, so a global is simpler than threading names through every
+// command. An empty name means "whatever the system calls default".
+#[derive(Clone, Default)]
+pub struct Devices {
+    pub mic: String,
+    pub speaker: String,
+    pub camera: String,
+}
+
+static DEVICES: std::sync::LazyLock<std::sync::RwLock<Devices>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(Devices::default()));
+
+pub fn set_devices(chosen: Devices) {
+    if let Ok(mut devices) = DEVICES.write() {
+        *devices = chosen;
+    }
+}
+
+pub fn devices() -> Devices {
+    DEVICES.read().map(|d| d.clone()).unwrap_or_default()
+}
+
+// The names to show in the picker. A device that disappears between the
+// listing and the call falls back to the system default.
+pub fn input_names() -> Vec<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    cpal::default_host()
+        .input_devices()
+        .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+pub fn output_names() -> Vec<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    cpal::default_host()
+        .output_devices()
+        .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn input_device(name: &str) -> Option<cpal::Device> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    if !name.is_empty()
+        && let Ok(mut found) = host.input_devices()
+        && let Some(picked) = found.find(|d| d.name().is_ok_and(|n| n == name))
+    {
+        return Some(picked);
+    }
+    host.default_input_device()
+}
+
+fn output_device(name: &str) -> Option<cpal::Device> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    if !name.is_empty()
+        && let Ok(mut found) = host.output_devices()
+        && let Some(picked) = found.find(|d| d.name().is_ok_and(|n| n == name))
+    {
+        return Some(picked);
+    }
+    host.default_output_device()
+}
+
 // Linear resampler that keeps its phase across callbacks: samples go in
 // at `from`, come out at `to`. Both directions of the call use it.
 struct Resampler {
@@ -135,8 +201,9 @@ fn run_devices(
     stop: Arc<AtomicBool>,
     ready: std::sync::mpsc::Sender<bool>,
 ) {
-    let input = build_input(mic_tx, muted);
-    let output = build_output(spk_rx);
+    let chosen = devices();
+    let input = build_input(mic_tx, muted, &chosen.mic);
+    let output = build_output(spk_rx, &chosen.speaker);
     if input.is_none() {
         eprintln!("[call] no microphone; the peer will hear silence");
     }
@@ -156,9 +223,10 @@ fn run_devices(
 fn build_input(
     mic_tx: async_channel::Sender<Vec<i16>>,
     muted: Arc<AtomicBool>,
+    name: &str,
 ) -> Option<cpal::Stream> {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    let device = cpal::default_host().default_input_device()?;
+    use cpal::traits::{DeviceTrait, StreamTrait};
+    let device = input_device(name)?;
     let config = device.default_input_config().ok()?;
     let channels = config.channels() as usize;
     let mut resampler = Resampler::new(config.sample_rate().0, CALL_RATE);
@@ -195,9 +263,12 @@ fn build_input(
 
 // Playout: pull decoded 16 kHz frames off the channel and stretch them
 // to whatever rate the output device runs at.
-fn build_output(spk_rx: async_channel::Receiver<Vec<i16>>) -> Option<cpal::Stream> {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    let device = cpal::default_host().default_output_device()?;
+fn build_output(
+    spk_rx: async_channel::Receiver<Vec<i16>>,
+    name: &str,
+) -> Option<cpal::Stream> {
+    use cpal::traits::{DeviceTrait, StreamTrait};
+    let device = output_device(name)?;
     let config = device.default_output_config().ok()?;
     let channels = config.channels() as usize;
     let mut resampler = Resampler::new(CALL_RATE, config.sample_rate().0);
@@ -290,8 +361,9 @@ pub struct Ringer {
 
 impl Ringer {
     pub fn start(kind: Ring) -> Option<Ringer> {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-        let device = cpal::default_host().default_output_device()?;
+        use cpal::traits::{DeviceTrait, StreamTrait};
+        // The ring belongs on the same speaker the call will use.
+        let device = output_device(&devices().speaker)?;
         let config = device.default_output_config().ok()?;
         let rate = config.sample_rate().0 as f32;
         let channels = config.channels() as usize;

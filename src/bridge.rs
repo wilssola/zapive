@@ -73,10 +73,16 @@ pub struct Bridge {
     media_path: HashMap<String, String>,
     decoded: HashMap<String, (slint::Image, i32, i32)>,
     decoded_order: std::collections::VecDeque<String>,
+    // Pixel bytes held by `decoded`, tracked so eviction can bound them.
+    decoded_bytes: usize,
     // Hydrated chats, most-recent last; cold ones live only in the vault.
     warm_order: std::collections::VecDeque<String>,
     hover_jid: String,
     animated: HashMap<String, Anim>,
+    // Insertion order for `animated`, so eviction drops the oldest rather
+    // than whichever key the map happens to yield first.
+    anim_order: std::collections::VecDeque<String>,
+    anim_bytes: usize,
     anim_timer: slint::Timer,
     stick_requeued: bool,
     media_key: crate::vault::KeyHandle,
@@ -140,7 +146,13 @@ struct ActiveCall {
     // The sender jid exactly as it arrived; a reject stanza needs it.
     from: String,
     outgoing: bool,
+    // The call was offered (or placed) as a video call.
     video: bool,
+    // Our camera is on and sending.
+    sending_video: bool,
+    // The peer's camera is on, or they have asked us to turn ours on.
+    peer_video: bool,
+    peer_wants_video: bool,
     // "incoming" | "outgoing" | "connecting" | "active" | "ended"
     state: &'static str,
     started: Option<Instant>,
@@ -162,6 +174,12 @@ const RATES: [f64; 5] = [1.0, 1.5, 2.0, 2.5, 3.0];
 const RATE_LABELS: [&str; 5] = ["1x", "1.5x", "2x", "2.5x", "3x"];
 
 const DECODE_CACHE_MAX: usize = 50;
+// The count cap alone is not a memory bound: photos are decoded at up to
+// 1280px, so one entry can be 6 MB of RGBA and fifty of them 300 MB. These
+// budgets are what actually keeps the caches honest; the counts above stay
+// as a ceiling on bookkeeping.
+const DECODE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const ANIM_CACHE_BYTES: usize = 24 * 1024 * 1024;
 const MAX_ANIMATIONS: usize = 6;
 // How many chats keep their message lists in RAM at once.
 const WARM_MAX: usize = 8;
@@ -170,6 +188,13 @@ fn image_of(d: &crate::media::Decoded) -> slint::Image {
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(d.w, d.h);
     buf.make_mut_bytes().copy_from_slice(&d.rgba);
     slint::Image::from_rgba8(buf)
+}
+
+// What an image costs in memory: Slint keeps decoded RGBA, so it is the
+// pixel count times four regardless of the size it is drawn at.
+fn image_bytes(image: &slint::Image) -> usize {
+    let size = image.size();
+    size.width as usize * size.height as usize * 4
 }
 
 // WhatsApp-style thumbnail box: fit within 330x380, never upscale.
@@ -294,9 +319,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         media_path: HashMap::new(),
         decoded: HashMap::new(),
         decoded_order: std::collections::VecDeque::new(),
+        decoded_bytes: 0,
         warm_order: std::collections::VecDeque::new(),
         hover_jid: String::new(),
         animated: HashMap::new(),
+        anim_order: std::collections::VecDeque::new(),
+        anim_bytes: 0,
         anim_timer: slint::Timer::default(),
         stick_requeued: false,
         media_key: crate::vault::KeyHandle::default(),
@@ -589,6 +617,17 @@ fn wire_callbacks(ui: &AppWindow) {
         let jid = jid.to_string();
         defer(move |b| b.start_call(&jid));
     });
+    // Enumerating devices touches the audio and camera stacks, so it waits
+    // until the user actually opens Settings.
+    ui.on_settings_opened(|| defer(|b| b.refresh_devices()));
+    ui.on_start_video_call(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.start_video_call(&jid));
+    });
+    ui.on_device_changed(|kind, name| {
+        let (kind, name) = (kind.to_string(), name.to_string());
+        defer(move |b| b.set_device(&kind, &name));
+    });
     ui.on_open_info(|| defer(|b| b.open_contact_info()));
     ui.on_close_info(|| defer(|b| b.ui.set_info_open(false)));
     ui.on_toggle_archive(|| defer(|b| b.toggle_archive()));
@@ -672,6 +711,9 @@ impl Bridge {
         self.refresh_chats();
         self.refresh_statuses();
         self.refresh_calls();
+        // Before any call can start, so the first one already uses the
+        // devices the user picked.
+        self.load_devices();
         self.wa.send(Cmd::Start);
         // Events that arrived while the PIN screen was up.
         for f in std::mem::take(&mut self.locked_backlog) {
@@ -801,7 +843,10 @@ impl Bridge {
         self.media_path.clear();
         self.decoded.clear();
         self.decoded_order.clear();
+        self.decoded_bytes = 0;
         self.animated.clear();
+        self.anim_order.clear();
+        self.anim_bytes = 0;
         if let Some(vault) = &self.vault {
             vault.del_prefix("store:");
         }
@@ -1975,15 +2020,26 @@ impl Bridge {
     }
 
     fn remember_decoded(&mut self, id: &str, image: slint::Image, w: i32, h: i32) {
-        if !self.decoded.contains_key(id) {
-            self.decoded_order.push_back(id.to_string());
-            if self.decoded_order.len() > DECODE_CACHE_MAX
-                && let Some(evicted) = self.decoded_order.pop_front()
-            {
-                self.decoded.remove(&evicted);
+        // Re-decoding the same message replaces its entry, so drop the old
+        // one from the running total first.
+        if let Some((old, _, _)) = self.decoded.remove(id) {
+            self.decoded_bytes = self.decoded_bytes.saturating_sub(image_bytes(&old));
+            self.decoded_order.retain(|known| known != id);
+        }
+        self.decoded_bytes += image_bytes(&image);
+        self.decoded_order.push_back(id.to_string());
+        self.decoded.insert(id.to_string(), (image, w, h));
+        // Evicting is cheap: the rows already on screen hold their own
+        // reference to the image, so this only costs a re-decode the next
+        // time the conversation is rebuilt.
+        while self.decoded_order.len() > DECODE_CACHE_MAX
+            || (self.decoded_bytes > DECODE_CACHE_BYTES && self.decoded_order.len() > 1)
+        {
+            let Some(evicted) = self.decoded_order.pop_front() else { break };
+            if let Some((old, _, _)) = self.decoded.remove(&evicted) {
+                self.decoded_bytes = self.decoded_bytes.saturating_sub(image_bytes(&old));
             }
         }
-        self.decoded.insert(id.to_string(), (image, w, h));
     }
 
     // A late-loading image must not push the newest message out of view;
@@ -2125,12 +2181,18 @@ impl Bridge {
     }
 
     fn start_animation(&mut self, id: &str, frames: Vec<slint::Image>, looping: bool) {
-        if self.animated.len() >= MAX_ANIMATIONS
-            && let Some(oldest) = self.animated.keys().next().cloned()
-        {
-            self.animated.remove(&oldest);
-        }
+        self.drop_animation(id);
+        self.anim_bytes += frames.iter().map(image_bytes).sum::<usize>();
+        self.anim_order.push_back(id.to_string());
         self.animated.insert(id.to_string(), Anim { frames, idx: 0, looping });
+        // A 320px GIF can be 45 frames of RGBA, so the count cap needs a
+        // byte budget beside it.
+        while self.anim_order.len() > MAX_ANIMATIONS
+            || (self.anim_bytes > ANIM_CACHE_BYTES && self.anim_order.len() > 1)
+        {
+            let Some(oldest) = self.anim_order.pop_front() else { break };
+            self.forget_animation(&oldest);
+        }
         if !self.anim_timer.running() {
             self.anim_timer.start(
                 slint::TimerMode::Repeated,
@@ -2138,6 +2200,21 @@ impl Bridge {
                 || apply_now(|b| b.tick_animations()),
             );
         }
+    }
+
+    // Removes an animation and its bytes, keeping the order queue in step.
+    fn drop_animation(&mut self, id: &str) {
+        if self.forget_animation(id) {
+            self.anim_order.retain(|known| known != id);
+        }
+    }
+
+    fn forget_animation(&mut self, id: &str) -> bool {
+        let Some(anim) = self.animated.remove(id) else { return false };
+        self.anim_bytes = self
+            .anim_bytes
+            .saturating_sub(anim.frames.iter().map(image_bytes).sum::<usize>());
+        true
     }
 
     fn tick_animations(&mut self) {
@@ -2160,7 +2237,7 @@ impl Bridge {
             patches.push((id.clone(), anim.frames[anim.idx].clone()));
         }
         for id in finished {
-            self.animated.remove(&id);
+            self.drop_animation(&id);
         }
         for (id, frame) in patches {
             self.patch_row(&id, |row| row.picture = frame);
@@ -2344,6 +2421,7 @@ impl Bridge {
         win.on_decline(|| defer(|b| b.decline_call()));
         win.on_hangup(|| defer(|b| b.hangup_call()));
         win.on_toggle_mute(|| defer(|b| b.toggle_call_mute()));
+        win.on_toggle_video(|| defer(|b| b.toggle_call_video()));
         // Closing the window means the same as decline (or hang up, once
         // the call is up), matching WhatsApp's own call window.
         win.window().on_close_requested(|| {
@@ -2386,6 +2464,114 @@ impl Bridge {
         win.set_avatar(avatar.unwrap_or_else(empty_image));
         win.set_initial(initial_of(&name).into());
         win.set_color_idx(color_idx_of(&jid));
+        let Some(call) = self.call.as_ref() else { return };
+        // A voice call is a portrait card; video needs room for a
+        // landscape picture, the way WhatsApp resizes its call window.
+        let video = call.video || call.sending_video || call.peer_video;
+        let wanted = if video {
+            slint::LogicalSize::new(760.0, 560.0)
+        } else {
+            slint::LogicalSize::new(360.0, 540.0)
+        };
+        if win.window().size().to_logical(win.window().scale_factor()) != wanted {
+            win.window().set_size(wanted);
+        }
+        win.set_video_call(video);
+        win.set_video_on(call.sending_video);
+        win.set_peer_video(call.peer_video);
+        win.set_video_wanted(call.peer_wants_video);
+    }
+
+    // ---- video ----
+
+    fn toggle_call_video(&mut self) {
+        let Some(call) = self.call.as_mut() else { return };
+        if call.state != "active" {
+            return;
+        }
+        let wanted = !call.sending_video;
+        // The camera is only really on once the call side says so; this
+        // keeps the button from flapping if it fails to open.
+        call.peer_wants_video = false;
+        self.wa.send(Cmd::SetCallVideo(wanted));
+    }
+
+    // Our own camera came on or went off.
+    pub fn on_call_video(&mut self, id: &str, on: bool) {
+        let Some(call) = self.call.as_mut() else { return };
+        if call.id != id {
+            return;
+        }
+        call.sending_video = on;
+        if !on {
+            self.clear_local_preview();
+        }
+        self.paint_call();
+    }
+
+    // The peer's camera came on or went off.
+    pub fn on_call_peer_video(&mut self, id: &str, on: bool) {
+        let Some(call) = self.call.as_mut() else { return };
+        if call.id != id {
+            return;
+        }
+        call.peer_video = on;
+        if !on {
+            self.clear_remote_video();
+        }
+        self.paint_call();
+    }
+
+    // The peer asked to add video. The camera stays off until the user
+    // agrees by pressing the button.
+    pub fn on_call_video_requested(&mut self, id: &str) {
+        let Some(call) = self.call.as_mut() else { return };
+        if call.id != id {
+            return;
+        }
+        call.peer_wants_video = true;
+        self.paint_call();
+    }
+
+    // One frame of the local self-view.
+    pub fn on_call_preview(&mut self, picture: crate::media::Decoded) {
+        if let Some(win) = self.call_ui.as_ref()
+            && self.call.as_ref().is_some_and(|call| call.sending_video)
+        {
+            win.set_local_video(image_of(&picture));
+            win.set_has_local_video(true);
+        }
+        // The capture thread waits on this before sending the next one.
+        crate::camera::PREVIEW_BUSY.store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    // One decoded frame from the peer.
+    pub fn on_call_remote_video(&mut self, picture: crate::media::Decoded) {
+        if let Some(win) = self.call_ui.as_ref()
+            && self.call.is_some()
+        {
+            win.set_remote_video(image_of(&picture));
+            win.set_has_remote_video(true);
+        }
+        crate::camera::REMOTE_BUSY.store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    fn clear_local_preview(&mut self) {
+        // A frame dropped mid-flight would otherwise leave the gate shut
+        // and the next call's self-view blank.
+        crate::camera::PREVIEW_BUSY.store(false, std::sync::atomic::Ordering::Release);
+        if let Some(win) = self.call_ui.as_ref() {
+            win.set_has_local_video(false);
+            win.set_local_video(empty_image());
+        }
+    }
+
+    fn clear_remote_video(&mut self) {
+        crate::camera::REMOTE_BUSY.store(false, std::sync::atomic::Ordering::Release);
+        if let Some(win) = self.call_ui.as_ref() {
+            win.set_has_remote_video(false);
+            win.set_remote_video(empty_image());
+        }
     }
 
     fn show_call_window(&mut self) {
@@ -2465,14 +2651,79 @@ impl Bridge {
         self.call = None;
         self.set_ring(None);
         self.call_timer.stop();
+        // Video frames are megabytes each; do not leave one parked in a
+        // hidden window for the rest of the session.
+        self.clear_local_preview();
+        self.clear_remote_video();
         if let Some(win) = self.call_ui.as_ref() {
             let _ = win.hide();
         }
     }
 
+    // ---- devices ----
+
+    // Fills the pickers and applies the saved choices. Enumeration talks
+    // to the audio and camera stacks, so it happens when Settings opens
+    // rather than on every launch.
+    pub fn refresh_devices(&mut self) {
+        let system = t("device.system");
+        let listed = |mut names: Vec<String>| {
+            names.insert(0, system.clone());
+            let rows: Vec<SharedString> = names.into_iter().map(SharedString::from).collect();
+            ModelRc::from(Rc::new(VecModel::from(rows)))
+        };
+        self.ui.set_mic_devices(listed(crate::call::input_names()));
+        self.ui.set_speaker_devices(listed(crate::call::output_names()));
+        self.ui
+            .set_camera_devices(listed(crate::camera::cameras().into_iter().map(|c| c.name).collect()));
+        let chosen = crate::call::devices();
+        let shown = |name: &str| {
+            if name.is_empty() { system.clone().into() } else { SharedString::from(name) }
+        };
+        self.ui.set_mic_device(shown(&chosen.mic));
+        self.ui.set_speaker_device(shown(&chosen.speaker));
+        self.ui.set_camera_device(shown(&chosen.camera));
+    }
+
+    pub fn set_device(&mut self, kind: &str, name: &str) {
+        // The first entry in every picker means "let the system decide",
+        // which is stored as an empty name.
+        let name = if name == t("device.system") { "" } else { name };
+        let mut chosen = crate::call::devices();
+        match kind {
+            "mic" => chosen.mic = name.to_string(),
+            "speaker" => chosen.speaker = name.to_string(),
+            "camera" => chosen.camera = name.to_string(),
+            _ => return,
+        }
+        if let Some(vault) = &self.vault {
+            vault.setting_set(&format!("device.{kind}"), name);
+        }
+        crate::call::set_devices(chosen);
+    }
+
+    // Restores the saved devices at boot, before any call can start.
+    fn load_devices(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let get = |key: &str| vault.setting_get(key).unwrap_or_default();
+        crate::call::set_devices(crate::call::Devices {
+            mic: get("device.mic"),
+            speaker: get("device.speaker"),
+            camera: get("device.camera"),
+        });
+    }
+
     // ---- call actions ----
 
     pub fn start_call(&mut self, jid: &str) {
+        self.place_call(jid, false);
+    }
+
+    pub fn start_video_call(&mut self, jid: &str) {
+        self.place_call(jid, true);
+    }
+
+    fn place_call(&mut self, jid: &str, video: bool) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
         if is_group(&jid) || is_channel(&jid) || jid == "status@broadcast" {
             return;
@@ -2485,14 +2736,17 @@ impl Bridge {
             jid: jid.clone(),
             from: jid.clone(),
             outgoing: true,
-            video: false,
+            video,
+            sending_video: video,
+            peer_video: false,
+            peer_wants_video: false,
             state: "outgoing",
             started: None,
         });
         self.paint_call();
         self.show_call_window();
         self.set_ring(Some(crate::call::Ring::Back));
-        self.wa.send(Cmd::StartCall { jid });
+        self.wa.send(Cmd::StartCall { jid, video });
     }
 
     fn accept_call(&mut self) {
@@ -2501,10 +2755,14 @@ impl Bridge {
             return;
         }
         call.state = "connecting";
+        // A video offer is answered with the camera on, the way the phone
+        // does it; the button in the call window turns it back off.
+        let video = call.video;
+        call.sending_video = video;
         let id = call.id.clone();
         self.set_ring(None);
         self.paint_call();
-        self.wa.send(Cmd::AcceptCall { id });
+        self.wa.send(Cmd::AcceptCall { id, video });
     }
 
     // Doubles as the hang-up for a call already up, so the window's close
@@ -2613,6 +2871,9 @@ impl Bridge {
             from: from.to_string(),
             outgoing: false,
             video,
+            sending_video: false,
+            peer_video: video,
+            peer_wants_video: false,
             state: "incoming",
             started: None,
         });
