@@ -6,7 +6,7 @@ use crate::i18n::{t, ta};
 use crate::markup::{MentionTarget, has_markup, to_markdown};
 use crate::qr::{empty_image, qr_image};
 use crate::store::{
-    MessageKind, Store, StoredMessage, clean_text, compute_preview, display_id, format_day,
+    MessageKind, Store, StoredMessage, clean_text, display_id, format_day,
     format_number, format_time, is_channel, is_group, normalize_jid, preview_body,
     reaction_summary, ticks_for,
 };

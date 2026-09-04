@@ -241,7 +241,7 @@ impl EventHandler for Pump {
                 let ids: Vec<String> = receipt.message_ids.iter().map(|i| i.to_string()).collect();
                 ui_apply(move |b| b.on_receipt(&chat, &ids, status));
             }
-            Event::HistorySync(lazy) => {
+            Event::HistorySync(_lazy) => {
                 // Decoding inflates megabytes of protobuf: keep it off the
                 // event bus thread and off the UI.
                 let event = event.clone();
