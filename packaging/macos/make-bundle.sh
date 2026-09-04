@@ -27,9 +27,11 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/zapive.icns"
 
 # Signature: Apple Silicon refuses to run unsigned bundles at all.
 # Ad-hoc signatures carry no certificate, so they can't be timestamped.
-TIMESTAMP=(--timestamp)
-[ "$IDENTITY" = "-" ] && TIMESTAMP=()
-codesign --force --deep "${TIMESTAMP[@]}" --sign "$IDENTITY" "$APP"
+# The flags accumulate into an array that is never empty: bash 3.2, which
+# is what macOS ships, rejects "${empty[@]}" as unbound under `set -u`.
+SIGN=(codesign --force --deep)
+[ "$IDENTITY" = "-" ] || SIGN+=(--timestamp)
+"${SIGN[@]}" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 
 STAGE=build/dmg
