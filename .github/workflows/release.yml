@@ -82,13 +82,19 @@ jobs:
             target: macos-aarch64
             bin: zapive
     runs-on: ${{ matrix.os }}
-    # Azure Artifact Signing (formerly Trusted Signing; the action kept
-    # the old name) is optional: the signing steps only run when the
-    # secrets are configured, so forks and local setups still release
-    # unsigned binaries. AZURE_TS_ENDPOINT is the regional URI, e.g.
-    # https://brs.codesigning.azure.net for Brazil South.
-    # env:
-    #   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+    env:
+      # Signing is optional throughout: each step runs only when its
+      # certificate secret exists, so forks still release unsigned.
+      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+      MACOS_P12_BASE64: ${{ secrets.MACOS_P12_BASE64 }}
+      MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
+      # Azure Artifact Signing (formerly Trusted Signing; the action kept
+      # the old name) is optional: the signing steps only run when the
+      # secrets are configured, so forks and local setups still release
+      # unsigned binaries. AZURE_TS_ENDPOINT is the regional URI, e.g.
+      # https://brs.codesigning.azure.net for Brazil South.
+      # AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
     steps:
       # The tag points at the version-bump commit the version job pushed,
       # so the build compiles exactly what the tag says.
@@ -122,11 +128,19 @@ jobs:
       #     file-digest: SHA256
       #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
       #     timestamp-digest: SHA256
+      - name: Sign binary (self-signed)
+        if: runner.os == 'Windows' && env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        run: packaging\windows\sign.ps1 -Path target\release\zapive.exe
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} packaging\windows\zapive.iss
+      - name: Sign installer (self-signed)
+        if: runner.os == 'Windows' && env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        run: packaging\windows\sign.ps1 -Path dist\Zapive-Setup-${{ needs.version.outputs.version }}.exe
       # - name: Sign installer (Azure Artifact Signing)
       #   if: runner.os == 'Windows' && env.AZURE_TENANT_ID != ''
       #   uses: azure/trusted-signing-action@v2
@@ -149,9 +163,36 @@ jobs:
         run: bash packaging/linux/make-appimage.sh "${{ needs.version.outputs.version }}"
 
       # ---- macOS: .app bundle (icon + no Terminal window) inside a DMG.
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS' && env.MACOS_P12_BASE64 != ''
+        run: |
+          keychain="$RUNNER_TEMP/zapive.keychain-db"
+          p12="$RUNNER_TEMP/zapive.p12"
+          echo "$MACOS_P12_BASE64" | base64 --decode > "$p12"
+          security create-keychain -p "$MACOS_P12_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$MACOS_P12_PASSWORD" "$keychain"
+          security import "$p12" -k "$keychain" -P "$MACOS_P12_PASSWORD" -T /usr/bin/codesign
+          # Lets codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_P12_PASSWORD" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$p12"
       - name: Build app bundle and DMG (macOS)
         if: runner.os == 'macOS'
-        run: bash packaging/macos/make-bundle.sh "${{ needs.version.outputs.version }}"
+        run: |
+          identity='-'
+          [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
+          bash packaging/macos/make-bundle.sh "${{ needs.version.outputs.version }}" "$identity"
+
+      # The updater swaps this binary into the installed bundle, so it has
+      # to carry the bundle identifier and the app's own signature or the
+      # bundle stops launching.
+      - name: Sign updater payload (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          identity='-'
+          [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
+          codesign --force --identifier io.github.wilssola.Zapive --sign "$identity" target/release/zapive
 
       # The self-updater downloads this bare-binary zip; on Windows it is
       # zipped after signing, so updated installs stay signed.

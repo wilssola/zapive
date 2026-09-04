@@ -4,7 +4,10 @@
 # layout. Run from the repository root (the release workflow does).
 set -euo pipefail
 
-VERSION="${1:?usage: make-bundle.sh <version>}"
+VERSION="${1:?usage: make-bundle.sh <version> [signing-identity]}"
+# "-" is the ad-hoc identity; a real one keeps the signature (and with it
+# the app's TCC permissions) stable across releases.
+IDENTITY="${2:--}"
 APP=build/Zapive.app
 
 rm -rf "$APP" build/zapive.iconset build/dmg
@@ -22,11 +25,20 @@ for size in 16 32 64 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/zapive.icns"
 
-# Ad-hoc signature: Apple Silicon refuses to run unsigned bundles at all.
-codesign --force --deep --sign - "$APP"
+# Signature: Apple Silicon refuses to run unsigned bundles at all.
+# Ad-hoc signatures carry no certificate, so they can't be timestamped.
+TIMESTAMP=(--timestamp)
+[ "$IDENTITY" = "-" ] && TIMESTAMP=()
+codesign --force --deep "${TIMESTAMP[@]}" --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict "$APP"
 
 STAGE=build/dmg
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "Zapive" -srcfolder "$STAGE" -ov -format UDZO "dist/Zapive-$VERSION.dmg"
+
+if [ "$IDENTITY" != "-" ]; then
+    codesign --force --timestamp --sign "$IDENTITY" "dist/Zapive-$VERSION.dmg"
+fi
+
