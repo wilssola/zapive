@@ -62,7 +62,10 @@ jobs:
           # GitHub signs every commit it creates itself, so the release
           # commit shows up as verified without any key to manage.
           # expectedHeadOid aborts the mutation if master moved meanwhile.
-          sha=$(gh api graphql -f query='
+          # jq reads the files off disk and the body goes in over stdin:
+          # base64 of Cargo.lock is ~330 kB, well past the 128 kB ceiling
+          # Linux puts on a single execve argument.
+          query='
             mutation($repo:String!,$branch:String!,$oid:GitObjectID!,$msg:String!,$toml:Base64String!,$lock:Base64String!) {
               createCommitOnBranch(input:{
                 branch:{repositoryNameWithOwner:$repo, branchName:$branch},
@@ -73,14 +76,19 @@ jobs:
                   {path:"Cargo.lock", contents:$lock}
                 ]}
               }) { commit { oid } }
-            }' \
-            -f repo="$GITHUB_REPOSITORY" \
-            -f branch="${GITHUB_REF_NAME}" \
-            -f oid="$(git rev-parse HEAD)" \
-            -f msg="chore(release): $tag" \
-            -f toml="$(base64 -w0 Cargo.toml)" \
-            -f lock="$(base64 -w0 Cargo.lock)" \
-            --jq '.data.createCommitOnBranch.commit.oid')
+            }'
+          sha=$(jq -n \
+            --arg query "$query" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg oid "$(git rev-parse HEAD)" \
+            --arg msg "chore(release): $tag" \
+            --rawfile toml Cargo.toml \
+            --rawfile lock Cargo.lock \
+            '{query: $query, variables: {repo: $repo, branch: $branch, oid: $oid,
+              msg: $msg, toml: ($toml | @base64), lock: ($lock | @base64)}}' \
+            | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.oid')
+          [ -n "$sha" ] || { echo "createCommitOnBranch returned no oid"; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$sha"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
