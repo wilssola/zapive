@@ -97,6 +97,9 @@ jobs:
     needs: version
     if: needs.version.outputs.tag != ''
     strategy:
+      # Each target ships its own installer, so a broken platform should
+      # not throw away the builds that did work.
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
