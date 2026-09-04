@@ -1,13 +1,29 @@
+use std::os::windows::process::CommandExt as _;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    FindWindowW, IsIconic, IsWindowVisible, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow,
 };
 use windows::core::w;
+
+// Console programs spawned from a GUI build flash a black window; this
+// keeps them invisible.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn quiet(program: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
 
 // Brings the running Zapive window to the foreground (used when a second
 // instance starts, and when a notification is clicked).
 pub fn focus_window() {
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, w!("Zapive")) {
+            // Parked in the tray the window is hidden, which is not the
+            // same as minimized and needs its own call.
+            if !IsWindowVisible(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+            }
             if IsIconic(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_RESTORE);
             }
@@ -18,7 +34,7 @@ pub fn focus_window() {
 
 // Opens a file or URL with whatever the system associates with it.
 pub fn open_path(target: &str) {
-    let _ = std::process::Command::new("cmd")
+    let _ = quiet("cmd")
         .args(["/c", "start", "", &target.replace('&', "^&")])
         .spawn();
 }
@@ -32,7 +48,7 @@ pub fn register_app_id(icon_path: &str) {
     }
     let key = r"HKCU\Software\Classes\AppUserModelId\Zapive";
     for (name, value) in [("DisplayName", "Zapive"), ("IconUri", icon_path)] {
-        let _ = std::process::Command::new("reg")
+        let _ = quiet("reg")
             .args(["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"])
             .output();
     }
@@ -61,7 +77,7 @@ pub fn toast(title: &str, body: &str, jid: Option<String>) {
 
 // Whether Windows apps are set to dark mode (defaults dark on error).
 pub fn system_dark() -> bool {
-    let out = std::process::Command::new("reg")
+    let out = quiet("reg")
         .args([
             "query",
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",

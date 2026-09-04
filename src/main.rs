@@ -176,7 +176,23 @@ fn main() {
         );
     }
 
-    ui.run().expect("event loop failed");
+    // run() spins the loop only until the last window is hidden, so parking
+    // the window in the tray would end it. Slint counts its own tray icons
+    // as keeping the loop alive, but not the tray-icon crate's, so the
+    // until_quit loop is what keeps the process around; the tray's Exit
+    // item and the update restart both call quit_event_loop().
+    #[cfg(windows)]
+    let park_in_tray = tray.is_some();
+    #[cfg(not(windows))]
+    let park_in_tray = false;
+
+    if park_in_tray {
+        ui.show().expect("failed to show the main window");
+        slint::run_event_loop_until_quit().expect("event loop failed");
+        let _ = ui.hide();
+    } else {
+        ui.run().expect("event loop failed");
+    }
     wa.send(wa::Cmd::Shutdown);
     single::release_single_instance();
 }
