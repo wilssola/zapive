@@ -3414,6 +3414,9 @@ export component CallWindow inherits Window {
     if root.has-remote-video: Rectangle {
         width: parent.width;
         height: 110px;
+        // Without an explicit y a child is centred, which put this
+        // gradient's hard edge across the middle of the picture.
+        y: 0;
         background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
     }
     if root.has-remote-video: Rectangle {
