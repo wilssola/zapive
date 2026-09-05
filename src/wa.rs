@@ -345,9 +345,9 @@ async fn run_call(
         }
         return;
     }
-    // Whether the media plane ever came up. Without it the call never
-    // reached the peer at all, which is a different ending from a call
-    // that connected and then hung up.
+    // Whether the media plane ever came up. It does not say whether the
+    // offer reached the peer -- a call that rang and went unanswered
+    // never gets here either -- so it is a diagnostic, not a verdict.
     let connected = Arc::new(AtomicBool::new(false));
     let events = handle.events();
     let watched = id.clone();
@@ -418,14 +418,11 @@ async fn run_call(
     {
         *live = None;
     }
-    // The offer went out but the server never came back with a relay (or
-    // it did and the peer never picked up before the setup timed out), so
-    // nothing ever rang on the other side. Saying "call ended" for that
-    // hides the failure; name it instead.
-    if outgoing && !connected.load(Ordering::SeqCst) {
-        log::warn!("[call] {id} ended before the media plane came up; the peer was never reached");
-        fail_call(&t("call.noRelay"));
-        return;
+    // A call the peer let ring out ends here too, so this is not a
+    // failure to report -- but it is the line that separates "nobody
+    // answered" from "the media never connected" when reading the log.
+    if !connected.load(Ordering::SeqCst) {
+        log::info!("[call] {id} ended without the media plane coming up");
     }
     let ended = id.clone();
     ui_apply(move |b| b.on_call_status(&ended, "terminate"));
