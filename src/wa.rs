@@ -307,7 +307,7 @@ async fn run_call(
     // never stalls on a full channel, and surface the terminal ones.
     // The user hung up while the handshake was still running.
     if CANCEL_PENDING.swap(false, Ordering::SeqCst) {
-        handle.hangup().await;
+        handle.hangup_local().await;
         return;
     }
     let events = handle.events();
@@ -608,11 +608,6 @@ impl EventHandler for Pump {
                 if !name.is_empty() {
                     ui_apply(move |b| b.on_contact(&jid, &name));
                 }
-            }
-            Event::PushNameUpdate(u) => {
-                let jid = u.jid.to_non_ad_string();
-                let name = u.new_push_name.clone();
-                ui_apply(move |b| b.on_push_name(&jid, &name));
             }
             _ => {}
         }
@@ -1230,7 +1225,7 @@ async fn executor(
                     {
                         eprintln!("[wa] call terminate failed: {e}");
                     }
-                    live.handle.hangup().await;
+                    live.handle.hangup_local().await;
                 });
             }
             Cmd::SetCallVideo(on) => {
@@ -1284,12 +1279,19 @@ async fn executor(
                 });
             }
             Cmd::SetCallMuted(muted) => {
-                if let Ok(live) = LIVE_CALL.lock()
-                    && let Some(call) = live.as_ref()
-                {
-                    call.handle.set_muted(muted);
-                    call.muted.store(muted, Ordering::SeqCst);
-                }
+                // set_muted announces <mute_v2> to the peer, so it has to be
+                // awaited; the capture side reads the flag either way.
+                let live = LIVE_CALL
+                    .lock()
+                    .ok()
+                    .and_then(|live| live.as_ref().map(|c| (c.handle.clone(), c.muted.clone())));
+                let Some((handle, flag)) = live else { continue };
+                flag.store(muted, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    if let Err(e) = handle.set_muted(muted).await {
+                        eprintln!("[wa] the peer was not told about the mute: {e}");
+                    }
+                });
             }
             Cmd::FetchChannel(jid) => {
                 let client = session.client.clone();
@@ -1648,7 +1650,7 @@ async fn executor(
                 if let Some(live) = take_live() {
                     let _ =
                         session.client.voip().terminate(&live.id, &live.peer, &live.creator).await;
-                    live.handle.hangup().await;
+                    live.handle.hangup_local().await;
                 }
                 session.client.disconnect().await;
                 return;

@@ -1090,11 +1090,6 @@ impl Bridge {
         self.schedule_refresh_chats();
     }
 
-    pub fn on_push_name(&mut self, jid: &str, name: &str) {
-        self.store.upsert_contact(&normalize_jid(jid), None, Some(name));
-        self.schedule_refresh_chats();
-    }
-
     // The just-sent message flows through the normal pipeline; the later
     // echo from the server is deduplicated by id in the store.
     pub fn echo_sent(&mut self, jid: &str, id: &str, message: wa::Message) {

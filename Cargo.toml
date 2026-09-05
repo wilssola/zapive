@@ -16,12 +16,20 @@ slint = { version = "1.17", default-features = false, features = [
     "accessibility",
     "compat-1-2",
 ] }
-# default features pull in `simd`, which needs nightly (portable_simd); pick the
-# stable set explicitly instead.
+# The feature set is picked explicitly rather than taken from the defaults,
+# which carry `tokio-native` this build does not need.
 # `voip-mlow` brings the call media plane (relay transport + the pure-Rust
 # MLOW codec). `voip-libopus` is deliberately left out: it links C libopus,
 # and the PCM path already encodes with MLOW.
-whatsapp-rust = { version = "=0.7.0", default-features = false, features = [
+# Pinned to a git rev, not 0.7.0: the released video `<offer>` sends
+# `enc="h264" dec="h264" orientation="0"`, and WhatsApp's own `<video>`
+# reader takes only `h.264`/`H264` and has no `orientation` attribute at
+# all -- so it discarded the child, acked the offer and never rang the
+# callee, while an audio offer to the same contact went through. Upstream
+# 6966ddc rebuilt the node against that reader, and 310b969b added the
+# RTCP PLI that recovers a torn picture; move back to crates.io once a
+# release carries both.
+whatsapp-rust = { git = "https://github.com/jlucaso1/whatsapp-rust", rev = "310b969be8bfbf5279f3df360d2d97d594f6a958", default-features = false, features = [
     "signal",
     "sqlite-storage",
     "tokio-transport",
@@ -33,9 +41,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 image = "0.25"
 qrcode = "0.14"
 sys-locale = "0.3"
-# Must resolve to the same libsqlite3-sys (0.37) that whatsapp-rust's
+# Must resolve to the same libsqlite3-sys (0.38) that whatsapp-rust's
 # diesel links, or cargo refuses the duplicate native sqlite3.
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 aes-gcm = "0.10"
 scrypt = { version = "0.11", default-features = false }
 rand = "0.9"
