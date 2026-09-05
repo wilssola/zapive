@@ -320,6 +320,13 @@ async fn run_call(
     // The user hung up while the handshake was still running.
     if CANCEL_PENDING.swap(false, Ordering::SeqCst) {
         handle.hangup_local().await;
+        // The entry above is this call's; leaving it behind would make
+        // the next hangup reach for a call that is already gone.
+        if let Ok(mut live) = LIVE_CALL.lock()
+            && live.as_ref().is_some_and(|call| call.id == id)
+        {
+            *live = None;
+        }
         return;
     }
     let events = handle.events();
