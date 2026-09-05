@@ -403,9 +403,10 @@ impl RemoteVideo {
 
 // The peer announces its camera's rotation in quarter turns and sends the
 // picture the way its sensor saw it, so turning it upright is the
-// receiver's job. One quarter turn means counter-clockwise and three
-// means clockwise, the way whatsapp-rust's own reference player reads the
-// field (`transpose=cclock` / `transpose=clock`).
+// receiver's job. Clockwise: an Android peer announcing 90deg arrives
+// needing a quarter turn that way, and taking the other one leaves the
+// room upside down. (whatsapp-rust's ffplay example reads the field the
+// other way round; it does not match what a phone actually sends.)
 fn upright(rgba: &[u8], w: usize, h: usize, quarters: u8) -> Decoded {
     // A quarter or three quarters of a turn swaps the two sides.
     let (dw, dh) = if quarters % 2 == 1 { (h, w) } else { (w, h) };
@@ -414,9 +415,9 @@ fn upright(rgba: &[u8], w: usize, h: usize, quarters: u8) -> Decoded {
         for x in 0..dw {
             // Where this pixel sat before the turn.
             let (sx, sy) = match quarters % 4 {
-                1 => (w - 1 - y, x),
+                1 => (y, h - 1 - x),
                 2 => (w - 1 - x, h - 1 - y),
-                _ => (y, h - 1 - x),
+                _ => (w - 1 - y, x),
             };
             let src = (sy * w + sx) * 4;
             let dst = (y * dw + x) * 4;
