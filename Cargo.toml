@@ -18,9 +18,11 @@ slint = { version = "1.17", default-features = false, features = [
 ] }
 # The feature set is picked explicitly rather than taken from the defaults,
 # which carry `tokio-native` this build does not need.
-# `voip-mlow` brings the call media plane (relay transport + the pure-Rust
-# MLOW codec). `voip-libopus` is deliberately left out: it links C libopus,
-# and the PCM path already encodes with MLOW.
+# `voip-mlow` is the pure-Rust MLOW codec and `voip-relay-native` the UDP
+# socket, DTLS and SCTP the media rides on -- separate features, so taking
+# only the codec leaves a client that signals a call and then cannot carry
+# it. `voip-libopus` is deliberately left out: it links C libopus, and the
+# PCM path already encodes with MLOW.
 # Pinned to a git rev, not 0.7.0: the released video `<offer>` sends
 # `enc="h264" dec="h264" orientation="0"`, and WhatsApp's own `<video>`
 # reader takes only `h.264`/`H264` and has no `orientation` attribute at
@@ -36,6 +38,7 @@ whatsapp-rust = { git = "https://github.com/jlucaso1/whatsapp-rust", rev = "310b
     "tokio-runtime",
     "ureq-client",
     "voip-mlow",
+    "voip-relay-native",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 image = "0.25"
