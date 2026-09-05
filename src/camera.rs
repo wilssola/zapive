@@ -50,7 +50,7 @@ pub fn cameras() -> Vec<CameraOption> {
             .map(|info| CameraOption { name: info.human_name(), index: info.index().clone() })
             .collect(),
         Err(e) => {
-            eprintln!("[camera] cannot list devices: {e}");
+            log::warn!("[camera] cannot list devices: {e}");
             Vec::new()
         }
     }
@@ -137,13 +137,13 @@ fn capture(
     let mut camera = match nokhwa::Camera::new(index, wanted) {
         Ok(camera) => camera,
         Err(e) => {
-            eprintln!("[camera] cannot open: {e}");
+            log::error!("[camera] cannot open: {e}");
             let _ = ready.send(false);
             return;
         }
     };
     if let Err(e) = camera.open_stream() {
-        eprintln!("[camera] cannot start the stream: {e}");
+        log::error!("[camera] cannot start the stream: {e}");
         let _ = ready.send(false);
         return;
     }
@@ -169,7 +169,7 @@ fn capture(
     ) {
         Ok(encoder) => encoder,
         Err(e) => {
-            eprintln!("[camera] cannot start the encoder: {e}");
+            log::error!("[camera] cannot start the encoder: {e}");
             let _ = ready.send(false);
             return;
         }

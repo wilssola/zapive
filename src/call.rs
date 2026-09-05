@@ -205,10 +205,10 @@ fn run_devices(
     let input = build_input(mic_tx, muted, &chosen.mic);
     let output = build_output(spk_rx, &chosen.speaker);
     if input.is_none() {
-        eprintln!("[call] no microphone; the peer will hear silence");
+        log::warn!("[call] no microphone; the peer will hear silence");
     }
     if output.is_none() {
-        eprintln!("[call] no speaker; the peer cannot be heard");
+        log::warn!("[call] no speaker; the peer cannot be heard");
     }
     let _ = ready.send(input.is_some() || output.is_some());
     if input.is_none() && output.is_none() {
@@ -253,7 +253,7 @@ fn build_input(
                     }
                 }
             },
-            |e| eprintln!("[call] microphone stream error: {e}"),
+            |e| log::warn!("[call] microphone stream error: {e}"),
             None,
         )
         .ok()?;
@@ -291,7 +291,7 @@ fn build_output(
                     }
                 }
             },
-            |e| eprintln!("[call] speaker stream error: {e}"),
+            |e| log::warn!("[call] speaker stream error: {e}"),
             None,
         )
         .ok()?;
@@ -387,7 +387,7 @@ impl Ringer {
                         }
                     }
                 },
-                |e| eprintln!("[call] ringtone stream error: {e}"),
+                |e| log::warn!("[call] ringtone stream error: {e}"),
                 None,
             )
             .ok()?;

@@ -255,7 +255,7 @@ fn open_video() -> Option<(crate::camera::CameraFeed, async_channel::Sender<Vide
         .name("zapive-video-decode".into())
         .spawn(move || {
             let Some(mut remote) = crate::camera::RemoteVideo::new() else {
-                eprintln!("[call] no H.264 decoder; peer video will not show");
+                log::error!("[call] no H.264 decoder; peer video will not show");
                 return;
             };
             // Every access unit must be decoded to keep the reference
@@ -269,7 +269,7 @@ fn open_video() -> Option<(crate::camera::CameraFeed, async_channel::Sender<Vide
             }
         });
     if let Err(e) = spawned {
-        eprintln!("[call] cannot start the video decoder: {e}");
+        log::error!("[call] cannot start the video decoder: {e}");
         return None;
     }
     Some((camera, sink_tx))
@@ -320,13 +320,13 @@ async fn run_call(
                     ui_apply(move |b| b.on_call_media_ready(&id));
                 }
                 CallEvent::RelayAllocateFailed(code) => {
-                    eprintln!("[call] relay refused the allocate ({code})");
+                    log::warn!("[call] relay refused the allocate ({code})");
                 }
                 CallEvent::RelayAllocateTimedOut | CallEvent::RelayReconnectTimedOut => {
-                    eprintln!("[call] relay went unresponsive");
+                    log::warn!("[call] relay went unresponsive");
                 }
                 CallEvent::AudioFormatMismatch { expected_rate, .. } => {
-                    eprintln!("[call] peer picked a rate other than {expected_rate}");
+                    log::warn!("[call] peer picked a rate other than {expected_rate}");
                 }
                 // The peer wants to add video, or has answered our own
                 // request. A request is parked until the user agrees: the
@@ -1124,13 +1124,13 @@ async fn executor(
                     // generation, which a bare id cannot reconstruct.
                     if let Some(offer) = take_offer(&id) {
                         if let Err(e) = client.voip().reject(&offer).await {
-                            eprintln!("[wa] call reject failed: {e}");
+                            log::warn!("[wa] call reject failed: {e}");
                         }
                         return;
                     }
                     let Some(peer) = parse_jid(&from) else { return };
                     if let Err(e) = client.voip().reject_call(&id, &peer, &peer).await {
-                        eprintln!("[wa] call reject failed: {e}");
+                        log::warn!("[wa] call reject failed: {e}");
                     }
                 });
             }
@@ -1146,7 +1146,7 @@ async fn executor(
                         // No devices means no call; decline rather than
                         // leave the caller listening to nothing.
                         if let Err(e) = client.voip().reject(&offer).await {
-                            eprintln!("[wa] call reject failed: {e}");
+                            log::warn!("[wa] call reject failed: {e}");
                         }
                         fail_call(&t("call.noDevices"));
                         return;
@@ -1165,7 +1165,7 @@ async fn executor(
                             run_call(handle, audio, vision.map(|(c, _)| c), false).await;
                         }
                         Err(e) => {
-                            eprintln!("[wa] call accept failed: {e}");
+                            log::error!("[wa] call accept failed: {e}");
                             fail_call(&t("call.failed"));
                         }
                     }
@@ -1193,16 +1193,21 @@ async fn executor(
                     if let Some((camera, sink)) = &vision {
                         builder = builder.video(camera.source(), sink.clone());
                     }
+                    log::info!(
+                        "[wa] placing a {} call to {peer}",
+                        if vision.is_some() { "video" } else { "voice" }
+                    );
                     match builder.start().await {
                         Ok(handle) => {
                             // The call id is minted here, so the screen
                             // only learns it now.
                             let id = handle.call_id().to_string();
+                            log::info!("[wa] offer sent for call {id}; waiting for the relay");
                             ui_apply(move |b| b.on_outgoing_call(&id));
                             run_call(handle, audio, vision.map(|(c, _)| c), true).await;
                         }
                         Err(e) => {
-                            eprintln!("[wa] outgoing call failed: {e}");
+                            log::error!("[wa] outgoing call failed: {e}");
                             fail_call(&t("call.failed"));
                         }
                     }
@@ -1223,7 +1228,7 @@ async fn executor(
                     if let Err(e) =
                         client.voip().terminate(&live.id, &live.peer, &live.creator).await
                     {
-                        eprintln!("[wa] call terminate failed: {e}");
+                        log::warn!("[wa] call terminate failed: {e}");
                     }
                     live.handle.hangup_local().await;
                 });
@@ -1237,7 +1242,7 @@ async fn executor(
                 tokio::spawn(async move {
                     if !on {
                         if let Err(e) = handle.stop_video().await {
-                            eprintln!("[wa] stopping video failed: {e}");
+                            log::warn!("[wa] stopping video failed: {e}");
                         }
                         if let Ok(mut live) = LIVE_CALL.lock()
                             && let Some(call) = live.as_mut()
@@ -1266,7 +1271,7 @@ async fn executor(
                         None => handle.start_video(camera.source(), sink.clone()).await,
                     };
                     if let Err(e) = started {
-                        eprintln!("[wa] starting video failed: {e}");
+                        log::error!("[wa] starting video failed: {e}");
                         fail_call(&t("call.noCamera"));
                         return;
                     }
@@ -1289,7 +1294,7 @@ async fn executor(
                 flag.store(muted, Ordering::SeqCst);
                 tokio::spawn(async move {
                     if let Err(e) = handle.set_muted(muted).await {
-                        eprintln!("[wa] the peer was not told about the mute: {e}");
+                        log::warn!("[wa] the peer was not told about the mute: {e}");
                     }
                 });
             }

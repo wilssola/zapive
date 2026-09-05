@@ -8,6 +8,7 @@ mod bridge;
 mod call;
 mod camera;
 mod i18n;
+mod logging;
 mod markup;
 mod media;
 mod video;
@@ -29,6 +30,7 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn main() {
     paths::ensure_dirs();
+    logging::install();
     if !single::claim_single_instance() {
         println!("another instance is running; raising it instead");
         return;
