@@ -276,6 +276,26 @@ fn audio_selftest() {
     let _ = std::fs::remove_file(&tmp);
 }
 
+// The NAL types in one Annex-B access unit, in order.
+fn nal_types(au: &[u8]) -> Vec<u8> {
+    let mut types = Vec::new();
+    let mut i = 0;
+    while i + 3 < au.len() {
+        let short = au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1;
+        let long = au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 0 && au[i + 3] == 1;
+        if short || long {
+            let start = i + if short { 3 } else { 4 };
+            if let Some(&first) = au.get(start) {
+                types.push(first & 0x1f);
+            }
+            i = start;
+        } else {
+            i += 1;
+        }
+    }
+    types
+}
+
 // Mirrors what a video call does, in the same order, so a camera that
 // only fails inside the app shows the same failure here.
 fn video_selftest() {
@@ -295,11 +315,13 @@ fn video_selftest() {
     println!("[selftest] opening camera {:?} on a worker thread", wanted);
     let frames = Arc::new(AtomicU32::new(0));
     let bytes = Arc::new(AtomicU32::new(0));
+    let keys = Arc::new(AtomicU32::new(0));
     let opened = std::time::Instant::now();
     let (done_tx, done_rx) = std::sync::mpsc::channel::<Option<()>>();
     {
         let frames = frames.clone();
         let bytes = bytes.clone();
+        let keys = keys.clone();
         std::thread::spawn(move || {
             let previews = Arc::new(AtomicU32::new(0));
             let seen = previews.clone();
@@ -314,13 +336,55 @@ fn video_selftest() {
                 return;
             };
             let _ = done_tx.send(Some(()));
-            let source = feed.source();
+            use whatsapp_rust::voip::VideoSource as _;
+            let source = feed.source().timed_frames().expect("the camera is timestamped");
+            // The engine answers a shortfall by asking for an IDR; whether the
+            // encoder actually turns that request into one, and how fast, is
+            // the thing a byte count never showed.
+            let asked = std::sync::Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
+            {
+                let asked = asked.clone();
+                let feed = feed.clone_switch();
+                std::thread::spawn(move || {
+                    for _ in 0..6 {
+                        std::thread::sleep(std::time::Duration::from_millis(440));
+                        *asked.lock().unwrap() = Some(std::time::Instant::now());
+                        feed.request();
+                    }
+                });
+            }
             let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
             while std::time::Instant::now() < until {
                 match source.recv_blocking() {
-                    Ok(au) => {
-                        frames.fetch_add(1, Ordering::Relaxed);
+                    Ok(frame) => {
+                        let au = frame.data;
+                        let n = frames.fetch_add(1, Ordering::Relaxed);
                         bytes.fetch_add(au.len() as u32, Ordering::Relaxed);
+                        // The engine drops every unit until one it reads as a
+                        // keyframe reaches it, so what it makes of ours is the
+                        // question a byte count cannot answer.
+                        // `keyframe` is true for a parameter set alone; the
+                        // send path needs an IDR SLICE (NAL type 5), and
+                        // nothing else clears its keyframe requirement.
+                        let types = nal_types(&au);
+                        if types.contains(&5) {
+                            keys.fetch_add(1, Ordering::Relaxed);
+                        }
+                        if types.contains(&5)
+                            && let Some(at) = asked.lock().unwrap().take()
+                        {
+                            println!(
+                                "[selftest] IDR {:?} after the request",
+                                at.elapsed()
+                            );
+                        }
+                        if n < 3 {
+                            println!(
+                                "[selftest] unit {n}: {} bytes, NAL types {types:?}, has IDR {}",
+                                au.len(),
+                                types.contains(&5)
+                            );
+                        }
                     }
                     Err(_) => break,
                 }
@@ -343,8 +407,9 @@ fn video_selftest() {
     std::thread::sleep(std::time::Duration::from_secs(4));
     let count = frames.load(Ordering::Relaxed);
     println!(
-        "[selftest] {count} access units, {} bytes total",
-        bytes.load(Ordering::Relaxed)
+        "[selftest] {count} access units, {} bytes total, {} carrying an IDR slice",
+        bytes.load(Ordering::Relaxed),
+        keys.load(Ordering::Relaxed)
     );
     if count == 0 {
         println!("[selftest] FAIL: the encoder produced nothing");

@@ -353,6 +353,10 @@ async fn run_call(
     let watched = id.clone();
     let allocated = connected.clone();
     tokio::spawn(async move {
+        // Said once: the peer reports on a cadence, and the fact is
+        // whether it ever happened, not how often.
+        let mut seen_video_report = false;
+        let mut reports = 0u32;
         while let Ok(event) = events.recv().await {
             match event {
                 CallEvent::RelayAllocated => {
@@ -366,6 +370,11 @@ async fn run_call(
                 CallEvent::RelayAllocateTimedOut | CallEvent::RelayReconnectTimedOut => {
                     log::warn!("[call] relay went unresponsive");
                 }
+                // A reconnect clears the send queue and holds video back
+                // until the next IDR, without counting what it discarded.
+                CallEvent::MediaSetupFailed(reason) => {
+                    log::warn!("[call] media setup failed: {reason}");
+                }
                 CallEvent::AudioFormatMismatch { expected_rate, .. } => {
                     log::warn!("[call] peer picked a rate other than {expected_rate}");
                 }
@@ -373,6 +382,7 @@ async fn run_call(
                 // request. A request is parked until the user agrees: the
                 // camera must never come on by itself.
                 CallEvent::VideoStateChanged { state, upgrade_token, .. } => {
+                    log::info!("[call] the peer's video state is now {state:?}");
                     if state.is_upgrade_request() {
                         if let Ok(mut live) = LIVE_CALL.lock()
                             && let Some(call) = live.as_mut()
@@ -395,10 +405,44 @@ async fn run_call(
                 // cannot start without one. Until it arrives the engine
                 // drops every frame we hand it.
                 CallEvent::VideoKeyframeNeeded => {
+                    log::info!("[call] the engine wants an IDR from our encoder");
                     if let Ok(live) = LIVE_CALL.lock()
                         && let Some(camera) = live.as_ref().and_then(|c| c.camera.as_ref())
                     {
                         camera.request_keyframe();
+                    }
+                }
+                // The relay could not take what we produced, so the peer
+                // sees a gap we caused.
+                CallEvent::OutboundMediaDropped { video_access_units, packets } => {
+                    log::warn!(
+                        "[call] the relay shed {video_access_units} access unit(s) and {packets} packet(s)"
+                    );
+                }
+                // What the peer says back is the only account from outside
+                // this process of whether our streams are landing: it names
+                // the SSRCs it is reporting on, so a video SSRC that never
+                // appears means our picture is not arriving. Logged in full
+                // for the first few, then only on the first video mention.
+                CallEvent::RtcpReceived {
+                    reports_video,
+                    reports_audio,
+                    referenced_ssrcs,
+                    packet_types,
+                    ..
+                } => {
+                    if reports < 15 {
+                        reports += 1;
+                        log::info!(
+                            "[call] peer rtcp {packet_types:?} about {referenced_ssrcs:?} (audio {reports_audio}, video {reports_video})"
+                        );
+                    }
+                    if !seen_video_report && reports_video {
+                        seen_video_report = true;
+                        log::info!(
+                            "[call] the peer reports on our video ({} ssrc(s), rtcp {packet_types:?})",
+                            referenced_ssrcs.len()
+                        );
                     }
                 }
                 _ => {}
@@ -577,7 +621,7 @@ impl EventHandler for Pump {
                         // Answering needs the offer itself (the encrypted
                         // callKey and the relay live on it), so park it
                         // until the user picks up or it goes stale.
-                        stash_offer(&id, call.clone());
+                        stash_offer(&id, (**call).clone());
                         ui_apply(move |b| b.on_incoming_call(&id, &from, video, group, ts));
                     }
                     CallAction::Accept { .. } => {
@@ -801,7 +845,7 @@ async fn executor(
                             use whatsapp_rust::proto_helpers::MessageExt as _;
                             let id = sent.message_id;
                             let echoed = message.prepare_for_forward();
-                            ui_apply(move |b| b.echo_sent(&jid, &id, *echoed));
+                            ui_apply(move |b| b.echo_sent(&jid, &id, echoed));
                         }
                         Err(e) => eprintln!("[wa] forward failed: {e}"),
                     }

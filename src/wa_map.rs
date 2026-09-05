@@ -298,7 +298,7 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         return None;
     }
     if !info.push_name.is_empty() {
-        store.contacts.insert(author.clone(), info.push_name.clone());
+        store.contacts.insert(author.clone(), info.push_name.to_string());
     }
     let content = {
         use whatsapp_rust::proto_helpers::MessageExt as _;
@@ -317,7 +317,7 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         return None;
     };
     Some(StoredMessage {
-        id: info.id.clone(),
+        id: info.id.to_string(),
         jid: author.clone(),
         kind,
         text,

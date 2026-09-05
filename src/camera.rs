@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use whatsapp_rust::async_channel;
 
+use whatsapp_rust::voip::{TimedVideoFrame, VideoSource};
+
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{
     CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
@@ -69,10 +71,32 @@ fn index_for(name: Option<&str>) -> CameraIndex {
 // The call side of the camera: encoded access units plus the switch that
 // stops the capture thread.
 pub struct CameraFeed {
-    frames: async_channel::Receiver<Vec<u8>>,
+    frames: async_channel::Receiver<TimedVideoFrame>,
     stop: Arc<AtomicBool>,
     // Bumped by the call when the peer asks for a keyframe.
     force_key: Arc<AtomicBool>,
+}
+
+// The camera as the call reads it. Every unit carries the 90 kHz instant it
+// was captured at, which is the whole point: on the plain channel the RTP
+// clock advances one stride per unit the engine ACCEPTS, so each one it
+// drops -- and it drops every delta while it waits on an IDR -- leaves our
+// video timeline further behind the audio it is played against.
+pub struct CameraSource(async_channel::Receiver<TimedVideoFrame>);
+
+impl VideoSource for CameraSource {
+    // Unused: a source offers one channel or the other, never both.
+    fn frames(&self) -> async_channel::Receiver<Vec<u8>> {
+        async_channel::bounded(1).1
+    }
+
+    fn timed_frames(&self) -> Option<async_channel::Receiver<TimedVideoFrame>> {
+        Some(self.0.clone())
+    }
+
+    fn rtp_timestamp_stride(&self) -> u32 {
+        90_000 / FPS
+    }
 }
 
 impl CameraFeed {
@@ -84,7 +108,7 @@ impl CameraFeed {
     ) -> Option<CameraFeed> {
         // Two frames of slack: video is loss tolerant and a deep queue only
         // buys latency.
-        let (tx, rx) = async_channel::bounded::<Vec<u8>>(2);
+        let (tx, rx) = async_channel::bounded::<TimedVideoFrame>(2);
         let stop = Arc::new(AtomicBool::new(false));
         let force_key = Arc::new(AtomicBool::new(false));
         let index = index_for(device);
@@ -104,13 +128,28 @@ impl CameraFeed {
         Some(CameraFeed { frames: rx, stop, force_key })
     }
 
-    pub fn source(&self) -> async_channel::Receiver<Vec<u8>> {
-        self.frames.clone()
+    pub fn source(&self) -> CameraSource {
+        CameraSource(self.frames.clone())
     }
 
     // The peer lost the picture and wants a fresh IDR.
     pub fn request_keyframe(&self) {
         self.force_key.store(true, Ordering::Relaxed);
+    }
+
+    // Just the keyframe switch, for a probe that has to ask from another
+    // thread without holding the feed itself.
+    pub fn clone_switch(&self) -> KeyframeSwitch {
+        KeyframeSwitch(self.force_key.clone())
+    }
+}
+
+// The keyframe switch on its own.
+pub struct KeyframeSwitch(Arc<AtomicBool>);
+
+impl KeyframeSwitch {
+    pub fn request(&self) {
+        self.0.store(true, Ordering::Relaxed);
     }
 }
 
@@ -123,7 +162,7 @@ impl Drop for CameraFeed {
 
 fn capture(
     index: CameraIndex,
-    tx: async_channel::Sender<Vec<u8>>,
+    tx: async_channel::Sender<TimedVideoFrame>,
     stop: Arc<AtomicBool>,
     force_key: Arc<AtomicBool>,
     preview: impl Fn(Decoded),
@@ -179,9 +218,18 @@ fn capture(
     let interval = std::time::Duration::from_micros(1_000_000 / FPS as u64);
     let mut since_keyframe = 0u32;
     let mut rgb: Vec<u8> = Vec::new();
+    // What the encoder actually handed over, reported when the camera
+    // closes: the counterpart to the peer's RTCP, so a call where the
+    // peer saw nothing says which side of the wire went quiet.
+    let (mut produced, mut refused) = (0u32, 0u32);
+    // The 90 kHz clock the peer plays our video against. Measured from the
+    // frame the camera just handed over, not from when the encoder finished
+    // with it, so a slow encode shifts nothing.
+    let origin = std::time::Instant::now();
     while !stop.load(Ordering::SeqCst) {
         let started = std::time::Instant::now();
         let Ok(buffer) = camera.frame() else { continue };
+        let captured = ticks_90khz(origin.elapsed());
         let source = buffer.resolution();
         if !to_rgb(buffer.buffer(), buffer.source_frame_format(), source, w, h, &mut rgb) {
             continue;
@@ -195,9 +243,13 @@ fn capture(
         if let Ok(bitstream) = encoder.encode(&yuv) {
             let au = bitstream.to_vec();
             if !au.is_empty() {
+                produced += 1;
                 // A full channel means the relay is behind; dropping the
                 // frame is what video is supposed to do.
-                let _ = tx.try_send(au);
+                let frame = TimedVideoFrame { data: au, timestamp: captured };
+                if tx.try_send(frame).is_err() {
+                    refused += 1;
+                }
             }
         }
         since_keyframe += 1;
@@ -206,6 +258,13 @@ fn capture(
             std::thread::sleep(rest);
         }
     }
+    log::info!("[camera] encoded {produced} access unit(s), {refused} the call would not take");
+}
+
+// A duration on the 90 kHz RTP video clock. Wraps, which is what the
+// field does too.
+fn ticks_90khz(since: std::time::Duration) -> u32 {
+    ((since.as_micros() as u64).saturating_mul(90) / 1_000) as u32
 }
 
 // Whatever the webcam speaks, cropped to `w`x`h` and written as RGB8.

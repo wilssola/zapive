@@ -31,7 +31,7 @@ slint = { version = "1.17", default-features = false, features = [
 # 6966ddc rebuilt the node against that reader, and 310b969b added the
 # RTCP PLI that recovers a torn picture; move back to crates.io once a
 # release carries both.
-whatsapp-rust = { git = "https://github.com/jlucaso1/whatsapp-rust", rev = "310b969be8bfbf5279f3df360d2d97d594f6a958", default-features = false, features = [
+whatsapp-rust = { git = "https://github.com/jlucaso1/whatsapp-rust", rev = "a5671942b3ed23a585e5bd9f75ab67b22e7ae460", default-features = false, features = [
     "signal",
     "sqlite-storage",
     "tokio-transport",
