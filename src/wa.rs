@@ -17,7 +17,7 @@ use whatsapp_rust::async_channel;
 use whatsapp_rust::types::call::{CallAction, ElsewhereOutcome, IncomingCall};
 use whatsapp_rust::types::events::{Event, EventHandler};
 use whatsapp_rust::types::presence::ReceiptType;
-use whatsapp_rust::voip::{CallHandle, VideoFrame, VideoUpgradeToken};
+use whatsapp_rust::voip::{CallHandle, KeyframeUrgency, VideoFrame, VideoUpgradeToken};
 use whatsapp_rust::waproto::whatsapp as wa;
 
 // After this many unclean drops in a row the retry loop stops and the
@@ -254,7 +254,12 @@ async fn open_camera() -> Option<(crate::camera::CameraFeed, async_channel::Send
 // thread that pushes finished pictures at the call screen.
 fn open_video() -> Option<(crate::camera::CameraFeed, async_channel::Sender<VideoFrame>)> {
     use crate::camera::{PREVIEW_BUSY, REMOTE_BUSY};
-    let (sink_tx, sink_rx) = async_channel::bounded::<VideoFrame>(2);
+    // Deep, unlike the capture side. The engine drops an access unit the
+    // sink cannot take, and a dropped unit is not one lost frame: every
+    // later frame is built on it, so the picture tears along a slice edge
+    // and stays torn until the next IDR. A few seconds of slack rides out
+    // a decode hiccup, and access units are kilobytes.
+    let (sink_tx, sink_rx) = async_channel::bounded::<VideoFrame>(64);
     let camera = crate::camera::CameraFeed::start(Some(&crate::call::devices().camera), |pic| {
         // One frame in flight at a time. Without this a UI thread that
         // falls behind would queue megabytes of RGBA per second.
@@ -273,7 +278,18 @@ fn open_video() -> Option<(crate::camera::CameraFeed, async_channel::Sender<Vide
             // Every access unit must be decoded to keep the reference
             // frames intact; only the handoff to the UI is skippable.
             while let Ok(frame) = sink_rx.recv_blocking() {
-                let Some(pic) = remote.decode(&frame) else { continue };
+                let picture = remote.decode(&frame);
+                // The decoder has nothing to build on and cannot fix that
+                // by itself: only an IDR from the peer restarts it. The
+                // engine throttles, so asking on every loss is the way
+                // this is meant to be used.
+                if remote.take_lost()
+                    && let Ok(live) = LIVE_CALL.lock()
+                    && let Some(call) = live.as_ref()
+                {
+                    call.handle.request_peer_keyframe(KeyframeUrgency::Immediate);
+                }
+                let Some(pic) = picture else { continue };
                 if REMOTE_BUSY.swap(true, Ordering::AcqRel) {
                     continue;
                 }
@@ -374,10 +390,11 @@ async fn run_call(
                         ui_apply(move |b| b.on_call_peer_video(&id, true));
                     }
                 }
-                // A peer that lost the picture asks for a fresh IDR.
-                CallEvent::RtcpReceived { packet_types, .. }
-                    if packet_types.contains(&206) || packet_types.contains(&205) =>
-                {
+                // Our own encoder has to produce an IDR: the peer asked
+                // for one over RTCP, or the engine has outbound video it
+                // cannot start without one. Until it arrives the engine
+                // drops every frame we hand it.
+                CallEvent::VideoKeyframeNeeded => {
                     if let Ok(live) = LIVE_CALL.lock()
                         && let Some(camera) = live.as_ref().and_then(|c| c.camera.as_ref())
                     {

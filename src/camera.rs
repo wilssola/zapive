@@ -345,6 +345,10 @@ pub struct RemoteVideo {
     started: bool,
     // The rotation last announced, so a turn is logged once.
     turned: u8,
+    // Set whenever the decoder is left with nothing to build on: before
+    // the first keyframe, and after a unit it could not decode. Only a
+    // fresh IDR clears it, and only the peer can send one.
+    lost: bool,
     // Scratch for the rotating path; the upright path writes straight
     // into the buffer it hands over.
     rgba: Vec<u8>,
@@ -353,19 +357,34 @@ pub struct RemoteVideo {
 impl RemoteVideo {
     pub fn new() -> Option<RemoteVideo> {
         let decoder = openh264::decoder::Decoder::new().ok()?;
-        Some(RemoteVideo { decoder, started: false, turned: 0, rgba: Vec::new() })
+        Some(RemoteVideo { decoder, started: false, turned: 0, lost: true, rgba: Vec::new() })
+    }
+
+    // True once for each time the decoder was left without a reference
+    // chain, so the caller can ask the peer for a keyframe.
+    pub fn take_lost(&mut self) -> bool {
+        std::mem::take(&mut self.lost)
     }
 
     // None while the stream has yet to produce a displayable picture.
     pub fn decode(&mut self, frame: &whatsapp_rust::voip::VideoFrame) -> Option<Decoded> {
         if !self.started {
             if !frame.keyframe {
+                self.lost = true;
                 return None;
             }
             self.started = true;
         }
         use openh264::formats::YUVSource;
-        let yuv = self.decoder.decode(&frame.data).ok()??;
+        let yuv = match self.decoder.decode(&frame.data) {
+            Ok(picture) => picture?,
+            // The unit was refused, so the references the next frames are
+            // built on are gone; nothing local can rebuild them.
+            Err(_) => {
+                self.lost = true;
+                return None;
+            }
+        };
         if frame.orientation % 4 != self.turned {
             self.turned = frame.orientation % 4;
             log::info!("[call] the peer's camera is at {}deg", self.turned as u32 * 90);
