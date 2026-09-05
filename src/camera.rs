@@ -343,13 +343,17 @@ pub struct RemoteVideo {
     // Skips everything until the first keyframe; feeding a decoder
     // mid-GOP only produces garbage.
     started: bool,
-    rgb: Vec<u8>,
+    // The rotation last announced, so a turn is logged once.
+    turned: u8,
+    // Scratch for the rotating path; the upright path writes straight
+    // into the buffer it hands over.
+    rgba: Vec<u8>,
 }
 
 impl RemoteVideo {
     pub fn new() -> Option<RemoteVideo> {
         let decoder = openh264::decoder::Decoder::new().ok()?;
-        Some(RemoteVideo { decoder, started: false, rgb: Vec::new() })
+        Some(RemoteVideo { decoder, started: false, turned: 0, rgba: Vec::new() })
     }
 
     // None while the stream has yet to produce a displayable picture.
@@ -362,16 +366,44 @@ impl RemoteVideo {
         }
         use openh264::formats::YUVSource;
         let yuv = self.decoder.decode(&frame.data).ok()??;
-        let (w, h) = yuv.dimensions();
-        self.rgb.resize(w * h * 3, 0);
-        yuv.write_rgb8(&mut self.rgb);
-        let mut rgba = vec![0u8; w * h * 4];
-        for (pixel, src) in self.rgb.chunks_exact(3).enumerate() {
-            let dst = pixel * 4;
-            rgba[dst..dst + 3].copy_from_slice(src);
-            rgba[dst + 3] = 255;
+        if frame.orientation % 4 != self.turned {
+            self.turned = frame.orientation % 4;
+            log::info!("[call] the peer's camera is at {}deg", self.turned as u32 * 90);
         }
-        Some(Decoded { w: w as u32, h: h as u32, rgba })
+        let (w, h) = yuv.dimensions();
+        if frame.orientation % 4 == 0 {
+            let mut rgba = vec![0u8; w * h * 4];
+            yuv.write_rgba8(&mut rgba);
+            return Some(Decoded { w: w as u32, h: h as u32, rgba });
+        }
+        self.rgba.resize(w * h * 4, 0);
+        yuv.write_rgba8(&mut self.rgba);
+        Some(upright(&self.rgba, w, h, frame.orientation))
     }
+}
+
+// The peer announces its camera's rotation in quarter turns and sends the
+// picture the way its sensor saw it, so turning it upright is the
+// receiver's job. One quarter turn means counter-clockwise and three
+// means clockwise, the way whatsapp-rust's own reference player reads the
+// field (`transpose=cclock` / `transpose=clock`).
+fn upright(rgba: &[u8], w: usize, h: usize, quarters: u8) -> Decoded {
+    // A quarter or three quarters of a turn swaps the two sides.
+    let (dw, dh) = if quarters % 2 == 1 { (h, w) } else { (w, h) };
+    let mut out = vec![0u8; dw * dh * 4];
+    for y in 0..dh {
+        for x in 0..dw {
+            // Where this pixel sat before the turn.
+            let (sx, sy) = match quarters % 4 {
+                1 => (w - 1 - y, x),
+                2 => (w - 1 - x, h - 1 - y),
+                _ => (y, h - 1 - x),
+            };
+            let src = (sy * w + sx) * 4;
+            let dst = (y * dw + x) * 4;
+            out[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
+        }
+    }
+    Decoded { w: dw as u32, h: dh as u32, rgba: out }
 }
 
