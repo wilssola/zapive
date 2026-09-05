@@ -237,6 +237,18 @@ fn take_live() -> Option<LiveCall> {
 // down the moment it is connected.
 static CANCEL_PENDING: AtomicBool = AtomicBool::new(false);
 
+// The device opens (cpal and the camera) block until the driver answers,
+// which on Windows is routinely hundreds of milliseconds. Doing that on a
+// runtime worker steals it from the transport at exactly the moment the
+// offer needs to go out, so both run on the blocking pool.
+async fn open_audio() -> Option<crate::call::CallAudio> {
+    tokio::task::spawn_blocking(crate::call::CallAudio::start).await.ok().flatten()
+}
+
+async fn open_camera() -> Option<(crate::camera::CameraFeed, async_channel::Sender<VideoFrame>)> {
+    tokio::task::spawn_blocking(open_video).await.ok().flatten()
+}
+
 // Opens the camera and the decode side of a video call. The returned
 // sender goes to the voip facade; the receiver is drained by a decode
 // thread that pushes finished pictures at the call screen.
@@ -1142,7 +1154,7 @@ async fn executor(
                         fail_call(&t("call.gone"));
                         return;
                     };
-                    let Some(audio) = crate::call::CallAudio::start() else {
+                    let Some(audio) = open_audio().await else {
                         // No devices means no call; decline rather than
                         // leave the caller listening to nothing.
                         if let Err(e) = client.voip().reject(&offer).await {
@@ -1153,7 +1165,10 @@ async fn executor(
                     };
                     // Answering an audio-only offer with video is not on
                     // the table: the peer never offered to receive it.
-                    let vision = video.then(open_video).flatten();
+                    let vision = match video {
+                        true => open_camera().await,
+                        false => None,
+                    };
                     let voip = client.voip();
                     let mut builder = voip.accept(&offer).audio(audio.mic(), audio.speaker());
                     if let Some((camera, sink)) = &vision {
@@ -1179,11 +1194,14 @@ async fn executor(
                         fail_call(&t("call.failed"));
                         return;
                     };
-                    let Some(audio) = crate::call::CallAudio::start() else {
+                    let Some(audio) = open_audio().await else {
                         fail_call(&t("call.noDevices"));
                         return;
                     };
-                    let vision = video.then(open_video).flatten();
+                    let vision = match video {
+                        true => open_camera().await,
+                        false => None,
+                    };
                     if video && vision.is_none() {
                         fail_call(&t("call.noCamera"));
                         return;

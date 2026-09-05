@@ -60,7 +60,10 @@ fn main() {
 
     let rt = RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+            // Two was enough for messaging, but a call adds the relay
+            // socket, DTLS/SCTP and the media drive loop on top of the
+            // transport; starving those stalls the call setup.
+            .worker_threads(4)
             .enable_all()
             .build()
             .expect("failed to build the tokio runtime")
