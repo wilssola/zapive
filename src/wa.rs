@@ -329,12 +329,18 @@ async fn run_call(
         }
         return;
     }
+    // Whether the media plane ever came up. Without it the call never
+    // reached the peer at all, which is a different ending from a call
+    // that connected and then hung up.
+    let connected = Arc::new(AtomicBool::new(false));
     let events = handle.events();
     let watched = id.clone();
+    let allocated = connected.clone();
     tokio::spawn(async move {
         while let Ok(event) = events.recv().await {
             match event {
                 CallEvent::RelayAllocated => {
+                    allocated.store(true, Ordering::SeqCst);
                     let id = watched.clone();
                     ui_apply(move |b| b.on_call_media_ready(&id));
                 }
@@ -394,6 +400,15 @@ async fn run_call(
         && live.as_ref().is_some_and(|call| call.id == id)
     {
         *live = None;
+    }
+    // The offer went out but the server never came back with a relay (or
+    // it did and the peer never picked up before the setup timed out), so
+    // nothing ever rang on the other side. Saying "call ended" for that
+    // hides the failure; name it instead.
+    if outgoing && !connected.load(Ordering::SeqCst) {
+        log::warn!("[call] {id} ended before the media plane came up; the peer was never reached");
+        fail_call(&t("call.noRelay"));
+        return;
     }
     let ended = id.clone();
     ui_apply(move |b| b.on_call_status(&ended, "terminate"));

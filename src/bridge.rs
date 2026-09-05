@@ -2958,6 +2958,11 @@ impl Bridge {
         self.set_ring(None);
         self.call_timer.stop();
         let Some(call) = self.call.as_mut() else { return };
+        // A peer that declined, or a call already torn down, has its own
+        // outcome on screen; a late failure must not rewrite it.
+        if call.state == "ended" {
+            return;
+        }
         call.state = "ended";
         call.started = None;
         if let Some(win) = self.call_ui.as_ref() {
