@@ -31,6 +31,17 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 fn main() {
     paths::ensure_dirs();
     logging::install();
+
+    // Developer probe: walks the video-call path the way a real call
+    // does -- enumerate on this thread first (the way the Settings panel
+    // does), then open the camera on its own thread and encode a few
+    // frames -- and exits. Runs before the single-instance claim so it
+    // can be pointed at a machine that already has the app open.
+    if std::env::args().any(|a| a == "--video-selftest") {
+        video_selftest();
+        return;
+    }
+
     if !single::claim_single_instance() {
         println!("another instance is running; raising it instead");
         return;
@@ -263,6 +274,81 @@ fn audio_selftest() {
     let strip = audio::message_waveform(&samples);
     println!("[selftest] message waveform {} points, peak {}", strip.len(), strip.iter().max().unwrap_or(&0));
     let _ = std::fs::remove_file(&tmp);
+}
+
+// Mirrors what a video call does, in the same order, so a camera that
+// only fails inside the app shows the same failure here.
+fn video_selftest() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    let listed = std::time::Instant::now();
+    let names: Vec<String> = camera::cameras().into_iter().map(|c| c.name).collect();
+    println!("[selftest] enumerated {} camera(s) in {:?}: {names:?}", names.len(), listed.elapsed());
+
+    // The call opens the camera off the UI thread, so the probe does too:
+    // COM apartments are per thread, and that is exactly what breaks.
+    let wanted = std::env::args()
+        .skip_while(|a| a != "--video-selftest")
+        .nth(1)
+        .unwrap_or_default();
+    println!("[selftest] opening camera {:?} on a worker thread", wanted);
+    let frames = Arc::new(AtomicU32::new(0));
+    let bytes = Arc::new(AtomicU32::new(0));
+    let opened = std::time::Instant::now();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<Option<()>>();
+    {
+        let frames = frames.clone();
+        let bytes = bytes.clone();
+        std::thread::spawn(move || {
+            let previews = Arc::new(AtomicU32::new(0));
+            let seen = previews.clone();
+            let feed = camera::CameraFeed::start(Some(&wanted), move |pic| {
+                if seen.fetch_add(1, Ordering::Relaxed) == 0 {
+                    println!("[selftest] first preview {}x{}", pic.w, pic.h);
+                }
+                camera::PREVIEW_BUSY.store(false, Ordering::Release);
+            });
+            let Some(feed) = feed else {
+                let _ = done_tx.send(None);
+                return;
+            };
+            let _ = done_tx.send(Some(()));
+            let source = feed.source();
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while std::time::Instant::now() < until {
+                match source.recv_blocking() {
+                    Ok(au) => {
+                        frames.fetch_add(1, Ordering::Relaxed);
+                        bytes.fetch_add(au.len() as u32, Ordering::Relaxed);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+    // A hang here is the bug: the call path waits on this same handshake
+    // with nothing to time it out.
+    match done_rx.recv_timeout(std::time::Duration::from_secs(20)) {
+        Ok(Some(())) => println!("[selftest] camera up in {:?}", opened.elapsed()),
+        Ok(None) => {
+            println!("[selftest] FAIL: the camera did not open");
+            return;
+        }
+        Err(_) => {
+            println!("[selftest] FAIL: the camera open hung for 20s");
+            return;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    let count = frames.load(Ordering::Relaxed);
+    println!(
+        "[selftest] {count} access units, {} bytes total",
+        bytes.load(Ordering::Relaxed)
+    );
+    if count == 0 {
+        println!("[selftest] FAIL: the encoder produced nothing");
+    }
 }
 
 // The tray crate's hidden message window carries no window icon, and
