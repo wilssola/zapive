@@ -260,3 +260,123 @@ msgstr "Inicialização"
 
 msgid "Open Zapive when I sign in"
 msgstr "Abrir o Zapive ao entrar no sistema"
+
+msgid "Groups"
+msgstr "Grupos"
+
+msgid "Messages"
+msgstr "Mensagens"
+
+msgid "Group admin"
+msgstr "Admin do grupo"
+
+msgid "{} selected"
+msgstr "{} selecionada(s)"
+
+msgid "You can't send messages to this group because you're no longer a member."
+msgstr "Você não pode enviar mensagens para este grupo porque não é mais participante."
+
+msgid "Only "
+msgstr "Somente "
+
+msgid "admins"
+msgstr "admins"
+
+msgid " can send messages"
+msgstr " podem enviar mensagens"
+
+msgid "Select"
+msgstr "Selecionar"
+
+msgid "Add member"
+msgstr "Adicionar membro"
+
+msgid "Search"
+msgstr "Pesquisar"
+
+msgid "Select messages"
+msgstr "Selecionar mensagens"
+
+msgid "Unmute notifications"
+msgstr "Reativar notificações"
+
+msgid "Mute notifications"
+msgstr "Silenciar notificações"
+
+msgid "Disappearing messages"
+msgstr "Mensagens temporárias"
+
+msgid "Remove from Favorites"
+msgstr "Remover dos favoritos"
+
+msgid "Add to Favorites"
+msgstr "Adicionar aos favoritos"
+
+msgid "Add to list"
+msgstr "Adicionar à lista"
+
+msgid "Export chat"
+msgstr "Exportar conversa"
+
+msgid "Close chat"
+msgstr "Fechar conversa"
+
+msgid "Clear chat"
+msgstr "Limpar conversa"
+
+msgid "Exit group"
+msgstr "Sair do grupo"
+
+msgid "Delete chat"
+msgstr "Apagar conversa"
+
+msgid "8 hours"
+msgstr "8 horas"
+
+msgid "1 week"
+msgstr "1 semana"
+
+msgid "Always"
+msgstr "Sempre"
+
+msgid "24 hours"
+msgstr "24 horas"
+
+msgid "7 days"
+msgstr "7 dias"
+
+msgid "90 days"
+msgstr "90 dias"
+
+msgid "Off"
+msgstr "Desativadas"
+
+msgid "New list"
+msgstr "Nova lista"
+
+msgid "Participants"
+msgstr "Participantes"
+
+msgid "Search messages"
+msgstr "Pesquisar mensagens"
+
+msgid "Search for messages in this chat"
+msgstr "Pesquise mensagens nesta conversa"
+
+msgid "Syncing older messages"
+msgstr "Sincronizando mensagens antigas"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Lists organize your chats. This chat is added to the new list."
+msgstr "As listas organizam suas conversas. Esta conversa entra na nova lista."
+
+msgid "List name"
+msgstr "Nome da lista"
+
+msgid "Create"
+msgstr "Criar"
+
+msgid "Add"
+msgstr "Adicionar"

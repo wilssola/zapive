@@ -104,3 +104,52 @@ pub fn to_markdown(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> Strin
     out.push_str(&plain(&text[last..]));
     out
 }
+
+// The "@query" being typed right before the cursor (byte offsets of the
+// "@" and of the cursor), when the cursor sits inside one: the "@" must
+// start a word and the query holds no whitespace.
+pub fn mention_query(text: &str, cursor: usize) -> Option<(usize, usize)> {
+    let cursor = cursor.min(text.len());
+    let cursor = (0..=cursor).rev().find(|&i| text.is_char_boundary(i))?;
+    let head = &text[..cursor];
+    let at = head.rfind('@')?;
+    let query = &head[at + 1..];
+    if query.contains(char::is_whitespace) {
+        return None;
+    }
+    if at > 0 && !head[..at].ends_with(char::is_whitespace) {
+        return None;
+    }
+    Some((at, cursor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mention_query_finds_the_word_at_the_cursor() {
+        assert_eq!(mention_query("@", 1), Some((0, 1)));
+        assert_eq!(mention_query("oi @jo", 6), Some((3, 6)));
+        assert_eq!(mention_query("oi @jo tudo", 6), Some((3, 6)));
+        // Cursor past a space: no longer inside the mention.
+        assert_eq!(mention_query("oi @jo tudo", 7), None);
+        // An "@" glued to a word is an address, not a mention.
+        assert_eq!(mention_query("mail@x", 6), None);
+        // Multi-byte text before the cursor keeps byte offsets valid.
+        assert_eq!(mention_query("ação @ma", 10), Some((7, 10)));
+        assert_eq!(mention_query("", 0), None);
+    }
+
+    #[test]
+    fn markdown_keeps_links_and_mentions() {
+        let resolve = |num: &str| MentionTarget {
+            name: Some("Ana".into()),
+            jid: format!("{num}@s.whatsapp.net"),
+        };
+        let md = to_markdown("oi @5511999 veja https://x.io/a_b *ok*", &resolve);
+        assert!(md.contains("[@Ana](5511999@s.whatsapp.net)"));
+        assert!(md.contains("(https://x.io/a_b)"));
+        assert!(md.ends_with("**ok**"));
+    }
+}

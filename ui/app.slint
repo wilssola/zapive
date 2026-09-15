@@ -37,6 +37,40 @@ export struct ChatItem {
     unread: int,
     mentioned: bool,
     pinned: bool,
+    muted: bool,
+}
+
+// A message found by search, in the sidebar (name = chat) or inside the
+// open conversation (name = author).
+export struct SearchHit {
+    jid: string,
+    id: string,
+    name: string,
+    sender: string,
+    snippet: string,
+    time: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+}
+
+export struct MemberItem {
+    jid: string,
+    name: string,
+    number: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+    checked: bool,
+    admin: bool,
+}
+
+export struct LabelItem {
+    id: string,
+    name: string,
+    active: bool,
 }
 
 export struct ReactionItem {
@@ -126,6 +160,12 @@ export struct MessageItem {
     playing: bool,
     progress: float,
     posLabel: string,
+    // The day this message belongs to, on every row (the floating
+    // header reads it from whichever row is at the top).
+    dayFull: string,
+    selected: bool,
+    // A notice that opens the group info when clicked.
+    clickable: bool,
 }
 
 component Avatar inherits Rectangle {
@@ -218,8 +258,12 @@ component FilterChip inherits TouchArea {
 component MenuRow inherits TouchArea {
     in property <image> icon;
     in property <string> label;
+    // A second, dimmer line under the label ("Muted always").
+    in property <string> detail;
+    in property <bool> submenu: false;
+    in property <color> tint: Theme.text;
     mouse-cursor: pointer;
-    height: 40px;
+    height: root.detail != "" ? 50px : 40px;
     Rectangle {
         width: parent.width;
         height: parent.height;
@@ -227,21 +271,208 @@ component MenuRow inherits TouchArea {
         background: root.has-hover ? Theme.hover : transparent;
         HorizontalLayout {
             padding-left: 12px;
-            padding-right: 16px;
+            padding-right: 12px;
             spacing: 10px;
             Image {
                 source: root.icon;
-                colorize: Theme.icon;
+                colorize: root.tint == Theme.text ? Theme.icon : root.tint;
                 width: 18px;
                 height: 18px;
                 y: (parent.height - self.height) / 2;
             }
-            Text {
-                text: root.label;
-                color: Theme.text;
-                font-size: 14px;
-                vertical-alignment: center;
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.label;
+                    color: root.tint;
+                    font-size: 14px;
+                    overflow: elide;
+                }
+                if root.detail != "": Text {
+                    text: root.detail;
+                    color: Theme.text-dim;
+                    font-size: 11px;
+                    overflow: elide;
+                }
             }
+            if root.submenu: Image {
+                source: @image-url("icons/chevron-right.svg");
+                colorize: Theme.text-dim;
+                width: 14px;
+                height: 14px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}
+
+// One row of a people list (mention popup, member picker, group info).
+component MemberRow inherits TouchArea {
+    in property <MemberItem> item;
+    in property <bool> pickable: false;
+    mouse-cursor: pointer;
+    height: 52px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        background: root.has-hover ? Theme.hover : transparent;
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 12px;
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                Avatar {
+                    width: 36px;
+                    height: 36px;
+                    src: root.item.avatar;
+                    has-image: root.item.hasAvatar;
+                    initial: root.item.initial;
+                    color-idx: root.item.colorIdx;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.item.name;
+                    color: Theme.text;
+                    font-size: 14px;
+                    overflow: elide;
+                }
+                if root.item.number != "": Text {
+                    text: root.item.number;
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            if root.item.admin: Rectangle {
+                width: admin-text.preferred-width + 12px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.accent;
+                admin-text := Text {
+                    text: @tr("Group admin");
+                    color: Theme.accent;
+                    font-size: 10px;
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            if root.pickable: Rectangle {
+                width: 20px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 4px;
+                border-width: 2px;
+                border-color: root.item.checked ? Theme.accent : Theme.text-dim;
+                background: root.item.checked ? Theme.accent : transparent;
+                if root.item.checked: Image {
+                    source: @image-url("icons/check.svg");
+                    colorize: white;
+                    width: 14px;
+                    height: 14px;
+                }
+            }
+        }
+    }
+}
+
+// A search result row: avatar, who, snippet and when.
+component HitRow inherits TouchArea {
+    in property <SearchHit> hit;
+    mouse-cursor: pointer;
+    height: 68px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.has-hover ? Theme.hover : transparent;
+        HorizontalLayout {
+            padding-left: 13px;
+            padding-right: 15px;
+            spacing: 13px;
+            VerticalLayout {
+                alignment: center;
+                Avatar {
+                    width: 40px;
+                    height: 40px;
+                    src: root.hit.avatar;
+                    has-image: root.hit.hasAvatar;
+                    initial: root.hit.initial;
+                    color-idx: root.hit.colorIdx;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.hit.name;
+                        color: Theme.text;
+                        font-size: 14px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.hit.time;
+                        color: Theme.text-dim;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: root.hit.sender != "" ? root.hit.sender + ": " + root.hit.snippet : root.hit.snippet;
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    overflow: elide;
+                }
+            }
+        }
+        Rectangle {
+            x: 66px;
+            y: parent.height - 1px;
+            width: parent.width - 66px;
+            height: 1px;
+            background: Theme.border;
+        }
+    }
+}
+
+// Round accent button with a label, for dialogs.
+component DialogButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    mouse-cursor: pointer;
+    width: btn-text.preferred-width + 32px;
+    height: 36px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 18px;
+        background: root.primary
+            ? (root.has-hover ? (root.danger ? #c9302c : Theme.accent.darker(0.15)) : (root.danger ? #ea0038 : Theme.accent))
+            : (root.has-hover ? Theme.hover : transparent);
+        btn-text := Text {
+            text: root.label;
+            color: root.primary ? white : Theme.accent;
+            font-size: 14px;
+            font-weight: 700;
+            width: parent.width;
+            height: parent.height;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 }
@@ -506,8 +737,103 @@ export component AppWindow inherits Window {
     callback forward-search(string);
     callback forward-to(string);
 
+    // Sync banner and its progress dialog
+    in-out property <bool> sync-open: false;
+    in-out property <string> sync-detail: "";
+    callback sync-clicked();
+
+    // Composer state the host needs: mentions and who may write here.
+    in-out property <bool> current-can-send: true;
+    in-out property <bool> current-left: false;
+    in-out property <bool> current-is-group: false;
+    in-out property <bool> current-admin: false;
+    in-out property <bool> current-muted: false;
+    in-out property <string> current-mute-label: "";
+    in-out property <bool> current-favorite: false;
+    in-out property <int> current-ephemeral: 0;
+    in-out property <string> current-ephemeral-label: "";
+    out property <string> composer-text: message-input.text;
+    callback composer-changed(string, int);
+    in-out property <bool> mention-open: false;
+    in-out property <[MemberItem]> mention-rows;
+    callback mention-pick(int);
+    callback mention-close();
+
+    // Selection mode over the conversation
+    in-out property <bool> select-mode: false;
+    in-out property <int> select-count: 0;
+    callback select-start(string);
+    callback toggle-select(string);
+    callback select-cancel();
+    callback select-copy();
+    callback select-forward();
+    callback select-star();
+    callback select-delete();
+
+    // Chat header menu
+    in-out property <bool> chat-menu-open: false;
+    // "" | "mute" | "ephemeral" | "lists"
+    in-out property <string> chat-menu-sub: "";
+    in-out property <[LabelItem]> labels;
+    callback menu-add-member();
+    callback menu-search();
+    callback menu-mute(int);
+    callback menu-ephemeral(int);
+    callback menu-favorite();
+    callback menu-list(string);
+    callback menu-new-list(string);
+    callback menu-delete-list(string);
+    callback menu-export();
+    callback menu-close-chat();
+    callback menu-clear();
+    callback menu-delete-chat();
+    callback menu-exit-group();
+    in-out property <bool> new-list-open: false;
+
+    // Confirm dialog
+    in-out property <bool> confirm-open: false;
+    in-out property <string> confirm-title;
+    in-out property <string> confirm-text;
+    in-out property <string> confirm-action;
+    in-out property <string> confirm-secondary;
+    callback confirm-accept();
+    callback confirm-other();
+
+    // Member picker (add to group) and the group roster
+    in-out property <bool> member-pick-open: false;
+    in-out property <[MemberItem]> member-rows;
+    in-out property <int> member-count: 0;
+    callback member-search(string);
+    callback member-toggle(string);
+    callback member-confirm();
+    in-out property <[MemberItem]> info-member-rows;
+    callback open-member(string);
+
+    // Search: sidebar hits across chats, and the in-chat panel
+    in-out property <[SearchHit]> search-hits;
+    callback open-hit(string, string);
+    in-out property <bool> chat-search-open: false;
+    in-out property <[SearchHit]> chat-search-rows;
+    in-out property <string> chat-search-count: "";
+    callback chat-search-changed(string);
+    callback chat-search-step(int);
+    callback chat-search-close();
+    // The message a search just jumped to; drawn with a flash.
+    in-out property <string> highlight-id: "";
+
+    // Floating day header while the conversation scrolls.
+    in-out property <string> floating-day: "";
+    in-out property <bool> scrolling: false;
+    callback day-at-top(string);
+
     public function append-composer(t: string) {
         message-input.text = message-input.text + t;
+    }
+    // The host rewrote the composer (a mention was picked).
+    public function set-composer(t: string, cursor: int) {
+        message-input.text = t;
+        message-input.set-selection-offsets(cursor, cursor);
+        message-input.focus();
     }
     public function scroll-conversation-end() {
         msg-list.viewport-y = min(0px, msg-list.height - msg-list.viewport-height);
@@ -1015,11 +1341,16 @@ export component AppWindow inherits Window {
                     restart => { root.update-restart(); }
                 }
 
-                Rectangle {
+                // Filter chips scroll sideways once the lists add up.
+                Flickable {
                     height: root.sidebar-view == "chats" ? 40px : 0;
                     visible: root.sidebar-view == "chats";
-                    HorizontalLayout {
+                    viewport-width: chips.preferred-width;
+                    viewport-height: self.height;
+                    interactive: chips.preferred-width > self.width;
+                    chips := HorizontalLayout {
                         padding-left: 12px;
+                        padding-right: 12px;
                         spacing: 8px;
                         alignment: start;
                         FilterChip {
@@ -1033,6 +1364,24 @@ export component AppWindow inherits Window {
                             clicked => { root.chat-tab = "unread"; root.tab-changed("unread"); }
                         }
                         FilterChip {
+                            label: @tr("Favorites");
+                            active: root.chat-tab == "favorites";
+                            clicked => { root.chat-tab = "favorites"; root.tab-changed("favorites"); }
+                        }
+                        FilterChip {
+                            label: @tr("Groups");
+                            active: root.chat-tab == "groups";
+                            clicked => { root.chat-tab = "groups"; root.tab-changed("groups"); }
+                        }
+                        for lb in root.labels: FilterChip {
+                            label: lb.name;
+                            active: root.chat-tab == "label:" + lb.id;
+                            clicked => {
+                                root.chat-tab = "label:" + lb.id;
+                                root.tab-changed("label:" + lb.id);
+                            }
+                        }
+                        FilterChip {
                             label: @tr("Archived");
                             active: root.chat-tab == "archived";
                             clicked => { root.chat-tab = "archived"; root.tab-changed("archived"); }
@@ -1040,7 +1389,21 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // Searching: chats by name on top, then messages by content.
+                if root.search-hits.length > 0: Rectangle {
+                    height: 28px;
+                    Text {
+                        text: @tr("Chats");
+                        color: Theme.accent;
+                        font-size: 13px;
+                        font-weight: 700;
+                        x: 16px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                    }
+                }
                 ListView {
+                    vertical-stretch: root.search-hits.length > 0 ? 1 : 3;
                     for chat[i] in root.chats: Rectangle {
                         height: 72px;
                         clip: true;
@@ -1098,6 +1461,14 @@ export component AppWindow inherits Window {
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
+                                    if chat.muted: Image {
+                                        source: @image-url("icons/bell-off.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 14px;
+                                        height: 14px;
+                                        y: (parent.height - self.height) / 2;
+                                        horizontal-stretch: 0;
+                                    }
                                     if chat.pinned: Image {
                                         source: @image-url("icons/pin.svg");
                                         colorize: Theme.text-dim;
@@ -1140,6 +1511,25 @@ export component AppWindow inherits Window {
                             height: 1px;
                             background: Theme.border;
                         }
+                    }
+                }
+                if root.search-hits.length > 0: Rectangle {
+                    height: 28px;
+                    Text {
+                        text: @tr("Messages");
+                        color: Theme.accent;
+                        font-size: 13px;
+                        font-weight: 700;
+                        x: 16px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                    }
+                }
+                if root.search-hits.length > 0: ListView {
+                    vertical-stretch: 2;
+                    for hit in root.search-hits: HitRow {
+                        hit: hit;
+                        clicked => { root.open-hit(hit.jid, hit.id); }
                     }
                 }
             }
@@ -1336,6 +1726,25 @@ export component AppWindow inherits Window {
                                 clicked => { root.start-call(root.current-jid); }
                             }
                         }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                icon: @image-url("icons/search.svg");
+                                active: root.chat-search-open;
+                                clicked => { root.menu-search(); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                icon: @image-url("icons/dots-vertical.svg");
+                                active: root.chat-menu-open;
+                                clicked => {
+                                    root.chat-menu-sub = "";
+                                    root.chat-menu-open = !root.chat-menu-open;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1345,24 +1754,48 @@ export component AppWindow inherits Window {
                         alignment: center;
                         padding-top: 6px;
                         Rectangle {
-                            width: banner-text.preferred-width + 24px;
+                            width: banner-text.preferred-width + 44px;
                             height: 24px;
                             border-radius: 12px;
-                            background: Theme.pill;
-                            banner-text := Text {
-                                text: root.sync-banner;
-                                color: Theme.text-dim;
-                                font-size: 12px;
-                                width: parent.width;
-                                height: parent.height;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            background: banner-touch.has-hover ? Theme.selected : Theme.pill;
+                            banner-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.sync-clicked(); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 6px;
+                                Image {
+                                    source: @image-url("icons/refresh.svg");
+                                    colorize: Theme.text-dim;
+                                    width: 13px;
+                                    height: 13px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                banner-text := Text {
+                                    text: root.sync-banner;
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
                     }
                 }
 
+                // The conversation and the day pill floating over it.
+                Rectangle {
+                    vertical-stretch: 1;
+                    // Fades the floating day out once the wheel stops.
+                    scroll-idle := Timer {
+                        interval: 1400ms;
+                        running: false;
+                        triggered => { root.scrolling = false; self.running = false; }
+                    }
                 msg-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
                     opacity: root.conv-ready ? 1.0 : 0.0;
                     changed viewport-height => {
                         root.conv-viewport-h = self.viewport-height;
@@ -1378,12 +1811,82 @@ export component AppWindow inherits Window {
                             && root.scroll-armed) {
                             root.load-older();
                         }
+                        if (root.conv-ready) {
+                            root.scrolling = true;
+                            scroll-idle.running = false;
+                            scroll-idle.running = true;
+                        }
                     }
                     for msg in root.messages: msg-row := Rectangle {
+                        // The row crossing the top edge names the day in
+                        // the floating pill. Rows sit in viewport
+                        // coordinates; the ListView re-anchors every
+                        // visible row on each scroll step, so the check
+                        // rides on y as well as on the visible offset.
+                        property <length> vis-y: self.y + msg-list.viewport-y;
+                        changed vis-y => {
+                            if (self.vis-y <= 6px && self.vis-y + self.height > 6px) {
+                                root.day-at-top(msg.dayFull);
+                            }
+                        }
+                        changed y => {
+                            if (self.vis-y <= 6px && self.vis-y + self.height > 6px) {
+                                root.day-at-top(msg.dayFull);
+                            }
+                        }
+                        if root.select-mode && msg.selected: Rectangle {
+                            background: Theme.accent.with-alpha(0.14);
+                        }
+                        if root.highlight-id == msg.id: Rectangle {
+                            background: Theme.accent.with-alpha(0.22);
+                        }
                         row-hover := TouchArea {
                             mouse-cursor: default;
                             // Purely a hover probe: clicks fall through.
                             enabled: false;
+                        }
+                        // System notices: one centered pill, no bubble.
+                        sys-pill := Rectangle {
+                            property <bool> is-system: msg.kind == "system";
+                            visible: self.is-system;
+                            y: 6px + msg-row.day-offset;
+                            x: (parent.width - self.width) / 2;
+                            width: self.is-system
+                                ? min(parent.width * 0.8, sys-text.preferred-width + 28px) : 0;
+                            height: self.is-system ? sys-text.preferred-height + 12px : 0;
+                            border-radius: 8px;
+                            background: sys-touch.has-hover && msg.clickable ? Theme.selected : Theme.pill;
+                            sys-touch := TouchArea {
+                                enabled: sys-pill.is-system;
+                                mouse-cursor: msg.clickable ? pointer : default;
+                                clicked => { if (msg.clickable) { root.open-info(); } }
+                            }
+                            sys-text := Text {
+                                text: sys-pill.is-system ? msg.text : "";
+                                color: msg.clickable ? Theme.accent : Theme.text-dim;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                                horizontal-alignment: center;
+                                width: max(0px, parent.width - 28px);
+                                x: 14px;
+                                y: 6px;
+                            }
+                        }
+                        if root.select-mode && msg.kind != "system": Rectangle {
+                            x: 10px;
+                            y: bubble.y + (bubble.height - self.height) / 2;
+                            width: 20px;
+                            height: 20px;
+                            border-radius: 4px;
+                            border-width: 2px;
+                            border-color: msg.selected ? Theme.accent : Theme.text-dim;
+                            background: msg.selected ? Theme.accent : transparent;
+                            if msg.selected: Image {
+                                source: @image-url("icons/check.svg");
+                                colorize: white;
+                                width: 14px;
+                                height: 14px;
+                            }
                         }
                         // A link card drives the bubble width, so the text
                         // wraps at the card instead of stretching past it on
@@ -1398,8 +1901,10 @@ export component AppWindow inherits Window {
                                 ? max(150px, msg.picW * 1px)
                                 : max-text-w;
                         property <length> day-offset: msg.dayLabel != "" ? 34px : 0;
-                        height: bubble.height + (msg.firstOfRun ? 16px : 6px)
-                            + (msg.reactions != "" ? 14px : 0) + self.day-offset;
+                        height: msg.kind == "system"
+                            ? sys-pill.height + 12px + self.day-offset
+                            : bubble.height + (msg.firstOfRun ? 16px : 6px)
+                                + (msg.reactions != "" ? 14px : 0) + self.day-offset;
                         if msg.dayLabel != "": Rectangle {
                             y: 8px;
                             x: (parent.width - self.width) / 2;
@@ -1428,12 +1933,13 @@ export component AppWindow inherits Window {
                             color-idx: msg.senderColorIdx;
                         }
                         bubble := Rectangle {
+                            visible: msg.kind != "system";
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
                             x: msg.fromMe
                                 ? parent.width - self.width - 30px
                                 : (msg.groupIndent ? 48px : 30px);
-                            width: content.preferred-width;
-                            height: content.preferred-height;
+                            width: msg.kind == "system" ? 0 : content.preferred-width;
+                            height: msg.kind == "system" ? 0 : content.preferred-height;
                             background: msg.sticker
                                 ? transparent
                                 : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
@@ -1842,96 +2348,40 @@ export component AppWindow inherits Window {
                                 }
 
                                 // Formatted text (bold/italic/strike/mono).
-                                if msg.hasStyled: ContextMenuArea {
-                                    width: styled-body.width;
-                                    height: styled-body.preferred-height;
-                                    Menu {
-                                        MenuItem {
-                                            title: @tr("Reply");
-                                            activated => { root.request-reply(msg.id); }
-                                        }
-                                        MenuItem {
-                                            title: @tr("Copy");
-                                            activated => { root.copy-text(msg.id); }
-                                        }
-                                        MenuItem {
-                                            title: @tr("Forward");
-                                            activated => { root.request-forward(msg.id); }
-                                        }
-                                        MenuItem {
-                                            title: msg.starred ? @tr("Unstar") : @tr("Star");
-                                            activated => { root.toggle-star(msg.id); }
-                                        }
-                                        MenuItem {
-                                            title: @tr("Delete");
-                                            activated => { root.delete-message(msg.id); }
-                                        }
-                                    }
-                                    styled-body := StyledText {
-                                        text: msg.styled;
-                                        default-color: Theme.bubble-text;
-                                        default-font-size: 14px;
-                                        link-color: Theme.accent;
-                                        width: min(self.preferred-width, msg-row.max-text-w);
-                                        link-clicked(target) => { root.open-dm(target); }
-                                    }
+                                // The bubble's own context menu (below)
+                                // handles right-clicks: StyledText swallows
+                                // every press, so a menu wrapped around it
+                                // never saw them.
+                                if msg.hasStyled: StyledText {
+                                    text: msg.styled;
+                                    default-color: Theme.bubble-text;
+                                    default-font-size: 14px;
+                                    link-color: Theme.accent;
+                                    width: min(self.preferred-width, msg-row.max-text-w);
+                                    link-clicked(target) => { root.open-dm(target); }
                                 }
 
-                                if !msg.hasStyled && (msg.kind == "text" || (msg.kind == "image" && msg.text != "")): Rectangle {
-                                    width: body-text.width;
-                                    height: body-text.preferred-height;
-                                    ContextMenuArea {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        Menu {
-                                            MenuItem {
-                                                title: @tr("Reply");
-                                                activated => { root.request-reply(msg.id); }
-                                            }
-                                            MenuItem {
-                                                title: @tr("Copy");
-                                                activated => {
-                                                    body-text.select-all();
-                                                    body-text.copy();
-                                                    body-text.clear-selection();
-                                                }
-                                            }
-                                            MenuItem {
-                                                title: @tr("Forward");
-                                                activated => { root.request-forward(msg.id); }
-                                            }
-                                            MenuItem {
-                                                title: msg.starred ? @tr("Unstar") : @tr("Star");
-                                                activated => { root.toggle-star(msg.id); }
-                                            }
-                                            MenuItem {
-                                                title: @tr("Delete");
-                                                activated => { root.delete-message(msg.id); }
-                                            }
-                                        }
-                                        body-text := TextInput {
-                                            text: msg.deleted ? "🚫 " + msg.text : msg.text;
-                                            read-only: true;
-                                            single-line: false;
-                                            wrap: word-wrap;
-                                            font-size: 14px;
-                                            font-italic: msg.deleted;
-                                            color: msg.deleted ? Theme.text-dim : Theme.bubble-text;
-                                            selection-background-color: #3390ec;
-                                            selection-foreground-color: white;
-                                            // captions wrap to the image width
-                                            width: min(self.preferred-width,
-                                                msg-row.content-w);
-                                            height: self.preferred-height;
-                                        }
-                                    }
+                                if !msg.hasStyled && (msg.kind == "text" || (msg.kind == "image" && msg.text != "")): TextInput {
+                                    text: msg.deleted ? "🚫 " + msg.text : msg.text;
+                                    read-only: true;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    font-size: 14px;
+                                    font-italic: msg.deleted;
+                                    color: msg.deleted ? Theme.text-dim : Theme.bubble-text;
+                                    selection-background-color: #3390ec;
+                                    selection-foreground-color: white;
+                                    // captions wrap to the image width
+                                    width: min(self.preferred-width,
+                                        msg-row.content-w);
+                                    height: self.preferred-height;
                                 }
 
                                 // Stickers have no bubble, so the timestamp
                                 // gets its own pill like WhatsApp draws it,
                                 // with breathing room under the artwork.
                                 if msg.sticker: Rectangle { height: 6px; }
-                                if msg.kind != "audio": HorizontalLayout {
+                                if msg.kind != "audio" && msg.kind != "system": HorizontalLayout {
                                     alignment: end;
                                     Rectangle {
                                         width: stamp.preferred-width + (msg.sticker ? 14px : 0);
@@ -1961,15 +2411,49 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
+                            // One menu for the whole bubble, whatever it
+                            // holds. Left clicks pass through to the text
+                            // (selection) and the links underneath.
+                            msg-menu := ContextMenuArea {
+                                enabled: !root.select-mode && !msg.deleted;
+                                Menu {
+                                    MenuItem {
+                                        title: @tr("Reply");
+                                        activated => { root.request-reply(msg.id); }
+                                    }
+                                    MenuItem {
+                                        title: @tr("Copy");
+                                        enabled: msg.kind == "text" || msg.text != "";
+                                        activated => { root.copy-text(msg.id); }
+                                    }
+                                    MenuItem {
+                                        title: @tr("Forward");
+                                        activated => { root.request-forward(msg.id); }
+                                    }
+                                    MenuItem {
+                                        title: @tr("Select");
+                                        activated => { root.select-start(msg.id); }
+                                    }
+                                    MenuItem {
+                                        title: msg.starred ? @tr("Unstar") : @tr("Star");
+                                        activated => { root.toggle-star(msg.id); }
+                                    }
+                                    MenuItem {
+                                        title: @tr("Delete");
+                                        activated => { root.delete-message(msg.id); }
+                                    }
+                                }
+                            }
                         }
                         // Hover actions, mirroring WhatsApp: react, forward
                         // and the message menu.
-                        if row-hover.has-hover || root.react-bar-id == msg.id: Rectangle {
+                        if (row-hover.has-hover || root.react-bar-id == msg.id)
+                            && !root.select-mode && msg.kind != "system": Rectangle {
                             y: bubble.y + 4px;
                             x: msg.fromMe
                                 ? max(0px, bubble.x - self.width - 6px)
                                 : bubble.x + bubble.width + 6px;
-                            width: 64px;
+                            width: 96px;
                             height: 28px;
                             HorizontalLayout {
                                 spacing: 4px;
@@ -1985,6 +2469,11 @@ export component AppWindow inherits Window {
                                     icon: @image-url("icons/corner-up-right.svg");
                                     icon-size: 17px;
                                     clicked => { root.request-forward(msg.id); }
+                                }
+                                IconButton {
+                                    icon: @image-url("icons/chevron-down.svg");
+                                    icon-size: 17px;
+                                    clicked => { msg-menu.show({ x: 0px, y: bubble.height }); }
                                 }
                             }
                         }
@@ -2069,6 +2558,34 @@ export component AppWindow inherits Window {
                                 vertical-alignment: center;
                             }
                         }
+                        // Selection mode: a click anywhere on the row
+                        // toggles it, over whatever the bubble holds.
+                        if root.select-mode && msg.kind != "system": TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.toggle-select(msg.id); }
+                        }
+                    }
+                }
+                    // Floating day: the date of the row at the top edge,
+                    // shown while the list moves.
+                    if root.scrolling && root.floating-day != "" && root.conv-ready: Rectangle {
+                        y: 8px;
+                        x: (parent.width - self.width) / 2;
+                        width: float-day.preferred-width + 24px;
+                        height: 24px;
+                        border-radius: 6px;
+                        background: Theme.pill;
+                        drop-shadow-blur: 4px;
+                        drop-shadow-color: #00000040;
+                        float-day := Text {
+                            text: root.floating-day;
+                            color: Theme.text-dim;
+                            font-size: 12px;
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
 
@@ -2122,8 +2639,86 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle {
+                // Selection bar: what to do with the picked messages.
+                if root.select-mode: Rectangle {
                     height: 62px;
+                    background: Theme.header;
+                    HorizontalBox {
+                        padding: 11px;
+                        spacing: 8px;
+                        IconButton {
+                            icon: @image-url("icons/x.svg");
+                            clicked => { root.select-cancel(); }
+                        }
+                        Text {
+                            text: @tr("{} selected", root.select-count);
+                            color: Theme.text;
+                            font-size: 15px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            icon: @image-url("icons/star.svg");
+                            enabled: root.select-count > 0;
+                            clicked => { root.select-star(); }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/copy.svg");
+                            enabled: root.select-count > 0;
+                            clicked => { root.select-copy(); }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/corner-up-right.svg");
+                            enabled: root.select-count > 0;
+                            clicked => { root.select-forward(); }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/trash.svg");
+                            enabled: root.select-count > 0;
+                            clicked => { root.select-delete(); }
+                        }
+                    }
+                }
+
+                // Read-only conversation: announcement groups and groups
+                // we are no longer in.
+                if !root.select-mode && !root.current-can-send: Rectangle {
+                    height: 62px;
+                    background: Theme.header;
+                    HorizontalLayout {
+                        alignment: center;
+                        if root.current-left: Text {
+                            text: @tr("You can't send messages to this group because you're no longer a member.");
+                            color: Theme.text-dim;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        if !root.current-left: Text {
+                            text: @tr("Only ");
+                            color: Theme.text-dim;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        if !root.current-left: Text {
+                            text: @tr("admins");
+                            color: Theme.accent;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        if !root.current-left: Text {
+                            text: @tr(" can send messages");
+                            color: Theme.text-dim;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    // The composer grows with its text, up to a few lines.
+                    height: root.select-mode || !root.current-can-send ? 0
+                        : max(62px, min(180px, message-input.preferred-height + 30px));
+                    visible: !root.select-mode && root.current-can-send;
                     background: Theme.header;
 
                     // Recording bar (replaces the composer while capturing)
@@ -2195,19 +2790,69 @@ export component AppWindow inherits Window {
                                 if (root.picker-open) { root.picker-opened(); }
                             }
                         }
-                        message-input := LineEdit {
-                            placeholder-text: @tr("Type a message");
-                            accepted => {
-                                root.send-message(self.text);
-                                self.text = "";
+                        // A TextInput rather than a LineEdit: it wraps,
+                        // takes Shift+Enter for a new line and tells the
+                        // host where the cursor is (for "@" mentions).
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 8px;
+                            background: Theme.pill;
+                            Flickable {
+                                x: 12px;
+                                y: 10px;
+                                width: parent.width - 24px;
+                                height: parent.height - 20px;
+                                viewport-height: max(self.height, message-input.preferred-height);
+                                viewport-width: self.width;
+                                interactive: false;
+                                message-input := TextInput {
+                                    width: parent.width;
+                                    height: max(parent.height, self.preferred-height);
+                                    color: Theme.text;
+                                    font-size: 15px;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                    selection-background-color: #3390ec;
+                                    selection-foreground-color: white;
+                                    edited => {
+                                        root.composer-changed(self.text, self.cursor-position-byte-offset);
+                                    }
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Return && !event.modifiers.shift) {
+                                            if (root.mention-open) {
+                                                root.mention-pick(0);
+                                            } else {
+                                                root.send-message(self.text);
+                                                self.text = "";
+                                            }
+                                            return accept;
+                                        }
+                                        if (event.text == Key.Escape && root.mention-open) {
+                                            root.mention-close();
+                                            return accept;
+                                        }
+                                        reject
+                                    }
+                                }
+                            }
+                            if message-input.text == "": Text {
+                                text: @tr("Type a message");
+                                color: Theme.text-dim;
+                                font-size: 15px;
+                                x: 12px;
+                                height: parent.height;
+                                vertical-alignment: center;
                             }
                         }
                         IconButton {
                             icon: @image-url("icons/microphone.svg");
+                            y: parent.height - self.height - 11px;
                             clicked => { root.rec-start(); }
                         }
                         IconButton {
                             icon: @image-url("icons/send-2.svg");
+                            y: parent.height - self.height - 11px;
                             clicked => {
                                 root.send-message(message-input.text);
                                 message-input.text = "";
@@ -2434,6 +3079,183 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // "@" mention list above the composer.
+            if root.mention-open && root.chat-open && !root.select-mode: Rectangle {
+                x: 12px;
+                y: parent.height - self.height - 74px;
+                width: 360px;
+                height: min(320px, mention-col.preferred-height + 12px);
+                background: Theme.panel;
+                border-radius: 10px;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000055;
+                clip: true;
+                mention-col := VerticalLayout {
+                    padding: 6px;
+                    spacing: 0;
+                    for m[i] in root.mention-rows: MemberRow {
+                        item: m;
+                        clicked => { root.mention-pick(i); }
+                    }
+                }
+            }
+
+            // Chat header menu, dropping from the "⋮" button.
+            if root.chat-menu-open && root.chat-open: Rectangle {
+                x: parent.width - self.width - 8px;
+                y: 50px;
+                width: 260px;
+                height: chat-menu-col.preferred-height + 12px;
+                background: Theme.panel;
+                border-radius: 10px;
+                drop-shadow-blur: 10px;
+                drop-shadow-color: #00000066;
+                chat-menu-col := VerticalLayout {
+                    padding: 6px;
+                    spacing: 1px;
+                    if root.chat-menu-sub == "": VerticalLayout {
+                        spacing: 1px;
+                        if root.current-is-group && !root.current-left: MenuRow {
+                            icon: @image-url("icons/user-plus.svg");
+                            label: @tr("Add member");
+                            clicked => { root.menu-add-member(); }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/info-circle.svg");
+                            label: root.current-is-group ? @tr("Group info") : @tr("Contact info");
+                            clicked => { root.chat-menu-open = false; root.open-info(); }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/search.svg");
+                            label: @tr("Search");
+                            clicked => { root.menu-search(); }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/checkbox.svg");
+                            label: @tr("Select messages");
+                            clicked => { root.select-start(""); }
+                        }
+                        MenuRow {
+                            icon: root.current-muted ? @image-url("icons/bell.svg") : @image-url("icons/bell-off.svg");
+                            label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
+                            detail: root.current-mute-label;
+                            submenu: !root.current-muted;
+                            clicked => {
+                                if (root.current-muted) { root.menu-mute(0); }
+                                else { root.chat-menu-sub = "mute"; }
+                            }
+                        }
+                        if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
+                            icon: @image-url("icons/clock-pause.svg");
+                            label: @tr("Disappearing messages");
+                            detail: root.current-ephemeral-label;
+                            submenu: true;
+                            clicked => { root.chat-menu-sub = "ephemeral"; }
+                        }
+                        MenuRow {
+                            icon: root.current-favorite ? @image-url("icons/heart-filled.svg") : @image-url("icons/heart.svg");
+                            label: root.current-favorite ? @tr("Remove from Favorites") : @tr("Add to Favorites");
+                            clicked => { root.menu-favorite(); }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/list-details.svg");
+                            label: @tr("Add to list");
+                            submenu: true;
+                            clicked => { root.chat-menu-sub = "lists"; }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/download.svg");
+                            label: @tr("Export chat");
+                            clicked => { root.menu-export(); }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/circle-x.svg");
+                            label: @tr("Close chat");
+                            clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
+                        }
+                        Rectangle { height: 1px; background: Theme.border; }
+                        MenuRow {
+                            icon: @image-url("icons/circle-minus.svg");
+                            label: @tr("Clear chat");
+                            clicked => { root.menu-clear(); }
+                        }
+                        if root.current-is-group && !root.current-left: MenuRow {
+                            icon: @image-url("icons/logout.svg");
+                            label: @tr("Exit group");
+                            tint: #f05d4d;
+                            clicked => { root.menu-exit-group(); }
+                        }
+                        if !root.current-is-group || root.current-left: MenuRow {
+                            icon: @image-url("icons/trash.svg");
+                            label: @tr("Delete chat");
+                            tint: #f05d4d;
+                            clicked => { root.menu-delete-chat(); }
+                        }
+                    }
+                    if root.chat-menu-sub == "mute": VerticalLayout {
+                        spacing: 1px;
+                        MenuRow {
+                            icon: @image-url("icons/arrow-left.svg");
+                            label: @tr("Mute notifications");
+                            clicked => { root.chat-menu-sub = ""; }
+                        }
+                        Rectangle { height: 1px; background: Theme.border; }
+                        MenuRow { icon: @image-url("icons/bell-off.svg"); label: @tr("8 hours"); clicked => { root.menu-mute(8); } }
+                        MenuRow { icon: @image-url("icons/bell-off.svg"); label: @tr("1 week"); clicked => { root.menu-mute(168); } }
+                        MenuRow { icon: @image-url("icons/bell-off.svg"); label: @tr("Always"); clicked => { root.menu-mute(-1); } }
+                    }
+                    if root.chat-menu-sub == "ephemeral": VerticalLayout {
+                        spacing: 1px;
+                        MenuRow {
+                            icon: @image-url("icons/arrow-left.svg");
+                            label: @tr("Disappearing messages");
+                            clicked => { root.chat-menu-sub = ""; }
+                        }
+                        Rectangle { height: 1px; background: Theme.border; }
+                        MenuRow {
+                            icon: root.current-ephemeral == 86400 ? @image-url("icons/check.svg") : @image-url("icons/clock-pause.svg");
+                            label: @tr("24 hours");
+                            clicked => { root.menu-ephemeral(86400); }
+                        }
+                        MenuRow {
+                            icon: root.current-ephemeral == 604800 ? @image-url("icons/check.svg") : @image-url("icons/clock-pause.svg");
+                            label: @tr("7 days");
+                            clicked => { root.menu-ephemeral(604800); }
+                        }
+                        MenuRow {
+                            icon: root.current-ephemeral == 7776000 ? @image-url("icons/check.svg") : @image-url("icons/clock-pause.svg");
+                            label: @tr("90 days");
+                            clicked => { root.menu-ephemeral(7776000); }
+                        }
+                        MenuRow {
+                            icon: root.current-ephemeral == 0 ? @image-url("icons/check.svg") : @image-url("icons/circle-x.svg");
+                            label: @tr("Off");
+                            clicked => { root.menu-ephemeral(0); }
+                        }
+                    }
+                    if root.chat-menu-sub == "lists": VerticalLayout {
+                        spacing: 1px;
+                        MenuRow {
+                            icon: @image-url("icons/arrow-left.svg");
+                            label: @tr("Add to list");
+                            clicked => { root.chat-menu-sub = ""; }
+                        }
+                        Rectangle { height: 1px; background: Theme.border; }
+                        for lb in root.labels: MenuRow {
+                            icon: lb.active ? @image-url("icons/check.svg") : @image-url("icons/list-details.svg");
+                            label: lb.name;
+                            tint: lb.active ? Theme.accent : Theme.text;
+                            clicked => { root.menu-list(lb.id); }
+                        }
+                        MenuRow {
+                            icon: @image-url("icons/plus.svg");
+                            label: @tr("New list");
+                            clicked => { root.chat-menu-open = false; root.new-list-open = true; }
+                        }
+                    }
+                }
+            }
+
             // WhatsApp-style attach menu popping above the composer
             if root.attach-open && root.chat-open: Rectangle {
                 x: 12px;
@@ -2560,6 +3382,16 @@ export component AppWindow inherits Window {
                                 font-size: 14px;
                                 wrap: word-wrap;
                             }
+                            if root.info-member-rows.length > 0: Text {
+                                text: @tr("Participants");
+                                color: Theme.accent;
+                                font-size: 13px;
+                                font-weight: 700;
+                            }
+                            for m in root.info-member-rows: MemberRow {
+                                item: m;
+                                clicked => { root.open-member(m.jid); }
+                            }
                             if root.info-media.length > 0: Text {
                                 text: @tr("Shared media");
                                 color: Theme.accent;
@@ -2595,6 +3427,294 @@ export component AppWindow inherits Window {
                                 clicked => { root.clear-chat(); }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- In-chat search panel ----------
+    if root.chat-search-open && root.chat-open: Rectangle {
+        width: 380px;
+        height: parent.height;
+        x: parent.width - self.width;
+        background: Theme.panel;
+        TouchArea { }
+        VerticalBox {
+            padding: 0;
+            spacing: 0;
+            Rectangle {
+                height: 54px;
+                background: Theme.header;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    IconButton {
+                        icon: @image-url("icons/x.svg");
+                        clicked => { root.chat-search-close(); }
+                    }
+                    Text {
+                        text: @tr("Search messages");
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/chevron-up.svg");
+                        enabled: root.chat-search-rows.length > 0;
+                        clicked => { root.chat-search-step(1); }
+                    }
+                    IconButton {
+                        icon: @image-url("icons/chevron-down.svg");
+                        enabled: root.chat-search-rows.length > 0;
+                        clicked => { root.chat-search-step(-1); }
+                    }
+                }
+            }
+            Rectangle {
+                height: 58px;
+                HorizontalLayout {
+                    padding: 10px;
+                    chat-search-input := LineEdit {
+                        placeholder-text: @tr("Search");
+                        init => { self.focus(); }
+                        edited => { root.chat-search-changed(self.text); }
+                        accepted => { root.chat-search-step(0); }
+                    }
+                }
+            }
+            if root.chat-search-count != "": Text {
+                text: root.chat-search-count;
+                color: Theme.text-dim;
+                font-size: 12px;
+                horizontal-alignment: center;
+            }
+            if chat-search-input.text == "": Text {
+                text: @tr("Search for messages in this chat");
+                color: Theme.text-dim;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+            ListView {
+                for hit in root.chat-search-rows: HitRow {
+                    hit: hit;
+                    clicked => { root.open-hit(hit.jid, hit.id); }
+                }
+            }
+        }
+    }
+
+    // ---------- Sync progress ----------
+    if root.sync-open: Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.sync-open = false; } }
+        Rectangle {
+            width: 400px;
+            height: sync-col.preferred-height + 44px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            sync-col := VerticalLayout {
+                padding: 22px;
+                spacing: 14px;
+                width: parent.width;
+                Text {
+                    text: @tr("Syncing older messages");
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 700;
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                Text {
+                    text: root.sync-detail;
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    width: parent.width - 44px;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    DialogButton {
+                        label: "OK";
+                        primary: true;
+                        clicked => { root.sync-open = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Confirm dialog ----------
+    if root.confirm-open: Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.confirm-open = false; } }
+        Rectangle {
+            width: 400px;
+            height: confirm-col.preferred-height + 44px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            confirm-col := VerticalLayout {
+                padding: 22px;
+                spacing: 14px;
+                width: parent.width;
+                Text {
+                    text: root.confirm-title;
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                    width: parent.width - 44px;
+                }
+                Text {
+                    text: root.confirm-text;
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    width: parent.width - 44px;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    DialogButton {
+                        label: @tr("Cancel");
+                        clicked => { root.confirm-open = false; }
+                    }
+                    if root.confirm-secondary != "": DialogButton {
+                        label: root.confirm-secondary;
+                        clicked => { root.confirm-other(); }
+                    }
+                    DialogButton {
+                        label: root.confirm-action;
+                        primary: true;
+                        danger: true;
+                        clicked => { root.confirm-accept(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- New list ----------
+    if root.new-list-open: Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.new-list-open = false; } }
+        Rectangle {
+            width: 380px;
+            height: list-col.preferred-height + 44px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            list-col := VerticalLayout {
+                padding: 22px;
+                spacing: 14px;
+                width: parent.width;
+                Text {
+                    text: @tr("New list");
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: @tr("Lists organize your chats. This chat is added to the new list.");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    width: parent.width - 44px;
+                }
+                new-list-name := LineEdit {
+                    placeholder-text: @tr("List name");
+                    accepted => {
+                        root.menu-new-list(self.text);
+                        self.text = "";
+                        root.new-list-open = false;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    DialogButton {
+                        label: @tr("Cancel");
+                        clicked => { root.new-list-open = false; }
+                    }
+                    DialogButton {
+                        label: @tr("Create");
+                        primary: true;
+                        clicked => {
+                            root.menu-new-list(new-list-name.text);
+                            new-list-name.text = "";
+                            root.new-list-open = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Add member ----------
+    if root.member-pick-open: Rectangle {
+        background: #000000aa;
+        TouchArea { clicked => { root.member-pick-open = false; } }
+        Rectangle {
+            width: 420px;
+            height: 560px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            VerticalBox {
+                padding: 18px;
+                spacing: 10px;
+                HorizontalLayout {
+                    Text {
+                        text: @tr("Add member");
+                        color: Theme.text;
+                        font-size: 17px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/x.svg");
+                        clicked => { root.member-pick-open = false; }
+                    }
+                }
+                LineEdit {
+                    placeholder-text: @tr("Search name or number");
+                    edited => { root.member-search(self.text); }
+                }
+                ListView {
+                    for m in root.member-rows: MemberRow {
+                        item: m;
+                        pickable: true;
+                        clicked => { root.member-toggle(m.jid); }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Text {
+                        text: @tr("{} selected", root.member-count);
+                        color: Theme.text-dim;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    DialogButton {
+                        label: @tr("Add");
+                        primary: true;
+                        enabled: root.member-count > 0;
+                        clicked => { root.member-confirm(); }
                     }
                 }
             }

@@ -5,7 +5,7 @@ use crate::store::{
     MessageKind, Store, StoredMessage, clean_text, display_id, format_duration,
     is_displayable_jid, normalize_jid, quoted_summary,
 };
-use crate::i18n::t;
+use crate::i18n::{t, ta};
 use std::collections::HashMap;
 use std::sync::Arc;
 use whatsapp_rust::types::events::InboundMessage;
@@ -76,7 +76,214 @@ pub fn from_live(store: &mut Store, inbound: &InboundMessage) -> Option<StoredMe
     normalize(store, &meta, &inbound.message, &HashMap::new(), 0)
 }
 
+// The person a notice talks about: "You" for one of our own identities,
+// otherwise the best name we have.
+pub fn notice_name(store: &Store, jid: &str) -> String {
+    let canon = store.canon_owned(&normalize_jid(jid));
+    if store.self_jids.contains(&canon) || store.self_jids.contains(jid) {
+        return t("reactions.you");
+    }
+    let name = store.chat_name(&canon);
+    if name.is_empty() { display_id(&canon) } else { name }
+}
+
+fn join_names(names: &[String]) -> String {
+    match names.len() {
+        0 => String::new(),
+        1 => names[0].clone(),
+        n => format!("{} {} {}", names[..n - 1].join(", "), t("notice.and"), names[n - 1]),
+    }
+}
+
+pub fn ephemeral_label(secs: u32) -> String {
+    match secs {
+        0 => t("ephemeral.off"),
+        86_400 => t("ephemeral.day"),
+        604_800 => t("ephemeral.week"),
+        7_776_000 => t("ephemeral.quarter"),
+        s if s % 86_400 == 0 => ta("ephemeral.days", &[&(s / 86_400).to_string()]),
+        s if s % 3600 == 0 => ta("ephemeral.hours", &[&(s / 3600).to_string()]),
+        s => ta("ephemeral.minutes", &[&(s / 60).to_string()]),
+    }
+}
+
+// The sentence a group event shows in the conversation, in WhatsApp's
+// wording. `actor` is who did it; `who` are the people it names.
+pub fn group_notice(
+    store: &Store,
+    kind: &str,
+    actor: Option<&str>,
+    who: &[String],
+    text: &str,
+    number: u32,
+) -> String {
+    let me = t("reactions.you");
+    let actor_name = actor.map(|a| notice_name(store, a)).unwrap_or_default();
+    let actor_is_me = actor_name == me;
+    let names: Vec<String> = who.iter().map(|w| notice_name(store, w)).collect();
+    let names_me = names.len() == 1 && names[0] == me;
+    let people = join_names(&names);
+    let actor_or_someone = if actor_name.is_empty() { t("notice.someone") } else { actor_name.clone() };
+    // Roster churn that does not involve us collapses into one line that
+    // opens the group info, the way WhatsApp keeps busy groups readable.
+    let self_leave = kind == "leave"
+        || (kind == "remove" && actor.is_some() && who.len() == 1 && actor_name == names[0]);
+    if matches!(kind, "add" | "invite" | "remove" | "promote" | "demote")
+        && !self_leave
+        && !names_me
+        && !actor_is_me
+    {
+        return t("notice.membersChanged");
+    }
+    match kind {
+        "add" => {
+            if names_me {
+                ta("notice.addedYou", &[&actor_or_someone])
+            } else if actor.is_some() && who.len() == 1 && actor_name == names[0] {
+                ta("notice.joinedLink", &[&people])
+            } else if actor_is_me {
+                ta("notice.youAdded", &[&people])
+            } else {
+                ta("notice.added", &[&actor_or_someone, &people])
+            }
+        }
+        "invite" => ta("notice.joinedLink", &[&people]),
+        "remove" | "leave" => {
+            if actor.is_some() && who.len() == 1 && actor_name == names[0] {
+                if names_me { t("notice.youLeft") } else { ta("notice.left", &[&people]) }
+            } else if names_me {
+                ta("notice.removedYou", &[&actor_or_someone])
+            } else if actor_is_me {
+                ta("notice.youRemoved", &[&people])
+            } else {
+                ta("notice.removed", &[&actor_or_someone, &people])
+            }
+        }
+        "promote" => {
+            if names_me { t("notice.youAdmin") } else { ta("notice.promoted", &[&people]) }
+        }
+        "demote" => {
+            if names_me { t("notice.youNotAdmin") } else { ta("notice.demoted", &[&people]) }
+        }
+        "subject" => ta("notice.subject", &[&actor_or_someone, text]),
+        "description" => ta("notice.description", &[&actor_or_someone]),
+        "icon" => ta("notice.icon", &[&actor_or_someone]),
+        "create" => ta("notice.created", &[&actor_or_someone, text]),
+        "announce" => ta("notice.announce", &[&actor_or_someone]),
+        "not_announce" => ta("notice.notAnnounce", &[&actor_or_someone]),
+        "locked" => ta("notice.locked", &[&actor_or_someone]),
+        "unlocked" => ta("notice.unlocked", &[&actor_or_someone]),
+        "ephemeral" => {
+            if number == 0 {
+                ta("notice.ephemeralOff", &[&actor_or_someone])
+            } else {
+                ta("notice.ephemeralOn", &[&actor_or_someone, &ephemeral_label(number)])
+            }
+        }
+        "delete" => t("notice.deleted"),
+        "missedVoice" => t("notice.missedVoice"),
+        "missedVideo" => t("notice.missedVideo"),
+        _ => String::new(),
+    }
+}
+
+// A group event stored in the history payload as a stub (no content, a
+// type and parameters), turned into a centered notice.
+fn stub_system(store: &mut Store, web: &wa::WebMessageInfo) -> Option<StoredMessage> {
+    use wa::web_message_info::StubType as S;
+    let stub = web.message_stub_type?;
+    let key = web.key.as_option()?;
+    let chat = store.canon_owned(&normalize_jid(key.remote_jid.as_deref()?));
+    if !is_displayable_jid(&chat) {
+        return None;
+    }
+    let actor: Option<String> = if key.from_me.unwrap_or(false) {
+        store.self_jids.iter().next().cloned()
+    } else {
+        key.participant.as_deref().map(normalize_jid).or_else(|| Some(chat.clone()))
+    };
+    let params = &web.message_stub_parameters;
+    let jids: Vec<String> = params
+        .iter()
+        .filter(|p| p.contains('@'))
+        .map(|p| normalize_jid(p))
+        .collect();
+    let first = params.first().map(String::as_str).unwrap_or("");
+    let (kind, text, number) = match stub {
+        S::GROUP_PARTICIPANT_ADD => ("add", "", 0),
+        S::GROUP_PARTICIPANT_INVITE => ("invite", "", 0),
+        S::GROUP_PARTICIPANT_REMOVE => ("remove", "", 0),
+        S::GROUP_PARTICIPANT_LEAVE => ("leave", "", 0),
+        S::GROUP_PARTICIPANT_PROMOTE => ("promote", "", 0),
+        S::GROUP_PARTICIPANT_DEMOTE => ("demote", "", 0),
+        S::GROUP_CHANGE_SUBJECT => ("subject", first, 0),
+        S::GROUP_CHANGE_DESCRIPTION => ("description", "", 0),
+        S::GROUP_CHANGE_ICON => ("icon", "", 0),
+        S::GROUP_CREATE => ("create", first, 0),
+        S::GROUP_CHANGE_ANNOUNCE => {
+            if first == "on" { ("announce", "", 0) } else { ("not_announce", "", 0) }
+        }
+        S::GROUP_CHANGE_RESTRICT => {
+            if first == "on" { ("locked", "", 0) } else { ("unlocked", "", 0) }
+        }
+        S::CHANGE_EPHEMERAL_SETTING => ("ephemeral", "", first.parse::<u32>().unwrap_or(0)),
+        S::GROUP_DELETE => ("delete", "", 0),
+        S::CALL_MISSED_VOICE | S::CALL_MISSED_GROUP_VOICE => ("missedVoice", "", 0),
+        S::CALL_MISSED_VIDEO | S::CALL_MISSED_GROUP_VIDEO => ("missedVideo", "", 0),
+        _ => return None,
+    };
+    // Leaving names oneself; the stub carries the actor as the leaver.
+    let who: Vec<String> = if kind == "leave" && jids.is_empty() {
+        actor.clone().into_iter().collect()
+    } else {
+        jids
+    };
+    let body = group_notice(store, kind, actor.as_deref(), &who, text, number);
+    if body.is_empty() {
+        return None;
+    }
+    Some(system_message(&chat, key.id.as_deref()?, web.message_timestamp.unwrap_or(0) as i64, body))
+}
+
+pub fn system_message(chat: &str, id: &str, timestamp: i64, text: String) -> StoredMessage {
+    StoredMessage {
+        id: id.to_string(),
+        jid: chat.to_string(),
+        kind: MessageKind::System,
+        text,
+        from_me: false,
+        sender: String::new(),
+        sender_jid: String::new(),
+        forwarded: false,
+        deleted: false,
+        gif: false,
+        starred: false,
+        sticker: false,
+        mentions: Vec::new(),
+        mentions_me: false,
+        quote_id: String::new(),
+        quote_author: String::new(),
+        quote_text: String::new(),
+        link_title: String::new(),
+        link_desc: String::new(),
+        link_url: String::new(),
+        timestamp,
+        mimetype: String::new(),
+        media_w: 0,
+        media_h: 0,
+        duration_sec: 0,
+        status: 0,
+        reactions: HashMap::new(),
+        raw: None,
+    }
+}
+
 pub fn from_history(store: &mut Store, web: &wa::WebMessageInfo) -> Option<StoredMessage> {
+    if web.message_stub_type.is_some_and(|s| s != wa::web_message_info::StubType::UNKNOWN)
+        && web.message.as_option().is_none()
+    {
+        return stub_system(store, web);
+    }
     let key = web.key.as_option()?;
     let chat = normalize_jid(key.remote_jid.as_deref()?);
     let from_me = key.from_me.unwrap_or(false);

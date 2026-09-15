@@ -63,6 +63,17 @@ fn downloadable(msg: &wa::Message) -> Option<&dyn whatsapp_rust::wacore::downloa
     None
 }
 
+// Stickers are keyed by their content hash rather than the message id:
+// the same sticker sent ten times is one file and one decode.
+pub fn sticker_key(msg: &wa::Message) -> Option<String> {
+    use whatsapp_rust::proto_helpers::MessageExt as _;
+    let sha = msg.get_base_message().sticker_message.as_option()?.file_sha256.as_ref()?;
+    if sha.is_empty() {
+        return None;
+    }
+    Some(sha.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 // Downloads (if missing) and returns the cached, encrypted file's path.
 pub async fn ensure_cached(
     client: &std::sync::Arc<whatsapp_rust::client::Client>,
@@ -71,7 +82,10 @@ pub async fn ensure_cached(
     mimetype: &str,
     msg: &wa::Message,
 ) -> Option<PathBuf> {
-    let path = cache_path(id, mimetype);
+    let path = match sticker_key(msg) {
+        Some(sha) => media_cache().join(format!("stk_{sha}.webp")),
+        None => cache_path(id, mimetype),
+    };
     if tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Some(path);
     }

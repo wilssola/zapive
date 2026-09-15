@@ -15,6 +15,7 @@ mod video;
 mod paths;
 mod platform;
 mod qr;
+mod search;
 mod single;
 mod store;
 mod update;

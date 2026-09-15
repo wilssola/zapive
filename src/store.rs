@@ -16,6 +16,9 @@ pub enum MessageKind {
     Audio,
     Doc,
     Video,
+    // A centered notice about the chat itself (members joined, subject
+    // changed, disappearing messages toggled); `text` is the sentence.
+    System,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -173,6 +176,57 @@ pub struct ChatMeta {
     // This jid is the community itself.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_community: bool,
+    // Notifications: 0 = on, -1 = muted always, otherwise muted until
+    // this unix time (seconds).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub muted: i64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub favorite: bool,
+    // Disappearing-message timer in seconds; 0 = off.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub ephemeral: u32,
+    // Group settings that decide whether we may write here.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub announce: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admin: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub left: bool,
+}
+
+impl ChatMeta {
+    pub fn is_muted(&self) -> bool {
+        self.muted == -1 || (self.muted > 0 && self.muted > now_secs())
+    }
+
+    // Announcement groups only take messages from admins.
+    pub fn can_send(&self) -> bool {
+        !self.left && (!self.announce || self.admin)
+    }
+}
+
+// One group participant, as the group roster lists them.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Member {
+    pub jid: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub phone: String,
+    // The name the server shows for this participant, when it sends one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admin: bool,
+}
+
+// A WhatsApp list (label) chats can be filed under.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct Label {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: i32,
+    #[serde(default)]
+    pub order: i32,
 }
 
 fn is_zero_i64(n: &i64) -> bool {
@@ -224,6 +278,23 @@ pub fn format_time(timestamp: i64) -> String {
     } else {
         d.format("%d/%m").to_string()
     }
+}
+
+// The wall-clock time of a message, whatever day it is from: bubbles
+// always carry the hour; the day comes from the separator above them.
+pub fn format_clock(timestamp: i64) -> String {
+    if timestamp == 0 {
+        return String::new();
+    }
+    local_date(timestamp).format("%H:%M").to_string()
+}
+
+// Day and time together, for search results and exports.
+pub fn format_stamp(timestamp: i64) -> String {
+    if timestamp == 0 {
+        return String::new();
+    }
+    local_date(timestamp).format("%d/%m/%Y %H:%M").to_string()
 }
 
 pub fn format_day(timestamp: i64) -> String {
@@ -315,6 +386,14 @@ pub struct Store {
     pub calls_dirty: bool,
     pub starred_dirty: bool,
     pub statuses_dirty: bool,
+    // Group jid -> roster, from the last metadata fetch.
+    pub members: HashMap<String, Vec<Member>>,
+    pub members_dirty: bool,
+    // WhatsApp lists: label id -> label, and label id -> chats filed there.
+    pub labels: HashMap<String, Label>,
+    pub label_chats: HashMap<String, HashSet<String>>,
+    pub labels_dirty: bool,
+    pub search: crate::search::SearchIndex,
 }
 
 impl Store {
@@ -345,22 +424,35 @@ impl Store {
                 name: dst
                     .filter(|d| !d.name.is_empty())
                     .map(|d| d.name.clone())
-                    .unwrap_or(src.name),
+                    .unwrap_or_else(|| src.name.clone()),
                 preview: if dst.map(|d| d.timestamp).unwrap_or(0) >= src.timestamp {
-                    dst.map(|d| d.preview.clone()).unwrap_or(src.preview)
+                    dst.map(|d| d.preview.clone()).unwrap_or_else(|| src.preview.clone())
                 } else {
-                    src.preview
+                    src.preview.clone()
                 },
                 timestamp: src.timestamp.max(dst.map(|d| d.timestamp).unwrap_or(0)),
                 unread: src.unread + dst.map(|d| d.unread).unwrap_or(0),
                 mentioned: src.mentioned || dst.map(|d| d.mentioned).unwrap_or(false),
                 pinned: src.pinned.max(dst.map(|d| d.pinned).unwrap_or(0)),
                 archived: src.archived || dst.map(|d| d.archived).unwrap_or(false),
-                community: dst.map(|d| d.community.clone()).unwrap_or(src.community),
+                community: dst.map(|d| d.community.clone()).unwrap_or_else(|| src.community.clone()),
                 is_community: src.is_community || dst.map(|d| d.is_community).unwrap_or(false),
+                muted: dst.map(|d| d.muted).filter(|m| *m != 0).unwrap_or(src.muted),
+                favorite: src.favorite || dst.map(|d| d.favorite).unwrap_or(false),
+                ephemeral: dst.map(|d| d.ephemeral).filter(|e| *e != 0).unwrap_or(src.ephemeral),
+                announce: src.announce || dst.map(|d| d.announce).unwrap_or(false),
+                admin: src.admin || dst.map(|d| d.admin).unwrap_or(false),
+                left: src.left && dst.map(|d| d.left).unwrap_or(true),
             };
             self.chats.insert(into.to_string(), merged);
         }
+        for set in self.label_chats.values_mut() {
+            if set.remove(from) {
+                set.insert(into.to_string());
+                self.labels_dirty = true;
+            }
+        }
+        self.search.remove_chat(from);
         if let Some(src_msgs) = self.messages.remove(from) {
             let dst_msgs = self.messages.entry(into.to_string()).or_default();
             let seen: HashSet<String> = dst_msgs.iter().map(|m| m.id.clone()).collect();
@@ -519,23 +611,21 @@ impl Store {
         if !is_displayable_jid(&jid) {
             return;
         }
-        let existing = self.chats.get(&jid);
-        let meta = ChatMeta {
-            jid: jid.clone(),
-            name: name
-                .filter(|n| !n.is_empty())
-                .map(str::to_string)
-                .or_else(|| existing.map(|e| e.name.clone()))
-                .unwrap_or_default(),
-            preview: existing.map(|e| e.preview.clone()).unwrap_or_default(),
-            timestamp: timestamp.max(existing.map(|e| e.timestamp).unwrap_or(0)),
-            unread: unread.unwrap_or_else(|| existing.map(|e| e.unread).unwrap_or(0)),
-            mentioned: existing.map(|e| e.mentioned).unwrap_or(false),
-            pinned: pinned.unwrap_or_else(|| existing.map(|e| e.pinned).unwrap_or(0)),
-            archived: archived.unwrap_or_else(|| existing.map(|e| e.archived).unwrap_or(false)),
-            community: existing.map(|e| e.community.clone()).unwrap_or_default(),
-            is_community: existing.map(|e| e.is_community).unwrap_or(false),
-        };
+        let mut meta = self.chats.get(&jid).cloned().unwrap_or_default();
+        meta.jid = jid.clone();
+        if let Some(name) = name.filter(|n| !n.is_empty()) {
+            meta.name = name.to_string();
+        }
+        meta.timestamp = timestamp.max(meta.timestamp);
+        if let Some(unread) = unread {
+            meta.unread = unread;
+        }
+        if let Some(pinned) = pinned {
+            meta.pinned = pinned;
+        }
+        if let Some(archived) = archived {
+            meta.archived = archived;
+        }
         self.chats.insert(jid, meta);
     }
 
@@ -568,35 +658,128 @@ impl Store {
             list.drain(..excess);
         }
         self.dirty_jids.insert(jid.clone());
+        self.search.add(&jid, &preview_msg);
 
         let existing = self.chats.get(&jid);
         if existing.map(|e| timestamp >= e.timestamp).unwrap_or(true) {
             let preview = compute_preview(&preview_msg, self);
-            let existing = self.chats.get(&jid);
-            let meta = ChatMeta {
-                jid: jid.clone(),
-                name: existing.map(|e| e.name.clone()).unwrap_or_default(),
-                preview,
-                timestamp: timestamp.max(existing.map(|e| e.timestamp).unwrap_or(0)),
-                unread: existing.map(|e| e.unread).unwrap_or(0),
-                mentioned: existing.map(|e| e.mentioned).unwrap_or(false),
-                pinned: existing.map(|e| e.pinned).unwrap_or(0),
-                archived: existing.map(|e| e.archived).unwrap_or(false),
-                community: existing.map(|e| e.community.clone()).unwrap_or_default(),
-                is_community: existing.map(|e| e.is_community).unwrap_or(false),
-            };
+            let mut meta = self.chats.get(&jid).cloned().unwrap_or_default();
+            meta.jid = jid.clone();
+            meta.preview = preview;
+            meta.timestamp = timestamp.max(meta.timestamp);
             self.chats.insert(jid.clone(), meta);
         }
-        let msg = self.messages.get(&jid).and_then(|l| l.iter().find(|m| m.timestamp == timestamp));
-        if let Some(m) = msg
-            && !m.from_me
-            && !m.sender.is_empty()
+        if preview_msg.kind != MessageKind::System
+            && !preview_msg.from_me
+            && !preview_msg.sender.is_empty()
             && (jid.ends_with("@s.whatsapp.net") || jid.ends_with("@lid"))
         {
-            let sender = m.sender.clone();
-            self.push_names.insert(jid, sender);
+            self.push_names.insert(jid, preview_msg.sender);
         }
         true
+    }
+
+    // Drops a chat's messages from RAM, the index and (via deleted_jids)
+    // the vault, keeping the chat itself in the list.
+    pub fn clear_messages(&mut self, jid: &str) {
+        self.messages.remove(jid);
+        self.hydrated.remove(jid);
+        self.dirty_jids.remove(jid);
+        self.deleted_jids.insert(jid.to_string());
+        self.search.remove_chat(jid);
+        if let Some(meta) = self.chats.get_mut(jid) {
+            meta.preview = String::new();
+        }
+    }
+
+    // Removes a chat entirely (WhatsApp's "delete chat").
+    pub fn delete_chat(&mut self, jid: &str) {
+        self.clear_messages(jid);
+        self.chats.remove(jid);
+        for set in self.label_chats.values_mut() {
+            set.remove(jid);
+        }
+    }
+
+    pub fn sorted_labels(&self) -> Vec<&Label> {
+        let mut out: Vec<&Label> = self.labels.values().collect();
+        out.sort_by(|a, b| a.order.cmp(&b.order).then(a.name.cmp(&b.name)));
+        out
+    }
+
+    pub fn set_label_chat(&mut self, label_id: &str, jid: &str, on: bool) -> bool {
+        let set = self.label_chats.entry(label_id.to_string()).or_default();
+        let changed = if on { set.insert(jid.to_string()) } else { set.remove(jid) };
+        if changed {
+            self.labels_dirty = true;
+        }
+        changed
+    }
+
+    pub fn upsert_label(&mut self, label: Label) {
+        self.labels.insert(label.id.clone(), label);
+        self.labels_dirty = true;
+    }
+
+    pub fn remove_label(&mut self, id: &str) {
+        self.labels.remove(id);
+        self.label_chats.remove(id);
+        self.labels_dirty = true;
+    }
+
+    // A fresh label id: WhatsApp numbers them, skipping the predefined
+    // ones (below 5) it keeps for itself.
+    pub fn next_label_id(&self) -> String {
+        let max = self.labels.keys().filter_map(|k| k.parse::<i64>().ok()).max().unwrap_or(4);
+        (max.max(4) + 1).to_string()
+    }
+
+    pub fn set_members(&mut self, jid: &str, members: Vec<Member>) {
+        self.members.insert(jid.to_string(), members);
+        self.members_dirty = true;
+    }
+
+    pub fn members_of(&self, jid: &str) -> &[Member] {
+        self.members.get(jid).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    // Applies a roster change from a group notification. Returns whether
+    // the roster is known at all (a fresh fetch fixes an unknown one).
+    pub fn patch_members(&mut self, jid: &str, jids: &[String], action: &str) -> bool {
+        let Some(list) = self.members.get_mut(jid) else { return false };
+        for who in jids {
+            match action {
+                "add" => {
+                    if !list.iter().any(|m| m.jid == *who) {
+                        list.push(Member {
+                            jid: who.clone(),
+                            phone: String::new(),
+                            name: String::new(),
+                            admin: false,
+                        });
+                    }
+                }
+                "remove" => list.retain(|m| m.jid != *who),
+                "promote" | "demote" => {
+                    if let Some(m) = list.iter_mut().find(|m| m.jid == *who) {
+                        m.admin = action == "promote";
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.members_dirty = true;
+        true
+    }
+
+    // Whether one of our identities is an admin of this group.
+    pub fn self_is_admin(&self, jid: &str) -> bool {
+        self.members_of(jid).iter().any(|m| {
+            m.admin
+                && (self.self_jids.contains(&m.jid)
+                    || self.self_jids.contains(self.canon(&m.jid))
+                    || (!m.phone.is_empty() && self.self_jids.contains(&m.phone)))
+        })
     }
 
     pub fn messages_for(&self, jid: &str) -> &[StoredMessage] {
@@ -821,6 +1004,22 @@ impl Store {
         m.text = String::new();
         m.raw = None;
         self.dirty_jids.insert(jid.to_string());
+        self.search.remove(jid, id);
+        true
+    }
+
+    // Removes messages locally only ("delete for me").
+    pub fn remove_messages(&mut self, jid: &str, ids: &[String]) -> bool {
+        let Some(list) = self.messages.get_mut(jid) else { return false };
+        let before = list.len();
+        list.retain(|m| !ids.contains(&m.id));
+        if list.len() == before {
+            return false;
+        }
+        for id in ids {
+            self.search.remove(jid, id);
+        }
+        self.dirty_jids.insert(jid.to_string());
         true
     }
 
@@ -884,6 +1083,15 @@ impl Store {
             vault.set("store:statuses", &to_json(&dehydrated));
             self.statuses_dirty = false;
         }
+        if self.members_dirty {
+            vault.set("store:members", &to_json(&self.members));
+            self.members_dirty = false;
+        }
+        if self.labels_dirty {
+            vault.set("store:labels", &to_json(&self.labels));
+            vault.set("store:labelchats", &to_json(&self.label_chats));
+            self.labels_dirty = false;
+        }
         let mut saved = 0;
         let dirty: Vec<String> = self.dirty_jids.drain().collect();
         for jid in dirty {
@@ -896,6 +1104,10 @@ impl Store {
                 let tail: Vec<&StoredMessage> =
                     list.iter().skip(list.len().saturating_sub(300)).collect();
                 vault.set(&format!("store:msgs:{jid}"), &to_json(&tail));
+                // The full list is in hand: the index for this chat is
+                // rebuilt from it, which also backfills chats that
+                // predate the index.
+                self.search.rebuild(&jid, list);
                 saved += 1;
             }
             if was_cold {
@@ -903,9 +1115,21 @@ impl Store {
                 self.hydrated.remove(&jid);
             }
         }
+        self.search.save_to(vault);
         if saved > 0 {
             println!("[store] saved {saved} chat message list(s)");
         }
+    }
+
+    // Indexes one cold chat straight from the vault (first-run backfill
+    // for chats stored before the search index existed).
+    pub fn index_from_vault(&mut self, vault: &Vault, jid: &str) {
+        if self.search.has_chat(jid) {
+            return;
+        }
+        let Some(text) = vault.get(&format!("store:msgs:{jid}")) else { return };
+        let Ok(disk) = serde_json::from_str::<Vec<StoredMessage>>(&text) else { return };
+        self.search.rebuild(jid, &disk);
     }
 
     pub fn load_from(&mut self, vault: &Vault) {
@@ -939,6 +1163,16 @@ impl Store {
             self.statuses = v;
             self.prune_statuses();
         }
+        if let Some(v) = read(vault, "store:members") {
+            self.members = v;
+        }
+        if let Some(v) = read(vault, "store:labels") {
+            self.labels = v;
+        }
+        if let Some(v) = read(vault, "store:labelchats") {
+            self.label_chats = v;
+        }
+        self.search.load_from(vault);
     }
 }
 
@@ -1004,7 +1238,7 @@ pub fn preview_body(stored: &StoredMessage) -> String {
             if stored.gif { t("preview.gif") } else { t("preview.video") }
         }
         MessageKind::Doc => ta("preview.document", &[&stored.text]),
-        MessageKind::Text => {
+        MessageKind::Text | MessageKind::System => {
             let collapsed: String = stored.text.split_whitespace().collect::<Vec<_>>().join(" ");
             collapsed.chars().take(80).collect()
         }
@@ -1013,6 +1247,9 @@ pub fn preview_body(stored: &StoredMessage) -> String {
 
 pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
     let body = store.named_mentions(&preview_body(stored));
+    if stored.kind == MessageKind::System {
+        return body;
+    }
     let prefix = if stored.from_me {
         "✓ ".to_string()
     } else if is_group(&stored.jid) && !stored.sender.is_empty() {
