@@ -90,6 +90,18 @@ pub enum Cmd {
     // Decodes an embedded thumbnail (link previews, video posters).
     DecodeThumb { id: String, bytes: Vec<u8>, link: bool },
     FetchAvatar(String),
+    // The full-size picture for the info panel.
+    AvatarLarge(String),
+    // A link preview's real thumbnail from the CDN; `fallback` is the
+    // inline jpeg used when the download fails.
+    LinkThumb {
+        id: String,
+        direct_path: String,
+        media_key: Vec<u8>,
+        sha256: Vec<u8>,
+        enc_sha256: Vec<u8>,
+        fallback: Vec<u8>,
+    },
     // Voice notes: full decode at a speed, waveform bars, send recording.
     AudioDecode { id: String, plain: std::path::PathBuf, rate_idx: usize, rate: f64 },
     Waveform { id: String, path: std::path::PathBuf },
@@ -1976,7 +1988,7 @@ async fn executor(
                                 return Some((None, fresh)); // remembered "no picture"
                             }
                             let img = crate::media::read_cached(&key, &path)
-                                .and_then(|b| crate::media::decode_cover(&b, 64))?;
+                                .and_then(|b| crate::media::decode_cover(&b, crate::media::AVATAR_PX))?;
                             Some((Some(img), fresh))
                         })
                         .await
@@ -1992,14 +2004,17 @@ async fn executor(
                     }
                     let _permit = sem.acquire_owned().await;
                     let Some(target) = parse_jid(&jid) else { return };
-                    let result = client.contacts().get_profile_picture(&target, true).await;
+                    // The preview the server offers is a 96px thumbnail
+                    // that blurs at any real size; the full picture is
+                    // what WhatsApp Web shows, so fetch that and cut it.
+                    let result = client.contacts().get_profile_picture(&target, false).await;
                     match result {
                         Ok(Some(pic)) => {
                             let url = pic.url.clone();
                             let img = tokio::task::spawn_blocking(move || {
                                 let mut res = ureq::get(&url).call().ok()?;
                                 let bytes = res.body_mut().read_to_vec().ok()?;
-                                let img = crate::media::decode_cover(&bytes, 64)?;
+                                let img = crate::media::decode_cover(&bytes, crate::media::AVATAR_PX)?;
                                 let _ = std::fs::write(&path, key.encrypt_bytes(&bytes));
                                 Some(img)
                             })
@@ -2022,6 +2037,89 @@ async fn executor(
                         Err(_) => ui_apply(move |b| b.on_avatar(&jid, None, false)),
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                });
+            }
+            Cmd::AvatarLarge(jid) => {
+                let client = session.client.clone();
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let path = crate::media::avatar_cache_path(&jid);
+                    let cached = {
+                        let (key, path) = (key.clone(), path.clone());
+                        tokio::task::spawn_blocking(move || {
+                            crate::media::read_cached(&key, &path)
+                                .and_then(|b| crate::media::decode_cover(&b, crate::media::AVATAR_LARGE_PX))
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    };
+                    if let Some(img) = cached {
+                        ui_apply(move |b| b.on_avatar_large(&jid, img));
+                        return;
+                    }
+                    let Some(target) = parse_jid(&jid) else { return };
+                    let Ok(Some(pic)) = client.contacts().get_profile_picture(&target, false).await
+                    else {
+                        return;
+                    };
+                    let url = pic.url.clone();
+                    let img = tokio::task::spawn_blocking(move || {
+                        let mut res = ureq::get(&url).call().ok()?;
+                        let bytes = res.body_mut().read_to_vec().ok()?;
+                        let img = crate::media::decode_cover(&bytes, crate::media::AVATAR_LARGE_PX)?;
+                        let _ = std::fs::write(&path, key.encrypt_bytes(&bytes));
+                        Some(img)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = img {
+                        ui_apply(move |b| b.on_avatar_large(&jid, img));
+                    }
+                });
+            }
+            Cmd::LinkThumb { id, direct_path, media_key: mk, sha256, enc_sha256, fallback } => {
+                let client = session.client.clone();
+                let key = media_key.clone();
+                let sem = media_sem.clone();
+                tokio::spawn(async move {
+                    let path = crate::media::link_thumb_path(&id);
+                    let mut bytes = {
+                        let (key, path) = (key.clone(), path.clone());
+                        tokio::task::spawn_blocking(move || crate::media::read_cached(&key, &path))
+                            .await
+                            .ok()
+                            .flatten()
+                    };
+                    if bytes.is_none() {
+                        let _permit = sem.acquire_owned().await;
+                        let params = whatsapp_rust::download::DownloadParams::encrypted(
+                            direct_path,
+                            &mk,
+                            &sha256,
+                            &enc_sha256,
+                            0,
+                            whatsapp_rust::wacore::download::MediaType::LinkThumbnail,
+                        );
+                        match client.download(&params).await {
+                            Ok(data) => {
+                                let sealed = key.encrypt_bytes(&data);
+                                let _ = tokio::fs::write(&path, sealed).await;
+                                bytes = Some(data);
+                            }
+                            Err(e) => eprintln!("[media] link thumbnail failed for {id}: {e}"),
+                        }
+                    }
+                    let data = bytes.unwrap_or(fallback);
+                    let img = tokio::task::spawn_blocking(move || crate::media::decode_bytes(&data, 800))
+                        .await
+                        .ok()
+                        .flatten();
+                    match img {
+                        Some(img) => ui_apply(move |b| b.on_thumb(&id, true, img)),
+                        None => ui_apply(move |b| b.on_media_missing(&id)),
+                    }
                 });
             }
             Cmd::Start | Cmd::Resume => {

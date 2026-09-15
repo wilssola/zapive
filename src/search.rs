@@ -25,6 +25,8 @@ pub struct Entry {
     pub from_me: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sender: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sender_jid: String,
 }
 
 pub struct Hit {
@@ -34,6 +36,7 @@ pub struct Hit {
     pub snippet: String,
     pub from_me: bool,
     pub sender: String,
+    pub sender_jid: String,
 }
 
 #[derive(Default)]
@@ -94,6 +97,7 @@ fn entry_of(m: &StoredMessage) -> Option<Entry> {
         text,
         from_me: m.from_me,
         sender: m.sender.clone(),
+        sender_jid: m.sender_jid.clone(),
     })
 }
 
@@ -172,6 +176,7 @@ impl SearchIndex {
                         snippet: snippet(&e.text, &e.norm, words[0]),
                         from_me: e.from_me,
                         sender: e.sender.clone(),
+                        sender_jid: e.sender_jid.clone(),
                     },
                 ));
             }

@@ -44,6 +44,8 @@ export struct ChatItem {
 // open conversation (name = author).
 export struct SearchHit {
     jid: string,
+    // Whose picture the row shows (the author inside a chat).
+    face: string,
     id: string,
     name: string,
     sender: string,

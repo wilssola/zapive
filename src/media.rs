@@ -112,7 +112,19 @@ pub async fn ensure_cached(
 pub fn avatar_cache_path(jid: &str) -> PathBuf {
     let dir = media_cache().join("avatars");
     let _ = std::fs::create_dir_all(&dir);
-    dir.join(format!("{}.avatar", sanitize(jid)))
+    // ".avatar" files held the server's tiny preview; the full picture
+    // lives under a new name so the old ones are simply refetched.
+    dir.join(format!("{}.avatar2", sanitize(jid)))
+}
+
+// Avatars are decoded once at a size that stays crisp in the list on
+// a HiDPI screen; the info panel asks for a larger cut on demand.
+pub const AVATAR_PX: u32 = 112;
+pub const AVATAR_LARGE_PX: u32 = 320;
+
+// A link preview's high-resolution thumbnail, cached like other media.
+pub fn link_thumb_path(id: &str) -> PathBuf {
+    media_cache().join(format!("lnk_{}.jpg", sanitize(id)))
 }
 
 pub fn read_cached(key: &KeyHandle, path: &PathBuf) -> Option<Vec<u8>> {
@@ -190,7 +202,7 @@ pub fn decode_bytes(data: &[u8], max_dim: u32) -> Option<Decoded> {
 // Square cover crop (avatars in the UI).
 pub fn decode_cover(data: &[u8], size: u32) -> Option<Decoded> {
     let img = image::load_from_memory(data).ok()?;
-    let resized = img.resize_to_fill(size, size, imageops::FilterType::Triangle);
+    let resized = img.resize_to_fill(size, size, imageops::FilterType::Lanczos3);
     let rgba = resized.to_rgba8();
     Some(Decoded { w: rgba.width(), h: rgba.height(), rgba: rgba.into_raw() })
 }

@@ -1692,6 +1692,9 @@ impl Bridge {
         }
         let hits = self.store.search.search(&self.search_text, None, SEARCH_LIMIT);
         let rows: Vec<SearchHit> = hits.iter().map(|h| self.to_hit(h, true)).collect();
+        for h in &hits {
+            self.queue_avatar(&h.jid);
+        }
         self.search_model.set_vec(rows);
     }
 
@@ -1705,7 +1708,18 @@ impl Bridge {
         } else {
             h.sender.clone()
         };
-        let avatar = self.avatar_for(&h.jid);
+        // Inside a chat the row is about the author, so it wears their
+        // picture; across chats it is about the conversation.
+        let face = if with_chat {
+            h.jid.clone()
+        } else if h.from_me {
+            self.self_jid.clone()
+        } else if h.sender_jid.is_empty() {
+            h.jid.clone()
+        } else {
+            self.store.canon_owned(&h.sender_jid)
+        };
+        let avatar = self.avatar_for(&face);
         let who = if with_chat && is_group(&h.jid) {
             if h.from_me { t("reactions.you") } else { h.sender.clone() }
         } else {
@@ -1713,6 +1727,7 @@ impl Bridge {
         };
         SearchHit {
             jid: h.jid.clone().into(),
+            face: face.clone().into(),
             id: h.id.clone().into(),
             name: name.clone().into(),
             sender: who.into(),
@@ -1721,7 +1736,7 @@ impl Bridge {
             hasAvatar: avatar.is_some(),
             avatar: avatar.unwrap_or_else(empty_image),
             initial: initial_of(&name).into(),
-            colorIdx: color_idx_of(&h.jid),
+            colorIdx: color_idx_of(&face),
         }
     }
 
@@ -2058,7 +2073,7 @@ impl Bridge {
             .unwrap_or(true);
         let sender_jid =
             if m.sender_jid.is_empty() { m.jid.clone() } else { self.store.canon_owned(&m.sender_jid) };
-        let group_indent = group && !m.from_me;
+        let group_indent = group && !m.from_me && m.kind != MessageKind::System;
         let voice_jid = if m.kind == MessageKind::Audio {
             if m.from_me { self.self_jid.clone() } else { sender_jid.clone() }
         } else {
@@ -2423,6 +2438,18 @@ impl Bridge {
         }
     }
 
+    // Which jid a search row's picture belongs to.
+    fn hit_face(&self, row: &SearchHit) -> String {
+        if row.face.is_empty() { row.jid.to_string() } else { row.face.to_string() }
+    }
+
+    pub fn on_avatar_large(&mut self, jid: &str, img: crate::media::Decoded) {
+        if self.ui.get_info_open() && self.current_jid.as_deref() == Some(jid) {
+            self.ui.set_info_avatar(image_of(&img));
+            self.ui.set_info_has_avatar(true);
+        }
+    }
+
     fn patch_avatar_everywhere(&mut self, jid: &str, image: &slint::Image) {
         // Chat list row.
         for i in 0..self.chats_model.row_count() {
@@ -2439,6 +2466,19 @@ impl Bridge {
         if Some(&jid.to_string()) == self.current_jid.as_ref() {
             self.ui.set_current_avatar(image.clone());
             self.ui.set_current_avatar_has(true);
+        }
+        // Search hits (sidebar and in-chat) that show this face.
+        for model in [&self.search_model, &self.chat_search_model] {
+            for i in 0..model.row_count() {
+                if let Some(mut row) = model.row_data(i)
+                    && !row.hasAvatar
+                    && self.hit_face(&row) == jid
+                {
+                    row.avatar = image.clone();
+                    row.hasAvatar = true;
+                    model.set_row_data(i, row);
+                }
+            }
         }
         // Sender and voice-note avatars inside message rows.
         for i in 0..self.messages_model.row_count() {
@@ -2488,19 +2528,29 @@ impl Bridge {
         match m.kind {
             MessageKind::System => {}
             MessageKind::Text => {
-                // Link preview thumbnail travels inside the message itself.
-                if let Some(thumb) = inner
-                    .extended_text_message
-                    .as_option()
-                    .and_then(|e| e.jpeg_thumbnail.as_ref())
-                    .filter(|t| !t.is_empty())
+                let Some(ext) = inner.extended_text_message.as_option() else { return };
+                let inline = ext.jpeg_thumbnail.clone().filter(|t| !t.is_empty()).unwrap_or_default();
+                // The card's real picture lives on the CDN; the inline
+                // jpeg is a placeholder-sized copy, kept as the fallback.
+                let hi_res = ext.thumbnail_direct_path.clone().zip(ext.media_key.clone()).zip(
+                    ext.thumbnail_sha256.clone().zip(ext.thumbnail_enc_sha256.clone()),
+                );
+                if let Some(((direct_path, media_key), (sha256, enc_sha256))) = hi_res
+                    && !direct_path.is_empty()
+                    && !media_key.is_empty()
                 {
                     self.media_inflight.insert(m.id.clone());
-                    self.wa.send(Cmd::DecodeThumb {
+                    self.wa.send(Cmd::LinkThumb {
                         id: m.id.clone(),
-                        bytes: thumb.to_vec(),
-                        link: true,
+                        direct_path,
+                        media_key,
+                        sha256,
+                        enc_sha256,
+                        fallback: inline,
                     });
+                } else if !inline.is_empty() {
+                    self.media_inflight.insert(m.id.clone());
+                    self.wa.send(Cmd::DecodeThumb { id: m.id.clone(), bytes: inline, link: true });
                 }
                 return;
             }
@@ -3639,6 +3689,8 @@ impl Bridge {
         self.ui.set_info_color_idx(color_idx_of(&jid));
         self.ui.set_chat_menu_open(false);
         self.info_member_model.set_vec(Vec::new());
+        // The 140px portrait wants a bigger cut than the list keeps.
+        self.wa.send(Cmd::AvatarLarge(jid.clone()));
         if group {
             self.fill_info_members(&jid);
             self.group_meta_at.remove(&jid);
@@ -4427,6 +4479,21 @@ impl Bridge {
         let hits = self.store.search.search(query, Some(&jid), 200);
         let count = hits.len();
         let rows: Vec<SearchHit> = hits.iter().map(|h| self.to_hit(h, false)).collect();
+        let faces: HashSet<String> = hits
+            .iter()
+            .map(|h| {
+                if h.from_me {
+                    self.self_jid.clone()
+                } else if h.sender_jid.is_empty() {
+                    h.jid.clone()
+                } else {
+                    self.store.canon_owned(&h.sender_jid)
+                }
+            })
+            .collect();
+        for face in faces {
+            self.queue_avatar(&face);
+        }
         self.chat_search_model.set_vec(rows);
         self.ui.set_chat_search_count(
             if count == 0 { t("search.none") } else { ta("search.results", &[&count.to_string()]) }.into(),
