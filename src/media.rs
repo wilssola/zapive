@@ -112,15 +112,35 @@ pub async fn ensure_cached(
 pub fn avatar_cache_path(jid: &str) -> PathBuf {
     let dir = media_cache().join("avatars");
     let _ = std::fs::create_dir_all(&dir);
-    // ".avatar" files held the server's tiny preview; the full picture
-    // lives under a new name so the old ones are simply refetched.
-    dir.join(format!("{}.avatar2", sanitize(jid)))
+    dir.join(format!("{}.avatar", sanitize(jid)))
 }
 
 // Avatars are decoded once at a size that stays crisp in the list on
 // a HiDPI screen; the info panel asks for a larger cut on demand.
 pub const AVATAR_PX: u32 = 112;
 pub const AVATAR_LARGE_PX: u32 = 320;
+
+// Whether cached avatar bytes hold the full picture. Earlier builds
+// stored the server's 96px preview; anything that small is refetched
+// and overwritten in place.
+pub fn avatar_is_full(bytes: &[u8]) -> bool {
+    image::load_from_memory(bytes)
+        .map(|img| img.width().min(img.height()) >= 200)
+        .unwrap_or(false)
+}
+
+// Files written under the interim ".avatar2" name fold back into the
+// ".avatar" cache.
+pub fn migrate_avatar_cache() {
+    let dir = media_cache().join("avatars");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "avatar2") {
+            let _ = std::fs::rename(&path, path.with_extension("avatar"));
+        }
+    }
+}
 
 // A link preview's high-resolution thumbnail, cached like other media.
 pub fn link_thumb_path(id: &str) -> PathBuf {

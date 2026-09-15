@@ -1987,9 +1987,11 @@ async fn executor(
                             if meta.len() == 0 {
                                 return Some((None, fresh)); // remembered "no picture"
                             }
-                            let img = crate::media::read_cached(&key, &path)
-                                .and_then(|b| crate::media::decode_cover(&b, crate::media::AVATAR_PX))?;
-                            Some((Some(img), fresh))
+                            let bytes = crate::media::read_cached(&key, &path)?;
+                            let img = crate::media::decode_cover(&bytes, crate::media::AVATAR_PX)?;
+                            // A preview-sized file counts as stale, so the
+                            // full picture replaces it.
+                            Some((Some(img), fresh && crate::media::avatar_is_full(&bytes)))
                         })
                         .await
                         .ok()
