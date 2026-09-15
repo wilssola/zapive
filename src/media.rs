@@ -120,29 +120,54 @@ pub fn sticker_key(msg: &wa::Message) -> Option<String> {
     Some(sha.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+// Where a message's media lives in the cache, and whether it is there.
+// Stickers cached per message by earlier builds are moved under their
+// content hash the first time they are asked for.
+pub fn cached_path(id: &str, mimetype: &str, msg: &wa::Message) -> (PathBuf, bool) {
+    let path = match sticker_key(msg) {
+        Some(sha) => {
+            let by_hash = media_cache().join(format!("{sha}.sticker"));
+            if !by_hash.exists() {
+                let legacy = cache_path(id, "image/webp");
+                if legacy.exists() {
+                    let _ = std::fs::rename(&legacy, &by_hash);
+                }
+            }
+            by_hash
+        }
+        None => cache_path(id, mimetype),
+    };
+    let exists = path.exists();
+    (path, exists)
+}
+
 // Downloads (if missing) and returns the cached, encrypted file's path.
+// The permit is only held while bytes actually move: a task waiting out
+// a rate limit must not sit on it, or cached media queues behind it.
 pub async fn ensure_cached(
     client: &std::sync::Arc<whatsapp_rust::client::Client>,
     key: &KeyHandle,
     id: &str,
     mimetype: &str,
     msg: &wa::Message,
+    sem: &std::sync::Arc<tokio::sync::Semaphore>,
 ) -> Option<PathBuf> {
-    let path = match sticker_key(msg) {
-        Some(sha) => media_cache().join(format!("{sha}.sticker")),
-        None => cache_path(id, mimetype),
-    };
-    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+    let (path, exists) = cached_path(id, mimetype, msg);
+    if exists {
         return Some(path);
     }
     let target = downloadable(msg)?;
     wait_for_backoff().await;
-    let mut attempt = client.download(target).await;
+    let mut attempt = {
+        let _permit = sem.acquire().await;
+        client.download(target).await
+    };
     if attempt.as_ref().is_err_and(|e| rate_limited(&e.to_string())) {
         // The server is throttling media: back everything off, then try
         // this one once more.
         note_rate_limit();
         wait_for_backoff().await;
+        let _permit = sem.acquire().await;
         attempt = client.download(target).await;
     }
     match attempt {

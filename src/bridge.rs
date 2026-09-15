@@ -73,6 +73,9 @@ pub struct Bridge {
     requested_avatars: HashSet<String>,
     avatar_tries: HashMap<String, u32>,
     media_inflight: HashSet<String>,
+    // Media the server refused (expired, forbidden): asked once per run,
+    // not again on every scroll.
+    media_failed: HashSet<String>,
     media_path: HashMap<String, String>,
     decoded: HashMap<String, (slint::Image, i32, i32)>,
     decoded_order: std::collections::VecDeque<String>,
@@ -396,6 +399,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         requested_avatars: HashSet::new(),
         avatar_tries: HashMap::new(),
         media_inflight: HashSet::new(),
+        media_failed: HashSet::new(),
         media_path: HashMap::new(),
         decoded: HashMap::new(),
         decoded_order: std::collections::VecDeque::new(),
@@ -1164,6 +1168,7 @@ impl Bridge {
         self.requested_avatars.clear();
         self.avatar_tries.clear();
         self.media_inflight.clear();
+        self.media_failed.clear();
         self.media_path.clear();
         self.decoded.clear();
         self.decoded_order.clear();
@@ -2672,7 +2677,7 @@ impl Bridge {
     }
 
     fn request_media(&mut self, m: &StoredMessage) {
-        if m.deleted || self.media_inflight.contains(&m.id) {
+        if m.deleted || self.media_inflight.contains(&m.id) || self.media_failed.contains(&m.id) {
             return;
         }
         let Some(raw) = m.raw.clone() else { return };
@@ -2810,6 +2815,7 @@ impl Bridge {
 
     pub fn on_media_missing(&mut self, id: &str) {
         self.media_inflight.remove(id);
+        self.media_failed.insert(id.to_string());
         self.patch_row(id, |row| {
             row.kind = "text".into();
             row.text = t("media.unavailable").into();

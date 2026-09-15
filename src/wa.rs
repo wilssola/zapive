@@ -903,9 +903,8 @@ async fn executor(
                 let key = media_key.clone();
                 let sem = media_sem.clone();
                 tokio::spawn(async move {
-                    let _permit = sem.acquire_owned().await;
                     let Some(path) =
-                        crate::media::ensure_cached(&client, &key, &id, &mimetype, &message).await
+                        crate::media::ensure_cached(&client, &key, &id, &mimetype, &message, &sem).await
                     else {
                         ui_apply(move |b| b.on_media_missing(&id));
                         return;
@@ -2118,7 +2117,6 @@ async fn executor(
                             .flatten()
                     };
                     if bytes.is_none() {
-                        let _permit = sem.acquire_owned().await;
                         let params = whatsapp_rust::download::DownloadParams::encrypted(
                             direct_path,
                             &mk,
@@ -2128,10 +2126,14 @@ async fn executor(
                             whatsapp_rust::wacore::download::MediaType::LinkThumbnail,
                         );
                         crate::media::wait_for_backoff().await;
-                        let mut attempt = client.download(&params).await;
+                        let mut attempt = {
+                            let _permit = sem.acquire().await;
+                            client.download(&params).await
+                        };
                         if attempt.as_ref().is_err_and(|e| crate::media::rate_limited(&e.to_string())) {
                             crate::media::note_rate_limit();
                             crate::media::wait_for_backoff().await;
+                            let _permit = sem.acquire().await;
                             attempt = client.download(&params).await;
                         }
                         match attempt {
