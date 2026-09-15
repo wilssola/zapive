@@ -917,6 +917,20 @@ export component AppWindow inherits Window {
     // Lightbox
     in-out property <bool> lightbox-open: false;
     in-out property <image> lightbox-image;
+    in-out property <string> lightbox-id: "";
+    callback open-lightbox(string);
+    callback notice-clicked(string);
+
+    // Share the group's recent history with someone who joined by link.
+    in-out property <bool> share-open: false;
+    in-out property <string> share-name: "";
+    in-out property <image> share-avatar;
+    in-out property <bool> share-has-avatar: false;
+    in-out property <string> share-initial: "";
+    in-out property <int> share-color-idx: 0;
+    in-out property <bool> share-sending: false;
+    callback share-accept();
+    callback share-cancel();
     // In-app video player
     in-out property <bool> video-open: false;
     in-out property <image> video-frame;
@@ -1955,7 +1969,7 @@ export component AppWindow inherits Window {
                             sys-touch := TouchArea {
                                 enabled: sys-pill.is-system;
                                 mouse-cursor: msg.clickable ? pointer : default;
-                                clicked => { if (msg.clickable) { root.open-info(); } }
+                                clicked => { if (msg.clickable) { root.notice-clicked(msg.id); } }
                             }
                             sys-text := Text {
                                 text: sys-pill.is-system ? msg.text : "";
@@ -2201,10 +2215,7 @@ export component AppWindow inherits Window {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
-                                    clicked => {
-                                        root.lightbox-image = msg.picture;
-                                        root.lightbox-open = true;
-                                    }
+                                    clicked => { root.open-lightbox(msg.id); }
                                     Image {
                                         source: msg.picture;
                                         width: parent.width;
@@ -3806,6 +3817,83 @@ export component AppWindow inherits Window {
                         primary: true;
                         danger: true;
                         clicked => { root.confirm-accept(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Share group history ----------
+    if root.share-open: Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.share-cancel(); } }
+        Rectangle {
+            width: 500px;
+            height: share-col.preferred-height + 48px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            share-col := VerticalLayout {
+                padding: 24px;
+                spacing: 14px;
+                width: parent.width;
+                HorizontalLayout {
+                    alignment: center;
+                    Avatar {
+                        width: 66px;
+                        height: 66px;
+                        src: root.share-avatar;
+                        has-image: root.share-has-avatar;
+                        initial: root.share-initial;
+                        color-idx: root.share-color-idx;
+                    }
+                }
+                Text {
+                    text: @tr("Send message history to {}?", root.share-name);
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                    width: parent.width - 48px;
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    Text {
+                        text: root.share-name + " ";
+                        color: Theme.text;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: @tr("will get");
+                        color: Theme.text;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: @tr("recent messages");
+                        color: Theme.accent;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: @tr("from this group.");
+                        color: Theme.text;
+                        font-size: 14px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    DialogButton {
+                        label: @tr("Cancel");
+                        clicked => { root.share-cancel(); }
+                    }
+                    DialogButton {
+                        label: root.share-sending ? @tr("Sending…") : @tr("Send");
+                        primary: true;
+                        enabled: !root.share-sending;
+                        clicked => { root.share-accept(); }
                     }
                 }
             }

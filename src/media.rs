@@ -195,6 +195,13 @@ pub fn avatar_cache_path(jid: &str) -> PathBuf {
     dir.join(format!("{}.avatar", sanitize(jid)))
 }
 
+// Decode sizes: a bubble is at most 330x380 logical, a link card 360
+// wide, so these cover a 2x display without keeping a screen-sized
+// bitmap per message. The lightbox re-decodes at FULL_PX on demand.
+pub const BUBBLE_PX: u32 = 720;
+pub const CARD_PX: u32 = 480;
+pub const FULL_PX: u32 = 2048;
+
 // Avatars are decoded once at a size that stays crisp in the list on
 // a HiDPI screen; the info panel asks for a larger cut on demand.
 pub const AVATAR_PX: u32 = 112;

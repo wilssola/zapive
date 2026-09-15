@@ -128,6 +128,11 @@ pub fn group_notice(
     // opens the group info, the way WhatsApp keeps busy groups readable.
     let self_leave = kind == "leave"
         || (kind == "remove" && actor.is_some() && who.len() == 1 && actor_name == names[0]);
+    // Someone coming in through the link gets their own line: it is
+    // also the handle for sharing the group's recent history with them.
+    if kind == "invite" && !names_me {
+        return ta("notice.joinedLinkShare", &[&people]);
+    }
     if matches!(kind, "add" | "invite" | "remove" | "promote" | "demote")
         && !self_leave
         && !names_me

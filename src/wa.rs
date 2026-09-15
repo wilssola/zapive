@@ -96,6 +96,10 @@ pub enum Cmd {
     PdfEngineInstall,
     // First frame of a video status, for the viewer.
     StatusPoster { id: String, path: std::path::PathBuf },
+    // The full-resolution decode of a cached photo, for the lightbox.
+    DecodeFull { id: String, path: std::path::PathBuf },
+    // Recent group messages, bundled for someone who just joined.
+    ShareHistory { group: String, member: String, messages: Vec<wa::WebMessageInfo> },
     // A link preview's real thumbnail from the CDN; `fallback` is the
     // inline jpeg used when the download fails.
     LinkThumb {
@@ -193,6 +197,8 @@ pub struct GroupChange {
     pub who: Vec<(String, Option<String>)>,
     pub text: String,
     pub number: u32,
+    // How members were added ("invite" = through the group's link).
+    pub reason: String,
 }
 
 #[derive(Clone)]
@@ -814,11 +820,13 @@ impl EventHandler for Pump {
                     who: Vec::new(),
                     text: String::new(),
                     number: 0,
+                    reason: String::new(),
                 };
                 match &*u.action {
-                    A::Add { participants, .. } => {
+                    A::Add { participants, reason } => {
                         change.kind = "add";
                         change.who = people(participants);
+                        change.reason = reason.clone().unwrap_or_default();
                     }
                     A::Remove { participants, .. } => {
                         change.kind = "remove";
@@ -912,8 +920,10 @@ async fn executor(
                     match want {
                         MediaWant::File => ui_apply(move |b| b.on_media_file(&id, &path)),
                         MediaWant::Image => {
+                            // Bubble size only; the lightbox asks for a
+                            // full decode when it opens.
                             let decoded = crate::media::read_cached(&key, &path)
-                                .and_then(|d| crate::media::decode_bytes(&d, 1280));
+                                .and_then(|d| crate::media::decode_bytes(&d, crate::media::BUBBLE_PX));
                             match decoded {
                                 Some(img) => ui_apply(move |b| b.on_media_image(&id, &path, img)),
                                 None => ui_apply(move |b| b.on_media_missing(&id)),
@@ -948,7 +958,7 @@ async fn executor(
             Cmd::DecodeThumb { id, bytes, link } => {
                 tokio::spawn(async move {
                     if let Some(img) =
-                        tokio::task::spawn_blocking(move || crate::media::decode_bytes(&bytes, 1280))
+                        tokio::task::spawn_blocking(move || crate::media::decode_bytes(&bytes, crate::media::BUBBLE_PX))
                             .await
                             .ok()
                             .flatten()
@@ -2051,6 +2061,69 @@ async fn executor(
                     ui_apply(move |b| b.on_pdf_engine_installed(result));
                 });
             }
+            Cmd::DecodeFull { id, path } => {
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let img = tokio::task::spawn_blocking(move || {
+                        crate::media::read_cached(&key, &path)
+                            .and_then(|d| crate::media::decode_bytes(&d, crate::media::FULL_PX))
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = img {
+                        ui_apply(move |b| b.on_full_image(&id, img));
+                    }
+                });
+            }
+            Cmd::ShareHistory { group, member, messages } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::waproto::buffa::{Message as _, MessageField};
+                    let Some(to) = parse_jid(&group) else { return };
+                    let count = messages.len() as i64;
+                    let oldest = messages.iter().filter_map(|m| m.message_timestamp).min().unwrap_or(0) as i64;
+                    let bundle = wa::GroupHistory { messages, ..Default::default() };
+                    let bytes = bundle.encode_to_vec();
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::History, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] history bundle upload failed: {e}");
+                            ui_apply(|b| b.on_share_result(false));
+                            return;
+                        }
+                    };
+                    let message = wa::Message {
+                        message_history_bundle: MessageField::some(wa::message::MessageHistoryBundle {
+                            mimetype: Some("application/x-protobuf".into()),
+                            file_sha256: Some(upload.file_sha256.to_vec()),
+                            media_key: Some(upload.media_key.to_vec()),
+                            file_enc_sha256: Some(upload.file_enc_sha256.to_vec()),
+                            direct_path: Some(upload.direct_path),
+                            media_key_timestamp: Some(upload.media_key_timestamp),
+                            message_history_metadata: MessageField::some(wa::message::MessageHistoryMetadata {
+                                history_receivers: vec![member.clone()],
+                                oldest_message_timestamp_in_window: Some(oldest),
+                                message_count: Some(count),
+                                oldest_message_timestamp_in_bundle: Some(oldest),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    match client.send_message(to, message).await {
+                        Ok(_) => ui_apply(|b| b.on_share_result(true)),
+                        Err(e) => {
+                            eprintln!("[wa] history bundle send failed: {e}");
+                            ui_apply(|b| b.on_share_result(false));
+                        }
+                    }
+                });
+            }
             Cmd::StatusPoster { id, path } => {
                 let key = media_key.clone();
                 tokio::spawn(async move {
@@ -2146,7 +2219,7 @@ async fn executor(
                         }
                     }
                     let data = bytes.unwrap_or(fallback);
-                    let img = tokio::task::spawn_blocking(move || crate::media::decode_bytes(&data, 800))
+                    let img = tokio::task::spawn_blocking(move || crate::media::decode_bytes(&data, crate::media::CARD_PX))
                         .await
                         .ok()
                         .flatten();

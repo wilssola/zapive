@@ -155,6 +155,9 @@ pub struct Bridge {
     drag_anchor: Option<(String, f32)>,
     row_geom: HashMap<String, (f32, f32, u32)>,
     geom_epoch: u32,
+    row_gc_queued: bool,
+    // Who a pending "share group history" dialog is about.
+    share_target: Option<(String, String)>,
     pending_image: Option<std::path::PathBuf>,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
@@ -200,7 +203,7 @@ enum ConfirmAction {
 }
 
 const STICKER_CACHE_MAX: usize = 64;
-const STICKER_CACHE_BYTES: usize = 40 * 1024 * 1024;
+const STICKER_CACHE_BYTES: usize = 24 * 1024 * 1024;
 // How long a fetched roster is trusted before the next open refreshes it.
 const GROUP_META_TTL: Duration = Duration::from_secs(10 * 60);
 const SEARCH_LIMIT: usize = 60;
@@ -247,8 +250,8 @@ const DECODE_CACHE_MAX: usize = 50;
 // 1280px, so one entry can be 6 MB of RGBA and fifty of them 300 MB. These
 // budgets are what actually keeps the caches honest; the counts above stay
 // as a ceiling on bookkeeping.
-const DECODE_CACHE_BYTES: usize = 64 * 1024 * 1024;
-const ANIM_CACHE_BYTES: usize = 24 * 1024 * 1024;
+const DECODE_CACHE_BYTES: usize = 32 * 1024 * 1024;
+const ANIM_CACHE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ANIMATIONS: usize = 6;
 // How many chats keep their message lists in RAM at once.
 const WARM_MAX: usize = 8;
@@ -457,6 +460,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         drag_anchor: None,
         row_geom: HashMap::new(),
         geom_epoch: 0,
+        row_gc_queued: false,
+        share_target: None,
         pending_image: None,
         last_paste: None,
         notify_queue: Vec::new(),
@@ -837,10 +842,27 @@ fn wire_callbacks(ui: &AppWindow) {
         let id = id.to_string();
         defer(move |b| {
             let epoch = b.geom_epoch;
-            b.row_geom.insert(id, (y, h, epoch));
+            b.row_geom.insert(id.clone(), (y, h, epoch));
+            b.media_for_visible_row(&id);
         });
     });
-    ui.on_conv_scrolled(|| defer(|b| b.geom_epoch = b.geom_epoch.wrapping_add(1)));
+    ui.on_conv_scrolled(|| {
+        defer(|b| {
+            b.geom_epoch = b.geom_epoch.wrapping_add(1);
+            b.schedule_row_gc();
+        });
+    });
+    ui.on_open_lightbox(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_lightbox(&id));
+    });
+    ui.on_share_accept(|| defer(|b| b.share_history_send()));
+    ui.on_share_cancel(|| {
+        defer(|b| {
+            b.share_target = None;
+            b.ui.set_share_open(false);
+        });
+    });
     ui.on_drag_start(|id, y| {
         let id = id.to_string();
         defer(move |b| b.drag_anchor = Some((id, y)));
@@ -990,6 +1012,19 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             b.ui.set_chat_search_open(false);
             b.ui.set_highlight_id("".into());
+        });
+    });
+    ui.on_notice_clicked(|id| {
+        let id = id.to_string();
+        defer(move |b| {
+            if let Some(rest) = id.strip_prefix("sys:invite:")
+                && let Some((_, member)) = rest.split_once(':')
+                && let Some(group) = b.current_jid.clone()
+            {
+                b.open_share_dialog(&group, member);
+            } else {
+                b.open_contact_info();
+            }
         });
     });
     ui.on_open_member(|jid| {
@@ -2235,8 +2270,9 @@ impl Bridge {
             showSender: group && !m.from_me && first_of_run && !system,
             dayFull: day.into(),
             selected: self.selected.iter().any(|s| s == &m.id),
-            // The collapsed roster notice opens the group info on click.
-            clickable: system && m.text == t("notice.membersChanged"),
+            // The collapsed roster notice opens the group info on click;
+            // an invite-link join offers to share the recent history.
+            clickable: system && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
             // Saved contacts show their address-book name without the ~.
             senderLabel: if group && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid) {
                 format!("~ {}", self.store.chat_name(&sender_jid)).into()
@@ -2658,21 +2694,196 @@ impl Bridge {
         }
     }
 
-    // Requests download/decoding for every media-bearing message of a chat,
-    // newest first.
+    // Media is fetched and decoded for the rows on screen, as they report
+    // their position; a whole chat's pictures never sit in RAM at once.
     fn load_media_for_chat(&mut self, jid: &str) {
+        let ids: Vec<String> = self.row_geom.keys().cloned().collect();
+        let known: HashSet<String> = ids.into_iter().collect();
         let pending: Vec<StoredMessage> = self
             .store
             .messages_for(jid)
             .iter()
-            .rev()
-            .filter(|m| {
-                m.kind != MessageKind::Text || !m.link_title.is_empty() || !m.link_url.is_empty()
-            })
+            .filter(|m| known.contains(&m.id))
+            .filter(|m| needs_media(m))
             .cloned()
             .collect();
         for m in pending {
             self.request_media(&m);
+        }
+    }
+
+    // A row just reported where it is: if it shows media that is not
+    // loaded (never was, or was released while off screen), ask for it.
+    fn media_for_visible_row(&mut self, id: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        if self.media_inflight.contains(id) || self.media_failed.contains(id) {
+            return;
+        }
+        let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id).cloned() else { return };
+        if !needs_media(&m) {
+            return;
+        }
+        let loaded = (0..self.messages_model.row_count())
+            .filter_map(|i| self.messages_model.row_data(i))
+            .find(|row| row.id == id)
+            .map(|row| {
+                let visual = matches!(m.kind, MessageKind::Image | MessageKind::Video);
+                (visual && row.mediaReady && (row.picture.size().width > 0 || m.kind == MessageKind::Video))
+                    || (!visual && m.kind != MessageKind::Text && row.mediaReady)
+                    || (m.kind == MessageKind::Text && row.hasLinkThumb)
+            })
+            .unwrap_or(true);
+        if !loaded {
+            self.request_media(&m);
+        }
+    }
+
+    fn schedule_row_gc(&mut self) {
+        if self.row_gc_queued {
+            return;
+        }
+        self.row_gc_queued = true;
+        self.once(500, |b| {
+            b.row_gc_queued = false;
+            b.gc_row_images();
+        });
+    }
+
+    // Rows that have not reported a position since the last two scroll
+    // steps are off screen: their bitmaps go, the row keeps its size.
+    fn gc_row_images(&mut self) {
+        let epoch = self.geom_epoch;
+        let mut freed = 0usize;
+        for i in 0..self.messages_model.row_count() {
+            let Some(mut row) = self.messages_model.row_data(i) else { continue };
+            let near = self
+                .row_geom
+                .get(row.id.as_str())
+                .is_some_and(|(_, _, e)| epoch.wrapping_sub(*e) <= 2);
+            if near {
+                continue;
+            }
+            let has_pic = row.picture.size().width > 0;
+            if !has_pic && !row.hasLinkThumb {
+                continue;
+            }
+            let id = row.id.to_string();
+            if has_pic {
+                freed += image_bytes(&row.picture);
+                row.picture = empty_image();
+                // Stickers and GIFs animate from their own caches; a photo
+                // or poster is simply asked for again when it returns.
+                if !row.sticker {
+                    row.mediaReady = false;
+                }
+                self.drop_animation(&id);
+            }
+            if row.hasLinkThumb {
+                freed += image_bytes(&row.linkThumb);
+                row.linkThumb = empty_image();
+                row.hasLinkThumb = false;
+            }
+            self.messages_model.set_row_data(i, row);
+            if let Some((old, _, _)) = self.decoded.remove(&id) {
+                self.decoded_bytes = self.decoded_bytes.saturating_sub(image_bytes(&old));
+                self.decoded_order.retain(|k| k != &id);
+            }
+        }
+        if freed > 4 * 1024 * 1024 {
+            println!("[media] released {} MB of off-screen pictures", freed / (1024 * 1024));
+        }
+    }
+
+    // ---- lightbox ----
+
+    // The bubble holds a small decode; the lightbox wants the real thing.
+    fn open_lightbox(&mut self, id: &str) {
+        let Some(row) = (0..self.messages_model.row_count())
+            .filter_map(|i| self.messages_model.row_data(i))
+            .find(|r| r.id == id)
+        else {
+            return;
+        };
+        self.ui.set_lightbox_image(row.picture.clone());
+        self.ui.set_lightbox_id(id.into());
+        self.ui.set_lightbox_open(true);
+        if let Some(path) = self.media_path.get(id) {
+            self.wa.send(Cmd::DecodeFull { id: id.to_string(), path: std::path::PathBuf::from(path) });
+        }
+    }
+
+    pub fn on_full_image(&mut self, id: &str, img: crate::media::Decoded) {
+        if self.ui.get_lightbox_open() && self.ui.get_lightbox_id() == id {
+            self.ui.set_lightbox_image(image_of(&img));
+        }
+    }
+
+    // ---- share group history with a newcomer ----
+
+    fn open_share_dialog(&mut self, group: &str, member: &str) {
+        let name = self.store.chat_name(member);
+        let number = format_number(member);
+        let avatar = self.avatar_for(member);
+        self.queue_avatar(member);
+        self.share_target = Some((group.to_string(), member.to_string()));
+        self.ui.set_share_name(if number.is_empty() || name == number { name.clone() } else { number.clone() }.into());
+        self.ui.set_share_has_avatar(avatar.is_some());
+        self.ui.set_share_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui.set_share_initial(initial_of(&name).into());
+        self.ui.set_share_color_idx(color_idx_of(member));
+        self.ui.set_share_sending(false);
+        self.ui.set_share_open(true);
+    }
+
+    fn share_history_send(&mut self) {
+        let Some((group, member)) = self.share_target.clone() else { return };
+        self.warm_chat(&group);
+        // The last few days of the group, newest 100 messages, as the
+        // WebMessageInfo records a history payload is made of.
+        let cutoff = now_secs() - 7 * 24 * 3600;
+        let mut messages: Vec<wa::WebMessageInfo> = self
+            .store
+            .messages_for(&group)
+            .iter()
+            .rev()
+            .filter(|m| m.kind != MessageKind::System && !m.deleted && m.timestamp >= cutoff)
+            .filter_map(|m| {
+                let raw = m.raw.as_deref()?;
+                use whatsapp_rust::waproto::buffa::MessageField;
+                Some(wa::WebMessageInfo {
+                    key: MessageField::some(wa::MessageKey {
+                        remote_jid: Some(group.clone()),
+                        from_me: Some(m.from_me),
+                        id: Some(m.id.clone()),
+                        participant: Some(if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() }),
+                    }),
+                    message: MessageField::some(raw.clone()),
+                    message_timestamp: Some(m.timestamp as u64),
+                    push_name: if m.sender.is_empty() { None } else { Some(m.sender.clone()) },
+                    ..Default::default()
+                })
+            })
+            .take(100)
+            .collect();
+        messages.reverse();
+        if messages.is_empty() {
+            self.share_target = None;
+            self.ui.set_share_open(false);
+            return;
+        }
+        self.ui.set_share_sending(true);
+        self.wa.send(Cmd::ShareHistory { group, member, messages });
+    }
+
+    pub fn on_share_result(&mut self, ok: bool) {
+        self.ui.set_share_sending(false);
+        self.ui.set_share_open(false);
+        if let Some((group, member)) = self.share_target.take()
+            && ok
+        {
+            let who = crate::wa_map::notice_name(&self.store, &member);
+            let body = ta("notice.historyShared", &[&who]);
+            self.add_system_message(&group, &format!("sys:shared:{}", now_secs()), now_secs(), body);
         }
     }
 
@@ -4156,16 +4367,22 @@ impl Bridge {
             }
             _ => {}
         }
+        let kind = if change.kind == "add" && change.reason == "invite" { "invite" } else { change.kind };
         let body = crate::wa_map::group_notice(
             &self.store,
-            change.kind,
+            kind,
             actor.as_deref(),
             &who,
             &change.text,
             change.number,
         );
         if !body.is_empty() {
-            let id = format!("sys:{}:{}:{}", change.ts, change.kind, who.join(","));
+            let invite = change.kind == "invite" || (change.kind == "add" && change.reason == "invite");
+            let id = if invite && who.len() == 1 && !me_involved {
+                format!("sys:invite:{}:{}", change.ts, who[0])
+            } else {
+                format!("sys:{}:{}:{}", change.ts, change.kind, who.join(","))
+            };
             self.add_system_message(&jid, &id, change.ts, body);
         }
         if Some(&jid) == self.current_jid.as_ref() {
@@ -5893,6 +6110,14 @@ impl Bridge {
         self.oneshots.retain(|timer| timer.running());
         self.oneshots.push(timer);
     }
+}
+
+// Whether a message has something to download or decode for its bubble.
+fn needs_media(m: &StoredMessage) -> bool {
+    !m.deleted
+        && (m.kind != MessageKind::Text && m.kind != MessageKind::System
+            || !m.link_title.is_empty()
+            || !m.link_url.is_empty())
 }
 
 // What a message becomes in a copy or an export: its text, or a

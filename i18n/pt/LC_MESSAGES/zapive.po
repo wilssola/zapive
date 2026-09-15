@@ -395,3 +395,18 @@ msgstr "Baixando…"
 
 msgid "Download viewer"
 msgstr "Baixar visualizador"
+
+msgid "Send message history to {}?"
+msgstr "Enviar o histórico de mensagens para {}?"
+
+msgid "will get"
+msgstr "vai receber as"
+
+msgid "recent messages"
+msgstr "mensagens recentes"
+
+msgid "from this group."
+msgstr "deste grupo."
+
+msgid "Sending…"
+msgstr "Enviando…"
