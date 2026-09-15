@@ -92,6 +92,10 @@ pub enum Cmd {
     FetchAvatar(String),
     // The full-size picture for the info panel.
     AvatarLarge(String),
+    // Downloads pdfium into the data directory for the PDF viewer.
+    PdfEngineInstall,
+    // First frame of a video status, for the viewer.
+    StatusPoster { id: String, path: std::path::PathBuf },
     // A link preview's real thumbnail from the CDN; `fallback` is the
     // inline jpeg used when the download fails.
     LinkThumb {
@@ -2009,10 +2013,9 @@ async fn executor(
                     // The preview the server offers is a 96px thumbnail
                     // that blurs at any real size; the full picture is
                     // what WhatsApp Web shows, so fetch that and cut it.
-                    let result = client.contacts().get_profile_picture(&target, false).await;
+                    let result = picture_url(&client, &target).await;
                     match result {
-                        Ok(Some(pic)) => {
-                            let url = pic.url.clone();
+                        Ok(Some(url)) => {
                             let img = tokio::task::spawn_blocking(move || {
                                 let mut res = ureq::get(&url).call().ok()?;
                                 let bytes = res.body_mut().read_to_vec().ok()?;
@@ -2041,6 +2044,30 @@ async fn executor(
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 });
             }
+            Cmd::PdfEngineInstall => {
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(crate::pdf::install_engine)
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()));
+                    ui_apply(move |b| b.on_pdf_engine_installed(result));
+                });
+            }
+            Cmd::StatusPoster { id, path } => {
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let frame = tokio::task::spawn_blocking(move || {
+                        crate::media::temp_plain(&key, &path)
+                            .map(|p| crate::video::frames(&p, 1080, 1.0, 1))
+                            .and_then(|f| f.into_iter().next())
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = frame {
+                        ui_apply(move |b| b.on_status_poster(&id, img));
+                    }
+                });
+            }
             Cmd::AvatarLarge(jid) => {
                 let client = session.client.clone();
                 let key = media_key.clone();
@@ -2061,11 +2088,7 @@ async fn executor(
                         return;
                     }
                     let Some(target) = parse_jid(&jid) else { return };
-                    let Ok(Some(pic)) = client.contacts().get_profile_picture(&target, false).await
-                    else {
-                        return;
-                    };
-                    let url = pic.url.clone();
+                    let Ok(Some(url)) = picture_url(&client, &target).await else { return };
                     let img = tokio::task::spawn_blocking(move || {
                         let mut res = ureq::get(&url).call().ok()?;
                         let bytes = res.body_mut().read_to_vec().ok()?;
@@ -2104,7 +2127,14 @@ async fn executor(
                             0,
                             whatsapp_rust::wacore::download::MediaType::LinkThumbnail,
                         );
-                        match client.download(&params).await {
+                        crate::media::wait_for_backoff().await;
+                        let mut attempt = client.download(&params).await;
+                        if attempt.as_ref().is_err_and(|e| crate::media::rate_limited(&e.to_string())) {
+                            crate::media::note_rate_limit();
+                            crate::media::wait_for_backoff().await;
+                            attempt = client.download(&params).await;
+                        }
+                        match attempt {
                             Ok(data) => {
                                 let sealed = key.encrypt_bytes(&data);
                                 let _ = tokio::fs::write(&path, sealed).await;
@@ -2274,6 +2304,31 @@ async fn executor(
                 return;
             }
         }
+    }
+}
+
+// Where a jid's full-size picture can be fetched from. Channels answer
+// through their metadata, groups through the group picture query when
+// the contact query has nothing, people through the contact query.
+// Ok(None) means "no picture"; Err means "ask again later".
+async fn picture_url(client: &Arc<Client>, jid: &whatsapp_rust::Jid) -> Result<Option<String>, ()> {
+    if jid.to_string().ends_with("@newsletter") {
+        return match client.newsletter().get_metadata(jid).await {
+            Ok(meta) => Ok(meta.picture_url.clone().or(meta.preview_url.clone())),
+            Err(_) => Err(()),
+        };
+    }
+    let is_group = jid.to_string().ends_with("@g.us");
+    match client.contacts().get_profile_picture(jid, false).await {
+        Ok(Some(pic)) => return Ok(Some(pic.url.clone())),
+        Ok(None) if !is_group => return Ok(None),
+        Err(_) if !is_group => return Err(()),
+        _ => {}
+    }
+    use whatsapp_rust::features::PictureType;
+    match client.groups().get_profile_pictures(vec![jid.clone()], PictureType::Image).await {
+        Ok(list) => Ok(list.into_iter().next().and_then(|p| p.url)),
+        Err(_) => Err(()),
     }
 }
 

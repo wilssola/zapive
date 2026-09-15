@@ -13,6 +13,7 @@ mod markup;
 mod media;
 mod video;
 mod paths;
+mod pdf;
 mod platform;
 mod qr;
 mod search;
@@ -40,6 +41,10 @@ fn main() {
     // can be pointed at a machine that already has the app open.
     if std::env::args().any(|a| a == "--video-selftest") {
         video_selftest();
+        return;
+    }
+    if std::env::args().any(|a| a == "--overlay-selftest") {
+        overlay_selftest();
         return;
     }
 
@@ -482,4 +487,65 @@ fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_ico
         .build()
         .ok()?;
     Some((tray, open_id, exit_id))
+}
+
+// Developer probe: a styled bubble with the transparent selection overlay
+// used in the conversation, on its own, so mouse selection over it can
+// be exercised without the whole app.
+fn overlay_selftest() {
+    slint::slint! {
+        export component SelftestWindow inherits Window {
+            title: "Zapive Selftest";
+            width: 480px;
+            height: 220px;
+            background: rgb(32,44,51);
+            callback probe(string);
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Rectangle {
+                    width: body.width;
+                    height: body.preferred-height;
+                    body := StyledText {
+                        text: @markdown("Cupom no APP: veja [https://x.io/a](https://x.io/a) agora *mesmo*");
+                        default-color: rgb(233,237,239);
+                        default-font-size: 14px;
+                        link-color: rgb(0,168,132);
+                        width: min(self.preferred-width, 400px);
+                    }
+                    sel := TextInput {
+                        text: "Cupom no APP: veja https://x.io/a agora mesmo";
+                        read-only: true;
+                        single-line: false;
+                        wrap: word-wrap;
+                        font-size: 14px;
+                        color: rgba(0,0,0,0.004);
+                        selection-background-color: rgb(51,144,236);
+                        selection-foreground-color: white;
+                        width: parent.width;
+                        height: parent.height;
+                        cursor-position-changed(p) => {
+                            root.probe("overlay anchor=" + self.anchor-position-byte-offset + " cursor=" + self.cursor-position-byte-offset);
+                        }
+                    }
+                }
+                plain := TextInput {
+                    text: "Plain bubble text for comparison";
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: rgb(233,237,239);
+                    selection-background-color: rgb(51,144,236);
+                    selection-foreground-color: white;
+                    cursor-position-changed(p) => {
+                        root.probe("plain anchor=" + self.anchor-position-byte-offset + " cursor=" + self.cursor-position-byte-offset);
+                    }
+                }
+            }
+        }
+    }
+    let win = SelftestWindow::new().expect("selftest window");
+    win.on_probe(|s| println!("[selftest] {s}"));
+    win.run().expect("event loop");
 }

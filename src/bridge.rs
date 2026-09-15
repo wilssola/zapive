@@ -3,7 +3,7 @@
 // through WaService commands. Port of src/bridge.ts on master (phases 1-2:
 // login, chat list, conversation, text messages, replies, backfill).
 use crate::i18n::{t, ta};
-use crate::markup::{MentionTarget, has_markup, to_markdown};
+use crate::markup::{MentionTarget, has_markup, render_plain, target_at, to_markdown};
 use crate::qr::{empty_image, qr_image};
 use crate::store::{
     Label, Member, MessageKind, Store, StoredMessage, clean_text, display_id, format_clock,
@@ -13,8 +13,8 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    AppWindow, CallItem, CallWindow, ChatItem, LabelItem, MemberItem, MessageItem, ReactionItem,
-    SearchHit, StickerCell,
+    AppWindow, CallItem, CallWindow, ChatItem, LabelItem, MemberItem, MessageItem, PdfPage,
+    ReactionItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -135,6 +135,23 @@ pub struct Bridge {
     label_model: Rc<VecModel<LabelItem>>,
     // What the confirm dialog will do when accepted.
     confirm_action: Option<ConfirmAction>,
+    // PDF viewer: the worker, the open document's page sizes (points),
+    // and which pages are rendered at which width.
+    pdf: crate::pdf::PdfWorker,
+    pdf_gen: u64,
+    pdf_id: String,
+    pdf_path: Option<std::path::PathBuf>,
+    pdf_sizes: Vec<(f32, f32)>,
+    pdf_model: Rc<VecModel<PdfPage>>,
+    pdf_zoom: f32,
+    pdf_page_w: f32,
+    pdf_rendered: HashMap<usize, u32>,
+    pdf_pending: HashSet<(usize, u32)>,
+    // Drag selection over the conversation: where the press started and
+    // where every visible row currently sits (list coordinates).
+    drag_anchor: Option<(String, f32)>,
+    row_geom: HashMap<String, (f32, f32, u32)>,
+    geom_epoch: u32,
     pending_image: Option<std::path::PathBuf>,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
@@ -322,6 +339,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let member_model = Rc::new(VecModel::<MemberItem>::default());
     let info_member_model = Rc::new(VecModel::<MemberItem>::default());
     let label_model = Rc::new(VecModel::<LabelItem>::default());
+    let pdf_model = Rc::new(VecModel::<PdfPage>::default());
+    ui.set_pdf_pages(ModelRc::from(pdf_model.clone()));
     ui.set_mention_rows(ModelRc::from(mention_model.clone()));
     ui.set_search_hits(ModelRc::from(search_model.clone()));
     ui.set_chat_search_rows(ModelRc::from(chat_search_model.clone()));
@@ -421,6 +440,19 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         info_member_model,
         label_model,
         confirm_action: None,
+        pdf: crate::pdf::PdfWorker::start(),
+        pdf_gen: 0,
+        pdf_id: String::new(),
+        pdf_path: None,
+        pdf_sizes: Vec::new(),
+        pdf_model,
+        pdf_zoom: 1.0,
+        pdf_page_w: 0.0,
+        pdf_rendered: HashMap::new(),
+        pdf_pending: HashSet::new(),
+        drag_anchor: None,
+        row_geom: HashMap::new(),
+        geom_epoch: 0,
         pending_image: None,
         last_paste: None,
         notify_queue: Vec::new(),
@@ -760,6 +792,61 @@ fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
+    // Documents: view in-app (PDF) or with the system, and save a copy.
+    ui.on_doc_view(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_document(&id));
+    });
+    ui.on_doc_save(|id| {
+        let id = id.to_string();
+        defer(move |b| b.save_document(&id));
+    });
+    ui.on_pdf_close(|| defer(|b| b.close_pdf()));
+    ui.on_pdf_scrolled(|y| defer(move |b| b.pdf_scrolled(y)));
+    ui.on_pdf_zoom(|step| defer(move |b| b.pdf_zoom_step(step)));
+    ui.on_pdf_goto(|delta| defer(move |b| b.pdf_goto(delta)));
+    ui.on_pdf_view_resized(|| defer(|b| b.pdf_layout(true)));
+    ui.on_pdf_open_external(|| {
+        defer(|b| {
+            if let Some(path) = b.pdf_path.clone() {
+                crate::platform::open_path(&path.to_string_lossy());
+            }
+        });
+    });
+    ui.on_pdf_save_as(|| {
+        defer(|b| {
+            let id = b.pdf_id.clone();
+            b.save_document(&id);
+        });
+    });
+    ui.on_pdf_install_engine(|| {
+        defer(|b| {
+            b.ui.set_pdf_installing(true);
+            b.ui.set_pdf_status(t("pdf.installing").into());
+            b.wa.send(Cmd::PdfEngineInstall);
+        });
+    });
+    // Status viewer: play a video update in the player.
+    ui.on_status_play(|| defer(|b| b.play_status_video()));
+    // Drag selection over the conversation.
+    ui.on_row_geom(|id, y, h| {
+        let id = id.to_string();
+        defer(move |b| {
+            let epoch = b.geom_epoch;
+            b.row_geom.insert(id, (y, h, epoch));
+        });
+    });
+    ui.on_conv_scrolled(|| defer(|b| b.geom_epoch = b.geom_epoch.wrapping_add(1)));
+    ui.on_drag_start(|id, y| {
+        let id = id.to_string();
+        defer(move |b| b.drag_anchor = Some((id, y)));
+    });
+    ui.on_drag_move(|y| defer(move |b| b.drag_move(y)));
+    ui.on_drag_end(|| defer(|b| b.drag_anchor = None));
+    ui.on_open_link_at(|id, offset| {
+        let id = id.to_string();
+        defer(move |b| b.open_link_at(&id, offset.max(0) as usize));
+    });
     ui.on_copy_text(|id| {
         let id = id.to_string();
         defer(move |b| b.copy_messages(&[id]));
@@ -916,7 +1003,14 @@ impl Bridge {
     // Called from main once the vault is open (or right away without PIN).
     pub fn boot(&mut self, vault: Vault, registered: bool) {
         crate::media::clean_tmp();
+        crate::media::migrate_cache();
         self.store.load_from(&vault);
+        // Known from the last run, so own rows have a face before the
+        // connection comes up.
+        if let Some(me) = vault.setting_get("self_jid").filter(|s| !s.is_empty()) {
+            self.store.set_self(&[&me]);
+            self.self_jid = me;
+        }
         self.media_key = vault.key_handle();
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
         self.vault = Some(vault);
@@ -1025,7 +1119,13 @@ impl Bridge {
             self.ui.set_screen("main".into());
         }
         self.store.set_self(&[pn, lid]);
-        self.self_jid = normalize_jid(pn);
+        // A LID-primary session may carry no phone jid at all; our own
+        // rows (voice notes, search hits) still need an identity.
+        self.self_jid = normalize_jid(if pn.is_empty() { lid } else { pn });
+        if let Some(vault) = &self.vault {
+            vault.setting_set("self_jid", &self.self_jid);
+        }
+        self.queue_avatar(&self.self_jid.clone());
         if !self.groups_fetched {
             self.groups_fetched = true;
             self.wa.send(Cmd::FetchGroups);
@@ -2021,18 +2121,27 @@ impl Bridge {
 
     // Formatted or mention-carrying messages render as styled text; plain
     // ones keep the selectable input.
-    fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool) {
+    fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool, String) {
         let body = if m.deleted { "" } else { m.text.as_str() };
         let empty = || slint::StyledText::from_plain_text("");
         // File names and durations are literal, underscores and all.
         if matches!(m.kind, MessageKind::Doc | MessageKind::Audio | MessageKind::System) {
-            return (empty(), false);
+            return (empty(), false, String::new());
         }
         if body.is_empty() || !has_markup(body) {
-            return (empty(), false);
+            return (empty(), false, String::new());
         }
+        let resolve = self.mention_resolver(m);
+        match slint::StyledText::from_markdown(&to_markdown(body, &resolve)) {
+            Ok(styled) => (styled, true, render_plain(body, &resolve).text),
+            Err(_) => (empty(), false, String::new()),
+        }
+    }
+
+    // Names and chats for the "@number" tokens of one message.
+    fn mention_resolver<'a>(&'a self, m: &'a StoredMessage) -> impl Fn(&str) -> MentionTarget + 'a {
         let store = &self.store;
-        let resolve = |num: &str| -> MentionTarget {
+        move |num: &str| -> MentionTarget {
             // Tagging the whole group carries the group's own id.
             if m.jid.starts_with(num) && is_group(&m.jid) {
                 return MentionTarget { name: Some(t("mention.all")), jid: m.jid.clone() };
@@ -2052,10 +2161,20 @@ impl Bridge {
             }
             let guess = if num.len() > 13 { format!("{num}@lid") } else { format!("{num}@s.whatsapp.net") };
             MentionTarget { name: None, jid: store.canon_owned(&guess) }
-        };
-        match slint::StyledText::from_markdown(&to_markdown(body, &resolve)) {
-            Ok(styled) => (styled, true),
-            Err(_) => (empty(), false),
+        }
+    }
+
+    // A click (no drag) on the selectable overlay of a styled message:
+    // opens whatever link or mention sits under that byte offset.
+    fn open_link_at(&mut self, id: &str, offset: usize) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        let target = target_at(&m.text, offset, &self.mention_resolver(&m));
+        if let Some(target) = target {
+            if target.starts_with("http://") || target.starts_with("https://") {
+                crate::platform::open_path(&target);
+            } else {
+                self.open_dm(&target, None);
+            }
         }
     }
 
@@ -2087,7 +2206,7 @@ impl Bridge {
         } else {
             String::new()
         };
-        let (styled, has_styled) = self.styled_for(m);
+        let (styled, has_styled, plain) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
         let system = m.kind == MessageKind::System;
         MessageItem {
@@ -2167,6 +2286,7 @@ impl Bridge {
             gif: m.gif,
             styled,
             hasStyled: has_styled,
+            plain: plain.into(),
             linkTitle: m.link_title.trim().into(),
             linkDesc: m.link_desc.trim().into(),
             linkHost: link_host.into(),
@@ -2440,7 +2560,7 @@ impl Bridge {
 
     // Which jid a search row's picture belongs to.
     fn hit_face(&self, row: &SearchHit) -> String {
-        if row.face.is_empty() { row.jid.to_string() } else { row.face.to_string() }
+        row.face.to_string()
     }
 
     pub fn on_avatar_large(&mut self, jid: &str, img: crate::media::Decoded) {
@@ -2466,6 +2586,39 @@ impl Bridge {
         if Some(&jid.to_string()) == self.current_jid.as_ref() {
             self.ui.set_current_avatar(image.clone());
             self.ui.set_current_avatar_has(true);
+        }
+        // Calls and status lists.
+        for i in 0..self.calls_model.row_count() {
+            if let Some(mut row) = self.calls_model.row_data(i)
+                && row.from == jid
+                && !row.hasAvatar
+            {
+                row.avatar = image.clone();
+                row.hasAvatar = true;
+                self.calls_model.set_row_data(i, row);
+            }
+        }
+        for i in 0..self.status_model.row_count() {
+            if let Some(mut row) = self.status_model.row_data(i)
+                && (row.jid == jid || self.store.canon(row.jid.as_str()) == jid)
+                && !row.hasAvatar
+            {
+                row.avatar = image.clone();
+                row.hasAvatar = true;
+                self.status_model.set_row_data(i, row);
+            }
+        }
+        for model in [&self.member_model, &self.info_member_model, &self.mention_model] {
+            for i in 0..model.row_count() {
+                if let Some(mut row) = model.row_data(i)
+                    && row.jid == jid
+                    && !row.hasAvatar
+                {
+                    row.avatar = image.clone();
+                    row.hasAvatar = true;
+                    model.set_row_data(i, row);
+                }
+            }
         }
         // Search hits (sidebar and in-chat) that show this face.
         for model in [&self.search_model, &self.chat_search_model] {
@@ -2680,6 +2833,13 @@ impl Bridge {
             .unwrap_or(false);
         if is_audio && !self.waves.contains_key(id) {
             self.wa.send(Cmd::Waveform { id: id.to_string(), path: path.to_path_buf() });
+        }
+        // A video status waiting on its clip gets the poster frame now.
+        if let Some((items, idx)) = &self.viewer
+            && items[*idx].id == id
+        {
+            self.ui.set_sv_video_ready(true);
+            self.wa.send(Cmd::StatusPoster { id: id.to_string(), path: path.to_path_buf() });
         }
         self.restick();
     }
@@ -2938,9 +3098,18 @@ impl Bridge {
         let rows: Vec<ChatItem> = authors
             .iter()
             .map(|(jid, latest, _count)| {
-                self.to_chat_row(jid, "", latest.timestamp, 0, false)
+                // Authors are keyed by the identity the update arrived
+                // with; the picture belongs to the canonical one.
+                let canon = self.store.canon_owned(jid);
+                let mut row = self.to_chat_row(&canon, "", latest.timestamp, 0, false);
+                row.jid = jid.clone().into();
+                row
             })
             .collect();
+        for (jid, _, _) in &authors {
+            let canon = self.store.canon_owned(jid);
+            self.queue_avatar(&canon);
+        }
         self.status_model.set_vec(rows);
     }
 
@@ -2976,6 +3145,16 @@ impl Bridge {
         self.ui.set_sv_count(count as i32);
         let has_image = item.kind == MessageKind::Image;
         self.ui.set_sv_has_image(false);
+        let is_video = item
+            .raw
+            .as_deref()
+            .map(|raw| {
+                use whatsapp_rust::proto_helpers::MessageExt as _;
+                raw.get_base_message().video_message.is_set()
+            })
+            .unwrap_or(false);
+        self.ui.set_sv_is_video(is_video);
+        self.ui.set_sv_video_ready(is_video && self.media_path.contains_key(&item.id));
         if has_image {
             if let Some((img, _, _)) = self.decoded.get(&item.id) {
                 self.ui.set_sv_image(img.clone());
@@ -3007,10 +3186,46 @@ impl Bridge {
                         message: raw,
                         want: MediaWant::Image,
                     });
+                } else if inner.video_message.is_set() && !self.media_inflight.contains(&item.id) {
+                    // A video update: the clip itself, for a sharp poster
+                    // frame now and playback on click.
+                    match self.media_path.get(&item.id).cloned() {
+                        Some(path) => self.wa.send(Cmd::StatusPoster {
+                            id: item.id.clone(),
+                            path: std::path::PathBuf::from(path),
+                        }),
+                        None => {
+                            self.media_inflight.insert(item.id.clone());
+                            self.wa.send(Cmd::Media {
+                                id: item.id.clone(),
+                                mimetype: if item.mimetype.is_empty() { "video/mp4".into() } else { item.mimetype.clone() },
+                                message: raw,
+                                want: MediaWant::File,
+                            });
+                        }
+                    }
                 }
             }
         }
         self.ui.set_sv_open(true);
+    }
+
+    // The clip of a video update landed: draw its first frame.
+    pub fn on_status_poster(&mut self, id: &str, img: crate::media::Decoded) {
+        let image = image_of(&img);
+        self.feed_viewer(id, &image);
+    }
+
+    fn play_status_video(&mut self) {
+        let Some((items, idx)) = &self.viewer else { return };
+        let item = items[*idx].clone();
+        let Some(path) = self.media_path.get(&item.id).map(std::path::PathBuf::from) else { return };
+        self.close_video();
+        self.video_id = Some(item.id.clone());
+        self.ui.set_video_w(item.media_w.max(320) as i32);
+        self.ui.set_video_h(item.media_h.max(240) as i32);
+        self.ui.set_video_open(true);
+        self.wa.send(Cmd::PlayVideo { id: item.id.clone(), path });
     }
 
     // Puts a freshly decoded bitmap on the open viewer when it matches.
@@ -3061,6 +3276,10 @@ impl Bridge {
                 }
             })
             .collect();
+        let jids: Vec<String> = self.store.calls.iter().take(60).map(|c| c.jid.clone()).collect();
+        for jid in jids {
+            self.queue_avatar(&jid);
+        }
         self.calls_model.set_vec(rows);
     }
 
@@ -4663,6 +4882,289 @@ impl Bridge {
         }
     }
 
+    // ---- documents and the PDF viewer ----
+
+    // The decrypted copy of a downloaded document, when it is here.
+    fn plain_document(&self, id: &str) -> Option<(StoredMessage, std::path::PathBuf)> {
+        let m = self.find_message(id)?.clone();
+        let cached = std::path::PathBuf::from(self.media_path.get(id)?);
+        let plain = crate::media::temp_plain(&self.media_key, &cached)?;
+        // The temp copy carries the cache name; the real file name matters
+        // to whatever opens it, so it gets a sibling with that name.
+        let named = plain.with_file_name(sanitize_file_name(&m.text));
+        if !named.exists() {
+            let _ = std::fs::copy(&plain, &named);
+        }
+        Some((m, if named.exists() { named } else { plain }))
+    }
+
+    fn open_document(&mut self, id: &str) {
+        let Some((m, path)) = self.plain_document(id) else { return };
+        if crate::pdf::is_pdf(&m.mimetype, &m.text) {
+            self.open_pdf(id, &m.text, path);
+        } else {
+            crate::platform::open_path(&path.to_string_lossy());
+        }
+    }
+
+    fn save_document(&mut self, id: &str) {
+        let Some((m, path)) = self.plain_document(id) else { return };
+        let name = sanitize_file_name(&m.text);
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+            if let Some(target) = picked
+                && let Err(e) = std::fs::copy(&path, &target)
+            {
+                eprintln!("[doc] save failed: {e}");
+            }
+        });
+    }
+
+    fn open_pdf(&mut self, id: &str, title: &str, path: std::path::PathBuf) {
+        self.pdf_gen += 1;
+        self.pdf_id = id.to_string();
+        self.pdf_path = Some(path.clone());
+        self.pdf_sizes.clear();
+        self.pdf_rendered.clear();
+        self.pdf_pending.clear();
+        self.pdf_zoom = 1.0;
+        self.pdf_model.set_vec(Vec::new());
+        self.ui.set_pdf_title(title.into());
+        self.ui.set_pdf_page(0);
+        self.ui.set_pdf_count(0);
+        self.ui.set_pdf_total_h(0.0);
+        self.ui.set_pdf_total_w(0.0);
+        self.ui.set_pdf_engine_missing(false);
+        self.ui.set_pdf_installing(false);
+        self.ui.set_pdf_status(t("pdf.loading").into());
+        self.ui.set_pdf_zoom_label("100%".into());
+        self.ui.set_pdf_open(true);
+        self.pdf.send(crate::pdf::PdfReq::Open { path, generation: self.pdf_gen });
+    }
+
+    fn close_pdf(&mut self) {
+        self.ui.set_pdf_open(false);
+        self.pdf_gen += 1;
+        self.pdf_model.set_vec(Vec::new());
+        self.pdf_sizes.clear();
+        self.pdf_rendered.clear();
+        self.pdf_pending.clear();
+        self.pdf.send(crate::pdf::PdfReq::Close);
+    }
+
+    pub fn on_pdf_engine_missing(&mut self, generation: u64) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.ui.set_pdf_engine_missing(true);
+        self.ui.set_pdf_status(t("pdf.engineMissing").into());
+    }
+
+    pub fn on_pdf_engine_installed(&mut self, result: Result<(), String>) {
+        self.ui.set_pdf_installing(false);
+        match result {
+            Ok(()) => {
+                self.pdf.send(crate::pdf::PdfReq::Rebind);
+                self.ui.set_pdf_engine_missing(false);
+                if let (Some(path), false) = (self.pdf_path.clone(), self.pdf_id.is_empty()) {
+                    let (id, title) = (self.pdf_id.clone(), self.ui.get_pdf_title().to_string());
+                    self.open_pdf(&id, &title, path);
+                }
+            }
+            Err(e) => self.ui.set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
+        }
+    }
+
+    pub fn on_pdf_failed(&mut self, generation: u64, reason: &str) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.ui.set_pdf_status(ta("pdf.failed", &[reason]).into());
+    }
+
+    pub fn on_pdf_opened(&mut self, generation: u64, sizes: Vec<(f32, f32)>) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.ui.set_pdf_status("".into());
+        self.ui.set_pdf_count(sizes.len() as i32);
+        self.pdf_sizes = sizes;
+        self.pdf_layout(false);
+        self.ui.invoke_pdf_set_scroll(0.0);
+        self.pdf_scrolled(0.0);
+    }
+
+    // Lays the pages out top to bottom at the current zoom (1.0 = page
+    // width fills the viewer) and asks for whatever is on screen.
+    fn pdf_layout(&mut self, keep_scroll: bool) {
+        if self.pdf_sizes.is_empty() {
+            return;
+        }
+        const MARGIN: f32 = 24.0;
+        const GAP: f32 = 16.0;
+        let view_w = self.ui.get_pdf_view_w().max(200.0);
+        let old_page_w = self.pdf_page_w;
+        let page_w = ((view_w - 2.0 * MARGIN) * self.pdf_zoom).max(120.0);
+        self.pdf_page_w = page_w;
+        let mut y = GAP;
+        let mut rows: Vec<PdfPage> = Vec::with_capacity(self.pdf_sizes.len());
+        for (i, (pw, ph)) in self.pdf_sizes.iter().enumerate() {
+            let h = page_w * (ph / pw.max(1.0));
+            let old = self.pdf_model.row_data(i);
+            let rendered_w = self.pdf_rendered.get(&i).copied().unwrap_or(0);
+            let keep = old.as_ref().filter(|_| rendered_w > 0);
+            rows.push(PdfPage {
+                index: i as i32,
+                y,
+                w: page_w,
+                h,
+                pic: keep.map(|o| o.pic.clone()).unwrap_or_else(empty_image),
+                ready: keep.is_some_and(|o| o.ready),
+            });
+            y += h + GAP;
+        }
+        self.ui.set_pdf_total_h(y);
+        self.ui.set_pdf_total_w((page_w + 2.0 * MARGIN).max(view_w));
+        self.pdf_model.set_vec(rows);
+        self.ui.set_pdf_zoom_label(format!("{}%", (self.pdf_zoom * 100.0).round() as i32).into());
+        if keep_scroll && old_page_w > 0.0 {
+            let ratio = page_w / old_page_w;
+            let scroll = self.ui.get_pdf_scroll() * ratio;
+            self.ui.invoke_pdf_set_scroll(scroll);
+            self.pdf_scrolled(scroll);
+        }
+    }
+
+    // Renders the pages around the viewport at the exact width they are
+    // drawn at, and lets pages far away go.
+    fn pdf_scrolled(&mut self, scroll: f32) {
+        if self.pdf_sizes.is_empty() {
+            return;
+        }
+        let view_h = self.ui.get_pdf_view_h().max(200.0);
+        let (top, bottom) = (scroll - view_h * 0.5, scroll + view_h * 1.5);
+        let width = self.pdf_page_w.round() as u32;
+        let mut current = 0;
+        for i in 0..self.pdf_model.row_count() {
+            let Some(row) = self.pdf_model.row_data(i) else { continue };
+            if row.y <= scroll + view_h * 0.35 {
+                current = i;
+            }
+            let visible = row.y + row.h >= top && row.y <= bottom;
+            if visible {
+                if self.pdf_rendered.get(&i) != Some(&width) && !self.pdf_pending.contains(&(i, width)) {
+                    self.pdf_pending.insert((i, width));
+                    self.pdf.send(crate::pdf::PdfReq::Render { page: i, width, generation: self.pdf_gen });
+                }
+            } else if row.ready && (row.y + row.h < top - view_h * 2.0 || row.y > bottom + view_h * 2.0) {
+                // Out of reach: drop the pixels, keep the slot.
+                let mut cleared = row;
+                cleared.pic = empty_image();
+                cleared.ready = false;
+                self.pdf_model.set_row_data(i, cleared);
+                self.pdf_rendered.remove(&i);
+            }
+        }
+        self.ui.set_pdf_page(current as i32 + 1);
+    }
+
+    pub fn on_pdf_page(&mut self, generation: u64, page: usize, img: crate::media::Decoded) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.pdf_pending.retain(|(p, _)| *p != page);
+        let width = self.pdf_page_w.round() as u32;
+        // A page rendered for an older zoom is still better than blank;
+        // the current width was requested again if it differs.
+        if let Some(mut row) = self.pdf_model.row_data(page) {
+            row.pic = image_of(&img);
+            row.ready = true;
+            self.pdf_model.set_row_data(page, row);
+        }
+        self.pdf_rendered.insert(page, if img.w == width { width } else { img.w });
+    }
+
+    fn pdf_zoom_step(&mut self, step: i32) {
+        let next = match step {
+            0 => 1.0,
+            s if s > 0 => (self.pdf_zoom * 1.25).min(4.0),
+            _ => (self.pdf_zoom / 1.25).max(0.4),
+        };
+        if (next - self.pdf_zoom).abs() < 0.001 {
+            return;
+        }
+        self.pdf_zoom = next;
+        self.pdf_layout(true);
+    }
+
+    fn pdf_goto(&mut self, delta: i32) {
+        let count = self.pdf_model.row_count() as i32;
+        if count == 0 {
+            return;
+        }
+        let target = (self.ui.get_pdf_page() - 1 + delta).clamp(0, count - 1);
+        if let Some(row) = self.pdf_model.row_data(target as usize) {
+            let y = (row.y - 16.0).max(0.0);
+            self.ui.invoke_pdf_set_scroll(y);
+            self.pdf_scrolled(y);
+        }
+    }
+
+    // ---- drag selection ----
+
+    // The pointer moved while pressed on a row's background: every row
+    // between the anchor and the pointer joins the selection.
+    fn drag_move(&mut self, y: f32) {
+        let Some((anchor_id, anchor_y)) = self.drag_anchor.clone() else { return };
+        if (y - anchor_y).abs() < 8.0 && !self.select_mode {
+            return;
+        }
+        let (lo, hi) = (anchor_y.min(y), anchor_y.max(y));
+        let epoch = self.geom_epoch;
+        let Some(jid) = self.current_jid.clone() else { return };
+        let mut wanted: Vec<String> = self
+            .row_geom
+            .iter()
+            .filter(|(_, (_, _, e))| *e == epoch)
+            .filter(|(_, (ry, rh, _))| *ry <= hi && ry + rh >= lo)
+            .map(|(id, _)| id.clone())
+            .collect();
+        if !wanted.iter().any(|w| w == &anchor_id) {
+            wanted.push(anchor_id);
+        }
+        // Only real messages, in conversation order.
+        let ordered: Vec<String> = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .filter(|m| m.kind != MessageKind::System && wanted.iter().any(|w| w == &m.id))
+            .map(|m| m.id.clone())
+            .collect();
+        self.set_selection(ordered);
+    }
+
+    fn set_selection(&mut self, ids: Vec<String>) {
+        if !self.select_mode {
+            self.select_mode = true;
+            self.ui.set_select_mode(true);
+            self.ui.set_chat_menu_open(false);
+            self.ui.set_react_bar_id("".into());
+        }
+        let previous = std::mem::replace(&mut self.selected, ids);
+        for id in &previous {
+            if !self.selected.contains(id) {
+                self.patch_row(id, |row| row.selected = false);
+            }
+        }
+        let now = self.selected.clone();
+        for id in &now {
+            if !previous.contains(id) {
+                self.patch_row(id, |row| row.selected = true);
+            }
+        }
+        self.ui.set_select_count(self.selected.len() as i32);
+    }
+
     // ---- video overlay (GIF zoom and click-to-play) ----
 
     fn open_video(&mut self, id: &str) {
@@ -5436,6 +5938,15 @@ fn media_box(m: &StoredMessage) -> (i32, i32) {
 // The content hash that identifies a sticker across messages.
 fn sticker_key(m: &StoredMessage) -> Option<String> {
     crate::media::sticker_key(m.raw.as_deref()?)
+}
+
+// A file name safe for the temp directory and the save dialog.
+fn sanitize_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .collect();
+    if cleaned.trim().is_empty() { "document".into() } else { cleaned.trim().to_string() }
 }
 
 fn host_of(url: &str) -> String {

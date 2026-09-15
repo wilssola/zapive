@@ -69,6 +69,16 @@ export struct MemberItem {
     admin: bool,
 }
 
+// One page of the open PDF, laid out by the host (viewer coordinates).
+export struct PdfPage {
+    index: int,
+    y: float,
+    w: float,
+    h: float,
+    pic: image,
+    ready: bool,
+}
+
 export struct LabelItem {
     id: string,
     name: string,
@@ -148,6 +158,8 @@ export struct MessageItem {
     gif: bool,
     styled: styled-text,
     hasStyled: bool,
+    // The styled text as drawn, for the selectable overlay.
+    plain: string,
     linkTitle: string,
     linkDesc: string,
     linkHost: string,
@@ -691,6 +703,8 @@ export component AppWindow inherits Window {
     callback attach-doc();
     callback play-audio(string);
     callback copy-text(string);
+    // A plain click on a styled message, as a byte offset into `plain`.
+    callback open-link-at(string, int);
     callback audio-toggle(string);
     callback audio-seek(string, float);
     callback audio-cycle-rate();
@@ -827,6 +841,49 @@ export component AppWindow inherits Window {
     in-out property <string> floating-day: "";
     in-out property <bool> scrolling: false;
     callback day-at-top(string);
+    // Every visible row reports where it sits (list coordinates) so a
+    // drag across the conversation can pick the rows it covers.
+    callback row-geom(string, float, float);
+    callback conv-scrolled();
+    callback drag-start(string, float);
+    callback drag-move(float);
+    callback drag-end();
+
+    // Documents
+    callback doc-view(string);
+    callback doc-save(string);
+
+    // PDF viewer
+    in-out property <bool> pdf-open: false;
+    in-out property <string> pdf-title: "";
+    in-out property <[PdfPage]> pdf-pages;
+    in-out property <float> pdf-total-h: 0;
+    in-out property <float> pdf-total-w: 0;
+    in-out property <int> pdf-page: 0;
+    in-out property <int> pdf-count: 0;
+    in-out property <string> pdf-zoom-label: "100%";
+    in-out property <string> pdf-status: "";
+    in-out property <bool> pdf-engine-missing: false;
+    in-out property <bool> pdf-installing: false;
+    out property <float> pdf-view-w: pdf-flick.width / 1px;
+    out property <float> pdf-view-h: pdf-flick.height / 1px;
+    out property <float> pdf-scroll: -pdf-flick.viewport-y / 1px;
+    callback pdf-close();
+    callback pdf-scrolled(float);
+    callback pdf-zoom(int);
+    callback pdf-goto(int);
+    callback pdf-view-resized();
+    callback pdf-open-external();
+    callback pdf-save-as();
+    callback pdf-install-engine();
+    public function pdf-set-scroll(y: float) {
+        pdf-flick.viewport-y = -y * 1px;
+    }
+
+    // Status viewer: video updates
+    in-out property <bool> sv-is-video: false;
+    in-out property <bool> sv-video-ready: false;
+    callback status-play();
 
     public function append-composer(t: string) {
         message-input.text = message-input.text + t;
@@ -1055,6 +1112,18 @@ export component AppWindow inherits Window {
         capture-key-pressed(event) => {
             if (event.text == "v" && event.modifiers.control && root.chat-open) {
                 root.paste-clipboard();
+            }
+            if (event.text == "c" && event.modifiers.control && root.select-mode) {
+                root.select-copy();
+                return accept;
+            }
+            if (event.text == Key.Escape && root.select-mode) {
+                root.select-cancel();
+                return accept;
+            }
+            if (event.text == Key.Escape && root.pdf-open) {
+                root.pdf-close();
+                return accept;
             }
             reject
         }
@@ -1817,6 +1886,7 @@ export component AppWindow inherits Window {
                             root.scrolling = true;
                             scroll-idle.running = false;
                             scroll-idle.running = true;
+                            root.conv-scrolled();
                         }
                     }
                     for msg in root.messages: msg-row := Rectangle {
@@ -1830,10 +1900,34 @@ export component AppWindow inherits Window {
                             if (self.vis-y <= 6px && self.vis-y + self.height > 6px) {
                                 root.day-at-top(msg.dayFull);
                             }
+                            root.row-geom(msg.id, self.vis-y / 1px, self.height / 1px);
                         }
                         changed y => {
                             if (self.vis-y <= 6px && self.vis-y + self.height > 6px) {
                                 root.day-at-top(msg.dayFull);
+                            }
+                            root.row-geom(msg.id, self.vis-y / 1px, self.height / 1px);
+                        }
+                        changed height => {
+                            root.row-geom(msg.id, self.vis-y / 1px, self.height / 1px);
+                        }
+                        // Pressing on the row's background and dragging
+                        // sweeps whole messages into the selection, the way
+                        // dragging over a page selects across bubbles.
+                        if msg.kind != "system": TouchArea {
+                            mouse-cursor: default;
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                                    root.drag-start(msg.id, msg-row.vis-y / 1px + self.pressed-y / 1px);
+                                }
+                                if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                    root.drag-end();
+                                }
+                            }
+                            moved => {
+                                if (self.pressed) {
+                                    root.drag-move(msg-row.vis-y / 1px + self.mouse-y / 1px);
+                                }
                             }
                         }
                         if root.select-mode && msg.selected: Rectangle {
@@ -2126,19 +2220,81 @@ export component AppWindow inherits Window {
                                     background: Theme.hover;
                                 }
 
-                                if msg.kind == "doc": HorizontalLayout {
-                                    spacing: 8px;
-                                    IconButton {
-                                        icon: @image-url("icons/file-text.svg");
-                                        enabled: msg.mediaReady;
-                                        clicked => { root.play-audio(msg.mediaPath); }
+                                if msg.kind == "doc": VerticalLayout {
+                                    spacing: 6px;
+                                    Rectangle {
+                                        height: 52px;
+                                        border-radius: 6px;
+                                        background: msg.fromMe ? #00000014 : #00000010;
+                                        doc-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            enabled: msg.mediaReady;
+                                            clicked => { root.doc-view(msg.id); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 12px;
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Image {
+                                                    source: @image-url("icons/file-text.svg");
+                                                    colorize: Theme.icon;
+                                                    width: 26px;
+                                                    height: 26px;
+                                                }
+                                            }
+                                            Text {
+                                                text: msg.text;
+                                                color: Theme.bubble-text;
+                                                font-size: 14px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                                width: min(self.preferred-width, msg-row.max-text-w - 60px);
+                                            }
+                                        }
                                     }
-                                    Text {
-                                        text: msg.text;
-                                        color: Theme.bubble-text;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                        width: min(self.preferred-width, msg-row.max-text-w - 60px);
+                                    // WhatsApp's two actions under a file.
+                                    HorizontalLayout {
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: 30px;
+                                            view-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                enabled: msg.mediaReady;
+                                                clicked => { root.doc-view(msg.id); }
+                                            }
+                                            Text {
+                                                text: @tr("View");
+                                                color: msg.mediaReady ? Theme.accent : Theme.text-dim;
+                                                font-size: 13px;
+                                                font-weight: 700;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        Rectangle { width: 1px; height: 30px; background: Theme.border; }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: 30px;
+                                            save-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                enabled: msg.mediaReady;
+                                                clicked => { root.doc-save(msg.id); }
+                                            }
+                                            Text {
+                                                text: @tr("Save as...");
+                                                color: msg.mediaReady ? Theme.accent : Theme.text-dim;
+                                                font-size: 13px;
+                                                font-weight: 700;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
                                     }
                                 }
 
@@ -2354,13 +2510,52 @@ export component AppWindow inherits Window {
                                 // handles right-clicks: StyledText swallows
                                 // every press, so a menu wrapped around it
                                 // never saw them.
-                                if msg.hasStyled: StyledText {
-                                    text: msg.styled;
-                                    default-color: Theme.bubble-text;
-                                    default-font-size: 14px;
-                                    link-color: Theme.accent;
-                                    width: min(self.preferred-width, msg-row.max-text-w);
-                                    link-clicked(target) => { root.open-dm(target); }
+                                // StyledText cannot select text, so a
+                                // transparent TextInput with the same
+                                // words lies over it: it owns the mouse
+                                // (drag to select, Ctrl+C), and a click
+                                // that moves nothing is a link click,
+                                // resolved by the host from the offset.
+                                if msg.hasStyled: Rectangle {
+                                    width: styled-body.width;
+                                    height: styled-body.preferred-height;
+                                    styled-body := StyledText {
+                                        text: msg.styled;
+                                        default-color: Theme.bubble-text;
+                                        default-font-size: 14px;
+                                        link-color: Theme.accent;
+                                        width: min(self.preferred-width, msg-row.max-text-w);
+                                    }
+                                    sel-overlay := TextInput {
+                                        text: msg.plain;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        font-size: 14px;
+                                        // Not fully transparent: the renderer
+                                        // skips a TextInput whose color has no
+                                        // alpha, selection highlight included.
+                                        color: #00000001;
+                                        selection-background-color: #3390ec;
+                                        selection-foreground-color: white;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        cursor-position-changed(pos) => {
+                                            link-click.running = false;
+                                            link-click.running = true;
+                                        }
+                                    }
+                                    link-click := Timer {
+                                        interval: 220ms;
+                                        running: false;
+                                        triggered => {
+                                            self.running = false;
+                                            if (sel-overlay.anchor-position-byte-offset
+                                                == sel-overlay.cursor-position-byte-offset) {
+                                                root.open-link-at(msg.id, sel-overlay.cursor-position-byte-offset);
+                                            }
+                                        }
+                                    }
                                 }
 
                                 if !msg.hasStyled && (msg.kind == "text" || (msg.kind == "image" && msg.text != "")): TextInput {
@@ -2565,6 +2760,19 @@ export component AppWindow inherits Window {
                         if root.select-mode && msg.kind != "system": TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.toggle-select(msg.id); }
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                                    root.drag-start(msg.id, msg-row.vis-y / 1px + self.pressed-y / 1px);
+                                }
+                                if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                    root.drag-end();
+                                }
+                            }
+                            moved => {
+                                if (self.pressed) {
+                                    root.drag-move(msg-row.vis-y / 1px + self.mouse-y / 1px);
+                                }
+                            }
                         }
                     }
                 }
@@ -3761,6 +3969,27 @@ export component AppWindow inherits Window {
                     y: parent.height * 0.03;
                     image-fit: contain;
                 }
+                if root.sv-is-video: Rectangle {
+                    width: 72px;
+                    height: 72px;
+                    border-radius: 36px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: root.sv-video-ready ? #000000a0 : #00000050;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        enabled: root.sv-video-ready;
+                        clicked => { root.status-play(); }
+                    }
+                    Image {
+                        source: @image-url("icons/player-play.svg");
+                        colorize: white;
+                        width: 34px;
+                        height: 34px;
+                        x: 21px;
+                        y: 19px;
+                    }
+                }
                 if !root.sv-has-image: Rectangle {
                     width: parent.width * 0.7;
                     height: parent.height * 0.7;
@@ -4364,6 +4593,160 @@ export component AppWindow inherits Window {
                     clicked => {
                         root.confirm-send-image(preview-caption.text);
                         preview-caption.text = "";
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- PDF viewer ----------
+    // Kept in the tree (hidden) so the Flickable's geometry is always
+    // readable by the host; the pages are laid out by the host.
+    Rectangle {
+        visible: root.pdf-open;
+        background: Theme.dark ? #0b141a : #e9edef;
+        TouchArea { }
+        VerticalLayout {
+            padding: 0;
+            spacing: 0;
+            Rectangle {
+                height: 56px;
+                background: Theme.header;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 6px;
+                    IconButton {
+                        icon: @image-url("icons/x.svg");
+                        clicked => { root.pdf-close(); }
+                    }
+                    Text {
+                        text: root.pdf-title;
+                        color: Theme.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    if root.pdf-count > 0: HorizontalLayout {
+                        spacing: 2px;
+                        IconButton {
+                            icon: @image-url("icons/chevron-up.svg");
+                            icon-size: 18px;
+                            clicked => { root.pdf-goto(-1); }
+                        }
+                        Text {
+                            text: root.pdf-page + " / " + root.pdf-count;
+                            color: Theme.text;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        IconButton {
+                            icon: @image-url("icons/chevron-down.svg");
+                            icon-size: 18px;
+                            clicked => { root.pdf-goto(1); }
+                        }
+                    }
+                    Rectangle { width: 12px; }
+                    if root.pdf-count > 0: HorizontalLayout {
+                        spacing: 2px;
+                        IconButton {
+                            icon: @image-url("icons/circle-minus.svg");
+                            icon-size: 18px;
+                            clicked => { root.pdf-zoom(-1); }
+                        }
+                        zoom-touch := TouchArea {
+                            width: zoom-text.preferred-width + 16px;
+                            mouse-cursor: pointer;
+                            clicked => { root.pdf-zoom(0); }
+                            zoom-text := Text {
+                                text: root.pdf-zoom-label;
+                                color: Theme.text;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                                width: parent.width;
+                                height: parent.height;
+                            }
+                        }
+                        IconButton {
+                            icon: @image-url("icons/plus.svg");
+                            icon-size: 18px;
+                            clicked => { root.pdf-zoom(1); }
+                        }
+                    }
+                    Rectangle { width: 12px; }
+                    IconButton {
+                        icon: @image-url("icons/download.svg");
+                        clicked => { root.pdf-save-as(); }
+                    }
+                    IconButton {
+                        icon: @image-url("icons/corner-up-right.svg");
+                        clicked => { root.pdf-open-external(); }
+                    }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                pdf-flick := Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-height: max(self.height, root.pdf-total-h * 1px);
+                    viewport-width: max(self.width, root.pdf-total-w * 1px);
+                    changed viewport-y => { root.pdf-scrolled(-self.viewport-y / 1px); }
+                    changed width => { if (root.pdf-open) { root.pdf-view-resized(); } }
+                    for p in root.pdf-pages: Rectangle {
+                        x: (pdf-flick.viewport-width - p.w * 1px) / 2;
+                        y: p.y * 1px;
+                        width: p.w * 1px;
+                        height: p.h * 1px;
+                        background: white;
+                        drop-shadow-blur: 6px;
+                        drop-shadow-color: #00000055;
+                        if p.ready: Image {
+                            source: p.pic;
+                            width: parent.width;
+                            height: parent.height;
+                            image-fit: fill;
+                        }
+                    }
+                }
+                if root.pdf-status != "": Rectangle {
+                    width: min(parent.width - 48px, 420px);
+                    height: status-col.preferred-height + 40px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.panel;
+                    border-radius: 12px;
+                    drop-shadow-blur: 10px;
+                    drop-shadow-color: #00000055;
+                    status-col := VerticalLayout {
+                        padding: 20px;
+                        spacing: 14px;
+                        width: parent.width;
+                        Text {
+                            text: root.pdf-status;
+                            color: Theme.text;
+                            font-size: 14px;
+                            wrap: word-wrap;
+                            width: parent.width - 40px;
+                            horizontal-alignment: center;
+                        }
+                        if root.pdf-engine-missing: HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            DialogButton {
+                                label: @tr("Open with another app");
+                                clicked => { root.pdf-open-external(); }
+                            }
+                            DialogButton {
+                                label: root.pdf-installing ? @tr("Downloading…") : @tr("Download viewer");
+                                primary: true;
+                                enabled: !root.pdf-installing;
+                                clicked => { root.pdf-install-engine(); }
+                            }
+                        }
                     }
                 }
             }

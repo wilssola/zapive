@@ -20,25 +20,71 @@ pub fn sanitize(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
 }
 
-pub fn ext_for(mimetype: &str) -> &'static str {
-    match mimetype.split(';').next().unwrap_or("").trim() {
-        "image/jpeg" => "jpg",
-        "image/png" => "png",
-        "image/webp" => "webp",
-        "image/gif" => "gif",
-        "video/mp4" => "mp4",
-        "video/3gpp" => "3gp",
-        "audio/ogg" => "ogg",
-        "audio/mpeg" => "mp3",
-        "audio/mp4" => "m4a",
-        "audio/wav" => "wav",
-        "application/pdf" => "pdf",
+// Cached media carries the app's own extensions, one per kind, since
+// every file is a sealed blob only Zapive reads: `.photo`, `.sticker`,
+// `.video`, `.audio`, `.doc`, `.link` (link-card pictures) and `.avatar`.
+pub fn kind_ext(mimetype: &str) -> &'static str {
+    let mime = mimetype.split(';').next().unwrap_or("").trim();
+    if mime.starts_with("image/") {
+        "photo"
+    } else if mime.starts_with("video/") {
+        "video"
+    } else if mime.starts_with("audio/") {
+        "audio"
+    } else {
+        "doc"
+    }
+}
+
+// The plain extension a decrypted copy gets, so whatever opens it (the
+// OS, a decoder that sniffs names) knows what it is.
+fn plain_ext(kind: &str) -> &'static str {
+    match kind {
+        "photo" | "link" | "avatar" => "jpg",
+        "sticker" => "webp",
+        "video" => "mp4",
+        "audio" => "ogg",
         _ => "bin",
     }
 }
 
 pub fn cache_path(id: &str, mimetype: &str) -> PathBuf {
-    media_cache().join(format!("{}.{}", sanitize(id), ext_for(mimetype)))
+    media_cache().join(format!("{}.{}", sanitize(id), kind_ext(mimetype)))
+}
+
+// Files written by earlier builds carried the media's real extension
+// (and a prefix for stickers and link pictures); they are renamed into
+// the current scheme once, at boot.
+pub fn migrate_cache() {
+    let dir = media_cache();
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let mut moved = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue };
+        let (new_stem, kind) = match ext {
+            "jpg" if stem.starts_with("lnk_") => (stem["lnk_".len()..].to_string(), "link"),
+            "webp" if stem.starts_with("stk_") => (stem["stk_".len()..].to_string(), "sticker"),
+            "jpg" | "png" | "gif" | "webp" => (stem.to_string(), "photo"),
+            "mp4" | "3gp" => (stem.to_string(), "video"),
+            "ogg" | "mp3" | "m4a" | "wav" => (stem.to_string(), "audio"),
+            "pdf" | "bin" => (stem.to_string(), "doc"),
+            _ => continue,
+        };
+        let target = dir.join(format!("{new_stem}.{kind}"));
+        if target.exists() {
+            let _ = std::fs::remove_file(&path);
+        } else if std::fs::rename(&path, &target).is_ok() {
+            moved += 1;
+        }
+    }
+    if moved > 0 {
+        println!("[media] renamed {moved} cached file(s) into the current scheme");
+    }
 }
 
 // The downloadable part of a message, if any.
@@ -83,14 +129,23 @@ pub async fn ensure_cached(
     msg: &wa::Message,
 ) -> Option<PathBuf> {
     let path = match sticker_key(msg) {
-        Some(sha) => media_cache().join(format!("stk_{sha}.webp")),
+        Some(sha) => media_cache().join(format!("{sha}.sticker")),
         None => cache_path(id, mimetype),
     };
     if tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Some(path);
     }
     let target = downloadable(msg)?;
-    match client.download(target).await {
+    wait_for_backoff().await;
+    let mut attempt = client.download(target).await;
+    if attempt.as_ref().is_err_and(|e| rate_limited(&e.to_string())) {
+        // The server is throttling media: back everything off, then try
+        // this one once more.
+        note_rate_limit();
+        wait_for_backoff().await;
+        attempt = client.download(target).await;
+    }
+    match attempt {
         Ok(bytes) => {
             let sealed = key.encrypt_bytes(&bytes);
             if let Err(e) = tokio::fs::write(&path, sealed).await {
@@ -131,7 +186,35 @@ pub fn avatar_is_full(bytes: &[u8]) -> bool {
 
 // A link preview's high-resolution thumbnail, cached like other media.
 pub fn link_thumb_path(id: &str) -> PathBuf {
-    media_cache().join(format!("lnk_{}.jpg", sanitize(id)))
+    media_cache().join(format!("{}.link", sanitize(id)))
+}
+
+// WhatsApp answers bursts of media downloads with 429 rate-overlimit.
+// One shared "not before" instant holds every download back for a while
+// after that, instead of each task hammering on.
+static BACKOFF_UNTIL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+pub fn rate_limited(err: &str) -> bool {
+    err.contains("rate-overlimit") || err.contains("429")
+}
+
+pub fn note_rate_limit() {
+    BACKOFF_UNTIL_MS.store(now_ms() + 30_000, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub async fn wait_for_backoff() {
+    let until = BACKOFF_UNTIL_MS.load(std::sync::atomic::Ordering::SeqCst);
+    let now = now_ms();
+    if until > now {
+        tokio::time::sleep(std::time::Duration::from_millis(until - now)).await;
+    }
 }
 
 pub fn read_cached(key: &KeyHandle, path: &PathBuf) -> Option<Vec<u8>> {
@@ -144,7 +227,8 @@ pub fn read_cached(key: &KeyHandle, path: &PathBuf) -> Option<Vec<u8>> {
 pub fn temp_plain(key: &KeyHandle, path: &PathBuf) -> Option<PathBuf> {
     let dir = media_cache().join(".tmp");
     let _ = std::fs::create_dir_all(&dir);
-    let out = dir.join(path.file_name()?);
+    let kind = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let out = dir.join(format!("{}.{}", path.file_stem()?.to_str()?, plain_ext(kind)));
     if !out.exists() {
         let plain = read_cached(key, path)?;
         std::fs::write(&out, plain).ok()?;

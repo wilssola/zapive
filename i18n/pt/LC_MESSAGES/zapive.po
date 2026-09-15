@@ -380,3 +380,18 @@ msgstr "Criar"
 
 msgid "Add"
 msgstr "Adicionar"
+
+msgid "View"
+msgstr "Ver"
+
+msgid "Save as..."
+msgstr "Salvar como..."
+
+msgid "Open with another app"
+msgstr "Abrir com outro app"
+
+msgid "Downloading…"
+msgstr "Baixando…"
+
+msgid "Download viewer"
+msgstr "Baixar visualizador"
