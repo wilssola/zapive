@@ -916,7 +916,6 @@ impl Bridge {
     // Called from main once the vault is open (or right away without PIN).
     pub fn boot(&mut self, vault: Vault, registered: bool) {
         crate::media::clean_tmp();
-        crate::media::migrate_avatar_cache();
         self.store.load_from(&vault);
         self.media_key = vault.key_handle();
         self.wa.send(Cmd::MediaKey(vault.key_handle()));

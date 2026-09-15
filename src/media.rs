@@ -129,19 +129,6 @@ pub fn avatar_is_full(bytes: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-// Files written under the interim ".avatar2" name fold back into the
-// ".avatar" cache.
-pub fn migrate_avatar_cache() {
-    let dir = media_cache().join("avatars");
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "avatar2") {
-            let _ = std::fs::rename(&path, path.with_extension("avatar"));
-        }
-    }
-}
-
 // A link preview's high-resolution thumbnail, cached like other media.
 pub fn link_thumb_path(id: &str) -> PathBuf {
     media_cache().join(format!("lnk_{}.jpg", sanitize(id)))
