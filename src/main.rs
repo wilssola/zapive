@@ -102,6 +102,10 @@ fn main() {
     let ui = AppWindow::new().expect("failed to create the main window");
     ui.set_language_mode(language.as_str().into());
     ui.set_autostart(platform::autostart_enabled());
+    // Both off by default: the current behaviour (no receipts sent, a
+    // revoke keeps its message) is what a fresh install already does.
+    ui.set_send_receipts(app_vault.setting_get("send_receipts").as_deref() == Some("1"));
+    ui.set_apply_deletions(app_vault.setting_get("apply_deletions").as_deref() == Some("1"));
 
     // Theme: explicit modes win; "system" follows the OS with a slow poll.
     let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
