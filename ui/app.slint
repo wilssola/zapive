@@ -109,6 +109,12 @@ export struct CallItem {
     group: bool,
 }
 
+// A link (or mention) inside a styled bubble: byte offsets into `plain`.
+export struct LinkSpan {
+    start: int,
+    end: int,
+}
+
 export struct StickerCell {
     id: string,
     pic: image,
@@ -166,6 +172,8 @@ export struct MessageItem {
     hasStyled: bool,
     // The styled text as drawn, for the selectable overlay.
     plain: string,
+    // Where its links are, for the hand cursor.
+    links: [LinkSpan],
     linkTitle: string,
     linkDesc: string,
     linkHost: string,
@@ -590,6 +598,137 @@ component SettingsRow inherits Rectangle {
 // screens so a new release is never missed behind the PIN.
 // A card with its own margins, so it never touches the search box above
 // or the filter chips below it.
+// The hand cursor over a link in a styled bubble.
+//
+// The words of such a bubble are drawn by a StyledText, and a transparent
+// TextInput with the same words lies over it to make them selectable. A
+// TextInput sets the I-beam on every mouse move it sees, and nothing laid
+// under or around it gets a say after that, so the hand has to come from
+// something on top -- which would then also eat the press that starts a
+// selection on the link. Hence the two halves here:
+//
+// - where: an invisible TextInput with the same text, width and font is
+//   asked for the cursor position at the link's first and last byte, and
+//   the link's box (up to three of them when it wraps) follows from those;
+// - how: the boxes are TouchAreas that show the hand and, on a press, step
+//   aside (`pass-through`) while the host plays the press again, this time
+//   reaching the TextInput underneath. Selecting from inside a link, a
+//   double click on it and the click that opens it all still belong to
+//   the overlay, exactly as without this.
+component LinkBox inherits TouchArea {
+    in property <bool> pass-through;
+    callback press(length, length);
+    callback release();
+    mouse-cursor: pointer;
+    enabled: !self.pass-through;
+    pointer-event(e) => {
+        if (e.button == PointerEventButton.left) {
+            if (e.kind == PointerEventKind.down) {
+                root.press(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            } else if (e.kind == PointerEventKind.up) {
+                root.release();
+            }
+        }
+    }
+}
+
+component LinkHover inherits Rectangle {
+    in property <string> text;
+    in property <int> start;
+    in property <int> end;
+    in property <bool> pass-through;
+    callback press(length, length);
+    callback release();
+
+    // Where the link starts and ends, in this element's coordinates.
+    out property <length> sx;
+    out property <length> sy;
+    out property <length> ex;
+    out property <length> ey;
+    property <bool> at-end: false;
+    out property <length> line-h: line.preferred-height;
+    out property <bool> one-line: abs((self.ey - self.sy) / 1px) < 2;
+    out property <bool> hovered: first.has-hover || middle.has-hover || last.has-hover;
+
+    line := Text {
+        text: "Ag";
+        font-size: 14px;
+        visible: false;
+    }
+    probe := TextInput {
+        text: root.text;
+        visible: false;
+        enabled: false;
+        read-only: true;
+        single-line: false;
+        wrap: word-wrap;
+        font-size: 14px;
+        width: root.width;
+        height: root.height;
+        cursor-position-changed(p) => {
+            if (root.at-end) {
+                root.ex = p.x;
+                root.ey = p.y;
+            } else {
+                root.sx = p.x;
+                root.sy = p.y;
+            }
+        }
+    }
+    function measure() {
+        root.at-end = false;
+        probe.set-selection-offsets(root.start, root.start);
+        root.at-end = true;
+        probe.set-selection-offsets(root.end, root.end);
+    }
+    // The row may be laid out after it is created, and it is recycled
+    // for other messages and re-wrapped when the window is resized.
+    init => { self.measure(); }
+    changed width => { self.measure(); }
+    changed text => { self.measure(); }
+    changed start => { self.measure(); }
+    Timer {
+        interval: 30ms;
+        running: true;
+        triggered => {
+            self.running = false;
+            root.measure();
+        }
+    }
+
+    // First line, whole lines in between, last line.
+    first := LinkBox {
+        x: root.sx;
+        y: root.sy;
+        width: max(0px, (root.one-line ? root.ex : root.width) - root.sx);
+        height: root.line-h;
+        pass-through: root.pass-through;
+        press(x, y) => { root.press(x, y); }
+        release => { root.release(); }
+    }
+    middle := LinkBox {
+        visible: !root.one-line && root.ey - root.sy > root.line-h * 1.5;
+        x: 0;
+        y: root.sy + root.line-h;
+        width: root.width;
+        height: max(0px, root.ey - root.sy - root.line-h);
+        pass-through: root.pass-through;
+        press(x, y) => { root.press(x, y); }
+        release => { root.release(); }
+    }
+    last := LinkBox {
+        visible: !root.one-line;
+        x: 0;
+        y: root.ey;
+        width: max(0px, root.ex);
+        height: root.line-h;
+        pass-through: root.pass-through;
+        press(x, y) => { root.press(x, y); }
+        release => { root.release(); }
+    }
+}
+
 component UpdateBanner inherits Rectangle {
     in property <int> state;
     in property <string> version;
@@ -1080,6 +1219,11 @@ export component AppWindow inherits Window {
     in-out property <int> video-h: 0;
     callback open-video(string);
     callback close-video();
+    // The hand cursor over links (see LinkHover): a press on a link's box
+    // is played again by the host with the boxes stepped aside.
+    in-out property <bool> link-press-through: false;
+    in-out property <bool> link-release-seen: false;
+    callback link-pressed(length, length);
     // A clip gets the transport; the GIF zoom is just the picture.
     in property <bool> video-is-clip: false;
     in property <bool> video-loading: false;
@@ -2811,6 +2955,19 @@ export component AppWindow inherits Window {
                                         }
                                         key-pressed(event) => { self.key-down = true; reject }
                                         key-released(event) => { self.key-down = false; reject }
+                                    }
+                                    for span in msg.links: LinkHover {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: msg.plain;
+                                        start: span.start;
+                                        end: span.end;
+                                        pass-through: root.link-press-through || root.select-mode;
+                                        press(x, y) => {
+                                            root.link-release-seen = false;
+                                            root.link-pressed(x, y);
+                                        }
+                                        release => { root.link-release-seen = true; }
                                     }
                                     // A press that is still a click (no drag
                                     // moved the cursor away from the anchor)
@@ -5624,6 +5781,69 @@ export component CallWindow inherits Window {
                 rotated: true;
                 clicked => { root.hangup(); }
             }
+        }
+    }
+}
+
+// Developer probe (--overlay-selftest): a styled bubble put together the
+// way the conversation does it -- StyledText, the transparent selection
+// overlay, the link's hand-cursor boxes -- on its own, so the mouse path
+// through it can be driven and checked without the whole app.
+export component LinkProbeWindow inherits Window {
+    title: "Zapive Selftest";
+    width: 480px;
+    height: 220px;
+    background: rgb(32,44,51);
+    in property <string> plain: "Cupom no APP: veja https://x.io/a agora mesmo";
+    in property <int> link-start: 19;
+    in property <int> link-end: 35;
+    in-out property <bool> link-press-through: false;
+    in-out property <bool> link-release-seen: false;
+    callback link-pressed(length, length);
+    out property <int> anchor: sel.anchor-position-byte-offset;
+    out property <int> cursor: sel.cursor-position-byte-offset;
+    out property <bool> hovered: hover.hovered;
+    // The link's first-line box, in window coordinates.
+    out property <length> box-x: hover.absolute-position.x + hover.sx;
+    out property <length> box-y: hover.absolute-position.y + hover.sy;
+    out property <length> box-w: (hover.one-line ? hover.ex : hover.width) - hover.sx;
+    out property <length> box-h: hover.line-h;
+    Rectangle {
+        x: 20px;
+        y: 20px;
+        width: body.width;
+        height: body.preferred-height;
+        body := StyledText {
+            text: @markdown("Cupom no APP: veja [https://x.io/a](https://x.io/a) agora *mesmo*");
+            default-color: rgb(233,237,239);
+            default-font-size: 14px;
+            link-color: rgb(0,168,132);
+            width: min(self.preferred-width, 400px);
+        }
+        sel := TextInput {
+            text: root.plain;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            font-size: 14px;
+            color: rgba(0,0,0,0.004);
+            selection-background-color: rgb(51,144,236);
+            selection-foreground-color: white;
+            width: parent.width;
+            height: parent.height;
+        }
+        hover := LinkHover {
+            width: parent.width;
+            height: parent.height;
+            text: root.plain;
+            start: root.link-start;
+            end: root.link-end;
+            pass-through: root.link-press-through;
+            press(x, y) => {
+                root.link-release-seen = false;
+                root.link-pressed(x, y);
+            }
+            release => { root.link-release-seen = true; }
         }
     }
 }

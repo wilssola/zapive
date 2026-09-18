@@ -678,62 +678,133 @@ fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_ico
 }
 
 // Developer probe: a styled bubble with the transparent selection overlay
-// used in the conversation, on its own, so mouse selection over it can
-// be exercised without the whole app.
+// and the link's hand-cursor boxes (LinkProbeWindow in app.slint), driven
+// with synthetic mouse events: hovering the link must reach its box, and
+// a press, a drag and a double click on it must still reach the text
+// underneath. "keep" after the flag leaves the window up for a real mouse.
 fn overlay_selftest() {
-    slint::slint! {
-        export component SelftestWindow inherits Window {
-            title: "Zapive Selftest";
-            width: 480px;
-            height: 220px;
-            background: rgb(32,44,51);
-            callback probe(string);
-            VerticalLayout {
-                padding: 20px;
-                spacing: 12px;
-                Rectangle {
-                    width: body.width;
-                    height: body.preferred-height;
-                    body := StyledText {
-                        text: @markdown("Cupom no APP: veja [https://x.io/a](https://x.io/a) agora *mesmo*");
-                        default-color: rgb(233,237,239);
-                        default-font-size: 14px;
-                        link-color: rgb(0,168,132);
-                        width: min(self.preferred-width, 400px);
-                    }
-                    sel := TextInput {
-                        text: "Cupom no APP: veja https://x.io/a agora mesmo";
-                        read-only: true;
-                        single-line: false;
-                        wrap: word-wrap;
-                        font-size: 14px;
-                        color: rgba(0,0,0,0.004);
-                        selection-background-color: rgb(51,144,236);
-                        selection-foreground-color: white;
-                        width: parent.width;
-                        height: parent.height;
-                        cursor-position-changed(p) => {
-                            root.probe("overlay anchor=" + self.anchor-position-byte-offset + " cursor=" + self.cursor-position-byte-offset);
-                        }
-                    }
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let win = LinkProbeWindow::new().expect("selftest window");
+    {
+        let weak = win.as_weak();
+        win.on_link_pressed(move |x, y| {
+            let weak = weak.clone();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(win) = weak.upgrade() {
+                    bridge::replay_link_press(
+                        win.window(),
+                        x,
+                        y,
+                        &|on| win.set_link_press_through(on),
+                        &|| win.get_link_release_seen(),
+                    );
                 }
-                plain := TextInput {
-                    text: "Plain bubble text for comparison";
-                    read-only: true;
-                    single-line: false;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    color: rgb(233,237,239);
-                    selection-background-color: rgb(51,144,236);
-                    selection-foreground-color: white;
-                    cursor-position-changed(p) => {
-                        root.probe("plain anchor=" + self.anchor-position-byte-offset + " cursor=" + self.cursor-position-byte-offset);
-                    }
+            });
+        });
+    }
+    let keep = std::env::args().any(|a| a == "keep");
+    let weak = win.as_weak();
+    let step = std::rc::Rc::new(std::cell::Cell::new(0u32));
+    let script = slint::Timer::default();
+    script.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(150), move || {
+        let Some(win) = weak.upgrade() else { return };
+        let (start, end) = (win.get_link_start(), win.get_link_end());
+        let (x, y) = (win.get_box_x() + win.get_box_w() / 2.0, win.get_box_y() + win.get_box_h() / 2.0);
+        let at = |x: f32, y: f32| slint::LogicalPosition::new(x, y);
+        let left = PointerEventButton::Left;
+        let send = |event| win.window().dispatch_event(event);
+        let n = step.get();
+        step.set(n + 1);
+        match n {
+            // Let the first layout and the probe's measurement happen.
+            0 | 1 => {}
+            2 => {
+                println!(
+                    "[selftest] link box {:.0},{:.0} {:.0}x{:.0}",
+                    win.get_box_x(),
+                    win.get_box_y(),
+                    win.get_box_w(),
+                    win.get_box_h()
+                );
+                if win.get_box_w() < 40.0 || win.get_box_h() < 10.0 {
+                    println!("[selftest] FAIL: the link was not measured");
+                }
+                send(WindowEvent::PointerMoved { position: at(x, y) });
+            }
+            3 => {
+                println!("[selftest] hovering the link: box hovered = {}", win.get_hovered());
+                if !win.get_hovered() {
+                    println!("[selftest] FAIL: the hand-cursor box is not what the mouse is over");
+                }
+                send(WindowEvent::PointerMoved { position: at(30.0, y) });
+            }
+            4 => {
+                if win.get_hovered() {
+                    println!("[selftest] FAIL: the box claims plain text too");
+                }
+                // A press on the link, then a drag to the right.
+                send(WindowEvent::PointerMoved { position: at(x, y) });
+                send(WindowEvent::PointerPressed { position: at(x, y), button: left });
+            }
+            5 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] press on the link: anchor={anchor} cursor={cursor}");
+                if anchor != cursor || anchor < start || anchor > end {
+                    println!("[selftest] FAIL: the press did not reach the text under the link");
+                }
+                send(WindowEvent::PointerMoved { position: at(x + 60.0, y) });
+            }
+            6 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] drag from the link: anchor={anchor} cursor={cursor}");
+                if cursor <= anchor {
+                    println!("[selftest] FAIL: a drag that starts on a link does not select");
+                }
+                send(WindowEvent::PointerReleased { position: at(x + 60.0, y), button: left });
+            }
+            // Past the double-click interval, so the next press is a new one.
+            7..=10 => {}
+            11 => {
+                // A plain click: down and up before the replay has run.
+                send(WindowEvent::PointerPressed { position: at(x, y), button: left });
+                send(WindowEvent::PointerReleased { position: at(x, y), button: left });
+            }
+            12 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] click on the link: anchor={anchor} cursor={cursor}");
+                if anchor != cursor || anchor < start || anchor > end {
+                    println!("[selftest] FAIL: a click should put the cursor on the link");
+                }
+                send(WindowEvent::PointerMoved { position: at(x + 80.0, y) });
+            }
+            13 => {
+                if win.get_anchor() != win.get_cursor() {
+                    println!("[selftest] FAIL: the text thinks the button is still down after a click");
+                }
+                send(WindowEvent::PointerMoved { position: at(x, y) });
+            }
+            14..=17 => {}
+            18 => {
+                // Double click: selects the word under it, as on plain text.
+                for _ in 0..2 {
+                    send(WindowEvent::PointerPressed { position: at(x, y), button: left });
+                    send(WindowEvent::PointerReleased { position: at(x, y), button: left });
                 }
             }
+            19 => {}
+            20 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] double click on the link: anchor={anchor} cursor={cursor}");
+                if anchor == cursor {
+                    println!("[selftest] FAIL: a double click on a link should select a word");
+                }
+                println!("[selftest] overlay done");
+                if !keep {
+                    slint::quit_event_loop().ok();
+                }
+            }
+            _ => {}
         }
-    }
-    let win = SelftestWindow::new().expect("selftest window");
-    win.on_probe(|s| println!("[selftest] {s}"));
+    });
     win.run().expect("event loop");
 }

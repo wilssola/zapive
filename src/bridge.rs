@@ -13,8 +13,8 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    AppWindow, CallItem, CallWindow, ChatItem, LabelItem, MemberItem, MessageItem, PdfPage,
-    ReactionItem, SearchHit, StickerCell,
+    AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem, MessageItem,
+    PdfPage, ReactionItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -287,6 +287,62 @@ fn image_bytes(image: &slint::Image) -> usize {
 }
 
 // WhatsApp-style thumbnail box: fit within 330x380, never upscale.
+// Plays a press that landed on a link's hand-cursor box again, with the
+// boxes out of the way, so it reaches the selectable text under them.
+// `pass_through` and `released` reach the window's link-press-through and
+// link-release-seen properties (the selftest has a window of its own).
+pub fn replay_link_press(
+    window: &slint::Window,
+    x: f32,
+    y: f32,
+    pass_through: &dyn Fn(bool),
+    released: &dyn Fn() -> bool,
+) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    thread_local! {
+        // The last press replayed: when, where, and its place in a run of
+        // clicks (1 = single, 2 = double, 3 = triple).
+        static LAST: std::cell::Cell<Option<(Instant, f32, f32, u8)>> = const { std::cell::Cell::new(None) };
+    }
+    // Slint counts clicks from the presses it sees, and it has now seen
+    // this one twice. Count them here instead and spell the run out.
+    let run = LAST.with(|last| {
+        let run = match last.get() {
+            Some((at, lx, ly, n))
+                if at.elapsed() < Duration::from_millis(450)
+                    && (lx - x).abs() < 6.0
+                    && (ly - y).abs() < 6.0
+                    && n < 3 =>
+            {
+                n + 1
+            }
+            _ => 1,
+        };
+        last.set(Some((Instant::now(), x, y, run)));
+        run
+    });
+    let position = slint::LogicalPosition::new(x, y);
+    pass_through(true);
+    // The box still holds the mouse grab from the real press. A press of
+    // another button is refused by it (it is disabled now), which frees
+    // the grab, and it also restarts Slint's own click counter.
+    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Other });
+    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Other });
+    for click in 1..=run {
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        if click < run {
+            window
+                .dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        }
+    }
+    // A click quicker than this replay: the button is already up, and
+    // the release went to the box instead of the text.
+    if released() {
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+    }
+    pass_through(false);
+}
+
 // A video's box when only its thumbnail is known: the thumbnail's shape
 // at the size a clip gets, scaled up as well as down.
 fn poster_box(w: i32, h: i32) -> (i32, i32) {
@@ -950,6 +1006,26 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_drag_move(|y| defer(move |b| b.drag_move(y)));
     ui.on_drag_end(|| defer(|b| b.drag_anchor = None));
+    // A press on a link's hand-cursor box, to be handed to the text
+    // underneath. Not from inside the callback: that runs in the middle
+    // of Slint dispatching the very press being replaced.
+    ui.on_link_pressed({
+        let weak = ui.as_weak();
+        move |x, y| {
+            let weak = weak.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    replay_link_press(
+                        ui.window(),
+                        x,
+                        y,
+                        &|on| ui.set_link_press_through(on),
+                        &|| ui.get_link_release_seen(),
+                    );
+                }
+            });
+        }
+    });
     ui.on_open_link_at(|id, offset| {
         let id = id.to_string();
         defer(move |b| b.open_link_at(&id, offset.max(0) as usize));
@@ -2295,20 +2371,30 @@ impl Bridge {
 
     // Formatted or mention-carrying messages render as styled text; plain
     // ones keep the selectable input.
-    fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool, String) {
+    // The styled rendering, whether there is one, the same words as plain
+    // text for the selectable overlay, and where the links are in those.
+    fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool, String, Vec<LinkSpan>) {
         let body = if m.deleted { "" } else { m.text.as_str() };
-        let empty = || slint::StyledText::from_plain_text("");
+        let none = || (slint::StyledText::from_plain_text(""), false, String::new(), Vec::new());
         // File names and durations are literal, underscores and all.
         if matches!(m.kind, MessageKind::Doc | MessageKind::Audio | MessageKind::System) {
-            return (empty(), false, String::new());
+            return none();
         }
         if body.is_empty() || !has_markup(body) {
-            return (empty(), false, String::new());
+            return none();
         }
         let resolve = self.mention_resolver(m);
         match slint::StyledText::from_markdown(&to_markdown(body, &resolve)) {
-            Ok(styled) => (styled, true, render_plain(body, &resolve).text),
-            Err(_) => (empty(), false, String::new()),
+            Ok(styled) => {
+                let plain = render_plain(body, &resolve);
+                let links = plain
+                    .spans
+                    .iter()
+                    .map(|(start, end, _)| LinkSpan { start: *start as i32, end: *end as i32 })
+                    .collect();
+                (styled, true, plain.text, links)
+            }
+            Err(_) => none(),
         }
     }
 
@@ -2380,7 +2466,7 @@ impl Bridge {
         } else {
             String::new()
         };
-        let (styled, has_styled, plain) = self.styled_for(m);
+        let (styled, has_styled, plain, links) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
         let system = m.kind == MessageKind::System;
         MessageItem {
@@ -2466,6 +2552,7 @@ impl Bridge {
             },
             styled,
             hasStyled: has_styled,
+            links: ModelRc::new(VecModel::from(links)),
             plain: plain.into(),
             linkTitle: m.link_title.trim().into(),
             linkDesc: m.link_desc.trim().into(),
