@@ -35,8 +35,19 @@ fraction of the resources — about **140–180 MB of RAM** connected with
 - Voice notes play at 1x/1.5x/2x/3x with pitch preserved (WSOLA
   time-stretch) and show real waveforms; recording encodes straight to
   ogg/opus like the phone apps do.
-- Click-to-play video overlay with soundtrack, GIF zoom, sticker/GIF
-  picker with Openverse search, in-panel media gallery.
+- Streaming video player: play/pause, seek bar, volume, keyboard
+  shortcuts, save-as, soundtrack kept in sync, clips of any length at
+  their own frame rate. GIF zoom, sticker/GIF picker with Openverse
+  search, in-panel media gallery.
+
+**Accounts**
+- Up to five WhatsApp accounts, switched from the avatar at the bottom of
+  the icon rail. One is connected at a time; the others stay linked and
+  catch up when switched to.
+- Logging out can keep the conversations on the computer: linking the
+  same number again carries on from them instead of downloading
+  everything once more. A different number starts clean.
+- Shows up under Linked devices as Windows / Mac OS / Linux.
 
 **Desktop integration**
 - Native toasts with sender avatar, click-to-open and quick actions.
@@ -109,7 +120,10 @@ cargo build --release
 Linux needs `libasound2-dev libgtk-3-dev libxdo-dev`; macOS needs
 nothing extra. Both are smoke-built by CI (`.github/workflows/build.yml`)
 but not yet regularly tested. `cargo run -- --audio-selftest` exercises
-the opus encode/decode, time-stretch and waveform paths headlessly.
+the opus encode/decode, time-stretch and waveform paths headlessly;
+`--player-selftest [clip.mp4]` does the same for the video player (play,
+pause, seek, end, replay) and `--overlay-selftest` for mouse selection
+and the link cursor over a styled bubble.
 
 ## Data locations
 
@@ -126,7 +140,8 @@ encrypted (see Privacy & security above); `wa.db` is whatsapp-rust's own
 store, plain SQLite guarded by OS file permissions. Deleting the cache
 never loses the account; deleting `search.db` only costs a rebuild of
 the search index on next launch; deleting `wa.db` requires pairing
-again.
+again. Accounts after the first keep their own `wa-<id>.db` and
+`search-<id>.db` next to those, and their rows in the one vault.
 
 ## Credits
 
