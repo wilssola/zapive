@@ -241,12 +241,37 @@ struct Session {
     client: Arc<Client>,
 }
 
+// How this device shows up under "Linked devices" on the phone. The
+// library's default is platform UNKNOWN with the os "rust", which the
+// phone renders as "Other device" with a question mark. DESKTOP plus a
+// real OS name is what the desktop apps send, and gets the OS's own
+// name and icon. Spelled the way WhatsApp's UA parser spells them, since
+// the pair-code handshake rejects an os it does not know. Read by the
+// server at pairing only: a session paired before this shows the old
+// name until it is linked again.
+fn device_identity() -> whatsapp_rust::wacore::store::DevicePropsOverride {
+    let os = if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "Mac OS"
+    } else {
+        "Linux"
+    };
+    whatsapp_rust::wacore::store::DevicePropsOverride::new()
+        .with_os(os)
+        .with_platform_type(wa::device_props::PlatformType::DESKTOP)
+}
+
 async fn build_session(
     cmd_tx: mpsc::UnboundedSender<Cmd>,
 ) -> Result<Session, Box<dyn std::error::Error + Send + Sync>> {
     let db_url = wa_session_path().to_string_lossy().into_owned();
     let store = SqliteStore::new(&db_url).await?;
-    let bot = Bot::builder().with_backend(store).build().await?;
+    let bot = Bot::builder()
+        .with_backend(store)
+        .with_device_props(device_identity())
+        .build()
+        .await?;
     let client = bot.client();
     client
         .subscribe_handler(Arc::new(Pump {
