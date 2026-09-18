@@ -50,6 +50,13 @@ pub fn vault_path() -> PathBuf {
     data_dir().join("vault.db")
 }
 
+// FTS5 search index. Kept separate from vault.db so the message store's
+// schema and encryption stay untouched; the index itself holds no
+// plaintext (see src/search.rs) and can always be dropped and rebuilt.
+pub fn search_index_path() -> PathBuf {
+    data_dir().join("search.db")
+}
+
 // whatsapp-rust's own protocol/session store; its schema, not ours.
 pub fn wa_session_path() -> PathBuf {
     data_dir().join("wa.db")
