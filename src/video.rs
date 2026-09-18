@@ -14,6 +14,18 @@ fn is_gif(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+// OpenH264 with the crate's default "flush after every decode" pulls
+// pictures out of the reorder buffer early. On a clip with B-frames
+// (anything a phone's camera or a screen recorder writes) that works
+// for a hundred-odd pictures and then the decoder errors out for the
+// rest of the file. Without it the decoder hands pictures back when
+// they are due, in display order.
+fn new_decoder() -> Option<openh264::decoder::Decoder> {
+    let config = openh264::decoder::DecoderConfig::new()
+        .flush_after_decode(openh264::decoder::Flush::NoFlush);
+    openh264::decoder::Decoder::with_api_config(openh264::OpenH264API::from_source(), config).ok()
+}
+
 fn open_mp4(path: &Path) -> Option<mp4::Mp4Reader<BufReader<std::fs::File>>> {
     let file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
@@ -139,7 +151,7 @@ pub fn frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
         };
         (track.sample_count(), track.timescale().max(1), sps.to_vec(), pps.to_vec())
     };
-    let Ok(mut decoder) = openh264::decoder::Decoder::new() else { return out };
+    let Some(mut decoder) = new_decoder() else { return out };
     let min_gap = if fps > 0.0 { 1.0 / fps } else { 0.0 };
     let mut next_at = 0.0f64;
     let mut annexb = Vec::new();
