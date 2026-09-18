@@ -261,6 +261,21 @@ msgstr "Inicialização"
 msgid "Open Zapive when I sign in"
 msgstr "Abrir o Zapive ao entrar no sistema"
 
+msgid "Privacy"
+msgstr "Privacidade"
+
+msgid "Send read receipts"
+msgstr "Enviar confirmação de leitura"
+
+msgid "Apply messages deleted by the sender"
+msgstr "Aplicar mensagens apagadas pelo remetente"
+
+msgid "Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted."
+msgstr "Ambas ficam desativadas por padrão: ninguém é avisado quando você lê uma mensagem, e uma mensagem apagada por alguém continua visível aqui, marcada como apagada."
+
+msgid "Deleted by sender"
+msgstr "Apagada pelo remetente"
+
 msgid "Groups"
 msgstr "Grupos"
 

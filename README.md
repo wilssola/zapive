@@ -20,6 +20,13 @@ fraction of the resources — about **140–180 MB of RAM** connected with
   forwarding, starring, deleting; edits and revokes are reflected.
 - Groups with sender names/colors, channels (newsletters) with metadata,
   status/stories viewer, and a call log with reject support.
+- Full-text message search backed by SQLite FTS5, in a separate,
+  keyed-and-encrypted index (see Privacy & security below) — no plaintext
+  word ever touches disk.
+- Two privacy switches, both **off by default**: sending read/played
+  receipts to others, and applying a "deleted for everyone" from someone
+  else (off keeps the message, with a small "deleted by sender"
+  indicator, instead of erasing it).
 
 **Media, fully in-process**
 - Photos, videos, GIFs, stickers, documents and voice notes — sent and
@@ -50,6 +57,12 @@ fraction of the resources — about **140–180 MB of RAM** connected with
   random data key sealed by Windows DPAPI (machine + user bound) and
   optionally by a PIN (scrypt-derived key). Only whatsapp-rust's own
   protocol store (`wa.db`) stays plain SQLite.
+- The search index (`search.db`) holds no plaintext either: every word is
+  a keyed, prefix-preserving hash derived from the same data key, and the
+  snippet text is separately AES-256-GCM encrypted.
+- Read/played receipts are never sent, and a "deleted for everyone" from
+  someone else never erases the message here, unless you turn either on
+  in Settings → Privacy.
 - Optional PIN lock screen on launch.
 
 ## Performance
@@ -103,14 +116,17 @@ the opus encode/decode, time-stretch and waveform paths headlessly.
 | What | Windows | macOS | Linux |
 |---|---|---|---|
 | Encrypted vault (chats, settings) | `%APPDATA%\Zapive\vault.db` | `~/Library/Application Support/Zapive/vault.db` | `$XDG_DATA_HOME/zapive/vault.db` |
+| Search index (FTS5, keyed/encrypted) | `%APPDATA%\Zapive\search.db` | `~/Library/Application Support/Zapive/search.db` | `$XDG_DATA_HOME/zapive/search.db` |
 | WhatsApp session (protocol state) | `%APPDATA%\Zapive\wa.db` | `~/Library/Application Support/Zapive/wa.db` | `$XDG_DATA_HOME/zapive/wa.db` |
 | Encrypted media + avatar cache | `%LOCALAPPDATA%\Zapive\Cache\media` | `~/Library/Caches/Zapive/media` | `$XDG_CACHE_HOME/zapive/media` |
 
 `$XDG_DATA_HOME` defaults to `~/.local/share` and `$XDG_CACHE_HOME` to
-`~/.cache`. The vault and the media cache are envelope-encrypted; `wa.db`
-is whatsapp-rust's own store, plain SQLite guarded by OS file
-permissions. Deleting the cache never loses the account; deleting
-`wa.db` requires pairing again.
+`~/.cache`. The vault, the search index and the media cache are
+encrypted (see Privacy & security above); `wa.db` is whatsapp-rust's own
+store, plain SQLite guarded by OS file permissions. Deleting the cache
+never loses the account; deleting `search.db` only costs a rebuild of
+the search index on next launch; deleting `wa.db` requires pairing
+again.
 
 ## Credits
 
