@@ -534,6 +534,22 @@ fn wire_callbacks(ui: &AppWindow) {
             b.ui.set_settings_status(t("lang.restart").into());
         });
     });
+    ui.on_send_receipts_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("send_receipts", if on { "1" } else { "0" });
+            }
+            b.ui.set_send_receipts(on);
+        });
+    });
+    ui.on_apply_deletions_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("apply_deletions", if on { "1" } else { "0" });
+            }
+            b.ui.set_apply_deletions(on);
+        });
+    });
 
     ui.on_open_chat(|jid| {
         let jid = jid.to_string();
@@ -1221,6 +1237,11 @@ impl Bridge {
         self.select_end();
         if let Some(vault) = &self.vault {
             vault.del_prefix("store:");
+            // The on-disk data key can outlive the account (only the
+            // vault's own `store:` keys were just wiped above), so a
+            // fresh pairing must not inherit the previous account's
+            // search index.
+            self.store.search.reset(vault);
         }
     }
 
@@ -1366,19 +1387,32 @@ impl Bridge {
                 self.apply_chat_settings_ui();
                 continue;
             }
-            // Deleted-for-everyone arrives as a protocol REVOKE.
+            // Deleted-for-everyone arrives as a protocol REVOKE. Applied
+            // destructively (today's behaviour) when "apply deletions" is
+            // on, or when it came from one of this account's own devices
+            // (phone or another linked device) so they all stay
+            // consistent; otherwise the message is kept and only
+            // flagged, so the reader can still see it and the sender
+            // can't quietly erase it here.
             if let Some(pm) = content.protocol_message.as_option()
                 && pm.r#type == Some(wa::message::protocol_message::Type::Revoke)
                 && let Some(target) = pm.key.as_option().and_then(|k| k.id.clone())
             {
                 let chat_jid = self.store.canon_owned(&normalize_jid(&chat));
-                if self.store.mark_deleted(&chat_jid, &target)
-                    && Some(&chat_jid) == self.current_jid.as_ref()
-                {
+                let destructive = self.ui.get_apply_deletions() || info.source.is_from_me;
+                let changed = if destructive {
+                    self.store.mark_deleted(&chat_jid, &target)
+                } else {
+                    self.store.mark_revoked(&chat_jid, &target)
+                };
+                if changed && Some(&chat_jid) == self.current_jid.as_ref() {
                     self.patch_row(&target, |row| {
-                        row.deleted = true;
-                        row.kind = "text".into();
-                        row.text = t("msg.deleted").into();
+                        if destructive {
+                            row.deleted = true;
+                            row.kind = "text".into();
+                            row.text = t("msg.deleted").into();
+                        }
+                        row.revoked = true;
                     });
                 }
                 self.schedule_refresh_chats();
@@ -1404,6 +1438,7 @@ impl Bridge {
             }
             if Some(&jid) == self.current_jid.as_ref() {
                 self.push_message_row(&jid);
+                self.send_view_receipts(&jid);
             } else if !from_me {
                 let mut muted = false;
                 if let Some(meta) = self.store.chats.get_mut(&jid) {
@@ -2014,6 +2049,7 @@ impl Bridge {
             meta.unread = 0;
             meta.mentioned = false;
         }
+        self.send_view_receipts(jid);
         self.ui.set_current_status("".into());
         self.wa.send(Cmd::SubscribePresence(jid.to_string()));
         self.apply_header(jid);
@@ -2349,6 +2385,7 @@ impl Bridge {
             senderJid: sender_jid.into(),
             forwarded: m.forwarded,
             deleted: m.deleted,
+            revoked: m.revoked,
             starred: m.starred,
             hasQuote: !m.quote_text.is_empty() || !m.quote_id.is_empty(),
             quoteName: if m.quote_author.is_empty() {
@@ -5595,6 +5632,56 @@ impl Bridge {
             .filter(|p| !p.is_empty())
     }
 
+    // "Send message viewed" (opt-in, off by default): read receipts for
+    // every not-yet-acked incoming message in this chat, one Cmd::MarkRead
+    // per sender so a group receipt carries the right participant.
+    // Called when the chat is opened and when a message arrives while it
+    // is the open chat -- there is no window-focus tracking in this app,
+    // so "viewed" means "the chat is currently open", the same condition
+    // that already clears the local unread badge.
+    fn send_view_receipts(&mut self, jid: &str) {
+        if !self.ui.get_send_receipts() {
+            return;
+        }
+        let pending: Vec<(Option<String>, String)> = self
+            .store
+            .messages_for(jid)
+            .iter()
+            .filter(|m| !m.from_me && !m.read_sent && m.kind != MessageKind::System)
+            .map(|m| (self.key_participant(m), m.id.clone()))
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        let mut by_sender: HashMap<Option<String>, Vec<String>> = HashMap::new();
+        for (sender, id) in pending {
+            by_sender.entry(sender).or_default().push(id);
+        }
+        let mut acked = Vec::new();
+        for (sender, ids) in by_sender {
+            acked.extend(ids.iter().cloned());
+            self.wa.send(Cmd::MarkRead { jid: jid.to_string(), sender, ids });
+        }
+        self.store.mark_read_sent(jid, &acked);
+    }
+
+    // The voice-note counterpart: sent once, the moment playback actually
+    // starts (see spin_audio_at, which covers both an already-decoded
+    // buffer and the post-decode resume in on_audio_ready). Reuses
+    // `read_sent` so a later seek/scrub on the same note doesn't re-send.
+    fn send_played_receipt(&mut self, jid: &str, id: &str) {
+        if !self.ui.get_send_receipts() {
+            return;
+        }
+        let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id) else { return };
+        if m.from_me || m.read_sent {
+            return;
+        }
+        let sender = self.key_participant(m);
+        self.wa.send(Cmd::MarkPlayed { jid: jid.to_string(), sender, id: id.to_string() });
+        self.store.mark_read_sent(jid, &[id.to_string()]);
+    }
+
     fn send_reaction(&mut self, id: &str, emoji: &str) {
         let Some(m) = self.find_message(id).cloned() else { return };
         // Reacting again with the same emoji removes it, like WhatsApp.
@@ -5911,6 +5998,7 @@ impl Bridge {
                 self.patch_row(&id, |row| row.playing = true);
             }
             self.ui.set_mini_audio_playing(true);
+            self.send_played_receipt(&jid, &id);
             return;
         }
         a.pending_offset = Some(offset_secs);
