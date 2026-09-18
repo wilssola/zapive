@@ -446,3 +446,5 @@ msgstr "Reinicie para usar a versão {}"
 
 msgid "Log out"
 msgstr "Sair"
+msgid "Loading…"
+msgstr "Carregando…"

@@ -191,8 +191,16 @@ pub struct Bridge {
     zoom_frames: Vec<slint::Image>,
     zoom_idx: usize,
     zoom_timer: slint::Timer,
+    video: Option<crate::video::Playback>,
     video_audio: Option<crate::audio::Player>,
     video_id: Option<String>,
+    // Told apart from a player that was closed or replaced.
+    video_gen: u64,
+    video_playing: bool,
+    video_pos: f64,
+    video_duration: f64,
+    video_volume: f32,
+    video_muted: bool,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -279,6 +287,14 @@ fn image_bytes(image: &slint::Image) -> usize {
 }
 
 // WhatsApp-style thumbnail box: fit within 330x380, never upscale.
+// A video's box when only its thumbnail is known: the thumbnail's shape
+// at the size a clip gets, scaled up as well as down.
+fn poster_box(w: i32, h: i32) -> (i32, i32) {
+    let (w, h) = (w.max(1) as f64, h.max(1) as f64);
+    let scale = (330.0 / w).min(380.0 / h);
+    (((w * scale).round() as i32).max(1), ((h * scale).round() as i32).max(1))
+}
+
 fn bubble_fit(w: i32, h: i32) -> (i32, i32) {
     let scale = (330.0 / w as f64).min(380.0 / h as f64).min(1.0);
     (((w as f64 * scale).round() as i32).max(1), ((h as f64 * scale).round() as i32).max(1))
@@ -494,8 +510,15 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         zoom_frames: Vec::new(),
         zoom_idx: 0,
         zoom_timer: slint::Timer::default(),
+        video: None,
         video_audio: None,
         video_id: None,
+        video_gen: 0,
+        video_playing: false,
+        video_pos: 0.0,
+        video_duration: 0.0,
+        video_volume: 1.0,
+        video_muted: false,
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -759,6 +782,28 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.open_video(&id));
     });
     ui.on_close_video(|| defer(|b| b.close_video()));
+    ui.on_video_toggle(|| defer(|b| b.video_toggle()));
+    ui.on_video_seek(|fraction| {
+        defer(move |b| {
+            let to = fraction as f64 * b.video_duration;
+            b.video_seek(to);
+        });
+    });
+    ui.on_video_seek_by(|secs| {
+        defer(move |b| {
+            let to = b.video_pos + secs as f64;
+            b.video_seek(to);
+        });
+    });
+    ui.on_video_set_volume(|volume| defer(move |b| b.video_set_volume(volume, volume <= 0.0)));
+    ui.on_video_mute_toggle(|| {
+        defer(|b| {
+            let (volume, muted) = (b.video_volume, !b.video_muted);
+            // Unmuting a slider dragged to zero would stay silent.
+            b.video_set_volume(if !muted && volume <= 0.0 { 1.0 } else { volume }, muted);
+        });
+    });
+    ui.on_video_save(|| defer(|b| b.video_save()));
     ui.on_status_open(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.open_status_viewer(&jid));
@@ -1087,6 +1132,9 @@ impl Bridge {
             self.self_jid = me;
         }
         self.media_key = vault.key_handle();
+        if let Some(volume) = vault.setting_get("video_volume").and_then(|v| v.parse::<f32>().ok()) {
+            self.video_volume = volume.clamp(0.0, 1.0);
+        }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
         self.vault = Some(vault);
         println!(
@@ -2411,6 +2459,11 @@ impl Bridge {
             },
             sticker: m.sticker,
             gif: m.gif,
+            videoLen: if m.kind == MessageKind::Video && !m.gif && m.duration_sec > 0 {
+                crate::store::format_duration(m.duration_sec).into()
+            } else {
+                "".into()
+            },
             styled,
             hasStyled: has_styled,
             plain: plain.into(),
@@ -3058,7 +3111,7 @@ impl Bridge {
                     id: m.id.clone(),
                     mimetype: m.mimetype.clone(),
                     message: raw,
-                    want: MediaWant::File,
+                    want: MediaWant::Video,
                 });
             }
             MessageKind::Audio | MessageKind::Doc => {
@@ -3281,6 +3334,19 @@ impl Bridge {
         self.restick();
     }
 
+    // The clip's own first picture, replacing the blurry thumbnail.
+    pub fn on_video_poster(&mut self, id: &str, img: crate::media::Decoded) {
+        let image = image_of(&img);
+        let (pic_w, pic_h) = poster_box(img.w as i32, img.h as i32);
+        self.remember_decoded(id, image.clone(), pic_w, pic_h);
+        self.patch_row(id, |row| {
+            row.picture = image.clone();
+            row.picW = pic_w;
+            row.picH = pic_h;
+        });
+        self.restick();
+    }
+
     pub fn on_thumb(&mut self, id: &str, link: bool, img: crate::media::Decoded) {
         let image = image_of(&img);
         let (w, h) = (img.w as i32, img.h as i32);
@@ -3293,13 +3359,22 @@ impl Bridge {
                 row.linkThumbH = h;
             });
         } else {
-            // Video poster: the bubble keeps its box; ready comes with the
-            // clip download.
-            let (pic_w, pic_h) = bubble_fit(w, h);
+            // Video poster. The embedded thumbnail is around a hundred
+            // pixels wide, and sizing the bubble to it is what made video
+            // previews tiny: the box comes from the clip's own size, and
+            // the thumbnail only lends its shape when that is unknown. A
+            // sharp poster replaces it once the clip is here.
+            if self.decoded.contains_key(id) {
+                return;
+            }
+            let sized = self.find_message(id).is_some_and(|m| m.media_w > 0 && m.media_h > 0);
+            let (pic_w, pic_h) = poster_box(w, h);
             self.patch_row(id, |row| {
                 row.picture = image.clone();
-                row.picW = pic_w;
-                row.picH = pic_h;
+                if !sized {
+                    row.picW = pic_w;
+                    row.picH = pic_h;
+                }
             });
             self.feed_viewer(id, &image);
         }
@@ -3526,10 +3601,7 @@ impl Bridge {
         let Some(path) = self.media_path.get(&item.id).map(std::path::PathBuf::from) else { return };
         self.close_video();
         self.video_id = Some(item.id.clone());
-        self.ui.set_video_w(item.media_w.max(320) as i32);
-        self.ui.set_video_h(item.media_h.max(240) as i32);
-        self.ui.set_video_open(true);
-        self.wa.send(Cmd::PlayVideo { id: item.id.clone(), path });
+        self.play_clip(path, item.media_w, item.media_h, item.duration_sec, None);
     }
 
     // Puts a freshly decoded bitmap on the open viewer when it matches.
@@ -5493,26 +5565,61 @@ impl Bridge {
                 self.zoom_frames = vec![img.clone()];
             }
             self.start_zoom_loop();
+            self.ui.set_video_is_clip(false);
+            self.ui.set_video_loading(false);
             self.ui.set_video_w(m.media_w.max(320) as i32);
             self.ui.set_video_h(m.media_h.max(240) as i32);
             self.ui.set_video_open(true);
             self.wa.send(Cmd::ZoomFrames { id: id.to_string(), path });
             return;
         }
-        self.ui.set_video_w(m.media_w.max(320) as i32);
-        self.ui.set_video_h(m.media_h.max(240) as i32);
+        let poster = self.decoded.get(id).map(|(img, _, _)| img.clone());
+        self.play_clip(path, m.media_w, m.media_h, m.duration_sec, poster);
+    }
+
+    // Opens the player on a cached clip. `poster` stands in until the
+    // first picture is decoded.
+    fn play_clip(
+        &mut self,
+        path: std::path::PathBuf,
+        w: u32,
+        h: u32,
+        seconds: u32,
+        poster: Option<slint::Image>,
+    ) {
+        self.video_gen += 1;
+        let generation = self.video_gen;
+        self.video_playing = true;
+        self.video_pos = 0.0;
+        self.video_duration = seconds as f64;
+        self.ui.set_video_frame(poster.unwrap_or_else(empty_image));
+        self.ui.set_video_w(w.max(1) as i32);
+        self.ui.set_video_h(h.max(1) as i32);
+        self.ui.set_video_is_clip(true);
+        self.ui.set_video_loading(true);
+        self.ui.set_video_playing(true);
+        self.ui.set_video_ended(false);
+        self.ui.set_video_progress(0.0);
+        self.ui.set_video_pos_label("0:00".into());
+        self.ui.set_video_duration_label(crate::store::format_duration(seconds).into());
+        self.ui.set_video_volume(self.video_volume);
+        self.ui.set_video_muted(self.video_muted);
         self.ui.set_video_open(true);
-        self.wa.send(Cmd::PlayVideo { id: id.to_string(), path });
+        self.video = Some(crate::video::Playback::start(self.media_key.clone(), path, move |event| {
+            ui_apply(move |b| b.on_video_event(generation, event));
+        }));
     }
 
     fn close_video(&mut self) {
-        self.wa.send(Cmd::StopVideo);
         self.zoom_timer.stop();
         self.zoom_frames.clear();
         self.zoom_idx = 0;
+        self.video_gen += 1;
+        self.video = None;
         self.video_audio = None;
         self.video_id = None;
         self.ui.set_video_open(false);
+        self.ui.set_video_frame(empty_image());
     }
 
     fn start_zoom_loop(&mut self) {
@@ -5546,25 +5653,135 @@ impl Bridge {
         self.start_zoom_loop();
     }
 
-    pub fn on_video_audio(&mut self, id: &str, buffer: crate::audio::AudioBuffer) {
-        if self.video_id.as_deref() == Some(id) {
-            self.video_audio = crate::audio::Player::start(&buffer, 0.0);
-        }
-    }
-
-    pub fn on_video_frame(&mut self, id: &str, frame: crate::media::Decoded) {
-        if self.video_id.as_deref() != Some(id) {
+    // What the player threads report. `generation` is the clip they were
+    // started for: a closed or replaced player keeps talking for a moment.
+    pub fn on_video_event(&mut self, generation: u64, event: crate::video::PlayerEvent) {
+        use crate::video::PlayerEvent;
+        if generation != self.video_gen {
             return;
         }
-        self.ui.set_video_w(frame.w as i32);
-        self.ui.set_video_h(frame.h as i32);
-        self.ui.set_video_frame(image_of(&frame));
+        match event {
+            PlayerEvent::Ready { w, h, duration } => {
+                self.video_duration = duration;
+                self.ui.set_video_w(w.max(1) as i32);
+                self.ui.set_video_h(h.max(1) as i32);
+                self.ui.set_video_duration_label(
+                    crate::store::format_duration(duration.round() as u32).into(),
+                );
+            }
+            PlayerEvent::Frame { frame, pos, resync } => {
+                self.ui.set_video_w(frame.w as i32);
+                self.ui.set_video_h(frame.h as i32);
+                self.ui.set_video_frame(image_of(&frame));
+                self.ui.set_video_loading(false);
+                self.set_video_pos(pos);
+                // The first picture after a start, a resume or a seek is
+                // where the sound is lined up with the picture again.
+                if resync && let Some(audio) = &self.video_audio {
+                    audio.seek(pos);
+                    if self.video_playing { audio.resume() } else { audio.pause() }
+                }
+                if let Some(video) = &self.video {
+                    video.frame_shown();
+                }
+            }
+            PlayerEvent::Audio(buffer) => {
+                // Decoded whole while the picture was already running.
+                let audio = crate::audio::Player::start(&buffer, self.video_pos);
+                if let Some(audio) = &audio {
+                    audio.set_gain(if self.video_muted { 0.0 } else { self.video_volume });
+                    if !self.video_playing {
+                        audio.pause();
+                    }
+                }
+                self.video_audio = audio;
+            }
+            PlayerEvent::Ended => {
+                self.video_playing = false;
+                self.ui.set_video_playing(false);
+                self.ui.set_video_ended(true);
+                self.set_video_pos(self.video_duration);
+                if let Some(audio) = &self.video_audio {
+                    audio.pause();
+                }
+            }
+            // Not H.264 in an MP4 (HEVC from an iPhone sent as a file,
+            // say): whatever the system plays videos with gets it.
+            PlayerEvent::Failed => {
+                let cached = self.video_id.as_ref().and_then(|id| self.media_path.get(id)).cloned();
+                self.close_video();
+                if let Some(cached) = cached
+                    && let Some(plain) =
+                        crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached))
+                {
+                    crate::platform::open_path(&plain.to_string_lossy());
+                }
+            }
+        }
     }
 
-    pub fn on_video_ended(&mut self, id: &str) {
-        if self.video_id.as_deref() == Some(id) {
-            self.close_video();
+    fn set_video_pos(&mut self, pos: f64) {
+        self.video_pos = pos;
+        let total = self.video_duration.max(0.001);
+        self.ui.set_video_progress((pos / total).clamp(0.0, 1.0) as f32);
+        self.ui.set_video_pos_label(crate::store::format_duration(pos as u32).into());
+    }
+
+    fn video_toggle(&mut self) {
+        let Some(video) = &self.video else { return };
+        if self.video_playing {
+            video.pause();
+            if let Some(audio) = &self.video_audio {
+                audio.pause();
+            }
+        } else {
+            // The sound comes back with the next picture (see `resync`).
+            video.resume();
+            self.ui.set_video_ended(false);
         }
+        self.video_playing = !self.video_playing;
+        self.ui.set_video_playing(self.video_playing);
+    }
+
+    fn video_seek(&mut self, secs: f64) {
+        let Some(video) = &self.video else { return };
+        let secs = secs.clamp(0.0, self.video_duration);
+        // Quiet until the picture lands where it was asked to go.
+        if let Some(audio) = &self.video_audio {
+            audio.pause();
+        }
+        video.seek(secs);
+        self.ui.set_video_ended(false);
+        self.set_video_pos(secs);
+    }
+
+    fn video_set_volume(&mut self, volume: f32, muted: bool) {
+        self.video_volume = volume.clamp(0.0, 1.0);
+        self.video_muted = muted;
+        self.ui.set_video_volume(self.video_volume);
+        self.ui.set_video_muted(muted);
+        if let Some(audio) = &self.video_audio {
+            audio.set_gain(if muted { 0.0 } else { self.video_volume });
+        }
+        if let Some(vault) = &self.vault {
+            vault.setting_set("video_volume", &format!("{:.2}", self.video_volume));
+        }
+    }
+
+    fn video_save(&mut self) {
+        let Some(id) = self.video_id.clone() else { return };
+        let Some(cached) = self.media_path.get(&id).map(std::path::PathBuf::from) else { return };
+        let Some(plain) = crate::media::temp_plain(&self.media_key, &cached) else { return };
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let name = format!("VID-{stamp}.mp4");
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+            if let Some(target) = picked
+                && let Err(e) = std::fs::copy(&plain, &target)
+            {
+                eprintln!("[video] save failed: {e}");
+            }
+        });
     }
 
     // ---- self-update ----

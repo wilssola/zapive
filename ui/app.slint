@@ -160,6 +160,8 @@ export struct MessageItem {
     senderLabel: string,
     sticker: bool,
     gif: bool,
+    // "1:23" on a video bubble; empty for GIFs.
+    videoLen: string,
     styled: styled-text,
     hasStyled: bool,
     // The styled text as drawn, for the selectable overlay.
@@ -231,6 +233,7 @@ component IconButton inherits TouchArea {
     in property <image> icon;
     in property <bool> active: false;
     in property <length> icon-size: 22px;
+    in property <color> tint: Theme.icon;
     width: 40px;
     height: 40px;
     mouse-cursor: pointer;
@@ -241,7 +244,7 @@ component IconButton inherits TouchArea {
         background: root.active ? Theme.selected : root.has-hover ? Theme.hover : transparent;
         Image {
             source: root.icon;
-            colorize: Theme.icon;
+            colorize: root.tint;
             width: root.icon-size;
             height: root.icon-size;
             x: (parent.width - self.width) / 2;
@@ -1077,6 +1080,24 @@ export component AppWindow inherits Window {
     in-out property <int> video-h: 0;
     callback open-video(string);
     callback close-video();
+    // A clip gets the transport; the GIF zoom is just the picture.
+    in property <bool> video-is-clip: false;
+    in property <bool> video-loading: false;
+    in property <bool> video-playing: false;
+    in property <bool> video-ended: false;
+    in property <float> video-progress: 0;
+    in property <string> video-pos-label: "0:00";
+    in property <string> video-duration-label: "0:00";
+    in property <float> video-volume: 1;
+    in property <bool> video-muted: false;
+    callback video-toggle();
+    // A fraction of the clip's length.
+    callback video-seek(float);
+    // Seconds, either way.
+    callback video-seek-by(float);
+    callback video-set-volume(float);
+    callback video-mute-toggle();
+    callback video-save();
 
     // Send-image preview (paste / attach confirmation)
     in-out property <bool> preview-open: false;
@@ -2319,21 +2340,79 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                // Still downloading: the thumbnail that came
+                                // with the message, dimmed, in the clip's box.
                                 if msg.kind == "video" && !msg.mediaReady && msg.picW > 0: Rectangle {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     border-radius: 6px;
                                     background: Theme.hover;
+                                    clip: true;
+                                    Image {
+                                        source: msg.picture;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        image-fit: cover;
+                                        opacity: 0.55;
+                                    }
+                                    Rectangle {
+                                        width: 46px;
+                                        height: 46px;
+                                        border-radius: 23px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        background: #00000090;
+                                        Image {
+                                            source: @image-url("icons/download.svg");
+                                            colorize: white;
+                                            width: 22px;
+                                            height: 22px;
+                                            x: 12px;
+                                            y: 12px;
+                                        }
+                                    }
                                 }
                                 if msg.kind == "video" && msg.mediaReady && msg.picW > 0: TouchArea {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
                                     clicked => { root.open-video(msg.id); }
-                                    Image {
-                                        source: msg.picture;
-                                        width: parent.width;
-                                        height: parent.height;
+                                    Rectangle {
+                                        border-radius: 6px;
+                                        clip: true;
+                                        background: black;
+                                        Image {
+                                            source: msg.picture;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            image-fit: cover;
+                                        }
+                                    }
+                                    if msg.videoLen != "": Rectangle {
+                                        x: 8px;
+                                        y: parent.height - self.height - 8px;
+                                        width: len-row.preferred-width + 12px;
+                                        height: 20px;
+                                        border-radius: 10px;
+                                        background: #000000a0;
+                                        len-row := HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            spacing: 4px;
+                                            Image {
+                                                source: @image-url("icons/video.svg");
+                                                colorize: white;
+                                                width: 12px;
+                                                height: 12px;
+                                                y: (parent.height - self.height) / 2;
+                                            }
+                                            Text {
+                                                text: msg.videoLen;
+                                                color: white;
+                                                font-size: 11px;
+                                                vertical-alignment: center;
+                                            }
+                                        }
                                     }
                                     // GIF badge, shown while the clip rests.
                                     if msg.gif && !msg.playing: Rectangle {
@@ -2355,19 +2434,19 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     if !msg.gif: Rectangle {
-                                        width: 46px;
-                                        height: 46px;
-                                        border-radius: 23px;
+                                        width: 56px;
+                                        height: 56px;
+                                        border-radius: 28px;
                                         x: (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
                                         background: #000000a0;
                                         Image {
                                             source: @image-url("icons/player-play.svg");
                                             colorize: white;
-                                            width: 24px;
-                                            height: 24px;
-                                            x: 11px;
-                                            y: 11px;
+                                            width: 28px;
+                                            height: 28px;
+                                            x: 15px;
+                                            y: 14px;
                                         }
                                     }
                                 }
@@ -2750,7 +2829,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                if !msg.hasStyled && (msg.kind == "text" || (msg.kind == "image" && msg.text != "")): TextInput {
+                                if !msg.hasStyled && (msg.kind == "text" || ((msg.kind == "image" || msg.kind == "video") && msg.text != "")): TextInput {
                                     text: msg.deleted ? "🚫 " + msg.text : msg.text;
                                     read-only: true;
                                     single-line: false;
@@ -5086,28 +5165,229 @@ export component AppWindow inherits Window {
 
     // ---------- Video player ----------
     if root.video-open: Rectangle {
-        background: #000000ee;
-        TouchArea { }
-        VerticalLayout {
-            padding: 16px;
-            spacing: 10px;
+        background: #000000f2;
+        // The bar, the close button and the pointer fade out while a clip
+        // plays untouched, and any movement brings them back.
+        property <bool> chrome: true;
+        property <bool> show-chrome: !root.video-is-clip || !root.video-playing
+            || self.chrome || bar-hover.has-hover || top-hover.has-hover || seek-area.pressed
+            || vol-area.pressed;
+        idle := Timer {
+            interval: 2.6s;
+            running: root.video-is-clip && root.video-playing;
+            triggered => { parent.chrome = false; }
+        }
+        stage := TouchArea {
+            mouse-cursor: parent.show-chrome ? MouseCursor.default : MouseCursor.none;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.move) {
+                    parent.chrome = true;
+                    idle.running = false;
+                    idle.running = root.video-is-clip && root.video-playing;
+                }
+            }
+            clicked => {
+                if (root.video-is-clip) { root.video-toggle(); }
+                else { root.close-video(); }
+            }
+        }
+        keys := FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) { root.close-video(); return accept; }
+                if (!root.video-is-clip) { return reject; }
+                if (event.text == " " || event.text == "k") { root.video-toggle(); return accept; }
+                if (event.text == Key.LeftArrow) { root.video-seek-by(-5); return accept; }
+                if (event.text == Key.RightArrow) { root.video-seek-by(5); return accept; }
+                if (event.text == Key.UpArrow) { root.video-set-volume(min(1, root.video-volume + 0.1)); return accept; }
+                if (event.text == Key.DownArrow) { root.video-set-volume(max(0, root.video-volume - 0.1)); return accept; }
+                if (event.text == "m") { root.video-mute-toggle(); return accept; }
+                reject
+            }
+        }
+        // Fit inside the window both ways (a tall clip used to run off
+        // the bottom), and never blow a small one up past 3x.
+        property <float> ratio: root.video-w / max(root.video-h, 1);
+        property <length> fit-w: min(self.width - 32px, (self.height - 32px) * self.ratio,
+            root.video-w * 3px);
+        Image {
+            source: root.video-frame;
+            width: parent.fit-w;
+            height: self.width / max(parent.ratio, 0.01);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+        }
+        if root.video-is-clip && root.video-loading: Rectangle {
+            width: loading-text.preferred-width + 28px;
+            height: 34px;
+            border-radius: 17px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #000000b0;
+            loading-text := Text {
+                text: @tr("Loading…");
+                color: white;
+                font-size: 13px;
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        if root.video-is-clip && !root.video-playing && !root.video-loading: Rectangle {
+            width: 76px;
+            height: 76px;
+            border-radius: 38px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #000000a8;
+            Image {
+                source: root.video-ended
+                    ? @image-url("icons/rotate-clockwise.svg")
+                    : @image-url("icons/player-play.svg");
+                colorize: white;
+                width: 36px;
+                height: 36px;
+                x: (parent.width - self.width) / 2 + (root.video-ended ? 0 : 2px);
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        // Top: save and close.
+        top-hover := TouchArea {
+            visible: parent.show-chrome;
+            height: 64px;
+            y: 0;
+            clicked => { if (root.video-is-clip) { root.video-toggle(); } }
+            Rectangle {
+                background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+            }
             HorizontalLayout {
+                padding: 12px;
+                spacing: 6px;
                 alignment: end;
+                if root.video-is-clip: IconButton {
+                    icon: @image-url("icons/download.svg");
+                    tint: white;
+                    clicked => { root.video-save(); }
+                }
                 IconButton {
                     icon: @image-url("icons/x.svg");
+                    tint: white;
                     clicked => { root.close-video(); }
                 }
             }
+        }
+
+        // Bottom: transport.
+        bar-hover := TouchArea {
+            visible: root.video-is-clip && parent.show-chrome;
+            height: 84px;
+            y: parent.height - self.height;
             Rectangle {
-                vertical-stretch: 1;
-                Image {
-                    source: root.video-frame;
-                    width: min(parent.width * 0.94, root.video-w * 1.6px);
-                    height: self.width * root.video-h / max(root.video-w, 1);
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: contain;
+                background: @linear-gradient(180deg, #00000000 0%, #000000d0 100%);
+            }
+            // Seek bar: a press jumps, a drag scrubs.
+            seek-area := TouchArea {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                height: 20px;
+                mouse-cursor: pointer;
+                property <float> at: 0;
+                function pick() {
+                    self.at = max(0, min(1, self.mouse-x / self.width));
+                    root.video-seek(self.at);
                 }
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
+                }
+                moved => { if (self.pressed) { self.pick(); } }
+                property <float> shown: self.pressed ? self.at : root.video-progress;
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: seek-area.has-hover || seek-area.pressed ? 6px : 4px;
+                    border-radius: self.height / 2;
+                    background: #ffffff40;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * seek-area.shown;
+                        border-radius: parent.border-radius;
+                        background: Theme.accent;
+                    }
+                }
+                Rectangle {
+                    visible: seek-area.has-hover || seek-area.pressed;
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: white;
+                    x: parent.width * seek-area.shown - self.width / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+            HorizontalLayout {
+                x: 12px;
+                y: 40px;
+                width: parent.width - 24px;
+                height: 36px;
+                spacing: 10px;
+                IconButton {
+                    icon: root.video-ended
+                        ? @image-url("icons/rotate-clockwise.svg")
+                        : (root.video-playing
+                            ? @image-url("icons/player-pause.svg")
+                            : @image-url("icons/player-play.svg"));
+                    tint: white;
+                    clicked => { root.video-toggle(); }
+                }
+                Text {
+                    text: root.video-pos-label + " / " + root.video-duration-label;
+                    color: white;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                IconButton {
+                    icon: root.video-muted || root.video-volume <= 0
+                        ? @image-url("icons/volume-off.svg")
+                        : @image-url("icons/volume.svg");
+                    tint: white;
+                    clicked => { root.video-mute-toggle(); }
+                }
+                vol-area := TouchArea {
+                    width: 90px;
+                    mouse-cursor: pointer;
+                    function pick() {
+                        root.video-set-volume(max(0, min(1, self.mouse-x / self.width)));
+                    }
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
+                    }
+                    moved => { if (self.pressed) { self.pick(); } }
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: #ffffff40;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * (root.video-muted ? 0 : root.video-volume);
+                            border-radius: 2px;
+                            background: white;
+                        }
+                    }
+                    Rectangle {
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 6px;
+                        background: white;
+                        x: parent.width * (root.video-muted ? 0 : root.video-volume) - self.width / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+                Rectangle { width: 4px; }
             }
         }
     }

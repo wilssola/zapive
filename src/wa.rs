@@ -41,8 +41,11 @@ pub enum MediaWant {
     Sticker,
     // Extract looping GIF frames from the clip.
     Gif,
-    // Just cache the file (audio, documents, video clips).
+    // Just cache the file (audio, documents).
     File,
+    // Cache the clip and decode its first picture for the bubble: the
+    // thumbnail embedded in the message is about a hundred pixels wide.
+    Video,
 }
 
 pub enum Cmd {
@@ -136,13 +139,11 @@ pub enum Cmd {
     SendAudioFile { jid: String, path: std::path::PathBuf },
     // Decode a local image for the send-preview overlay.
     PreviewImage { path: std::path::PathBuf },
-    // Stickers, GIFs and the video player.
+    // Stickers and GIFs (the video player runs its own threads).
     SendSticker { jid: String, path: std::path::PathBuf },
     GifSearch(String),
     SendGifUrl { jid: String, url: String },
     ZoomFrames { id: String, path: std::path::PathBuf },
-    PlayVideo { id: String, path: std::path::PathBuf },
-    StopVideo,
     // Self-update.
     CheckUpdate,
     ApplyUpdate,
@@ -935,8 +936,6 @@ async fn executor(
     let mut media_key = crate::vault::KeyHandle::default();
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
-    // Bumped on every play/stop; running frame loops exit when it moves.
-    let video_gen = Arc::new(std::sync::atomic::AtomicU64::new(0));
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             Cmd::MediaKey(key) => {
@@ -955,6 +954,24 @@ async fn executor(
                     };
                     match want {
                         MediaWant::File => ui_apply(move |b| b.on_media_file(&id, &path)),
+                        MediaWant::Video => {
+                            // Playable the moment the file is here; the
+                            // poster follows when it is decoded.
+                            {
+                                let (id, path) = (id.clone(), path.clone());
+                                ui_apply(move |b| b.on_media_file(&id, &path));
+                            }
+                            let poster = tokio::task::spawn_blocking(move || {
+                                crate::media::temp_plain(&key, &path)
+                                    .and_then(|p| crate::video::poster(&p, crate::media::BUBBLE_PX))
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+                            if let Some(img) = poster {
+                                ui_apply(move |b| b.on_video_poster(&id, img));
+                            }
+                        }
                         MediaWant::Image => {
                             // Bubble size only; the lightbox asks for a
                             // full decode when it opens.
@@ -1387,59 +1404,6 @@ async fn executor(
                         ui_apply(move |b| b.on_zoom_frames(&id, frames));
                     }
                 });
-            }
-            Cmd::PlayVideo { id, path } => {
-                video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let generation = video_gen.load(std::sync::atomic::Ordering::SeqCst);
-                let key = media_key.clone();
-                let gen_handle = video_gen.clone();
-                tokio::spawn(async move {
-                    let Some(plain) = ({
-                        let key = key.clone();
-                        let path = path.clone();
-                        tokio::task::spawn_blocking(move || crate::media::temp_plain(&key, &path))
-                            .await
-                            .ok()
-                            .flatten()
-                    }) else {
-                        return;
-                    };
-                    // Soundtrack decoded whole; playback starts UI-side in
-                    // sync with the first frame.
-                    let audio_plain = plain.clone();
-                    let audio = tokio::task::spawn_blocking(move || {
-                        crate::audio::decode_with_tempo(&audio_plain, 1.0)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    let id_for_audio = id.clone();
-                    if let Some(buffer) = audio {
-                        ui_apply(move |b| b.on_video_audio(&id_for_audio, buffer));
-                    }
-                    // Paced frame loop on a blocking thread; a newer
-                    // generation (or StopVideo) ends it.
-                    tokio::task::spawn_blocking(move || {
-                        let frames = crate::video::frames(&plain, 560, 15.0, 900);
-                        let started = std::time::Instant::now();
-                        for (i, frame) in frames.into_iter().enumerate() {
-                            if gen_handle.load(std::sync::atomic::Ordering::SeqCst) != generation {
-                                return;
-                            }
-                            let due = std::time::Duration::from_millis((i as u64) * 1000 / 15);
-                            if let Some(wait) = due.checked_sub(started.elapsed()) {
-                                std::thread::sleep(wait);
-                            }
-                            let id = id.clone();
-                            ui_apply(move |b| b.on_video_frame(&id, frame));
-                        }
-                        let id_done = id.clone();
-                        ui_apply(move |b| b.on_video_ended(&id_done));
-                    });
-                });
-            }
-            Cmd::StopVideo => {
-                video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             Cmd::CheckUpdate => {
                 tokio::spawn(async move {

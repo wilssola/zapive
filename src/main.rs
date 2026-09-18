@@ -47,6 +47,10 @@ fn main() {
         overlay_selftest();
         return;
     }
+    if std::env::args().any(|a| a == "--player-selftest") {
+        player_selftest();
+        return;
+    }
 
     if !single::claim_single_instance() {
         println!("another instance is running; raising it instead");
@@ -299,6 +303,171 @@ fn audio_selftest() {
     let strip = audio::message_waveform(&samples);
     println!("[selftest] message waveform {} points, peak {}", strip.len(), strip.iter().max().unwrap_or(&0));
     let _ = std::fs::remove_file(&tmp);
+}
+
+// Developer probe: drives the video player with no window -- play, pause,
+// resume, seek, run to the end, replay -- against the clip given after the
+// flag, or a four-second one made on the spot. A plain file passes for a
+// cache entry: only sealed files carry the magic that asks for the key.
+fn player_selftest() {
+    use std::sync::{Arc, Mutex};
+    use video::PlayerEvent;
+
+    let given = std::env::args().skip_while(|a| a != "--player-selftest").nth(1);
+    let clip = match given {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let gif = std::env::temp_dir().join("zapive_selftest.gif");
+            let mp4 = std::env::temp_dir().join("zapive_selftest.mp4");
+            let mut frames = Vec::new();
+            for i in 0..60u32 {
+                let img = image::RgbaImage::from_fn(320, 180, |x, _| {
+                    if x / 8 == i { image::Rgba([255, 255, 255, 255]) } else { image::Rgba([20, 60, 90, 255]) }
+                });
+                frames.push(image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(100, 1)));
+            }
+            let file = std::fs::File::create(&gif).expect("temp gif");
+            let mut encoder = image::codecs::gif::GifEncoder::new(file);
+            encoder.encode_frames(frames).expect("encode gif");
+            drop(encoder);
+            // The player opens a cache entry through its plain temp copy,
+            // and keeps one it finds: drop the last run's.
+            let _ = std::fs::remove_file(paths::media_cache().join(".tmp").join("zapive_selftest.mp4"));
+            if video::gif_to_mp4(&gif, &mp4).is_none() {
+                println!("[selftest] FAIL: could not build the test clip");
+                return;
+            }
+            mp4
+        }
+    };
+    println!("[selftest] playing {}", clip.display());
+
+    #[derive(Default)]
+    struct Seen {
+        frames: u32,
+        last: f64,
+        resyncs: u32,
+        ended: bool,
+        failed: bool,
+        duration: f64,
+    }
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let player: Arc<Mutex<Option<video::Playback>>> = Arc::new(Mutex::new(None));
+    let started = std::time::Instant::now();
+    let playback = {
+        let (seen, player) = (seen.clone(), player.clone());
+        video::Playback::start(vault::KeyHandle::default(), clip, move |event| {
+            let mut seen = seen.lock().unwrap();
+            match event {
+                PlayerEvent::Ready { w, h, duration } => {
+                    seen.duration = duration;
+                    println!("[selftest] ready {w}x{h}, {duration:.2}s");
+                }
+                PlayerEvent::Frame { frame, pos, resync } => {
+                    seen.frames += 1;
+                    seen.last = pos;
+                    if std::env::var_os("ZAPIVE_TRACE").is_some() {
+                        println!("[trace] {pos:.3} at {:.3}", started.elapsed().as_secs_f64());
+                    }
+                    if resync {
+                        seen.resyncs += 1;
+                        println!(
+                            "[selftest] resync at {pos:.2}s ({}x{}), {:.2}s in",
+                            frame.w,
+                            frame.h,
+                            started.elapsed().as_secs_f64()
+                        );
+                    }
+                    // Stand in for the UI having drawn it.
+                    if let Some(player) = player.lock().unwrap().as_ref() {
+                        player.frame_shown();
+                    }
+                }
+                PlayerEvent::Audio(buffer) => {
+                    println!("[selftest] soundtrack {:.2}s", buffer.duration_secs())
+                }
+                PlayerEvent::Ended => {
+                    seen.ended = true;
+                    println!("[selftest] ended, {:.2}s in", started.elapsed().as_secs_f64());
+                }
+                PlayerEvent::Failed => {
+                    seen.failed = true;
+                    println!("[selftest] FAIL: the player gave up on the clip");
+                }
+            }
+        })
+    };
+    *player.lock().unwrap() = Some(playback);
+    let with = |f: &dyn Fn(&video::Playback)| f(player.lock().unwrap().as_ref().unwrap());
+    let sleep = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
+    let report = |what: &str| {
+        let seen = seen.lock().unwrap();
+        println!("[selftest] {what}: {} frames, at {:.2}s", seen.frames, seen.last);
+        (seen.frames, seen.last)
+    };
+
+    // Everything below is in fractions of the clip, whatever its length.
+    sleep(400);
+    let total = seen.lock().unwrap().duration.max(0.5);
+    let (frames, at) = report("after 0.4s of play");
+    if frames < 3 || !(0.2..=0.6).contains(&at) {
+        println!("[selftest] FAIL: 0.4s of play should be about 0.4s in");
+    }
+    with(&|p| p.pause());
+    sleep(150);
+    let (paused_frames, _) = report("paused");
+    sleep(500);
+    let (still, _) = report("still paused");
+    if still != paused_frames {
+        println!("[selftest] FAIL: frames kept coming while paused");
+    }
+    // A seek while paused shows where it landed, once.
+    let target = total * 0.7;
+    with(&|p| p.seek(target));
+    sleep(400);
+    let (after_seek, at) = report("sought to 70% while paused");
+    if after_seek != still + 1 || (at - target).abs() > 0.15 {
+        println!("[selftest] FAIL: a paused seek should show exactly the picture it landed on");
+    }
+    with(&|p| p.resume());
+    sleep(150);
+    let (_, at) = report("resumed");
+    if at < target || at > target + 0.35 {
+        println!("[selftest] FAIL: play should carry on from the seek");
+    }
+    // A seek lands when its keyframe-to-target run is decoded, which a
+    // debug build takes its time over: wait for it instead of guessing.
+    let target = total * 0.2;
+    with(&|p| p.seek(target));
+    let landed = (0..40).any(|_| {
+        sleep(100);
+        let at = seen.lock().unwrap().last;
+        at >= target && at < target + 1.5
+    });
+    report("sought back to 20% while playing");
+    if !landed {
+        println!("[selftest] FAIL: a playing seek should land and keep going");
+    }
+    // The last second, rather than sitting through a long clip.
+    with(&|p| p.seek((total - 1.0).max(0.0)));
+    let ended = (0..60).any(|_| {
+        sleep(100);
+        seen.lock().unwrap().ended
+    });
+    if !ended {
+        println!("[selftest] FAIL: the clip never reported its end");
+    }
+    // Play at the end means play again.
+    with(&|p| p.resume());
+    sleep(600);
+    let (_, at) = report("replayed");
+    if !(0.1..=0.9).contains(&at) {
+        println!("[selftest] FAIL: replay should start over");
+    }
+    let failed = seen.lock().unwrap().failed;
+    *player.lock().unwrap() = None;
+    sleep(100);
+    println!("[selftest] {}", if failed { "player FAILED" } else { "player done" });
 }
 
 // The NAL types in one Annex-B access unit, in order.
