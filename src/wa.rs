@@ -118,6 +118,11 @@ pub enum Cmd {
     React { jid: String, id: String, from_me: bool, participant: Option<String>, emoji: String },
     Revoke { jid: String, id: String },
     Star { jid: String, id: String, from_me: bool, participant: Option<String>, starred: bool },
+    // "Send message viewed" (opt-in, off by default): blue ticks and the
+    // blue mic. `sender` is the group participant a receipt is addressed
+    // to (None in a DM), matching Client::mark_as_read/mark_as_played.
+    MarkRead { jid: String, sender: Option<String>, ids: Vec<String> },
+    MarkPlayed { jid: String, sender: Option<String>, id: String },
     Forward { jid: String, message: std::sync::Arc<wa::Message> },
     // Outgoing media (paths are plain files picked by the user).
     SendImage { jid: String, path: std::path::PathBuf, caption: Option<String> },
@@ -1007,6 +1012,27 @@ async fn executor(
                     };
                     if let Err(e) = result {
                         eprintln!("[wa] star failed: {e}");
+                    }
+                });
+            }
+            Cmd::MarkRead { jid, sender, ids } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let sender = sender.and_then(|p| parse_jid(&p));
+                    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+                    if let Err(e) = client.mark_as_read(&chat, sender.as_ref(), &id_refs).await {
+                        eprintln!("[wa] read receipt failed: {e}");
+                    }
+                });
+            }
+            Cmd::MarkPlayed { jid, sender, id } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let sender = sender.and_then(|p| parse_jid(&p));
+                    if let Err(e) = client.mark_as_played(&chat, sender.as_ref(), &[id.as_str()]).await {
+                        eprintln!("[wa] played receipt failed: {e}");
                     }
                 });
             }
