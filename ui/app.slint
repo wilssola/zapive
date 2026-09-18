@@ -126,6 +126,10 @@ export struct MessageItem {
     firstOfRun: bool,
     forwarded: bool,
     deleted: bool,
+    // The sender revoked this message but it was kept ("apply deletions"
+    // off); shown as a small indicator, unlike `deleted` which replaces
+    // the whole bubble with "This message was deleted".
+    revoked: bool,
     starred: bool,
     hasQuote: bool,
     quoteName: string,
@@ -913,6 +917,12 @@ export component AppWindow inherits Window {
     callback save-pin(string, string);
     callback remove-pin(string);
     callback logout();
+    // Privacy: both off by default (see Bridge::send_view_receipts and
+    // the deletion routing in Bridge::on_messages).
+    in-out property <bool> send-receipts: false;
+    in-out property <bool> apply-deletions: false;
+    callback send-receipts-changed(bool);
+    callback apply-deletions-changed(bool);
 
     // Lightbox
     in-out property <bool> lightbox-open: false;
@@ -2153,6 +2163,27 @@ export component AppWindow inherits Window {
                                     }
                                     Text {
                                         text: @tr("Forwarded");
+                                        font-size: 11px;
+                                        font-italic: true;
+                                        color: Theme.text-dim;
+                                    }
+                                }
+
+                                // "Apply deletions" is off: the sender took
+                                // this back but the message was kept, so a
+                                // small indicator is all that changes.
+                                if msg.revoked && !msg.deleted: HorizontalLayout {
+                                    spacing: 4px;
+                                    alignment: start;
+                                    Image {
+                                        source: @image-url("icons/trash.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 12px;
+                                        height: 12px;
+                                        y: 1px;
+                                    }
+                                    Text {
+                                        text: @tr("Deleted by sender");
                                         font-size: 11px;
                                         font-italic: true;
                                         color: Theme.text-dim;
@@ -4549,6 +4580,36 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text: @tr("A device picked here is used for every call. Changes apply to the next call.");
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: @tr("Privacy");
+                    color: Theme.accent;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterChip {
+                        label: @tr("Send read receipts");
+                        active: root.send-receipts;
+                        clicked => { root.send-receipts-changed(!root.send-receipts); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterChip {
+                        label: @tr("Apply messages deleted by the sender");
+                        active: root.apply-deletions;
+                        clicked => { root.apply-deletions-changed(!root.apply-deletions); }
+                    }
+                }
+                Text {
+                    text: @tr("Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted.");
                     color: Theme.text-dim;
                     font-size: 12px;
                     wrap: word-wrap;
