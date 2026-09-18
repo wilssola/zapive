@@ -12,8 +12,10 @@ use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
+use hmac::{Hmac, Mac};
 use rand::RngCore as _;
 use rusqlite::Connection;
+use sha2::Sha256;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use zeroize::Zeroizing;
@@ -38,6 +40,19 @@ impl KeyHandle {
 
     pub fn unlocked(&self) -> bool {
         self.with(|k| k.is_some())
+    }
+
+    // A key for a specific purpose, derived from the DK so it needs no
+    // storage of its own and dies with the vault lock. Used to key the
+    // FTS5 search index (src/search.rs) without giving it the DK itself.
+    pub fn derive(&self, label: &[u8]) -> Option<[u8; 32]> {
+        self.with(|key| {
+            let key = key?;
+            let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(label);
+            let out = mac.finalize().into_bytes();
+            Some(out.into())
+        })
     }
 
     // ZENC1 | iv(12) | GCM tag(16) | ciphertext. Plaintext passthrough
