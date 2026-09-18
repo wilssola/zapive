@@ -135,7 +135,11 @@ fn main() {
         );
     }
 
-    let (wa, registered) = match wa::WaService::start(rt) {
+    // The session to open is the account that was on screen last; the
+    // vault reads and writes that account's conversations from here on.
+    let account = app_vault.active_account();
+    app_vault.set_account(&account);
+    let (wa, registered) = match wa::WaService::start(rt, &account) {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("[wa] failed to start: {e}");
@@ -218,6 +222,21 @@ fn main() {
                         slint::quit_event_loop().ok();
                     }
                 }
+            },
+        );
+    }
+
+    // Developer probe; see Bridge::accounts_selftest.
+    let accounts_probe = slint::Timer::default();
+    if std::env::args().any(|a| a == "--accounts-selftest") {
+        let step = std::cell::Cell::new(0u32);
+        accounts_probe.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(3),
+            move || {
+                let n = step.get();
+                step.set(n + 1);
+                bridge::ui_apply(move |b| b.accounts_selftest(n));
             },
         );
     }

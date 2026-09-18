@@ -53,13 +53,48 @@ pub fn vault_path() -> PathBuf {
 // FTS5 search index. Kept separate from vault.db so the message store's
 // schema and encryption stay untouched; the index itself holds no
 // plaintext (see src/search.rs) and can always be dropped and rebuilt.
-pub fn search_index_path() -> PathBuf {
-    data_dir().join("search.db")
+//
+// One per account. The first account has the empty id and keeps the
+// names every install already has on disk, so adding accounts later
+// migrates nothing.
+pub fn search_index_path(account: &str) -> PathBuf {
+    data_dir().join(per_account("search", account))
 }
 
 // whatsapp-rust's own protocol/session store; its schema, not ours.
-pub fn wa_session_path() -> PathBuf {
-    data_dir().join("wa.db")
+pub fn wa_session_path(account: &str) -> PathBuf {
+    data_dir().join(per_account("wa", account))
+}
+
+fn per_account(stem: &str, account: &str) -> String {
+    if account.is_empty() { format!("{stem}.db") } else { format!("{stem}-{account}.db") }
+}
+
+// Session and index files of accounts that are no longer registered. A
+// removed account's files go right away when they can, but on Windows
+// the session database of an account that was just switched away from
+// is often still open for a moment; this catches it at the next launch.
+pub fn sweep_accounts(known: &[String]) {
+    let Ok(entries) = std::fs::read_dir(data_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix("wa-").or_else(|| name.strip_prefix("search-")) else {
+            continue;
+        };
+        let Some((id, _)) = rest.split_once(".db") else { continue };
+        if !known.iter().any(|k| k == id) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+// A sqlite database together with its WAL sidecars.
+pub fn remove_db(path: &std::path::Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let mut p = path.as_os_str().to_owned();
+        p.push(suffix);
+        let _ = std::fs::remove_file(PathBuf::from(p));
+    }
 }
 
 pub fn media_cache() -> PathBuf {

@@ -446,5 +446,30 @@ msgstr "Reinicie para usar a versão {}"
 
 msgid "Log out"
 msgstr "Sair"
+
+msgid "Conversations of {} are saved on this computer"
+msgstr "As conversas de {} estão salvas neste computador"
+
+msgid "Conversations are saved on this computer"
+msgstr "Há conversas salvas neste computador"
+
+msgid "Link the same number and the app picks up where it left off, without downloading everything again. A different number starts clean."
+msgstr "Conecte o mesmo número e o app continua de onde parou, sem baixar tudo de novo. Um número diferente começa do zero."
+
+msgid "Erase"
+msgstr "Apagar"
+
+msgid "Other accounts"
+msgstr "Outras contas"
+
+msgid "Add account"
+msgstr "Adicionar conta"
+
+msgid "Up to 5 accounts"
+msgstr "Limite de 5 contas"
+
+msgid "Switching accounts..."
+msgstr "Trocando de conta..."
+
 msgid "Loading…"
 msgstr "Carregando…"

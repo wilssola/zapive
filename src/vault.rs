@@ -99,9 +99,28 @@ impl KeyHandle {
 pub struct Vault {
     conn: Connection,
     key: KeyHandle,
+    // The account whose rows `get`/`set` reach. One vault (one PIN, one
+    // data key) serves every account; what separates them is this prefix
+    // on the kv keys. The first account has the empty id and no prefix,
+    // which is the layout a single-account install already has.
+    account: std::cell::RefCell<String>,
     failed_attempts: u32,
     next_try_at: Option<Instant>,
 }
+
+// One linked WhatsApp account. `jid` is whoever paired it last -- kept
+// after a logout so a new pairing can tell whether the conversations on
+// disk are its own -- and `name` is what the switcher shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Account {
+    pub id: String,
+    #[serde(default)]
+    pub jid: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+pub const MAX_ACCOUNTS: usize = 5;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum PinError {
@@ -122,7 +141,13 @@ impl Vault {
              CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
         )
         .map_err(|e| e.to_string())?;
-        Ok(Self { conn, key: KeyHandle::default(), failed_attempts: 0, next_try_at: None })
+        Ok(Self {
+            conn,
+            key: KeyHandle::default(),
+            account: Default::default(),
+            failed_attempts: 0,
+            next_try_at: None,
+        })
     }
 
     pub fn key_handle(&self) -> KeyHandle {
@@ -255,9 +280,69 @@ impl Vault {
         );
     }
 
+    // ---- accounts ----
+
+    pub fn account(&self) -> String {
+        self.account.borrow().clone()
+    }
+
+    pub fn set_account(&self, id: &str) {
+        *self.account.borrow_mut() = id.to_string();
+    }
+
+    fn scope(&self) -> String {
+        let account = self.account.borrow();
+        if account.is_empty() { String::new() } else { format!("acct:{account}:") }
+    }
+
+    // The registry is plaintext on purpose: main needs the active
+    // account before the PIN is typed, to open the right session.
+    pub fn accounts(&self) -> Vec<Account> {
+        let mut list: Vec<Account> = self
+            .setting_get("accounts")
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+        if list.is_empty() {
+            // A single-account install from before the registry existed.
+            list.push(Account {
+                id: String::new(),
+                jid: self.setting_get("self_jid").unwrap_or_default(),
+                name: String::new(),
+            });
+        }
+        list
+    }
+
+    pub fn set_accounts(&self, list: &[Account]) {
+        self.setting_set("accounts", &serde_json::to_string(list).unwrap_or_else(|_| "[]".into()));
+    }
+
+    // The account to open at launch; falls back to the first one when the
+    // saved id no longer exists.
+    pub fn active_account(&self) -> String {
+        let list = self.accounts();
+        let saved = self.setting_get("active_account").unwrap_or_default();
+        if list.iter().any(|a| a.id == saved) {
+            saved
+        } else {
+            list.first().map(|a| a.id.clone()).unwrap_or_default()
+        }
+    }
+
+    pub fn set_active_account(&self, id: &str) {
+        self.setting_set("active_account", id);
+    }
+
+    // Every row of one account, whichever account is active.
+    pub fn wipe_account(&self, id: &str) {
+        let scope = if id.is_empty() { "store:".to_string() } else { format!("acct:{id}:") };
+        let _ = self.conn.execute("DELETE FROM kv WHERE k LIKE ?1", [format!("{scope}%")]);
+    }
+
     // ---- kv (values encrypted with the DK) ----
 
     pub fn get(&self, k: &str) -> Option<String> {
+        let k = &format!("{}{k}", self.scope());
         let stored = self
             .conn
             .query_row("SELECT v FROM kv WHERE k = ?1", [k], |row| row.get::<_, String>(0))
@@ -266,6 +351,7 @@ impl Vault {
     }
 
     pub fn set(&self, k: &str, v: &str) {
+        let k = &format!("{}{k}", self.scope());
         // Dropping the write beats panicking: callers race the PIN unlock
         // (the WhatsApp client connects while the vault is still locked).
         let Some(encoded) = self.key.with(|key| key.map(|key| encrypt_str(v, key))) else {
@@ -279,22 +365,26 @@ impl Vault {
     }
 
     pub fn del(&self, k: &str) {
+        let k = format!("{}{k}", self.scope());
         let _ = self.conn.execute("DELETE FROM kv WHERE k = ?1", [k]);
     }
 
     pub fn del_prefix(&self, prefix: &str) {
         let _ = self
             .conn
-            .execute("DELETE FROM kv WHERE k LIKE ?1", [format!("{prefix}%")]);
+            .execute("DELETE FROM kv WHERE k LIKE ?1", [format!("{}{prefix}%", self.scope())]);
     }
 
+    // Keys come back the way the caller wrote them, without the scope.
     pub fn keys(&self, prefix: &str) -> Vec<String> {
+        let scope = self.scope();
         let mut out = Vec::new();
         if let Ok(mut stmt) = self.conn.prepare("SELECT k FROM kv WHERE k LIKE ?1")
-            && let Ok(rows) = stmt.query_map([format!("{prefix}%")], |row| row.get::<_, String>(0))
+            && let Ok(rows) =
+                stmt.query_map([format!("{scope}{prefix}%")], |row| row.get::<_, String>(0))
         {
             for k in rows.flatten() {
-                out.push(k);
+                out.push(k[scope.len()..].to_string());
             }
         }
         out
@@ -356,4 +446,74 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| ()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempVault {
+        vault: Vault,
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for TempVault {
+        fn drop(&mut self) {
+            crate::paths::remove_db(&self.path);
+        }
+    }
+
+    fn temp_vault(tag: &str) -> TempVault {
+        let path = std::env::temp_dir().join(format!("zapive_test_accounts_{}_{tag}.db", std::process::id()));
+        let mut vault = Vault::open_at(&path.to_string_lossy()).expect("open vault");
+        vault.open().expect("unlock vault (no pin)");
+        TempVault { vault, path }
+    }
+
+    #[test]
+    fn accounts_keep_their_rows_apart() {
+        let t = temp_vault("rows");
+        let v = &t.vault;
+        // The first account is what a single-account install already has.
+        v.set("store:chats", "first");
+        v.set("store:msgs:a@s.whatsapp.net", "hello");
+        v.set_account("1a2b3c4d");
+        assert_eq!(v.get("store:chats"), None);
+        v.set("store:chats", "second");
+        v.set("store:msgs:b@s.whatsapp.net", "hi");
+        assert_eq!(v.keys("store:msgs:"), vec!["store:msgs:b@s.whatsapp.net".to_string()]);
+        v.set_account("");
+        assert_eq!(v.get("store:chats").as_deref(), Some("first"));
+        assert_eq!(v.keys("store:msgs:"), vec!["store:msgs:a@s.whatsapp.net".to_string()]);
+        // A logout's wipe takes one account's conversations only.
+        v.del_prefix("store:");
+        assert_eq!(v.get("store:chats"), None);
+        v.set_account("1a2b3c4d");
+        assert_eq!(v.get("store:chats").as_deref(), Some("second"));
+        // Removing an account works from wherever the vault is pointed.
+        v.set_account("");
+        v.wipe_account("1a2b3c4d");
+        v.set_account("1a2b3c4d");
+        assert_eq!(v.get("store:chats"), None);
+    }
+
+    #[test]
+    fn registry_starts_from_the_single_account_install() {
+        let t = temp_vault("registry");
+        let v = &t.vault;
+        v.setting_set("self_jid", "5511999998888@s.whatsapp.net");
+        let list = v.accounts();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "");
+        assert_eq!(list[0].jid, "5511999998888@s.whatsapp.net");
+        assert_eq!(v.active_account(), "");
+        let mut list = list;
+        list.push(Account { id: "0badc0de".into(), ..Default::default() });
+        v.set_accounts(&list);
+        v.set_active_account("0badc0de");
+        assert_eq!(v.active_account(), "0badc0de");
+        // An id that is gone falls back to the first account.
+        v.set_active_account("missing");
+        assert_eq!(v.active_account(), "");
+    }
 }

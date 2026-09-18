@@ -199,7 +199,7 @@ impl SearchIndex {
     // error or while the vault is locked: search then quietly returns
     // nothing, the same policy Vault::set uses for a dropped write.
     pub fn open(&mut self, vault: &Vault) {
-        self.open_at(vault, &crate::paths::search_index_path());
+        self.open_at(vault, &crate::paths::search_index_path(&vault.account()));
     }
 
     // Drops and recreates search.db under the vault currently unlocked.
@@ -207,7 +207,7 @@ impl SearchIndex {
     // the vault's own `store:` keys are wiped there), so the keycheck
     // alone would not notice a different account reusing the same key.
     pub fn reset(&mut self, vault: &Vault) {
-        self.reset_at(vault, &crate::paths::search_index_path());
+        self.reset_at(vault, &crate::paths::search_index_path(&vault.account()));
     }
 
     fn open_at(&mut self, vault: &Vault, path: &Path) {

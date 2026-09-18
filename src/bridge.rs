@@ -13,8 +13,9 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem, MessageItem,
-    PdfPage, ReactionItem, SearchHit, StickerCell,
+    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
+    MessageItem, PdfPage,
+    ReactionItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -65,6 +66,16 @@ pub struct Bridge {
     refresh_queued: bool,
     save_queued: bool,
     pending_registered: bool,
+    // Accounts: which one is loaded, the wa.rs session epoch its events
+    // carry, whether it is paired right now, and the switcher's rows.
+    account: String,
+    epoch: u64,
+    registered: bool,
+    switching: bool,
+    // Set by the logout dialog: the conversations go with the session.
+    // A logout that came from the phone leaves them alone.
+    wipe_on_logout: bool,
+    accounts_model: Rc<VecModel<AccountItem>>,
     // The open chat's contact is online; what the header falls back to
     // when a typing/recording line ends.
     peer_online: bool,
@@ -217,6 +228,11 @@ enum ConfirmAction {
     ClearChat(String),
     DeleteSelected { for_everyone: bool },
     DeleteChat(String),
+    // Primary button wipes the conversations too; the secondary keeps them.
+    Logout,
+    RemoveAccount(String),
+    // From the login screen: drop what a past session left on disk.
+    ForgetConversations,
 }
 
 const STICKER_CACHE_MAX: usize = 64;
@@ -371,9 +387,19 @@ pub fn ui_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
 // processing an event then would build on empty state and a later save
 // would clobber the vault. Park them and let boot replay in order.
 pub fn wa_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
+    wa_apply_at(crate::wa::SESSION_EPOCH.load(std::sync::atomic::Ordering::SeqCst), f);
+}
+
+// `epoch` is the session the work came from. The bridge holds one
+// account's conversations at a time, so anything produced under another
+// epoch than the one it has loaded is for a store that is not here.
+pub fn wa_apply_at(epoch: u64, f: impl FnOnce(&mut Bridge) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || {
         BRIDGE.with(|cell| {
             if let Some(bridge) = cell.borrow_mut().as_mut() {
+                if bridge.epoch != epoch {
+                    return;
+                }
                 if bridge.vault.as_ref().is_none_or(|v| v.locked()) {
                     // ~10k events covers hours on the lock screen; past
                     // that, keep the newest.
@@ -427,6 +453,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let info_member_model = Rc::new(VecModel::<MemberItem>::default());
     let label_model = Rc::new(VecModel::<LabelItem>::default());
     let pdf_model = Rc::new(VecModel::<PdfPage>::default());
+    let accounts_model = Rc::new(VecModel::<AccountItem>::default());
+    ui.set_accounts(ModelRc::from(accounts_model.clone()));
     ui.set_pdf_pages(ModelRc::from(pdf_model.clone()));
     ui.set_mention_rows(ModelRc::from(mention_model.clone()));
     ui.set_search_hits(ModelRc::from(search_model.clone()));
@@ -478,6 +506,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         refresh_queued: false,
         save_queued: false,
         pending_registered: false,
+        account: String::new(),
+        epoch: 0,
+        registered: false,
+        switching: false,
+        wipe_on_logout: false,
+        accounts_model: accounts_model.clone(),
         peer_online: false,
         typing_gen: 0,
         locked_backlog: Vec::new(),
@@ -601,8 +635,32 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_logout(|| {
         defer(|b| {
             b.ui.set_settings_open(false);
-            b.ui.set_status_text(t("status.loggingOut").into());
-            b.wa.send(Cmd::Logout);
+            b.ask_confirm(
+                t("logout.title"),
+                t("logout.body"),
+                t("logout.wipe"),
+                ConfirmAction::Logout,
+            );
+            b.ui.set_confirm_secondary(t("logout.keep").into());
+        });
+    });
+    ui.on_switch_account(|id| {
+        let id = id.to_string();
+        defer(move |b| b.switch_account(&id));
+    });
+    ui.on_add_account(|| defer(|b| b.add_account()));
+    ui.on_remove_account(|id| {
+        let id = id.to_string();
+        defer(move |b| b.ask_remove_account(&id));
+    });
+    ui.on_forget_conversations(|| {
+        defer(|b| {
+            b.ask_confirm(
+                t("forget.title"),
+                t("forget.body"),
+                t("forget.action"),
+                ConfirmAction::ForgetConversations,
+            );
         });
     });
     ui.on_unlock(|pin| {
@@ -1200,10 +1258,21 @@ impl Bridge {
     pub fn boot(&mut self, vault: Vault, registered: bool) {
         crate::media::clean_tmp();
         crate::media::migrate_cache();
+        // main opened this account's session and pointed the vault at it.
+        self.account = vault.account();
+        self.registered = registered;
+        let known: Vec<String> = vault.accounts().into_iter().map(|a| a.id).collect();
+        crate::paths::sweep_accounts(&known);
         self.store.load_from(&vault);
         // Known from the last run, so own rows have a face before the
         // connection comes up.
-        if let Some(me) = vault.setting_get("self_jid").filter(|s| !s.is_empty()) {
+        if let Some(me) = vault
+            .accounts()
+            .into_iter()
+            .find(|a| a.id == self.account)
+            .map(|a| a.jid)
+            .filter(|s| !s.is_empty())
+        {
             self.store.set_self(&[&me]);
             self.self_jid = me;
         }
@@ -1221,6 +1290,7 @@ impl Bridge {
         );
         self.ui.set_pin_set(self.vault.as_ref().is_some_and(|v| v.has_pin()));
         self.ui.set_screen(if registered { "main" } else { "login" }.into());
+        self.refresh_accounts();
         self.refresh_labels();
         self.refresh_chats();
         self.refresh_statuses();
@@ -1311,19 +1381,35 @@ impl Bridge {
         self.ui.set_status_text(text.into());
     }
 
-    pub fn on_open(&mut self, pn: &str, lid: &str) {
+    pub fn on_open(&mut self, pn: &str, lid: &str, name: &str) {
         self.ui.set_alert_open(false);
         self.ui.set_status_text(t("status.connected").into());
         if self.ui.get_screen() == "login" {
             self.ui.set_screen("main".into());
         }
+        // Conversations kept from an earlier session are picked up again
+        // only by the number they belong to. Anyone else pairing into
+        // this slot starts clean, before the first history chunk lands.
+        let me = normalize_jid(if pn.is_empty() { lid } else { pn });
+        let kept = self.account_entry().map(|a| a.jid).unwrap_or_default();
+        if !kept.is_empty() && kept != normalize_jid(pn) && kept != normalize_jid(lid) {
+            println!("[store] a different number paired; dropping the kept conversations");
+            self.wipe_conversations();
+        }
+        self.registered = true;
         self.store.set_self(&[pn, lid]);
         // A LID-primary session may carry no phone jid at all; our own
         // rows (voice notes, search hits) still need an identity.
-        self.self_jid = normalize_jid(if pn.is_empty() { lid } else { pn });
-        if let Some(vault) = &self.vault {
-            vault.setting_set("self_jid", &self.self_jid);
-        }
+        self.self_jid = me;
+        let jid = self.self_jid.clone();
+        let name = name.trim().to_string();
+        self.update_account(|a| {
+            a.jid = jid;
+            if !name.is_empty() {
+                a.name = name;
+            }
+        });
+        self.refresh_accounts();
         self.queue_avatar(&self.self_jid.clone());
         if !self.groups_fetched {
             self.groups_fetched = true;
@@ -1349,16 +1435,93 @@ impl Bridge {
     }
 
     pub fn on_logged_out(&mut self) {
-        self.current_jid = None;
-        self.groups_fetched = false;
+        self.registered = false;
         self.ui.set_pairing_mode(false);
         self.ui.set_pairing_code("".into());
-        self.ui.set_chat_open(false);
+        self.ui.set_qr_image(crate::qr::empty_image());
         self.ui.set_screen("login".into());
-        // Wipe local conversation data along with the session.
+        self.close_session_views();
+        // The session is gone either way; the conversations go with it
+        // only when the user asked for that. Kept, they are what a new
+        // pairing of the same number picks up again instead of waiting
+        // for the phone to send everything once more.
+        if std::mem::take(&mut self.wipe_on_logout) {
+            self.wipe_conversations();
+            self.forget_account_identity();
+        } else {
+            self.save_now();
+        }
+        self.refresh_accounts();
+    }
+
+    fn logout(&mut self, wipe: bool) {
+        self.wipe_on_logout = wipe;
+        self.ui.set_status_text(t("status.loggingOut").into());
+        self.wa.send(Cmd::Logout);
+    }
+
+    fn save_now(&mut self) {
+        if let Some(vault) = self.vault.take() {
+            if !vault.locked() {
+                self.store.save_to(&vault);
+            }
+            self.vault = Some(vault);
+        }
+    }
+
+    // Whatever is on screen belongs to a session that just ended.
+    fn close_session_views(&mut self) {
+        self.current_jid = None;
+        self.groups_fetched = false;
+        self.ui.set_chat_open(false);
+        self.ui.set_settings_open(false);
+        self.ui.set_info_open(false);
+        self.ui.set_account_menu_open(false);
+        self.close_video();
+        self.select_end();
+    }
+
+    // Drops the loaded account's conversations, in memory and on disk.
+    fn wipe_conversations(&mut self) {
+        self.current_jid = None;
+        self.ui.set_chat_open(false);
+        self.clear_store_state();
+        if let Some(vault) = &self.vault {
+            vault.del_prefix("store:");
+            // The on-disk data key can outlive the account (only the
+            // vault's own `store:` keys were just wiped above), so a
+            // fresh pairing must not inherit the previous account's
+            // search index.
+            self.store.search.reset(vault);
+        }
+        self.refresh_labels();
+        self.refresh_chats();
+        self.refresh_statuses();
+        self.refresh_calls();
+    }
+
+    // Empties everything derived from one account's store. The store on
+    // disk is untouched: this is also how the bridge lets go of an
+    // account it is switching away from.
+    fn clear_store_state(&mut self) {
         self.store = Store::default();
+        self.self_jid.clear();
         self.chats_model.set_vec(Vec::new());
         self.messages_model.set_vec(Vec::new());
+        self.status_model.set_vec(Vec::new());
+        self.calls_model.set_vec(Vec::new());
+        self.warm_order.clear();
+        self.truncated.clear();
+        self.scroll_pos.clear();
+        self.history_batches = 0;
+        self.history_pending = false;
+        self.sync_batches = 0;
+        self.sync_messages = 0;
+        self.requested_channels.clear();
+        self.pending_forward.clear();
+        self.notify_queue.clear();
+        self.audio_buffers.clear();
+        self.waves.clear();
         self.avatars.clear();
         self.requested_avatars.clear();
         self.avatar_tries.clear();
@@ -1378,15 +1541,284 @@ impl Bridge {
         self.search_model.set_vec(Vec::new());
         self.chat_search_model.set_vec(Vec::new());
         self.label_model.set_vec(Vec::new());
-        self.select_end();
-        if let Some(vault) = &self.vault {
-            vault.del_prefix("store:");
-            // The on-disk data key can outlive the account (only the
-            // vault's own `store:` keys were just wiped above), so a
-            // fresh pairing must not inherit the previous account's
-            // search index.
-            self.store.search.reset(vault);
+    }
+
+    // ---- accounts ----
+
+    fn account_entry(&self) -> Option<crate::vault::Account> {
+        self.vault.as_ref()?.accounts().into_iter().find(|a| a.id == self.account)
+    }
+
+    fn update_account(&mut self, f: impl FnOnce(&mut crate::vault::Account)) {
+        let Some(vault) = &self.vault else { return };
+        let mut list = vault.accounts();
+        if let Some(entry) = list.iter_mut().find(|a| a.id == self.account) {
+            f(entry);
         }
+        vault.set_accounts(&list);
+    }
+
+    // With the conversations gone nothing ties the slot to a number.
+    fn forget_account_identity(&mut self) {
+        self.update_account(|a| {
+            a.jid.clear();
+            a.name.clear();
+        });
+    }
+
+    fn refresh_accounts(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let list = vault.accounts();
+        let rows: Vec<AccountItem> = list
+            .iter()
+            .map(|a| {
+                let number = if a.jid.is_empty() { String::new() } else { format_number(&a.jid) };
+                let name = if !a.name.is_empty() {
+                    a.name.clone()
+                } else if !number.is_empty() {
+                    number.clone()
+                } else {
+                    t("account.new")
+                };
+                let avatar = self.avatars.get(&a.jid).cloned().flatten();
+                AccountItem {
+                    id: a.id.as_str().into(),
+                    initial: initial_of(&name).into(),
+                    detail: if name == number { "".into() } else { number.into() },
+                    name: name.into(),
+                    active: a.id == self.account,
+                    colorIdx: color_idx_of(&a.jid),
+                    hasAvatar: avatar.is_some(),
+                    avatar: avatar.unwrap_or_default(),
+                }
+            })
+            .collect();
+        if let Some(mine) = rows.iter().find(|row| row.active) {
+            self.ui.set_my_account(mine.clone());
+        }
+        self.ui.set_can_add_account(list.len() < crate::vault::MAX_ACCOUNTS);
+        self.ui.set_account_count(list.len() as i32);
+        self.accounts_model.set_vec(rows);
+        // The login screen offers the conversations a past session left.
+        let kept = self.account_entry().map(|a| a.jid).unwrap_or_default();
+        let has_kept = !self.registered && !self.store.chats.is_empty();
+        self.ui.set_kept_conversations(has_kept);
+        self.ui.set_kept_number(
+            if has_kept && !kept.is_empty() { format_number(&kept).into() } else { "".into() },
+        );
+    }
+
+    pub fn switch_account(&mut self, id: &str) {
+        self.ui.set_account_menu_open(false);
+        let Some(vault) = &self.vault else { return };
+        if self.switching
+            || id == self.account
+            || vault.locked()
+            || !vault.accounts().iter().any(|a| a.id == id)
+        {
+            return;
+        }
+        // A call belongs to the account it runs on.
+        if self.call.is_some() {
+            self.ui.set_status_text(t("account.inCall").into());
+            return;
+        }
+        self.switching = true;
+        self.ui.set_account_switching(true);
+        self.save_now();
+        self.wa.send(Cmd::SwitchAccount(id.to_string()));
+    }
+
+    pub fn add_account(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let mut list = vault.accounts();
+        if list.len() >= crate::vault::MAX_ACCOUNTS || self.switching {
+            return;
+        }
+        let id = loop {
+            let id = format!("{:08x}", rand::random::<u32>());
+            if !list.iter().any(|a| a.id == id) {
+                break id;
+            }
+        };
+        list.push(crate::vault::Account { id: id.clone(), ..Default::default() });
+        vault.set_accounts(&list);
+        self.switch_account(&id);
+    }
+
+    fn ask_remove_account(&mut self, id: &str) {
+        self.ui.set_account_menu_open(false);
+        let Some(vault) = &self.vault else { return };
+        let Some(entry) = vault.accounts().into_iter().find(|a| a.id == id) else { return };
+        // The loaded account goes through the logout dialog instead: its
+        // session has to be closed on the phone's side too.
+        if id == self.account {
+            return;
+        }
+        let label = if !entry.name.is_empty() {
+            entry.name
+        } else if !entry.jid.is_empty() {
+            format_number(&entry.jid)
+        } else {
+            t("account.new")
+        };
+        self.ask_confirm(
+            ta("account.removeTitle", &[&label]),
+            t("account.removeBody"),
+            t("account.removeAction"),
+            ConfirmAction::RemoveAccount(id.to_string()),
+        );
+    }
+
+    // Only ever an account that is not loaded: its session database is
+    // closed, so the files can simply go. The phone keeps listing the
+    // device until it is removed there (or WhatsApp expires it).
+    fn remove_account(&mut self, id: &str) {
+        let Some(vault) = &self.vault else { return };
+        if id == self.account {
+            return;
+        }
+        let mut list = vault.accounts();
+        list.retain(|a| a.id != id);
+        vault.set_accounts(&list);
+        vault.wipe_account(id);
+        crate::paths::remove_db(&crate::paths::wa_session_path(id));
+        crate::paths::remove_db(&crate::paths::search_index_path(id));
+        self.refresh_accounts();
+    }
+
+    // Developer probe (--accounts-selftest): walks the account switcher on
+    // the real session plumbing -- add an account, leave a trace in the
+    // first one's store, switch back and forth -- and reports after each
+    // step. Refuses to touch a data directory that holds a paired session:
+    // point APPDATA/XDG_DATA_HOME at an empty one.
+    pub fn accounts_selftest(&mut self, step: u32) {
+        let ids = |b: &Bridge| -> Vec<String> {
+            b.vault.as_ref().map(|v| v.accounts().into_iter().map(|a| a.id).collect()).unwrap_or_default()
+        };
+        let fail = |what: &str| println!("[selftest] FAIL: {what}");
+        match step {
+            0 => {
+                if self.registered || ids(self).len() != 1 {
+                    println!("[selftest] refusing: this data directory is in use");
+                    slint::quit_event_loop().ok();
+                    return;
+                }
+                // Something that must survive a round trip, and must not
+                // show up in the other account.
+                self.store.upsert_chat("5511999990000@s.whatsapp.net", Some("Probe"), 1, None, None, None);
+                self.add_account();
+                println!("[selftest] add account: switching = {}", self.switching);
+            }
+            1 => {
+                let list = ids(self);
+                println!(
+                    "[selftest] on the new account: id {:?}, {} account(s), {} chat(s), screen {}",
+                    self.account,
+                    list.len(),
+                    self.store.chats.len(),
+                    self.ui.get_screen()
+                );
+                if self.switching || self.account.is_empty() || list.len() != 2 {
+                    fail("adding an account should land on a second, new one");
+                }
+                if !self.store.chats.is_empty() {
+                    fail("the first account's conversations leaked into the new one");
+                }
+                if self.ui.get_screen() != "login" {
+                    fail("an unpaired account should be on the login screen");
+                }
+                self.switch_account("");
+            }
+            2 => {
+                let list = ids(self);
+                println!(
+                    "[selftest] back on the first: id {:?}, {} account(s), {} chat(s)",
+                    self.account,
+                    list.len(),
+                    self.store.chats.len()
+                );
+                if !self.account.is_empty() {
+                    fail("switching back did not happen");
+                }
+                if self.store.chats.len() != 1 {
+                    fail("the first account's conversations did not come back");
+                }
+                // Never paired, nothing in it: the slot should be gone.
+                if list.len() != 1 {
+                    fail("the abandoned empty account was kept");
+                }
+                // The limit.
+                for _ in 0..8 {
+                    let Some(vault) = &self.vault else { break };
+                    let mut list = vault.accounts();
+                    if list.len() >= crate::vault::MAX_ACCOUNTS {
+                        break;
+                    }
+                    list.push(crate::vault::Account {
+                        id: format!("probe{}", list.len()),
+                        jid: "5511888880000@s.whatsapp.net".into(),
+                        ..Default::default()
+                    });
+                    vault.set_accounts(&list);
+                }
+                self.add_account();
+                if self.switching || ids(self).len() != crate::vault::MAX_ACCOUNTS {
+                    fail("a sixth account was accepted");
+                }
+                self.refresh_accounts();
+                println!(
+                    "[selftest] at the limit: {} accounts, can add = {}",
+                    ids(self).len(),
+                    self.ui.get_can_add_account()
+                );
+                println!("[selftest] accounts done");
+                slint::quit_event_loop().ok();
+            }
+            _ => {}
+        }
+    }
+
+    // wa.rs has the other account's client built (not yet connected).
+    pub fn on_account_ready(&mut self, account: &str, registered: bool, epoch: u64) {
+        // Whatever the old session delivered since the switch was asked.
+        self.save_now();
+        let previous = std::mem::replace(&mut self.account, account.to_string());
+        let abandoned = previous != account && !self.registered && self.store.chats.is_empty();
+        self.epoch = epoch;
+        self.registered = registered;
+        self.switching = false;
+        self.close_session_views();
+        self.clear_store_state();
+        if let Some(vault) = self.vault.take() {
+            vault.set_account(account);
+            vault.set_active_account(account);
+            self.store.load_from(&vault);
+            self.vault = Some(vault);
+        }
+        // "Add account" backed out of before pairing: the empty slot
+        // would otherwise sit in the switcher forever.
+        if abandoned {
+            self.remove_account(&previous);
+        }
+        if let Some(me) = self.account_entry().map(|a| a.jid).filter(|s| !s.is_empty()) {
+            self.store.set_self(&[&me]);
+            self.self_jid = me;
+        }
+        self.ui.set_qr_image(crate::qr::empty_image());
+        self.ui.set_pairing_mode(false);
+        self.ui.set_pairing_code("".into());
+        self.ui.set_status_text(t("status.connecting").into());
+        self.ui.set_alert_open(false);
+        self.ui.set_screen(if registered { "main" } else { "login" }.into());
+        self.ui.set_account_switching(false);
+        self.refresh_accounts();
+        self.refresh_labels();
+        self.refresh_chats();
+        self.refresh_statuses();
+        self.refresh_calls();
+        self.once(4000, |b| b.index_backfill());
+        self.wa.send(Cmd::Start);
     }
 
     // Indexes cold chats that have messages on disk but no index yet;
@@ -2808,6 +3240,9 @@ impl Bridge {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
                 self.patch_avatar_everywhere(jid, &image);
+                if jid == self.self_jid {
+                    self.refresh_accounts();
+                }
             }
             (None, true) => {
                 // Confirmed: no picture. The initial stays.
@@ -4816,6 +5251,13 @@ impl Bridge {
                 self.schedule_refresh_chats();
             }
             ConfirmAction::DeleteSelected { for_everyone } => self.delete_selected(for_everyone),
+            ConfirmAction::Logout => self.logout(true),
+            ConfirmAction::RemoveAccount(id) => self.remove_account(&id),
+            ConfirmAction::ForgetConversations => {
+                self.wipe_conversations();
+                self.forget_account_identity();
+                self.refresh_accounts();
+            }
         }
     }
 
@@ -4823,8 +5265,10 @@ impl Bridge {
     // is "delete for everyone".
     fn confirm_secondary(&mut self) {
         self.ui.set_confirm_open(false);
-        if let Some(ConfirmAction::DeleteSelected { .. }) = self.confirm_action.take() {
-            self.delete_selected(false);
+        match self.confirm_action.take() {
+            Some(ConfirmAction::DeleteSelected { .. }) => self.delete_selected(false),
+            Some(ConfirmAction::Logout) => self.logout(false),
+            _ => {}
         }
     }
 

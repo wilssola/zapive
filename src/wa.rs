@@ -7,7 +7,7 @@ use crate::bridge::wa_apply as ui_apply;
 use crate::i18n::t;
 use crate::paths::wa_session_path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tokio::sync::mpsc;
 use whatsapp_rust::bot::{Bot, BotHandle};
 use whatsapp_rust::client::Client;
@@ -23,6 +23,13 @@ use whatsapp_rust::waproto::whatsapp as wa;
 // After this many unclean drops in a row the retry loop stops and the
 // user gets the "offline" modal instead.
 const MAX_FAILURES: u32 = 5;
+
+// Which session the UI is showing. Switching accounts swaps the client
+// under a bridge that holds one account's conversations at a time, and
+// an event of the account just left must never land in the store of the
+// one just opened. Everything headed for the bridge is stamped with the
+// epoch it was produced under and dropped if the epoch has moved on.
+pub static SESSION_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 // What a reply quotes: enough to build the context info.
 #[derive(Debug)]
@@ -56,6 +63,11 @@ pub enum Cmd {
     // From the fatal modal's button: reconnect after conflict/offline.
     Resume,
     Logout,
+    // Closes the running session and opens another account's. Answered
+    // with Bridge::on_account_ready once the new client exists; nothing
+    // connects until the bridge has that account's store loaded and
+    // sends Start.
+    SwitchAccount(String),
     Shutdown,
     // `mentions` are the jids named as @user in the body; `mention_all`
     // carries the group subject when the body tags @all/@everyone.
@@ -221,10 +233,10 @@ pub struct WaService {
 impl WaService {
     // Builds the client (blocking briefly on the runtime to open the
     // store) and reports whether a paired session already exists.
-    pub fn start(rt: &tokio::runtime::Runtime) -> Result<(Self, bool), String> {
+    pub fn start(rt: &tokio::runtime::Runtime, account: &str) -> Result<(Self, bool), String> {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let session = rt
-            .block_on(build_session(cmd_tx.clone()))
+            .block_on(build_session(cmd_tx.clone(), account))
             .map_err(|e| e.to_string())?;
         let registered = session.client.pn().is_some();
         rt.spawn(executor(session, cmd_rx, cmd_tx.clone()));
@@ -240,6 +252,8 @@ struct Session {
     // Keeps the bot's background workers (history sync intake) alive.
     _handle: BotHandle,
     client: Arc<Client>,
+    // Whose session this is (the id in the vault's account registry).
+    account: String,
 }
 
 // How this device shows up under "Linked devices" on the phone. The
@@ -265,8 +279,9 @@ fn device_identity() -> whatsapp_rust::wacore::store::DevicePropsOverride {
 
 async fn build_session(
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    account: &str,
 ) -> Result<Session, Box<dyn std::error::Error + Send + Sync>> {
-    let db_url = wa_session_path().to_string_lossy().into_owned();
+    let db_url = wa_session_path(account).to_string_lossy().into_owned();
     let store = SqliteStore::new(&db_url).await?;
     let bot = Bot::builder()
         .with_backend(store)
@@ -278,6 +293,7 @@ async fn build_session(
         .subscribe_handler(Arc::new(Pump {
             client: client.clone(),
             cmd_tx,
+            epoch: SESSION_EPOCH.load(Ordering::SeqCst),
             rt: tokio::runtime::Handle::current(),
             failures: AtomicU32::new(0),
             stopped: AtomicBool::new(false),
@@ -287,7 +303,7 @@ async fn build_session(
     // itself ends on disconnect, but the workers stay up, so later resumes
     // just spawn client.run() again.
     let handle = bot.spawn();
-    Ok(Session { _handle: handle, client })
+    Ok(Session { _handle: handle, client, account: account.to_string() })
 }
 
 fn parse_jid(jid: &str) -> Option<whatsapp_rust::Jid> {
@@ -594,6 +610,8 @@ fn fail_call(reason: &str) {
 struct Pump {
     client: Arc<Client>,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    // The epoch this client was built under; see SESSION_EPOCH.
+    epoch: u64,
     rt: tokio::runtime::Handle,
     failures: AtomicU32,
     stopped: AtomicBool,
@@ -601,6 +619,10 @@ struct Pump {
 
 impl EventHandler for Pump {
     fn handle_event(&self, event: Arc<Event>) {
+        // A client that was switched away from may still be draining.
+        if self.epoch != SESSION_EPOCH.load(Ordering::SeqCst) {
+            return;
+        }
         match &*event {
             Event::PairingQrCode(qr) => {
                 let code = qr.code.clone();
@@ -614,7 +636,9 @@ impl EventHandler for Pump {
                 self.stopped.store(false, Ordering::Relaxed);
                 let pn = self.client.pn().map(|j| j.to_non_ad_string()).unwrap_or_default();
                 let lid = self.client.lid().map(|j| j.to_non_ad_string()).unwrap_or_default();
-                ui_apply(move |b| b.on_open(&pn, &lid));
+                // What the account switcher calls this account.
+                let name = self.client.push_name();
+                ui_apply(move |b| b.on_open(&pn, &lid, &name));
             }
             Event::StreamReplaced(_) => {
                 // WhatsApp keeps one desktop session per account: the
@@ -666,6 +690,7 @@ impl EventHandler for Pump {
                 // Decoding inflates megabytes of protobuf: keep it off the
                 // event bus thread and off the UI.
                 let event = event.clone();
+                let epoch = self.epoch;
                 self.rt.spawn(async move {
                     let Event::HistorySync(lazy) = &*event else { return };
                     let Some(hs) = lazy.get() else {
@@ -704,7 +729,11 @@ impl EventHandler for Pump {
                             chunk.pushnames.push((id, name));
                         }
                     }
-                    ui_apply(move |b| b.on_history_chunk(chunk));
+                    // Decoding takes long enough for an account switch
+                    // to slip in, so the chunk carries the epoch of the
+                    // client it came from, not of whoever is current by
+                    // the time it is ready.
+                    crate::bridge::wa_apply_at(epoch, move |b| b.on_history_chunk(chunk));
                 });
             }
             // Every <call> stanza arrives as IncomingCall, not just the
@@ -2384,16 +2413,50 @@ async fn executor(
                 session.client.disconnect().await;
                 ui_apply(|b| b.on_fatal("offline"));
             }
+            Cmd::SwitchAccount(account) => {
+                // A call cannot follow the user to another account.
+                if let Some(live) = take_live() {
+                    let _ =
+                        session.client.voip().terminate(&live.id, &live.peer, &live.creator).await;
+                    live.handle.hangup_local().await;
+                }
+                session.client.disconnect().await;
+                let previous = session.account.clone();
+                drop(session);
+                SESSION_EPOCH.fetch_add(1, Ordering::SeqCst);
+                let opened = match build_session(cmd_tx.clone(), &account).await {
+                    Ok(next) => Ok(next),
+                    Err(e) => {
+                        eprintln!("[wa] cannot open account {account:?}: {e}");
+                        build_session(cmd_tx.clone(), &previous).await
+                    }
+                };
+                match opened {
+                    Ok(next) => {
+                        session = next;
+                        let account = session.account.clone();
+                        let registered = session.client.pn().is_some();
+                        let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
+                        // Not through the epoch-stamped path on purpose:
+                        // this is the message that opens the new epoch.
+                        crate::bridge::ui_apply(move |b| {
+                            b.on_account_ready(&account, registered, epoch)
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[wa] session rebuild failed: {e}");
+                        let msg = t("status.connectFailed");
+                        crate::bridge::ui_apply(move |b| b.on_status(&msg));
+                        return;
+                    }
+                }
+            }
             Cmd::ResetSession => {
                 session.client.disconnect().await;
+                let account = session.account.clone();
                 drop(session);
-                let path = wa_session_path();
-                for suffix in ["", "-wal", "-shm"] {
-                    let mut p = path.as_os_str().to_owned();
-                    p.push(suffix);
-                    let _ = std::fs::remove_file(std::path::PathBuf::from(p));
-                }
-                match build_session(cmd_tx.clone()).await {
+                crate::paths::remove_db(&wa_session_path(&account));
+                match build_session(cmd_tx.clone(), &account).await {
                     Ok(next) => {
                         session = next;
                         ui_apply(|b| b.on_logged_out());
