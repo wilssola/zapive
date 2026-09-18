@@ -65,6 +65,12 @@ pub struct Bridge {
     refresh_queued: bool,
     save_queued: bool,
     pending_registered: bool,
+    // The open chat's contact is online; what the header falls back to
+    // when a typing/recording line ends.
+    peer_online: bool,
+    // Bumped whenever the typing line changes hands, so an expiry timer
+    // armed for an older "composing" does nothing.
+    typing_gen: u64,
     // WhatsApp events that arrived before the vault was open (the client
     // connects while the PIN screen is still up); replayed by boot.
     locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
@@ -400,6 +406,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         refresh_queued: false,
         save_queued: false,
         pending_registered: false,
+        peer_online: false,
+        typing_gen: 0,
         locked_backlog: Vec::new(),
         avatars: HashMap::new(),
         requested_avatars: HashSet::new(),
@@ -1449,6 +1457,12 @@ impl Bridge {
                 continue;
             }
             if Some(&jid) == self.current_jid.as_ref() {
+                // The message they were typing has arrived. In a group
+                // someone else may still be at it; their next refresh
+                // puts the line back.
+                if !from_me {
+                    self.clear_typing();
+                }
                 self.push_message_row(&jid);
                 self.send_view_receipts(&jid);
             } else if !from_me {
@@ -1513,12 +1527,33 @@ impl Bridge {
         if Some(&jid) != self.current_jid.as_ref() {
             return;
         }
-        let text = if state.contains("Composing") {
-            if media.contains("Audio") { t("presence.recording") } else { t("presence.typing") }
-        } else {
-            String::new()
-        };
+        if !state.contains("Composing") {
+            self.clear_typing();
+            return;
+        }
+        let text =
+            if media.contains("Audio") { t("presence.recording") } else { t("presence.typing") };
         self.ui.set_current_status(text.into());
+        // A "composing" is only good for a while: the peer's client
+        // refreshes it as long as they keep going, and the "paused" that
+        // should end it is routinely lost (the app is killed, the network
+        // drops, the phone sleeps). WhatsApp's own clients age it out
+        // after about 25s, so this one does too.
+        self.typing_gen += 1;
+        let generation = self.typing_gen;
+        self.once(25_000, move |b| {
+            if b.typing_gen == generation {
+                b.clear_typing();
+            }
+        });
+    }
+
+    // Back from typing/recording to what is known of the contact.
+    fn clear_typing(&mut self) {
+        self.typing_gen += 1;
+        self.ui.set_current_status(
+            if self.peer_online { t("presence.online").into() } else { "".into() },
+        );
     }
 
     pub fn on_presence(&mut self, from: &str, available: bool) {
@@ -1526,11 +1561,12 @@ impl Bridge {
         if Some(&jid) != self.current_jid.as_ref() {
             return;
         }
-        // Only overwrite the idle state; typing/recording wins.
+        self.peer_online = available;
+        // Someone who just went offline is not typing either; their
+        // "paused" will never come.
         let current = self.ui.get_current_status();
-        if current.is_empty() || current == t("presence.online").as_str() {
-            self.ui
-                .set_current_status(if available { t("presence.online").into() } else { "".into() });
+        if !available || current.is_empty() || current == t("presence.online").as_str() {
+            self.clear_typing();
         }
     }
 
@@ -2062,6 +2098,8 @@ impl Bridge {
             meta.mentioned = false;
         }
         self.send_view_receipts(jid);
+        self.peer_online = false;
+        self.typing_gen += 1;
         self.ui.set_current_status("".into());
         self.wa.send(Cmd::SubscribePresence(jid.to_string()));
         self.apply_header(jid);
