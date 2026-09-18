@@ -124,6 +124,12 @@ pub enum Cmd {
     MarkRead { jid: String, sender: Option<String>, ids: Vec<String> },
     MarkPlayed { jid: String, sender: Option<String>, id: String },
     Forward { jid: String, message: std::sync::Arc<wa::Message> },
+    // Re-sends a sticker/GIF already on the CDN, reusing its media
+    // reference to skip a re-upload -- but as a fresh message, not a
+    // forward: unlike Cmd::Forward, this never sets `is_forwarded`, so
+    // picking a sticker from the recents/favorites tray doesn't show a
+    // "Forwarded" tag (WhatsApp itself never tags that as a forward).
+    ResendMedia { jid: String, message: std::sync::Arc<wa::Message> },
     // Outgoing media (paths are plain files picked by the user).
     SendImage { jid: String, path: std::path::PathBuf, caption: Option<String> },
     SendDocument { jid: String, path: std::path::PathBuf },
@@ -1048,6 +1054,28 @@ async fn executor(
                             ui_apply(move |b| b.echo_sent(&jid, &id, echoed));
                         }
                         Err(e) => eprintln!("[wa] forward failed: {e}"),
+                    }
+                });
+            }
+            Cmd::ResendMedia { jid, message } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::proto_helpers::MessageExt as _;
+                    let Some(to) = parse_jid(&jid) else { return };
+                    // A plain send, not forward_message: prepare_for_forward
+                    // always stamps `is_forwarded`, which is wrong here --
+                    // this is a fresh message that merely reuses an
+                    // already-uploaded CDN blob. Clearing context_info
+                    // strips it (and any stale quote/mention data) so
+                    // neither side sees it as forwarded.
+                    let mut message = (*message).clone();
+                    message.set_context_info(wa::ContextInfo::default());
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] resend failed: {e}"),
                     }
                 });
             }
