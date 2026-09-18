@@ -33,6 +33,8 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 fn main() {
     paths::ensure_dirs();
     logging::install();
+    // The previous binary, left by an update that ran in the last session.
+    update::sweep();
 
     // Developer probe: walks the video-call path the way a real call
     // does -- enumerate on this thread first (the way the Settings panel
@@ -45,6 +47,13 @@ fn main() {
     }
     if std::env::args().any(|a| a == "--overlay-selftest") {
         overlay_selftest();
+        return;
+    }
+    // Developer probe: runs the self-updater against this very executable
+    // (copy it somewhere disposable first) and says why it failed, if so.
+    if std::env::args().any(|a| a == "--update-selftest") {
+        println!("[selftest] running {}, latest is {:?}", update::current_version(), update::check());
+        println!("[selftest] apply: {:?}", update::apply());
         return;
     }
     if std::env::args().any(|a| a == "--player-selftest") {

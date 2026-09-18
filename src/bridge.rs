@@ -6347,9 +6347,13 @@ impl Bridge {
                 self.ui.set_update_version(version.into());
                 self.ui.set_update_state(3);
             }
+            // Said out loud: a release build has no console, and going
+            // quietly back to "update available" reads as a button that
+            // does nothing.
             Err(e) => {
-                eprintln!("[update] failed: {e}");
-                self.ui.set_update_state(1);
+                log::error!("[update] failed: {e}");
+                self.ui.set_update_error(e.into());
+                self.ui.set_update_state(4);
             }
         }
     }

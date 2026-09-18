@@ -473,3 +473,12 @@ msgstr "Trocando de conta..."
 
 msgid "Loading…"
 msgstr "Carregando…"
+
+msgid "Update failed"
+msgstr "A atualização falhou"
+
+msgid "Update failed: {}"
+msgstr "A atualização falhou: {}"
+
+msgid "Try again"
+msgstr "Tentar de novo"

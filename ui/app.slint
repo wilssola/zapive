@@ -814,9 +814,12 @@ component AccountRow inherits TouchArea {
     }
 }
 
+// state: 1 available, 2 downloading, 3 installed (restart), 4 failed.
 component UpdateBanner inherits Rectangle {
     in property <int> state;
     in property <string> version;
+    // Why the last attempt failed (state 4).
+    in property <string> error;
     // Side margin around the card (the sidebar keeps 12px; the lock and
     // login screens center a bare card and pass 0).
     in property <length> inset: 12px;
@@ -839,7 +842,7 @@ component UpdateBanner inherits Rectangle {
             spacing: 10px;
             Image {
                 source: @image-url("icons/refresh.svg");
-                colorize: Theme.accent;
+                colorize: root.state == 4 ? #f05d4d : Theme.accent;
                 width: 20px;
                 height: 20px;
                 y: (parent.height - self.height) / 2;
@@ -851,6 +854,7 @@ component UpdateBanner inherits Rectangle {
                 Text {
                     text: root.state == 1 ? @tr("Update available")
                         : root.state == 2 ? @tr("Downloading update…")
+                        : root.state == 4 ? @tr("Update failed")
                         : @tr("Update installed");
                     color: Theme.text;
                     font-size: 13px;
@@ -860,20 +864,23 @@ component UpdateBanner inherits Rectangle {
                 Text {
                     text: root.state == 1 ? @tr("Version {} is available", root.version)
                         : root.state == 2 ? @tr("Version {}", root.version)
+                        : root.state == 4 ? root.error
                         : @tr("Restart to use version {}", root.version);
                     color: Theme.text-dim;
                     font-size: 12px;
                     overflow: elide;
                 }
             }
-            if root.state == 1 || root.state == 3: Rectangle {
+            if root.state == 1 || root.state == 3 || root.state == 4: Rectangle {
                 width: update-btn-text.preferred-width + 24px;
                 height: 30px;
                 y: (parent.height - self.height) / 2;
                 border-radius: 15px;
                 background: update-touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent;
                 update-btn-text := Text {
-                    text: root.state == 1 ? @tr("Update") : @tr("Restart");
+                    text: root.state == 1 ? @tr("Update")
+                        : root.state == 4 ? @tr("Try again")
+                        : @tr("Restart");
                     color: white;
                     font-size: 13px;
                     font-weight: 700;
@@ -883,7 +890,7 @@ component UpdateBanner inherits Rectangle {
                 update-touch := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
-                        if (root.state == 1) { root.apply-update(); }
+                        if (root.state == 1 || root.state == 4) { root.apply-update(); }
                         else { root.restart(); }
                     }
                 }
@@ -986,6 +993,7 @@ export component AppWindow inherits Window {
     // 3 = installed (restart pending).
     in-out property <int> update-state: 0;
     in-out property <string> update-version;
+    in property <string> update-error;
     in-out property <string> app-version;
     callback update-check();
     callback update-apply();
@@ -1361,6 +1369,7 @@ export component AppWindow inherits Window {
                 inset: 0;
                 state: root.update-state;
                 version: root.update-version;
+                error: root.update-error;
                 apply-update => { root.update-apply(); }
                 restart => { root.update-restart(); }
             }
@@ -1420,6 +1429,7 @@ export component AppWindow inherits Window {
                 inset: 0;
                 state: root.update-state;
                 version: root.update-version;
+                error: root.update-error;
                 apply-update => { root.update-apply(); }
                 restart => { root.update-restart(); }
             }
@@ -1923,6 +1933,7 @@ export component AppWindow inherits Window {
                 UpdateBanner {
                     state: root.update-state;
                     version: root.update-version;
+                error: root.update-error;
                     apply-update => { root.update-apply(); }
                     restart => { root.update-restart(); }
                 }
@@ -5331,6 +5342,7 @@ export component AppWindow inherits Window {
                                 detail: root.update-state == 1 ? @tr("Version {} is available", root.update-version)
                                     : root.update-state == 2 ? @tr("Downloading update…")
                                     : root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
+                                    : root.update-state == 4 ? @tr("Update failed: {}", root.update-error)
                                     : @tr("Version {}", root.app-version);
                                 DialogButton {
                                     y: (parent.height - self.height) / 2;
@@ -5339,9 +5351,10 @@ export component AppWindow inherits Window {
                                     label: root.update-state == 1 ? @tr("Update")
                                         : root.update-state == 2 ? @tr("Downloading update…")
                                         : root.update-state == 3 ? @tr("Restart")
+                                        : root.update-state == 4 ? @tr("Try again")
                                         : @tr("Check for updates");
                                     clicked => {
-                                        if (root.update-state == 1) { root.update-apply(); }
+                                        if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
                                         else if (root.update-state == 3) { root.update-restart(); }
                                         else if (root.update-state == 0) { root.update-check(); }
                                     }
