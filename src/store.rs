@@ -35,6 +35,16 @@ pub struct StoredMessage {
     pub forwarded: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deleted: bool,
+    // The sender took this message back. `deleted` additionally means the
+    // body was dropped; with the "apply deletions" setting off, text and
+    // media survive and only this flag is set, so the reader knows what
+    // happened without losing the message (see Store::mark_revoked).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub revoked: bool,
+    // A read (or played) receipt for this message was already sent, so
+    // "send message viewed" (opt-in) doesn't ack it twice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_sent: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gif: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -990,7 +1000,9 @@ impl Store {
         self.messages.values().map(Vec::len).sum()
     }
 
-    // Marks a message as deleted-for-everyone (protocol REVOKE).
+    // Marks a message as deleted-for-everyone (protocol REVOKE), wiping
+    // its body: the destructive path, used when "apply deletions" is on,
+    // and always for a revoke performed on this account's own devices.
     pub fn mark_deleted(&mut self, jid: &str, id: &str) -> bool {
         let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
         else {
@@ -1000,12 +1012,45 @@ impl Store {
             return false;
         }
         m.deleted = true;
+        m.revoked = true;
         m.kind = MessageKind::Text;
         m.text = String::new();
         m.raw = None;
         self.dirty_jids.insert(jid.to_string());
         self.search.remove(jid, id);
         true
+    }
+
+    // Notes that someone else revoked this message, without touching its
+    // body: the default path while "apply deletions" is off. Text and
+    // media survive -- the message stays exactly as rendered, just with
+    // a "deleted by sender" indicator -- and it stays in the search
+    // index, since its content is still there.
+    pub fn mark_revoked(&mut self, jid: &str, id: &str) -> bool {
+        let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
+        else {
+            return false;
+        };
+        if m.revoked {
+            return false;
+        }
+        m.revoked = true;
+        self.dirty_jids.insert(jid.to_string());
+        true
+    }
+
+    // Marks receipts as already sent for these messages, so "send
+    // message viewed" (opt-in) doesn't ack them twice.
+    pub fn mark_read_sent(&mut self, jid: &str, ids: &[String]) {
+        let Some(list) = self.messages.get_mut(jid) else { return };
+        let mut changed = false;
+        for m in list.iter_mut().filter(|m| ids.contains(&m.id) && !m.read_sent) {
+            m.read_sent = true;
+            changed = true;
+        }
+        if changed {
+            self.dirty_jids.insert(jid.to_string());
+        }
     }
 
     // Removes messages locally only ("delete for me").
@@ -1172,7 +1217,7 @@ impl Store {
         if let Some(v) = read(vault, "store:labelchats") {
             self.label_chats = v;
         }
-        self.search.load_from(vault);
+        self.search.open(vault);
     }
 }
 
@@ -1258,4 +1303,42 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
         String::new()
     };
     format!("{prefix}{body}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text_msg(jid: &str, id: &str, text: &str) -> StoredMessage {
+        let mut m = crate::wa_map::system_message(jid, id, 1, text.to_string());
+        m.kind = MessageKind::Text;
+        m
+    }
+
+    #[test]
+    fn mark_deleted_wipes_the_body_mark_revoked_keeps_it() {
+        let mut store = Store::default();
+        store.add_message(text_msg("a@g.us", "1", "hello"));
+        store.add_message(text_msg("a@g.us", "2", "world"));
+
+        // "Apply deletions" off: the message stays, only flagged.
+        assert!(store.mark_revoked("a@g.us", "1"));
+        let kept = store.messages_for("a@g.us").iter().find(|m| m.id == "1").unwrap();
+        assert!(kept.revoked);
+        assert!(!kept.deleted);
+        assert_eq!(kept.text, "hello");
+
+        // "Apply deletions" on (or a revoke from this account's own
+        // devices): the destructive path wipes the body.
+        assert!(store.mark_deleted("a@g.us", "2"));
+        let wiped = store.messages_for("a@g.us").iter().find(|m| m.id == "2").unwrap();
+        assert!(wiped.revoked);
+        assert!(wiped.deleted);
+        assert!(wiped.text.is_empty());
+
+        // Idempotent: a repeat reports no change and doesn't clobber
+        // anything already set.
+        assert!(!store.mark_revoked("a@g.us", "1"));
+        assert!(!store.mark_deleted("a@g.us", "2"));
+    }
 }
