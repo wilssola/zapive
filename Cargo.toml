@@ -49,6 +49,12 @@ sys-locale = "0.3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 aes-gcm = "0.10"
 scrypt = { version = "0.11", default-features = false }
+# Both already sit in the tree as scrypt's own dependencies (hmac 0.12,
+# sha2 0.10); pinning them directly adds no new crate and no binary
+# growth. Used to derive a keyed hash for the FTS5 search terms so the
+# on-disk index never holds a plaintext word (see src/search.rs).
+hmac = "0.12"
+sha2 = "0.10"
 rand = "0.9"
 zeroize = "1"
 base64 = "0.22"
