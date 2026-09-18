@@ -5088,7 +5088,9 @@ impl Bridge {
 
     fn send_sticker_by_id(&mut self, id: &str) {
         let Some(jid) = self.current_jid.clone() else { return };
-        // Panel stickers are past messages: forwarding reuses their CDN copy.
+        // Panel stickers are past messages: reusing their CDN copy skips a
+        // re-upload, but this is a fresh send, not a forward (WhatsApp
+        // itself never tags a re-sent sticker as forwarded).
         let raw = self
             .store
             .messages
@@ -5098,7 +5100,7 @@ impl Bridge {
             .and_then(|m| m.raw.clone());
         if let Some(message) = raw {
             self.ui.set_picker_open(false);
-            self.wa.send(Cmd::Forward { jid, message });
+            self.wa.send(Cmd::ResendMedia { jid, message });
         }
     }
 
@@ -5129,7 +5131,8 @@ impl Bridge {
             self.wa.send(Cmd::SendGifUrl { jid, url });
             return;
         }
-        // A history GIF: forward the original message.
+        // A history GIF: resend the original message's CDN copy, not a
+        // forward (see send_sticker_by_id).
         let raw = self
             .store
             .messages
@@ -5138,7 +5141,7 @@ impl Bridge {
             .find(|m| m.id == id && m.gif)
             .and_then(|m| m.raw.clone());
         if let Some(message) = raw {
-            self.wa.send(Cmd::Forward { jid, message });
+            self.wa.send(Cmd::ResendMedia { jid, message });
         }
     }
 
