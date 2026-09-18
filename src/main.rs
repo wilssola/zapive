@@ -145,6 +145,21 @@ fn main() {
 
     bridge::install(&ui, wa.clone());
 
+    // The window's first frame is drawn before anything queued through
+    // ui_apply runs, and the screen it starts on is the QR login: a
+    // paired session flashed it on every launch. Pick the real screen
+    // here, while the window is still hidden.
+    ui.set_screen(
+        if app_vault.has_pin() {
+            "locked"
+        } else if registered {
+            "main"
+        } else {
+            "login"
+        }
+        .into(),
+    );
+
     // With a PIN the vault stays locked until the user types it; without
     // one it opens right away, bound to the OS account.
     if app_vault.has_pin() {
