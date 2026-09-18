@@ -1422,11 +1422,9 @@ async fn executor(
                         .await
                         .ok()
                         .flatten();
-                    if let Some(version) = found {
-                        // Direct apply: the banner must show on the lock
-                        // and login screens, not wait in the backlog.
-                        crate::bridge::ui_apply(move |b| b.on_update_available(&version));
-                    }
+                    // Direct apply: the banner must show on the lock
+                    // and login screens, not wait in the backlog.
+                    crate::bridge::ui_apply(move |b| b.on_update_checked(found));
                 });
             }
             Cmd::ApplyUpdate => {

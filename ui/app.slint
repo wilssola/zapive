@@ -495,49 +495,170 @@ component DialogButton inherits TouchArea {
     }
 }
 
+// A switch for the on/off settings.
+component Toggle inherits TouchArea {
+    in property <bool> on;
+    width: 42px;
+    height: 24px;
+    mouse-cursor: pointer;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        background: root.on ? Theme.accent : (Theme.dark ? #3b4a54 : #c5ccd1);
+        animate background { duration: 150ms; }
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            y: 3px;
+            x: root.on ? parent.width - self.width - 3px : 3px;
+            background: white;
+            drop-shadow-blur: 2px;
+            drop-shadow-color: #00000040;
+            animate x { duration: 150ms; easing: ease-out; }
+        }
+    }
+}
+
+// A settings group: a title over a card of rows, and an optional note
+// under it.
+component SettingsCard inherits VerticalLayout {
+    in property <string> title;
+    in property <string> hint;
+    spacing: 8px;
+    Text {
+        text: root.title;
+        color: Theme.accent;
+        font-size: 13px;
+        font-weight: 700;
+    }
+    Rectangle {
+        border-radius: 10px;
+        background: Theme.bg;
+        VerticalLayout {
+            padding-top: 2px;
+            padding-bottom: 2px;
+            @children
+        }
+    }
+    if root.hint != "": Text {
+        text: root.hint;
+        color: Theme.text-dim;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+}
+
+// One row of a card: a label (and an optional second line) with the
+// control on the right. Controls center themselves with a `y` binding.
+component SettingsRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    height: max(46px, row.preferred-height);
+    row := HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                color: Theme.text-dim;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+        @children
+    }
+}
+
 // Self-update banner: lives in the sidebar, and on the lock and login
 // screens so a new release is never missed behind the PIN.
+// A card with its own margins, so it never touches the search box above
+// or the filter chips below it.
 component UpdateBanner inherits Rectangle {
     in property <int> state;
     in property <string> version;
+    // Side margin around the card (the sidebar keeps 12px; the lock and
+    // login screens center a bare card and pass 0).
+    in property <length> inset: 12px;
     callback apply-update();
     callback restart();
-    height: root.state > 0 ? 42px : 0;
+    height: root.state > 0 ? 66px : 0;
     visible: root.state > 0;
-    background: Theme.accent.with-alpha(0.15);
-    HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 12px;
-        spacing: 8px;
-        Text {
-            text: root.state == 1
-                ? @tr("Version {} is available", root.version)
-                : root.state == 2 ? @tr("Downloading update…")
-                : @tr("Update installed");
-            color: Theme.text;
-            font-size: 13px;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-        }
-        if root.state == 1 || root.state == 3: Rectangle {
-            width: update-btn-text.preferred-width + 22px;
-            height: 28px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 14px;
-            background: Theme.accent;
-            update-btn-text := Text {
-                text: root.state == 1 ? @tr("Update") : @tr("Restart");
-                color: white;
-                font-size: 13px;
-                vertical-alignment: center;
-                horizontal-alignment: center;
+    Rectangle {
+        x: root.inset;
+        y: 4px;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - 12px;
+        border-radius: 10px;
+        background: Theme.accent.with-alpha(0.12);
+        border-width: 1px;
+        border-color: Theme.accent.with-alpha(0.35);
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 10px;
+            spacing: 10px;
+            Image {
+                source: @image-url("icons/refresh.svg");
+                colorize: Theme.accent;
+                width: 20px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
             }
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    if (root.state == 1) { root.apply-update(); }
-                    else { root.restart(); }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.state == 1 ? @tr("Update available")
+                        : root.state == 2 ? @tr("Downloading update…")
+                        : @tr("Update installed");
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.state == 1 ? @tr("Version {} is available", root.version)
+                        : root.state == 2 ? @tr("Version {}", root.version)
+                        : @tr("Restart to use version {}", root.version);
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            if root.state == 1 || root.state == 3: Rectangle {
+                width: update-btn-text.preferred-width + 24px;
+                height: 30px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 15px;
+                background: update-touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent;
+                update-btn-text := Text {
+                    text: root.state == 1 ? @tr("Update") : @tr("Restart");
+                    color: white;
+                    font-size: 13px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                update-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if (root.state == 1) { root.apply-update(); }
+                        else { root.restart(); }
+                    }
                 }
             }
         }
@@ -638,6 +759,8 @@ export component AppWindow inherits Window {
     // 3 = installed (restart pending).
     in-out property <int> update-state: 0;
     in-out property <string> update-version;
+    in-out property <string> app-version;
+    callback update-check();
     callback update-apply();
     callback update-restart();
     callback search-changed(string);
@@ -969,7 +1092,7 @@ export component AppWindow inherits Window {
             alignment: center;
             UpdateBanner {
                 width: 360px;
-                border-radius: 8px;
+                inset: 0;
                 state: root.update-state;
                 version: root.update-version;
                 apply-update => { root.update-apply(); }
@@ -1028,7 +1151,7 @@ export component AppWindow inherits Window {
             alignment: center;
             UpdateBanner {
                 width: 820px;
-                border-radius: 8px;
+                inset: 0;
                 state: root.update-state;
                 version: root.update-version;
                 apply-update => { root.update-apply(); }
@@ -2588,18 +2711,39 @@ export component AppWindow inherits Window {
                                         selection-foreground-color: white;
                                         width: parent.width;
                                         height: parent.height;
+                                        // Slint moves the cursor for more
+                                        // than clicks: a recycled row gets
+                                        // new text and the cursor is clamped
+                                        // to it, and arrow keys walk it. A
+                                        // link opens only for a press that
+                                        // lands on the text it was seen on.
+                                        property <string> seen-text;
+                                        property <bool> key-down: false;
+                                        init => { self.seen-text = self.text; }
                                         cursor-position-changed(pos) => {
                                             link-click.running = false;
-                                            link-click.running = true;
+                                            if (self.text != self.seen-text) {
+                                                self.seen-text = self.text;
+                                            } else if (self.has-focus && !self.key-down
+                                                    && self.anchor-position-byte-offset
+                                                        == self.cursor-position-byte-offset) {
+                                                link-click.running = true;
+                                            }
                                         }
+                                        key-pressed(event) => { self.key-down = true; reject }
+                                        key-released(event) => { self.key-down = false; reject }
                                     }
+                                    // A press that is still a click (no drag
+                                    // moved the cursor away from the anchor)
+                                    // once a double-click would have shown up.
                                     link-click := Timer {
                                         interval: 220ms;
                                         running: false;
                                         triggered => {
                                             self.running = false;
-                                            if (sel-overlay.anchor-position-byte-offset
-                                                == sel-overlay.cursor-position-byte-offset) {
+                                            if (sel-overlay.has-focus
+                                                && sel-overlay.anchor-position-byte-offset
+                                                    == sel-overlay.cursor-position-byte-offset) {
                                                 root.open-link-at(msg.id, sel-overlay.cursor-position-byte-offset);
                                             }
                                         }
@@ -2974,8 +3118,11 @@ export component AppWindow inherits Window {
 
                 Rectangle {
                     // The composer grows with its text, up to a few lines.
+                    // 42px is what the box's own padding (11px each side)
+                    // and the text's inset (10px each side) take off the
+                    // bar: anything less clips the last line.
                     height: root.select-mode || !root.current-can-send ? 0
-                        : max(62px, min(180px, message-input.preferred-height + 30px));
+                        : max(62px, min(190px, message-input.preferred-height + 42px));
                     visible: !root.select-mode && root.current-can-send;
                     background: Theme.header;
 
@@ -4460,263 +4607,275 @@ export component AppWindow inherits Window {
         background: #000000aa;
         TouchArea { clicked => { root.settings-open = false; } }
         Rectangle {
-            width: 440px;
+            width: min(500px, parent.width - 32px);
             // Never taller than the window: the body scrolls instead, so
             // the sections can keep growing.
-            height: min(720px, parent.height - 48px);
+            height: min(780px, parent.height - 48px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
-            border-radius: 12px;
+            border-radius: 14px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            clip: true;
             TouchArea { }
-            VerticalBox {
-                padding: 24px;
-                spacing: 13px;
-                HorizontalLayout {
-                    vertical-stretch: 0;
-                    Text {
-                        text: @tr("Settings");
-                        color: Theme.text;
-                        font-size: 20px;
-                        font-weight: 700;
-                        horizontal-stretch: 1;
+            VerticalLayout {
+                padding: 0;
+                spacing: 0;
+                Rectangle {
+                    height: 64px;
+                    HorizontalLayout {
+                        padding-left: 24px;
+                        padding-right: 14px;
+                        Text {
+                            text: @tr("Settings");
+                            color: Theme.text;
+                            font-size: 20px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            icon: @image-url("icons/x.svg");
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.settings-open = false; }
+                        }
                     }
-                    IconButton {
-                        icon: @image-url("icons/x.svg");
-                        clicked => { root.settings-open = false; }
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.border;
                     }
                 }
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
-                    spacing: 13px;
-                    padding-right: 12px;
-                Text {
-                    text: @tr("Appearance");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    FilterChip {
-                        label: @tr("Dark");
-                        active: root.theme-mode == "dark";
-                        clicked => { root.theme-mode = "dark"; root.theme-changed("dark"); }
-                    }
-                    FilterChip {
-                        label: @tr("Light");
-                        active: root.theme-mode == "light";
-                        clicked => { root.theme-mode = "light"; root.theme-changed("light"); }
-                    }
-                    FilterChip {
-                        label: @tr("System");
-                        active: root.theme-mode == "system";
-                        clicked => { root.theme-mode = "system"; root.theme-changed("system"); }
-                    }
-                }
-                Text {
-                    text: @tr("Language");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    FilterChip {
-                        label: "Português";
-                        active: root.language-mode == "pt";
-                        clicked => { root.language-mode = "pt"; root.language-changed("pt"); }
-                    }
-                    FilterChip {
-                        label: "English";
-                        active: root.language-mode == "en";
-                        clicked => { root.language-mode = "en"; root.language-changed("en"); }
-                    }
-                    FilterChip {
-                        label: @tr("System");
-                        active: root.language-mode == "system";
-                        clicked => { root.language-mode = "system"; root.language-changed("system"); }
-                    }
-                }
-                Text {
-                    text: @tr("Startup");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    FilterChip {
-                        label: @tr("Open Zapive when I sign in");
-                        active: root.autostart;
-                        clicked => { root.autostart-changed(!root.autostart); }
-                    }
-                }
-                Text {
-                    text: @tr("Calls");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                Text {
-                    text: @tr("Microphone");
-                    color: Theme.text-dim;
-                    font-size: 13px;
-                }
-                ComboBox {
-                    model: root.mic-devices;
-                    current-value: root.mic-device;
-                    selected(value) => {
-                        root.mic-device = value;
-                        root.device-changed("mic", value);
-                    }
-                }
-                Text {
-                    text: @tr("Speaker");
-                    color: Theme.text-dim;
-                    font-size: 13px;
-                }
-                ComboBox {
-                    model: root.speaker-devices;
-                    current-value: root.speaker-device;
-                    selected(value) => {
-                        root.speaker-device = value;
-                        root.device-changed("speaker", value);
-                    }
-                }
-                Text {
-                    text: @tr("Camera");
-                    color: Theme.text-dim;
-                    font-size: 13px;
-                }
-                ComboBox {
-                    model: root.camera-devices;
-                    current-value: root.camera-device;
-                    selected(value) => {
-                        root.camera-device = value;
-                        root.device-changed("camera", value);
-                    }
-                }
-                Text {
-                    text: @tr("A device picked here is used for every call. Changes apply to the next call.");
-                    color: Theme.text-dim;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: @tr("Privacy");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    FilterChip {
-                        label: @tr("Send read receipts");
-                        active: root.send-receipts;
-                        clicked => { root.send-receipts-changed(!root.send-receipts); }
-                    }
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    FilterChip {
-                        label: @tr("Apply messages deleted by the sender");
-                        active: root.apply-deletions;
-                        clicked => { root.apply-deletions-changed(!root.apply-deletions); }
-                    }
-                }
-                Text {
-                    text: @tr("Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted.");
-                    color: Theme.text-dim;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: @tr("Security");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                Text {
-                    text: root.pin-set
-                        ? @tr("PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI).")
-                        : @tr("Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch.");
-                    color: Theme.text-dim;
-                    font-size: 13px;
-                    wrap: word-wrap;
-                }
-                current-pin := LineEdit {
-                    visible: root.pin-set;
-                    input-type: password;
-                    placeholder-text: @tr("Current PIN");
-                }
-                new-pin := LineEdit {
-                    input-type: password;
-                    placeholder-text: @tr("New PIN (4 to 10 digits)");
-                }
-                HorizontalLayout {
-                    spacing: 10px;
-                    Button {
-                        text: root.pin-set ? @tr("Change PIN") : @tr("Set PIN");
-                        primary: true;
-                        clicked => {
-                            root.save-pin(current-pin.text, new-pin.text);
-                            new-pin.text = "";
+                        padding: 24px;
+                        padding-top: 18px;
+                        spacing: 20px;
+                        SettingsCard {
+                            title: @tr("Appearance");
+                            SettingsRow {
+                                label: @tr("Theme");
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    height: 30px;
+                                    y: (parent.height - self.height) / 2;
+                                    FilterChip {
+                                        label: @tr("Dark");
+                                        active: root.theme-mode == "dark";
+                                        clicked => { root.theme-mode = "dark"; root.theme-changed("dark"); }
+                                    }
+                                    FilterChip {
+                                        label: @tr("Light");
+                                        active: root.theme-mode == "light";
+                                        clicked => { root.theme-mode = "light"; root.theme-changed("light"); }
+                                    }
+                                    FilterChip {
+                                        label: @tr("System");
+                                        active: root.theme-mode == "system";
+                                        clicked => { root.theme-mode = "system"; root.theme-changed("system"); }
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Language");
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    height: 30px;
+                                    y: (parent.height - self.height) / 2;
+                                    FilterChip {
+                                        label: "Português";
+                                        active: root.language-mode == "pt";
+                                        clicked => { root.language-mode = "pt"; root.language-changed("pt"); }
+                                    }
+                                    FilterChip {
+                                        label: "English";
+                                        active: root.language-mode == "en";
+                                        clicked => { root.language-mode = "en"; root.language-changed("en"); }
+                                    }
+                                    FilterChip {
+                                        label: @tr("System");
+                                        active: root.language-mode == "system";
+                                        clicked => { root.language-mode = "system"; root.language-changed("system"); }
+                                    }
+                                }
+                            }
                         }
-                    }
-                    Button {
-                        visible: root.pin-set;
-                        text: @tr("Remove PIN");
-                        clicked => {
-                            root.remove-pin(current-pin.text);
-                            current-pin.text = "";
+                        SettingsCard {
+                            title: @tr("General");
+                            SettingsRow {
+                                label: @tr("Open Zapive when I sign in");
+                                Toggle {
+                                    on: root.autostart;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.autostart-changed(!root.autostart); }
+                                }
+                            }
                         }
-                    }
-                }
-                Text {
-                    text: root.settings-status;
-                    color: #ffbc38;
-                    font-size: 13px;
-                    wrap: word-wrap;
-                }
-                Rectangle { height: 6px; }
-                Text {
-                    text: @tr("Account");
-                    color: Theme.accent;
-                    font-size: 14px;
-                    font-weight: 700;
-                }
-                HorizontalLayout {
-                    alignment: start;
-                    logout-btn := TouchArea {
-                        mouse-cursor: pointer;
-                        width: lb.preferred-width + 28px;
-                        height: 36px;
-                        clicked => { root.logout(); }
-                        lb := Text {
-                            text: @tr("Log out of WhatsApp");
-                            color: white;
-                            font-size: 14px;
-                            font-weight: 700;
-                            x: 14px;
-                            height: parent.height;
-                            vertical-alignment: center;
+                        SettingsCard {
+                            title: @tr("Calls");
+                            hint: @tr("A device picked here is used for every call. Changes apply to the next call.");
+                            SettingsRow {
+                                label: @tr("Microphone");
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.mic-devices;
+                                    current-value: root.mic-device;
+                                    selected(value) => {
+                                        root.mic-device = value;
+                                        root.device-changed("mic", value);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Speaker");
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.speaker-devices;
+                                    current-value: root.speaker-device;
+                                    selected(value) => {
+                                        root.speaker-device = value;
+                                        root.device-changed("speaker", value);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Camera");
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.camera-devices;
+                                    current-value: root.camera-device;
+                                    selected(value) => {
+                                        root.camera-device = value;
+                                        root.device-changed("camera", value);
+                                    }
+                                }
+                            }
                         }
-                        Rectangle {
-                            width: parent.width;
-                            height: parent.height;
-                            border-radius: 8px;
-                            background: logout-btn.has-hover ? #d9534f : #c9302c;
-                            z: -1;
+                        SettingsCard {
+                            title: @tr("Privacy");
+                            hint: @tr("Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted.");
+                            SettingsRow {
+                                label: @tr("Send read receipts");
+                                Toggle {
+                                    on: root.send-receipts;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.send-receipts-changed(!root.send-receipts); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Apply messages deleted by the sender");
+                                Toggle {
+                                    on: root.apply-deletions;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.apply-deletions-changed(!root.apply-deletions); }
+                                }
+                            }
+                        }
+                        SettingsCard {
+                            title: @tr("Security");
+                            VerticalLayout {
+                                padding: 14px;
+                                padding-top: 10px;
+                                spacing: 10px;
+                                Text {
+                                    text: root.pin-set
+                                        ? @tr("PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI).")
+                                        : @tr("Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch.");
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                                current-pin := LineEdit {
+                                    visible: root.pin-set;
+                                    input-type: password;
+                                    placeholder-text: @tr("Current PIN");
+                                }
+                                new-pin := LineEdit {
+                                    input-type: password;
+                                    placeholder-text: @tr("New PIN (4 to 10 digits)");
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    alignment: start;
+                                    Button {
+                                        text: root.pin-set ? @tr("Change PIN") : @tr("Set PIN");
+                                        primary: true;
+                                        clicked => {
+                                            root.save-pin(current-pin.text, new-pin.text);
+                                            new-pin.text = "";
+                                        }
+                                    }
+                                    Button {
+                                        visible: root.pin-set;
+                                        text: @tr("Remove PIN");
+                                        clicked => {
+                                            root.remove-pin(current-pin.text);
+                                            current-pin.text = "";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SettingsCard {
+                            title: @tr("About");
+                            SettingsRow {
+                                label: "Zapive";
+                                detail: root.update-state == 1 ? @tr("Version {} is available", root.update-version)
+                                    : root.update-state == 2 ? @tr("Downloading update…")
+                                    : root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
+                                    : @tr("Version {}", root.app-version);
+                                DialogButton {
+                                    y: (parent.height - self.height) / 2;
+                                    primary: root.update-state != 0;
+                                    enabled: root.update-state != 2;
+                                    label: root.update-state == 1 ? @tr("Update")
+                                        : root.update-state == 2 ? @tr("Downloading update…")
+                                        : root.update-state == 3 ? @tr("Restart")
+                                        : @tr("Check for updates");
+                                    clicked => {
+                                        if (root.update-state == 1) { root.update-apply(); }
+                                        else if (root.update-state == 3) { root.update-restart(); }
+                                        else if (root.update-state == 0) { root.update-check(); }
+                                    }
+                                }
+                            }
+                        }
+                        SettingsCard {
+                            title: @tr("Account");
+                            SettingsRow {
+                                label: @tr("Log out of WhatsApp");
+                                DialogButton {
+                                    y: (parent.height - self.height) / 2;
+                                    primary: true;
+                                    danger: true;
+                                    label: @tr("Log out");
+                                    clicked => { root.logout(); }
+                                }
+                            }
                         }
                     }
                 }
+                // Feedback from the host (PIN saved, restart to apply a
+                // language, update check result), pinned under the body.
+                if root.settings-status != "": Rectangle {
+                    height: status-text.preferred-height + 20px;
+                    background: #ffbc38.with-alpha(0.12);
+                    status-text := Text {
+                        x: 24px;
+                        y: 10px;
+                        width: parent.width - 48px;
+                        text: root.settings-status;
+                        color: #ffbc38;
+                        font-size: 13px;
+                        wrap: word-wrap;
                     }
                 }
             }

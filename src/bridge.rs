@@ -163,6 +163,9 @@ pub struct Bridge {
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String)>,
     notify_queued: bool,
+    // A check the user asked for from Settings: it also reports "nothing
+    // new", where the periodic one stays quiet.
+    update_manual: bool,
     // Status/stories, calls, channels and the info panel.
     status_model: Rc<VecModel<ChatItem>>,
     calls_model: Rc<VecModel<CallItem>>,
@@ -466,6 +469,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        update_manual: false,
         status_model,
         calls_model,
         info_media_model,
@@ -558,6 +562,14 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_chat_hover(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.chat_hover(&jid));
+    });
+    ui.set_app_version(crate::update::current_version().into());
+    ui.on_update_check(|| {
+        defer(|b| {
+            b.update_manual = true;
+            b.ui.set_settings_status(t("update.checking").into());
+            b.wa.send(Cmd::CheckUpdate);
+        });
     });
     ui.on_update_apply(|| {
         defer(|b| {
@@ -5521,14 +5533,25 @@ impl Bridge {
 
     fn update_tick(&mut self) {
         self.wa.send(Cmd::CheckUpdate);
-        // Check again every 6 hours while the app stays open.
-        self.once(21_600_000, |b| b.update_tick());
+        // Check again every hour while the app stays open: a release
+        // published during the day shows up the same day.
+        self.once(3_600_000, |b| b.update_tick());
     }
 
-    pub fn on_update_available(&mut self, version: &str) {
-        self.ui.set_update_version(version.into());
-        if self.ui.get_update_state() == 0 {
-            self.ui.set_update_state(1);
+    pub fn on_update_checked(&mut self, found: Option<String>) {
+        let manual = std::mem::take(&mut self.update_manual);
+        match found {
+            Some(version) => {
+                self.ui.set_update_version(version.into());
+                if self.ui.get_update_state() == 0 {
+                    self.ui.set_update_state(1);
+                }
+                if manual {
+                    self.ui.set_settings_status("".into());
+                }
+            }
+            None if manual => self.ui.set_settings_status(t("update.latest").into()),
+            None => {}
         }
     }
 

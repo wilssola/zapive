@@ -2,14 +2,26 @@
 // translated into the markdown subset Slint's StyledText understands.
 // Everything outside a marker is escaped so stray symbols stay literal.
 // Port of src/markup.ts on master.
+//
+// The styled rendering and the plain one (the text a transparent
+// TextInput lays over it for selection) come from the same token
+// stream, so a marker either styles in both or is literal in both.
 use regex::Regex;
 use std::sync::OnceLock;
 
 fn token_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"```([\s\S]+?)```|`([^`\n]+?)`|\*([^*\n]+?)\*|_([^_\n]+?)_|~([^~\n]+?)~")
-            .expect("valid token regex")
+        // A marker pair only counts when the text inside starts and ends
+        // on something other than whitespace: "* a *" stays literal for
+        // WhatsApp, and CommonMark would not style it either.
+        Regex::new(concat!(
+            r"```([\s\S]+?)```|`([^`\n]+?)`",
+            r"|\*([^*\n\s](?:[^*\n]*?[^*\n\s])?)\*",
+            r"|_([^_\n\s](?:[^_\n]*?[^_\n\s])?)_",
+            r"|~([^~\n\s](?:[^~\n]*?[^~\n\s])?)~",
+        ))
+        .expect("valid token regex")
     })
 }
 
@@ -23,10 +35,18 @@ fn url_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(?i)https?://[^\s<>\]]+").expect("valid url regex"))
 }
 
+const NBSP: char = '\u{a0}';
+
 fn escape_md(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if matches!(c, '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '(' | ')' | '#' | '>' | '+' | '-' | '.' | '!' | '|') {
+        // '<' and '&' too: otherwise "<b>" becomes an HTML tag and
+        // "&amp;" an entity, and the styled text drifts from the plain.
+        if matches!(
+            c,
+            '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '(' | ')' | '#' | '>' | '+' | '-' | '.' | '!'
+                | '|' | '<' | '&'
+        ) {
             out.push('\\');
         }
         out.push(c);
@@ -43,6 +63,48 @@ pub fn has_markup(text: &str) -> bool {
 pub struct MentionTarget {
     pub name: Option<String>,
     pub jid: String,
+}
+
+enum Token<'a> {
+    Plain(&'a str),
+    Code(&'a str),
+    Bold(&'a str),
+    Italic(&'a str),
+    Strike(&'a str),
+}
+
+// Marker pairs, with the literal text between them. An underscore pair
+// glued to letters on either side ("snake_case_name") is literal: it is
+// not a WhatsApp style and CommonMark would not style it either.
+fn tokens(text: &str) -> Vec<Token<'_>> {
+    let mut out = Vec::new();
+    let mut last = 0;
+    for caps in token_re().captures_iter(text) {
+        let whole = caps.get(0).unwrap();
+        if let Some(italic) = caps.get(4) {
+            let before = text[..whole.start()].chars().next_back();
+            let after = text[whole.end()..].chars().next();
+            if before.is_some_and(char::is_alphanumeric) || after.is_some_and(char::is_alphanumeric) {
+                continue;
+            }
+            out.push(Token::Plain(&text[last..whole.start()]));
+            out.push(Token::Italic(italic.as_str()));
+        } else if let Some(code) = caps.get(1).or_else(|| caps.get(2)) {
+            out.push(Token::Plain(&text[last..whole.start()]));
+            out.push(Token::Code(code.as_str()));
+        } else if let Some(bold) = caps.get(3) {
+            out.push(Token::Plain(&text[last..whole.start()]));
+            out.push(Token::Bold(bold.as_str()));
+        } else if let Some(strike) = caps.get(5) {
+            out.push(Token::Plain(&text[last..whole.start()]));
+            out.push(Token::Strike(strike.as_str()));
+        } else {
+            continue;
+        }
+        last = whole.end();
+    }
+    out.push(Token::Plain(&text[last..]));
+    out
 }
 
 fn render_links(text: &str) -> String {
@@ -82,27 +144,67 @@ fn render_mentions(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> Strin
     out
 }
 
+// A code span keeps its text verbatim, one span per line: CommonMark
+// folds a newline inside a span into a space, and trims one space off
+// each end, and the plain rendering keeps both.
+fn render_code(code: &str) -> String {
+    code.replace('`', "")
+        .split('\n')
+        .map(|line| {
+            if line.is_empty() {
+                return String::new();
+            }
+            let mut line = line.to_string();
+            if line.starts_with(' ') {
+                line.replace_range(..1, "\u{a0}");
+            }
+            if line.ends_with(' ') {
+                let at = line.len() - 1;
+                line.replace_range(at.., "\u{a0}");
+            }
+            format!("`{line}`")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// Every line of the message must stay a line of the rendering: CommonMark
+// drops blank lines (they only end a paragraph) and the indentation of
+// continuation lines, and reads four leading spaces as a code block. A
+// no-break space is not whitespace to it, so it keeps blank lines and
+// indentation on screen where the plain text has them.
+fn keep_lines(md: &str) -> String {
+    md.split('\n')
+        .map(|line| {
+            let indent = line.len() - line.trim_start_matches(' ').len();
+            let rest = &line[indent..];
+            if rest.trim().is_empty() {
+                return NBSP.to_string();
+            }
+            let mut out = String::with_capacity(line.len() + indent);
+            for _ in 0..indent {
+                out.push(NBSP);
+            }
+            out.push_str(rest);
+            out
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn to_markdown(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> String {
     let plain = |part: &str| render_mentions(part, resolve);
     let mut out = String::new();
-    let mut last = 0;
-    for caps in token_re().captures_iter(text) {
-        let whole = caps.get(0).unwrap();
-        out.push_str(&plain(&text[last..whole.start()]));
-        if let Some(code) = caps.get(1).or_else(|| caps.get(2)) {
-            out.push_str(&format!("`{}`", code.as_str().replace('`', "")));
-        } else if let Some(bold) = caps.get(3) {
-            out.push_str(&format!("**{}**", plain(bold.as_str())));
-        } else if let Some(italic) = caps.get(4) {
-            out.push_str(&format!("*{}*", plain(italic.as_str())));
-        } else if let Some(strike) = caps.get(5) {
-            out.push_str(&format!("~~{}~~", escape_md(strike.as_str())));
+    for token in tokens(text) {
+        match token {
+            Token::Plain(part) => out.push_str(&plain(part)),
+            Token::Code(code) => out.push_str(&render_code(code)),
+            Token::Bold(inner) => out.push_str(&format!("**{}**", plain(inner))),
+            Token::Italic(inner) => out.push_str(&format!("*{}*", plain(inner))),
+            Token::Strike(inner) => out.push_str(&format!("~~{}~~", escape_md(inner))),
         }
-        last = whole.end();
     }
-    // The tail is literal text as well: it still needs mentions and links.
-    out.push_str(&plain(&text[last..]));
-    out
+    keep_lines(&out)
 }
 
 // What StyledText ends up drawing, as plain text, plus the byte ranges
@@ -116,20 +218,15 @@ pub struct PlainRender {
 
 pub fn render_plain(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> PlainRender {
     let mut out = PlainRender { text: String::with_capacity(text.len()), spans: Vec::new() };
-    let mut last = 0;
-    for caps in token_re().captures_iter(text) {
-        let whole = caps.get(0).unwrap();
-        plain_mentions(&text[last..whole.start()], resolve, &mut out);
-        if let Some(code) = caps.get(1).or_else(|| caps.get(2)) {
-            out.text.push_str(&code.as_str().replace('`', ""));
-        } else if let Some(inner) = caps.get(3).or_else(|| caps.get(4)) {
-            plain_mentions(inner.as_str(), resolve, &mut out);
-        } else if let Some(strike) = caps.get(5) {
-            out.text.push_str(strike.as_str());
+    for token in tokens(text) {
+        match token {
+            Token::Plain(part) | Token::Bold(part) | Token::Italic(part) => {
+                plain_mentions(part, resolve, &mut out)
+            }
+            Token::Code(code) => out.text.push_str(&code.replace('`', "")),
+            Token::Strike(inner) => out.text.push_str(inner),
         }
-        last = whole.end();
     }
-    plain_mentions(&text[last..], resolve, &mut out);
     out
 }
 
@@ -196,6 +293,10 @@ pub fn mention_query(text: &str, cursor: usize) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
 
+    fn ana(num: &str) -> MentionTarget {
+        MentionTarget { name: Some("Ana".into()), jid: format!("{num}@s.whatsapp.net") }
+    }
+
     #[test]
     fn mention_query_finds_the_word_at_the_cursor() {
         assert_eq!(mention_query("@", 1), Some((0, 1)));
@@ -212,27 +313,50 @@ mod tests {
 
     #[test]
     fn plain_rendering_matches_the_styled_text() {
-        let resolve = |num: &str| MentionTarget {
-            name: Some("Ana".into()),
-            jid: format!("{num}@s.whatsapp.net"),
-        };
-        let r = render_plain("oi @5511999 veja *https://x.io/a* fim", &resolve);
+        let r = render_plain("oi @5511999 veja *https://x.io/a* fim", &ana);
         assert_eq!(r.text, "oi @Ana veja https://x.io/a fim");
         assert_eq!(r.spans[0], (3, 7, "5511999@s.whatsapp.net".to_string()));
         assert_eq!(r.spans[1], (13, 27, "https://x.io/a".to_string()));
-        assert_eq!(target_at("oi @5511999 veja *https://x.io/a* fim", 20, &resolve).as_deref(), Some("https://x.io/a"));
-        assert_eq!(target_at("oi @5511999 veja *https://x.io/a* fim", 9, &resolve), None);
+        assert_eq!(target_at("oi @5511999 veja *https://x.io/a* fim", 20, &ana).as_deref(), Some("https://x.io/a"));
+        assert_eq!(target_at("oi @5511999 veja *https://x.io/a* fim", 9, &ana), None);
     }
 
     #[test]
     fn markdown_keeps_links_and_mentions() {
-        let resolve = |num: &str| MentionTarget {
-            name: Some("Ana".into()),
-            jid: format!("{num}@s.whatsapp.net"),
-        };
-        let md = to_markdown("oi @5511999 veja https://x.io/a_b *ok*", &resolve);
+        let md = to_markdown("oi @5511999 veja https://x.io/a_b *ok*", &ana);
         assert!(md.contains("[@Ana](5511999@s.whatsapp.net)"));
         assert!(md.contains("(https://x.io/a_b)"));
         assert!(md.ends_with("**ok**"));
+    }
+
+    // Blank lines and indentation would vanish in CommonMark and the
+    // plain overlay would sit one line lower than the styled text.
+    #[test]
+    fn markdown_keeps_every_line() {
+        let md = to_markdown("*a*\n\n  b\n    c", &ana);
+        assert_eq!(md, "**a**\n\u{a0}\n\u{a0}\u{a0}b\n\u{a0}\u{a0}\u{a0}\u{a0}c");
+        assert_eq!(md.split('\n').count(), render_plain("*a*\n\n  b\n    c", &ana).text.split('\n').count());
+    }
+
+    // Markers that WhatsApp leaves literal stay literal in both renderings.
+    #[test]
+    fn loose_markers_are_literal_in_both() {
+        assert_eq!(render_plain("2 * 3 * 4", &ana).text, "2 * 3 * 4");
+        assert_eq!(to_markdown("2 * 3 * 4", &ana), "2 \\* 3 \\* 4");
+        assert_eq!(render_plain("snake_case_name", &ana).text, "snake_case_name");
+        assert_eq!(to_markdown("snake_case_name", &ana), "snake\\_case\\_name");
+        assert_eq!(render_plain("_it_ ok", &ana).text, "it ok");
+        assert_eq!(to_markdown("_it_ ok", &ana), "*it* ok");
+    }
+
+    #[test]
+    fn html_looking_text_stays_literal() {
+        assert_eq!(to_markdown("a <b> & c", &ana), "a \\<b\\> \\& c");
+    }
+
+    #[test]
+    fn code_spans_keep_their_lines() {
+        assert_eq!(to_markdown("```x\n y```", &ana), "`x`\n`\u{a0}y`");
+        assert_eq!(render_plain("```x\n y```", &ana).text, "x\n y");
     }
 }
