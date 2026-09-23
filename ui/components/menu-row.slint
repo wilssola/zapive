@@ -1,0 +1,32 @@
+import { Theme } from "theme.slint";
+
+export component MenuRow inherits TouchArea {
+    in property <image> icon;
+    in property <string> label;
+    mouse-cursor: pointer;
+    height: 40px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        background: root.has-hover ? Theme.hover : transparent;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 16px;
+            spacing: 10px;
+            Image {
+                source: root.icon;
+                colorize: Theme.icon;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

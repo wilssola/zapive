@@ -1,0 +1,14 @@
+import { Theme } from "theme.slint";
+
+export component GreenLink inherits TouchArea {
+    in property <string> label;
+    mouse-cursor: pointer;
+    height: t.preferred-height;
+    width: t.preferred-width;
+    t := Text {
+        text: root.label;
+        color: Theme.accent;
+        font-size: 14px;
+        font-weight: 700;
+    }
+}
