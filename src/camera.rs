@@ -154,10 +154,10 @@ impl CameraFeed {
         let (tx, rx) = async_channel::bounded::<TimedVideoFrame>(2);
         let stop = Arc::new(AtomicBool::new(false));
         let force_key = Arc::new(AtomicBool::new(false));
-        let index = index_for(device).ok_or_else(|| {
+        let Some(index) = index_for(device) else {
             log::warn!("[camera] no camera available");
-            "camera unavailable"
-        })?;
+            return None;
+        };
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<bool>();
         {
             let stop = stop.clone();

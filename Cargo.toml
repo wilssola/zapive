@@ -101,6 +101,9 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 # Notifications with the app's own identity: the notification center on

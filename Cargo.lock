@@ -10481,6 +10481,7 @@ dependencies = [
  "mp4",
  "nokhwa",
  "notify-rust",
+ "objc2 0.6.4",
  "ogg",
  "openh264",
  "opus-pure",
