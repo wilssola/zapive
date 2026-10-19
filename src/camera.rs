@@ -45,6 +45,7 @@ pub struct CameraOption {
 }
 
 // Cameras the system reports, in the order the backend lists them.
+#[cfg(not(target_os = "macos"))]
 pub fn cameras() -> Vec<CameraOption> {
     match nokhwa::query(nokhwa::utils::ApiBackend::Auto) {
         Ok(found) => found
@@ -58,14 +59,56 @@ pub fn cameras() -> Vec<CameraOption> {
     }
 }
 
-fn index_for(name: Option<&str>) -> CameraIndex {
+#[cfg(target_os = "macos")]
+pub fn cameras() -> Vec<CameraOption> {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    use std::ffi::{CStr, c_char};
+
+    objc2::rc::autoreleasepool(|_| unsafe {
+        let media_type: *mut AnyObject =
+            msg_send![class!(NSString), stringWithUTF8String: c"vide".as_ptr()];
+        let devices: *mut AnyObject =
+            msg_send![class!(AVCaptureDevice), devicesWithMediaType: media_type];
+        if devices.is_null() {
+            return Vec::new();
+        }
+        let count: usize = msg_send![devices, count];
+        let mut cameras = Vec::with_capacity(count);
+        for index in 0..count {
+            let device: *mut AnyObject = msg_send![devices, objectAtIndex: index];
+            let name: *mut AnyObject = msg_send![device, localizedName];
+            let uid: *mut AnyObject = msg_send![device, uniqueID];
+            if name.is_null() || uid.is_null() {
+                continue;
+            }
+            let name: *const c_char = msg_send![name, UTF8String];
+            let uid: *const c_char = msg_send![uid, UTF8String];
+            if !name.is_null() && !uid.is_null() {
+                cameras.push(CameraOption {
+                    name: CStr::from_ptr(name).to_string_lossy().into_owned(),
+                    index: CameraIndex::String(CStr::from_ptr(uid).to_string_lossy().into_owned()),
+                });
+            }
+        }
+        cameras
+    })
+}
+
+fn index_for(name: Option<&str>) -> Option<CameraIndex> {
     let wanted = name.unwrap_or_default();
     if !wanted.is_empty()
         && let Some(found) = cameras().into_iter().find(|c| c.name == wanted)
     {
-        return found.index;
+        return Some(found.index);
     }
-    CameraIndex::Index(0)
+    #[cfg(target_os = "macos")]
+    if let Some(camera) = cameras().into_iter().next() {
+        return Some(camera.index);
+    }
+    #[cfg(target_os = "macos")]
+    return None;
+    #[cfg(not(target_os = "macos"))]
+    Some(CameraIndex::Index(0))
 }
 
 // The call side of the camera: encoded access units plus the switch that
@@ -111,7 +154,10 @@ impl CameraFeed {
         let (tx, rx) = async_channel::bounded::<TimedVideoFrame>(2);
         let stop = Arc::new(AtomicBool::new(false));
         let force_key = Arc::new(AtomicBool::new(false));
-        let index = index_for(device);
+        let index = index_for(device).ok_or_else(|| {
+            log::warn!("[camera] no camera available");
+            "camera unavailable"
+        })?;
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<bool>();
         {
             let stop = stop.clone();

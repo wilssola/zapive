@@ -77,6 +77,12 @@ pub fn install() {
     let logger = Box::new(FileLog { level, file: Mutex::new(file) });
     if log::set_boxed_logger(logger).is_ok() {
         log::set_max_level(level);
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            log::error!("[panic] {info}\n{backtrace}");
+            previous_hook(info);
+        }));
         log::info!(
             "zapive {} starting on {}; log level {level}",
             env!("CARGO_PKG_VERSION"),

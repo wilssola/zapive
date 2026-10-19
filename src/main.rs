@@ -112,6 +112,18 @@ fn main() {
     // straight into the tray instead of popping the window open.
     let autostarted = std::env::args().any(|a| a == "--autostart");
 
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("SLINT_BACKEND").is_none()
+        && std::env::var_os("SLINT_RENDERER").is_none()
+    {
+        slint::BackendSelector::new()
+            .backend_name("winit".into())
+            .renderer_name("software".into())
+            .select()
+            .expect("select software renderer");
+        log::info!("[ui] using software renderer on Windows");
+    }
+
     let ui = AppWindow::new().expect("failed to create the main window");
     ui.set_language_mode(language.as_str().into());
     ui.set_autostart(platform::autostart_enabled());
