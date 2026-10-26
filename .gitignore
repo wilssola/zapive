@@ -9,4 +9,3 @@ packaging/flatpak/cargo-sources.json
 # Signing certificates: private keys, never committed.
 *.pfx
 *.p12
-

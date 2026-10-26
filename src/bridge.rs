@@ -49,6 +49,7 @@ pub struct Bridge {
     chats_model: Rc<VecModel<ChatItem>>,
     messages_model: Rc<VecModel<MessageItem>>,
     current_jid: Option<String>,
+    unread_boundary: Option<String>,
     self_jid: String,
     search_text: String,
     tab: String,
@@ -492,6 +493,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         chats_model,
         messages_model,
         current_jid: None,
+        unread_boundary: None,
         self_jid: String::new(),
         search_text: String::new(),
         tab: "all".into(),
@@ -1473,6 +1475,7 @@ impl Bridge {
     // Whatever is on screen belongs to a session that just ended.
     fn close_session_views(&mut self) {
         self.current_jid = None;
+        self.unread_boundary = None;
         self.groups_fetched = false;
         self.ui.set_chat_open(false);
         self.ui.set_settings_open(false);
@@ -1485,6 +1488,7 @@ impl Bridge {
     // Drops the loaded account's conversations, in memory and on disk.
     fn wipe_conversations(&mut self) {
         self.current_jid = None;
+        self.unread_boundary = None;
         self.ui.set_chat_open(false);
         self.clear_store_state();
         if let Some(vault) = &self.vault {
@@ -2423,6 +2427,13 @@ impl Bridge {
     // In-place diff: only changed rows are rewritten, which is what keeps
     // the ListView's scroll position stable.
     fn refresh_chats(&mut self) {
+        let archived_unread = self.store.chats.values()
+            .filter(|chat| chat.archived && chat.unread > 0)
+            .count();
+        let archived_mentioned = self.store.chats.values()
+            .any(|chat| chat.archived && chat.unread > 0 && chat.mentioned);
+        self.ui.set_archived_unread_count(archived_unread.min(i32::MAX as usize) as i32);
+        self.ui.set_archived_mentioned(archived_mentioned);
         let rows: Vec<ChatItem> = self
             .visible_chats()
             .iter()
@@ -2643,6 +2654,17 @@ impl Bridge {
             self.clear_reply();
         }
         if self.current_jid.as_deref() != Some(jid) {
+            let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
+            self.unread_boundary = if unread > 0 {
+                let incoming: Vec<_> = self.store.messages_for(jid).iter()
+                    .filter(|m| !m.from_me && m.kind != MessageKind::System)
+                    .collect();
+                incoming.len().checked_sub(unread)
+                    .and_then(|index| incoming.get(index))
+                    .map(|m| m.id.clone())
+            } else {
+                None
+            };
             self.select_end();
             self.ui.set_chat_search_open(false);
             self.chat_search_model.set_vec(Vec::new());
@@ -2952,6 +2974,7 @@ impl Bridge {
             reactions: reactions.into(),
             reactionCount: reaction_count.into(),
             dayLabel: day_label.into(),
+            unread_boundary: self.unread_boundary.as_deref() == Some(m.id.as_str()),
             ticks: ticks.into(),
             ticksBlue: ticks_blue,
             senderHasAvatar: self.avatar_for(&sender_jid).is_some(),
@@ -4907,6 +4930,7 @@ impl Bridge {
         self.ui.set_chat_open(false);
         self.ui.set_selected_jid("".into());
         self.current_jid = None;
+        self.unread_boundary = None;
         self.messages_model.set_vec(Vec::new());
         self.sync_mini_player();
     }
