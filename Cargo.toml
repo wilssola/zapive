@@ -1,6 +1,6 @@
 [package]
 name = "zapive"
-version = "0.17.0"
+version = "0.17.3"
 edition = "2024"
 description = "Native WhatsApp desktop client"
 publish = false
@@ -100,6 +100,9 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
