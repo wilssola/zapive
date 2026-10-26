@@ -2,5 +2,739 @@ import { Theme } from "components/theme.slint";
 import { ChatItem, ReactionItem, CallItem, StickerCell, MessageItem } from "components/types.slint";
 import { AppWindow } from "components/app-window.slint";
 import { CallWindow } from "components/call-window.slint";
+import { Avatar } from "components/avatar.slint";
 
-export { Theme, ChatItem, ReactionItem, CallItem, StickerCell, MessageItem, AppWindow, CallWindow }
+export { Theme, ChatItem, ReactionItem, CallItem, StickerCell, MessageItem, AppWindow, CallWindow, Avatar }
+
+component IconButton inherits TouchArea {
+    in property <image> icon;
+    in property <bool> active: false;
+    in property <length> icon-size: 22px;
+    in property <color> tint: Theme.icon;
+    width: 40px;
+    height: 40px;
+    mouse-cursor: pointer;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        background: root.active ? Theme.selected : root.has-hover ? Theme.hover : transparent;
+        Image {
+            source: root.icon;
+            colorize: root.tint;
+            width: root.icon-size;
+            height: root.icon-size;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}
+
+component FilterChip inherits TouchArea {
+    in property <string> label;
+    in property <bool> active: false;
+    mouse-cursor: pointer;
+    width: chip.preferred-width;
+    height: 30px;
+    chip := Rectangle {
+        height: parent.height;
+        border-radius: 15px;
+        background: root.active ? Theme.chip-active-bg : Theme.chip-bg;
+        HorizontalLayout {
+            padding-left: 13px;
+            padding-right: 13px;
+            Text {
+                text: root.label;
+                color: root.active ? Theme.accent : Theme.text-dim;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// Round accent button with a label, for dialogs.
+component DialogButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    mouse-cursor: pointer;
+    width: btn-text.preferred-width + 32px;
+    height: 36px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 18px;
+        background: root.primary
+            ? (root.has-hover ? (root.danger ? #c9302c : Theme.accent.darker(0.15)) : (root.danger ? #ea0038 : Theme.accent))
+            : (root.has-hover ? Theme.hover : transparent);
+        btn-text := Text {
+            text: root.label;
+            color: root.primary ? white : Theme.accent;
+            font-size: 14px;
+            font-weight: 700;
+            width: parent.width;
+            height: parent.height;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A switch for the on/off settings.
+component Toggle inherits TouchArea {
+    in property <bool> on;
+    width: 42px;
+    height: 24px;
+    mouse-cursor: pointer;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        background: root.on ? Theme.accent : (Theme.dark ? #3b4a54 : #c5ccd1);
+        animate background { duration: 150ms; }
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            y: 3px;
+            x: root.on ? parent.width - self.width - 3px : 3px;
+            background: white;
+            drop-shadow-blur: 2px;
+            drop-shadow-color: #00000040;
+            animate x { duration: 150ms; easing: ease-out; }
+        }
+    }
+}
+
+// A settings group: a title over a card of rows, and an optional note
+// under it.
+component SettingsCard inherits VerticalLayout {
+    in property <string> title;
+    in property <string> hint;
+    spacing: 8px;
+    Text {
+        text: root.title;
+        color: Theme.accent;
+        font-size: 13px;
+        font-weight: 700;
+    }
+    Rectangle {
+        border-radius: 10px;
+        background: Theme.bg;
+        VerticalLayout {
+            padding-top: 2px;
+            padding-bottom: 2px;
+            @children
+        }
+    }
+    if root.hint != "": Text {
+        text: root.hint;
+        color: Theme.text-dim;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+}
+
+// One row of a card: a label (and an optional second line) with the
+// control on the right. Controls center themselves with a `y` binding.
+component SettingsRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    height: max(46px, row.preferred-height);
+    row := HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                color: Theme.text-dim;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+        @children
+    }
+}
+
+// Self-update banner: lives in the sidebar, and on the lock and login
+// screens so a new release is never missed behind the PIN.
+// A card with its own margins, so it never touches the search box above
+// or the filter chips below it.
+// The hand cursor over a link in a styled bubble.
+//
+// The words of such a bubble are drawn by a StyledText, and a transparent
+// TextInput with the same words lies over it to make them selectable. A
+// TextInput sets the I-beam on every mouse move it sees, and nothing laid
+// under or around it gets a say after that, so the hand has to come from
+// something on top -- which would then also eat the press that starts a
+// selection on the link. Hence the two halves here:
+//
+// - where: an invisible TextInput with the same text, width and font is
+//   asked for the cursor position at the link's first and last byte, and
+//   the link's box (up to three of them when it wraps) follows from those;
+// - how: the boxes are TouchAreas that show the hand and, on a press, step
+//   aside (`pass-through`) while the host plays the press again, this time
+//   reaching the TextInput underneath. Selecting from inside a link, a
+//   double click on it and the click that opens it all still belong to
+//   the overlay, exactly as without this.
+component LinkBox inherits TouchArea {
+    in property <bool> pass-through;
+    callback press(length, length);
+    callback release();
+    mouse-cursor: pointer;
+    enabled: !self.pass-through;
+    pointer-event(e) => {
+        if (e.button == PointerEventButton.left) {
+            if (e.kind == PointerEventKind.down) {
+                root.press(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            } else if (e.kind == PointerEventKind.up) {
+                root.release();
+            }
+        }
+    }
+}
+
+component LinkHover inherits Rectangle {
+    in property <string> text;
+    in property <int> start;
+    in property <int> end;
+    in property <bool> pass-through;
+    callback press(length, length);
+    callback release();
+
+    // Where the link starts and ends, in this element's coordinates.
+    out property <length> sx;
+    out property <length> sy;
+    out property <length> ex;
+    out property <length> ey;
+    property <bool> at-end: false;
+    out property <length> line-h: line.preferred-height;
+    out property <bool> one-line: abs((self.ey - self.sy) / 1px) < 2;
+    out property <bool> hovered: first.has-hover || middle.has-hover || last.has-hover;
+
+    line := Text {
+        text: "Ag";
+        font-size: 14px;
+        visible: false;
+    }
+    probe := TextInput {
+        text: root.text;
+        visible: false;
+        enabled: false;
+        read-only: true;
+        single-line: false;
+        wrap: word-wrap;
+        font-size: 14px;
+        width: root.width;
+        height: root.height;
+        cursor-position-changed(p) => {
+            if (root.at-end) {
+                root.ex = p.x;
+                root.ey = p.y;
+            } else {
+                root.sx = p.x;
+                root.sy = p.y;
+            }
+        }
+    }
+    function measure() {
+        root.at-end = false;
+        probe.set-selection-offsets(root.start, root.start);
+        root.at-end = true;
+        probe.set-selection-offsets(root.end, root.end);
+    }
+    // The row may be laid out after it is created, and it is recycled
+    // for other messages and re-wrapped when the window is resized.
+    init => { self.measure(); }
+    changed width => { self.measure(); }
+    changed text => { self.measure(); }
+    changed start => { self.measure(); }
+    Timer {
+        interval: 30ms;
+        running: true;
+        triggered => {
+            self.running = false;
+            root.measure();
+        }
+    }
+
+    // First line, whole lines in between, last line.
+    first := LinkBox {
+        x: root.sx;
+        y: root.sy;
+        width: max(0px, (root.one-line ? root.ex : root.width) - root.sx);
+        height: root.line-h;
+        pass-through: root.pass-through;
+        press(x, y) => { root.press(x, y); }
+        release => { root.release(); }
+    }
+    middle := LinkBox {
+        visible: !root.one-line && root.ey - root.sy > root.line-h * 1.5;
+        x: 0;
+        y: root.sy + root.line-h;
+        width: root.width;
+        height: max(0px, root.ey - root.sy - root.line-h);
+        pass-through: root.pass-through;
+        press(x, y) => { root.press(x, y); }
+        release => { root.release(); }
+    }
+    last := LinkBox {
+        visible: !root.one-line;
+        x: 0;
+        y: root.ey;
+        width: max(0px, root.ex);
+        height: root.line-h;
+        pass-through: root.pass-through;
+        press(x, y) => { root.press(x, y); }
+        release => { root.release(); }
+    }
+}
+
+// One account in the switcher: the loaded one carries a check, the
+// others a button that removes them from this computer.
+component AccountRow inherits TouchArea {
+    in property <AccountItem> account;
+    callback remove();
+    mouse-cursor: pointer;
+    height: 52px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        background: root.has-hover || drop.has-hover ? Theme.hover : transparent;
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Avatar {
+            width: 36px;
+            height: 36px;
+            y: (parent.height - self.height) / 2;
+            src: root.account.avatar;
+            has-image: root.account.hasAvatar;
+            initial: root.account.initial;
+            color-idx: root.account.colorIdx;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.account.name;
+                color: Theme.text;
+                font-size: 14px;
+                overflow: elide;
+            }
+            if root.account.detail != "": Text {
+                text: root.account.detail;
+                color: Theme.text-dim;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+        Rectangle { width: 24px; }
+    }
+    if root.account.active: Image {
+        source: @image-url("icons/check.svg");
+        colorize: Theme.accent;
+        x: parent.width - self.width - 14px;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+    }
+    drop := TouchArea {
+        visible: !root.account.active;
+        x: parent.width - self.width - 8px;
+        y: (parent.height - self.height) / 2;
+        width: 30px;
+        height: 30px;
+        mouse-cursor: pointer;
+        clicked => { root.remove(); }
+        Image {
+            source: @image-url("icons/trash.svg");
+            colorize: drop.has-hover ? #f05d4d : Theme.text-dim;
+            width: 16px;
+            height: 16px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}
+
+// state: 1 available, 2 downloading, 3 installed (restart), 4 failed.
+component UpdateBanner inherits Rectangle {
+    in property <int> state;
+    in property <string> version;
+    // Why the last attempt failed (state 4).
+    in property <string> error;
+    // Side margin around the card (the sidebar keeps 12px; the lock and
+    // login screens center a bare card and pass 0).
+    in property <length> inset: 12px;
+    callback apply-update();
+    callback restart();
+    height: root.state > 0 ? 66px : 0;
+    visible: root.state > 0;
+    Rectangle {
+        x: root.inset;
+        y: 4px;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - 12px;
+        border-radius: 10px;
+        background: Theme.accent.with-alpha(0.12);
+        border-width: 1px;
+        border-color: Theme.accent.with-alpha(0.35);
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 10px;
+            spacing: 10px;
+            Image {
+                source: @image-url("icons/refresh.svg");
+                colorize: root.state == 4 ? #f05d4d : Theme.accent;
+                width: 20px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.state == 1 ? @tr("Update available")
+                        : root.state == 2 ? @tr("Downloading update…")
+                        : root.state == 4 ? @tr("Update failed")
+                        : @tr("Update installed");
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.state == 1 ? @tr("Version {} is available", root.version)
+                        : root.state == 2 ? @tr("Version {}", root.version)
+                        : root.state == 4 ? root.error
+                        : @tr("Restart to use version {}", root.version);
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            if root.state == 1 || root.state == 3 || root.state == 4: Rectangle {
+                width: update-btn-text.preferred-width + 24px;
+                height: 30px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 15px;
+                background: update-touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent;
+                update-btn-text := Text {
+                    text: root.state == 1 ? @tr("Update")
+                        : root.state == 4 ? @tr("Try again")
+                        : @tr("Restart");
+                    color: white;
+                    font-size: 13px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                update-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if (root.state == 1 || root.state == 4) { root.apply-update(); }
+                        else { root.restart(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// One round call button with its caption underneath.
+component CallAction inherits TouchArea {
+    in property <string> label;
+    in property <image> icon;
+    in property <color> tint;
+    in property <color> icon-tint: #ffffff;
+    // The hang-up glyph is the handset upside down.
+    in property <bool> rotated: false;
+    mouse-cursor: pointer;
+    width: 74px;
+    height: 92px;
+    VerticalLayout {
+        spacing: 8px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 60px;
+                height: 60px;
+                border-radius: 30px;
+                background: root.tint;
+                opacity: root.has-hover ? 0.85 : 1.0;
+                Image {
+                    source: root.icon;
+                    colorize: root.icon-tint;
+                    width: 27px;
+                    height: 27px;
+                    transform-rotation: root.rotated ? 135deg : 0deg;
+                }
+            }
+        }
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// The call screen: a window of its own, the way WhatsApp Desktop puts
+// calls outside the chat list. Incoming calls ring here instead of
+// covering the conversation with a modal.
+export component CallWindow inherits Window {
+    // Not translated: the platform layer finds this window by its title.
+    title: "Zapive Call";
+    icon: @image-url("zapive.png");
+    // Preferred, not fixed: a fixed width/height binding would override
+    // the resize the host does when a call turns into a video one.
+    preferred-width: 360px;
+    preferred-height: 540px;
+    background: Theme.dark ? #111b21 : #f0f2f5;
+    // Matches AppWindow's default-font-weight (see its comment).
+    default-font-weight: 500;
+    init => {
+        Theme.dark = root.dark-theme;
+    }
+    in-out property <bool> dark-theme: true;
+    changed dark-theme => {
+        Theme.dark = self.dark-theme;
+    }
+
+    // "incoming" | "outgoing" | "connecting" | "active" | "ended"
+    in-out property <string> state: "incoming";
+    in-out property <string> peer-name: "";
+    in-out property <string> detail: "";
+    in-out property <string> timer: "";
+    in-out property <image> avatar;
+    in-out property <bool> has-avatar: false;
+    in-out property <string> initial: "";
+    in-out property <int> color-idx: 0;
+    in-out property <bool> muted: false;
+    // Video: `video-call` means this call has a picture at all, `video-on`
+    // is our own camera, `peer-video` is theirs, and `video-wanted` is the
+    // peer asking us to switch ours on.
+    in-out property <bool> video-call: false;
+    in-out property <bool> video-on: false;
+    in-out property <bool> peer-video: false;
+    in-out property <bool> video-wanted: false;
+    in-out property <image> remote-video;
+    in-out property <bool> has-remote-video: false;
+    in-out property <image> local-video;
+    in-out property <bool> has-local-video: false;
+    callback accept();
+    callback decline();
+    callback hangup();
+    callback toggle-mute();
+    callback toggle-video();
+
+    // The peer's picture fills the window; the name and controls float on
+    // top of it, the way WhatsApp lays a video call out.
+    if root.has-remote-video: Image {
+        source: root.remote-video;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+    // The self-view sits in the corner, small enough to stay out of the way.
+    if root.has-local-video: Rectangle {
+        width: 116px;
+        height: 88px;
+        x: parent.width - self.width - 16px;
+        y: 16px;
+        border-radius: 8px;
+        clip: true;
+        background: #000000;
+        Image {
+            source: root.local-video;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+        }
+    }
+
+    // Video is bright and busy; the name needs its own ground to stay
+    // readable on top of it.
+    if root.has-remote-video: Rectangle {
+        width: parent.width;
+        height: 110px;
+        // Without an explicit y a child is centred, which put this
+        // gradient's hard edge across the middle of the picture.
+        y: 0;
+        background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+    }
+    if root.has-remote-video: Rectangle {
+        width: parent.width;
+        height: 150px;
+        y: parent.height - self.height;
+        background: @linear-gradient(0deg, #000000b0 0%, #00000000 100%);
+    }
+
+    VerticalLayout {
+        padding: 28px;
+        spacing: 16px;
+
+        Rectangle { vertical-stretch: root.has-remote-video ? 0 : 1; }
+        Text {
+            text: root.peer-name;
+            color: root.has-remote-video ? #ffffff : Theme.text;
+            font-size: 26px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.timer != "" ? root.timer : root.detail;
+            color: root.has-remote-video ? #d0d8dc : Theme.text-dim;
+            font-size: 14px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        if !root.has-remote-video: HorizontalLayout {
+            alignment: center;
+            Avatar {
+                width: 160px;
+                height: 160px;
+                src: root.avatar;
+                has-image: root.has-avatar;
+                initial: root.initial;
+                color-idx: root.color-idx;
+            }
+        }
+        // Pushes the controls to the bottom edge of the picture.
+        Rectangle { vertical-stretch: 1; }
+
+        // Ringing: decline on the left, answer on the right, as on the
+        // phone. Everything else gets mute plus a single hang-up.
+        HorizontalLayout {
+            alignment: center;
+            spacing: root.state == "incoming" ? 44px : 12px;
+            if root.state == "incoming": CallAction {
+                label: @tr("Decline");
+                icon: @image-url("icons/phone.svg");
+                tint: #ea0038;
+                rotated: true;
+                clicked => { root.decline(); }
+            }
+            if root.state == "incoming": CallAction {
+                label: @tr("Accept");
+                icon: root.video-call
+                    ? @image-url("icons/video.svg")
+                    : @image-url("icons/phone.svg");
+                tint: #00a884;
+                clicked => { root.accept(); }
+            }
+            // The camera can only be switched once the call is up. It
+            // lights up when the peer has asked for video.
+            if root.state == "active": CallAction {
+                label: root.video-on ? @tr("Stop video") : @tr("Video");
+                icon: @image-url("icons/video.svg");
+                tint: root.video-wanted
+                    ? #00a884
+                    : (root.video-on ? #2a3942 : (Theme.dark ? #2a3942 : #d1d7db));
+                icon-tint: root.video-wanted || root.video-on ? #ffffff : Theme.text;
+                clicked => { root.toggle-video(); }
+            }
+            // Muting only means something once the media plane is up.
+            if root.state == "active": CallAction {
+                label: root.muted ? @tr("Unmute") : @tr("Mute");
+                icon: @image-url("icons/microphone.svg");
+                tint: root.muted ? #ea0038 : (Theme.dark ? #2a3942 : #d1d7db);
+                icon-tint: root.muted ? #ffffff : Theme.text;
+                clicked => { root.toggle-mute(); }
+            }
+            if root.state != "incoming" && root.state != "ended": CallAction {
+                label: @tr("End");
+                icon: @image-url("icons/phone.svg");
+                tint: #ea0038;
+                rotated: true;
+                clicked => { root.hangup(); }
+            }
+        }
+    }
+}
+
+// Developer probe (--overlay-selftest): a styled bubble put together the
+// way the conversation does it -- StyledText, the transparent selection
+// overlay, the link's hand-cursor boxes -- on its own, so the mouse path
+// through it can be driven and checked without the whole app.
+export component LinkProbeWindow inherits Window {
+    title: "Zapive Selftest";
+    width: 480px;
+    height: 220px;
+    background: rgb(32,44,51);
+    in property <string> plain: "Cupom no APP: veja https://x.io/a agora mesmo";
+    in property <int> link-start: 19;
+    in property <int> link-end: 35;
+    in-out property <bool> link-press-through: false;
+    in-out property <bool> link-release-seen: false;
+    callback link-pressed(length, length);
+    out property <int> anchor: sel.anchor-position-byte-offset;
+    out property <int> cursor: sel.cursor-position-byte-offset;
+    out property <bool> hovered: hover.hovered;
+    // The link's first-line box, in window coordinates.
+    out property <length> box-x: hover.absolute-position.x + hover.sx;
+    out property <length> box-y: hover.absolute-position.y + hover.sy;
+    out property <length> box-w: (hover.one-line ? hover.ex : hover.width) - hover.sx;
+    out property <length> box-h: hover.line-h;
+    Rectangle {
+        x: 20px;
+        y: 20px;
+        width: body.width;
+        height: body.preferred-height;
+        body := StyledText {
+            text: @markdown("Cupom no APP: veja [https://x.io/a](https://x.io/a) agora *mesmo*");
+            default-color: rgb(233,237,239);
+            default-font-size: 14px;
+            link-color: rgb(0,168,132);
+            width: min(self.preferred-width, 400px);
+        }
+        sel := TextInput {
+            text: root.plain;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            font-size: 14px;
+            color: rgba(0,0,0,0.004);
+            selection-background-color: rgb(51,144,236);
+            selection-foreground-color: white;
+            width: parent.width;
+            height: parent.height;
+        }
+        hover := LinkHover {
+            width: parent.width;
+            height: parent.height;
+            text: root.plain;
+            start: root.link-start;
+            end: root.link-end;
+            pass-through: root.link-press-through;
+            press(x, y) => {
+                root.link-release-seen = false;
+                root.link-pressed(x, y);
+            }
+            release => { root.link-release-seen = true; }
+        }
+    }
+}

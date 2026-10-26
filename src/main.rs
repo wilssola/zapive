@@ -13,8 +13,10 @@ mod markup;
 mod media;
 mod video;
 mod paths;
+mod pdf;
 mod platform;
 mod qr;
+mod search;
 mod single;
 mod store;
 mod update;
@@ -31,6 +33,8 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 fn main() {
     paths::ensure_dirs();
     logging::install();
+    // The previous binary, left by an update that ran in the last session.
+    update::sweep();
 
     // Developer probe: walks the video-call path the way a real call
     // does -- enumerate on this thread first (the way the Settings panel
@@ -39,6 +43,21 @@ fn main() {
     // can be pointed at a machine that already has the app open.
     if std::env::args().any(|a| a == "--video-selftest") {
         video_selftest();
+        return;
+    }
+    if std::env::args().any(|a| a == "--overlay-selftest") {
+        overlay_selftest();
+        return;
+    }
+    // Developer probe: runs the self-updater against this very executable
+    // (copy it somewhere disposable first) and says why it failed, if so.
+    if std::env::args().any(|a| a == "--update-selftest") {
+        println!("[selftest] running {}, latest is {:?}", update::current_version(), update::check());
+        println!("[selftest] apply: {:?}", update::apply());
+        return;
+    }
+    if std::env::args().any(|a| a == "--player-selftest") {
+        player_selftest();
         return;
     }
 
@@ -96,6 +115,10 @@ fn main() {
     let ui = AppWindow::new().expect("failed to create the main window");
     ui.set_language_mode(language.as_str().into());
     ui.set_autostart(platform::autostart_enabled());
+    // Both off by default: the current behaviour (no receipts sent, a
+    // revoke keeps its message) is what a fresh install already does.
+    ui.set_send_receipts(app_vault.setting_get("send_receipts").as_deref() == Some("1"));
+    ui.set_apply_deletions(app_vault.setting_get("apply_deletions").as_deref() == Some("1"));
 
     // Theme: explicit modes win; "system" follows the OS with a slow poll.
     let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
@@ -121,7 +144,11 @@ fn main() {
         );
     }
 
-    let (wa, registered) = match wa::WaService::start(rt) {
+    // The session to open is the account that was on screen last; the
+    // vault reads and writes that account's conversations from here on.
+    let account = app_vault.active_account();
+    app_vault.set_account(&account);
+    let (wa, registered) = match wa::WaService::start(rt, &account) {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("[wa] failed to start: {e}");
@@ -134,6 +161,21 @@ fn main() {
     };
 
     bridge::install(&ui, wa.clone());
+
+    // The window's first frame is drawn before anything queued through
+    // ui_apply runs, and the screen it starts on is the QR login: a
+    // paired session flashed it on every launch. Pick the real screen
+    // here, while the window is still hidden.
+    ui.set_screen(
+        if app_vault.has_pin() {
+            "locked"
+        } else if registered {
+            "main"
+        } else {
+            "login"
+        }
+        .into(),
+    );
 
     // With a PIN the vault stays locked until the user types it; without
     // one it opens right away, bound to the OS account.
@@ -189,6 +231,21 @@ fn main() {
                         slint::quit_event_loop().ok();
                     }
                 }
+            },
+        );
+    }
+
+    // Developer probe; see Bridge::accounts_selftest.
+    let accounts_probe = slint::Timer::default();
+    if std::env::args().any(|a| a == "--accounts-selftest") {
+        let step = std::cell::Cell::new(0u32);
+        accounts_probe.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(3),
+            move || {
+                let n = step.get();
+                step.set(n + 1);
+                bridge::ui_apply(move |b| b.accounts_selftest(n));
             },
         );
     }
@@ -274,6 +331,171 @@ fn audio_selftest() {
     let strip = audio::message_waveform(&samples);
     println!("[selftest] message waveform {} points, peak {}", strip.len(), strip.iter().max().unwrap_or(&0));
     let _ = std::fs::remove_file(&tmp);
+}
+
+// Developer probe: drives the video player with no window -- play, pause,
+// resume, seek, run to the end, replay -- against the clip given after the
+// flag, or a four-second one made on the spot. A plain file passes for a
+// cache entry: only sealed files carry the magic that asks for the key.
+fn player_selftest() {
+    use std::sync::{Arc, Mutex};
+    use video::PlayerEvent;
+
+    let given = std::env::args().skip_while(|a| a != "--player-selftest").nth(1);
+    let clip = match given {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let gif = std::env::temp_dir().join("zapive_selftest.gif");
+            let mp4 = std::env::temp_dir().join("zapive_selftest.mp4");
+            let mut frames = Vec::new();
+            for i in 0..60u32 {
+                let img = image::RgbaImage::from_fn(320, 180, |x, _| {
+                    if x / 8 == i { image::Rgba([255, 255, 255, 255]) } else { image::Rgba([20, 60, 90, 255]) }
+                });
+                frames.push(image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(100, 1)));
+            }
+            let file = std::fs::File::create(&gif).expect("temp gif");
+            let mut encoder = image::codecs::gif::GifEncoder::new(file);
+            encoder.encode_frames(frames).expect("encode gif");
+            drop(encoder);
+            // The player opens a cache entry through its plain temp copy,
+            // and keeps one it finds: drop the last run's.
+            let _ = std::fs::remove_file(paths::media_cache().join(".tmp").join("zapive_selftest.mp4"));
+            if video::gif_to_mp4(&gif, &mp4).is_none() {
+                println!("[selftest] FAIL: could not build the test clip");
+                return;
+            }
+            mp4
+        }
+    };
+    println!("[selftest] playing {}", clip.display());
+
+    #[derive(Default)]
+    struct Seen {
+        frames: u32,
+        last: f64,
+        resyncs: u32,
+        ended: bool,
+        failed: bool,
+        duration: f64,
+    }
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let player: Arc<Mutex<Option<video::Playback>>> = Arc::new(Mutex::new(None));
+    let started = std::time::Instant::now();
+    let playback = {
+        let (seen, player) = (seen.clone(), player.clone());
+        video::Playback::start(vault::KeyHandle::default(), clip, move |event| {
+            let mut seen = seen.lock().unwrap();
+            match event {
+                PlayerEvent::Ready { w, h, duration } => {
+                    seen.duration = duration;
+                    println!("[selftest] ready {w}x{h}, {duration:.2}s");
+                }
+                PlayerEvent::Frame { frame, pos, resync } => {
+                    seen.frames += 1;
+                    seen.last = pos;
+                    if std::env::var_os("ZAPIVE_TRACE").is_some() {
+                        println!("[trace] {pos:.3} at {:.3}", started.elapsed().as_secs_f64());
+                    }
+                    if resync {
+                        seen.resyncs += 1;
+                        println!(
+                            "[selftest] resync at {pos:.2}s ({}x{}), {:.2}s in",
+                            frame.w,
+                            frame.h,
+                            started.elapsed().as_secs_f64()
+                        );
+                    }
+                    // Stand in for the UI having drawn it.
+                    if let Some(player) = player.lock().unwrap().as_ref() {
+                        player.frame_shown();
+                    }
+                }
+                PlayerEvent::Audio(buffer) => {
+                    println!("[selftest] soundtrack {:.2}s", buffer.duration_secs())
+                }
+                PlayerEvent::Ended => {
+                    seen.ended = true;
+                    println!("[selftest] ended, {:.2}s in", started.elapsed().as_secs_f64());
+                }
+                PlayerEvent::Failed => {
+                    seen.failed = true;
+                    println!("[selftest] FAIL: the player gave up on the clip");
+                }
+            }
+        })
+    };
+    *player.lock().unwrap() = Some(playback);
+    let with = |f: &dyn Fn(&video::Playback)| f(player.lock().unwrap().as_ref().unwrap());
+    let sleep = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
+    let report = |what: &str| {
+        let seen = seen.lock().unwrap();
+        println!("[selftest] {what}: {} frames, at {:.2}s", seen.frames, seen.last);
+        (seen.frames, seen.last)
+    };
+
+    // Everything below is in fractions of the clip, whatever its length.
+    sleep(400);
+    let total = seen.lock().unwrap().duration.max(0.5);
+    let (frames, at) = report("after 0.4s of play");
+    if frames < 3 || !(0.2..=0.6).contains(&at) {
+        println!("[selftest] FAIL: 0.4s of play should be about 0.4s in");
+    }
+    with(&|p| p.pause());
+    sleep(150);
+    let (paused_frames, _) = report("paused");
+    sleep(500);
+    let (still, _) = report("still paused");
+    if still != paused_frames {
+        println!("[selftest] FAIL: frames kept coming while paused");
+    }
+    // A seek while paused shows where it landed, once.
+    let target = total * 0.7;
+    with(&|p| p.seek(target));
+    sleep(400);
+    let (after_seek, at) = report("sought to 70% while paused");
+    if after_seek != still + 1 || (at - target).abs() > 0.15 {
+        println!("[selftest] FAIL: a paused seek should show exactly the picture it landed on");
+    }
+    with(&|p| p.resume());
+    sleep(150);
+    let (_, at) = report("resumed");
+    if at < target || at > target + 0.35 {
+        println!("[selftest] FAIL: play should carry on from the seek");
+    }
+    // A seek lands when its keyframe-to-target run is decoded, which a
+    // debug build takes its time over: wait for it instead of guessing.
+    let target = total * 0.2;
+    with(&|p| p.seek(target));
+    let landed = (0..40).any(|_| {
+        sleep(100);
+        let at = seen.lock().unwrap().last;
+        at >= target && at < target + 1.5
+    });
+    report("sought back to 20% while playing");
+    if !landed {
+        println!("[selftest] FAIL: a playing seek should land and keep going");
+    }
+    // The last second, rather than sitting through a long clip.
+    with(&|p| p.seek((total - 1.0).max(0.0)));
+    let ended = (0..60).any(|_| {
+        sleep(100);
+        seen.lock().unwrap().ended
+    });
+    if !ended {
+        println!("[selftest] FAIL: the clip never reported its end");
+    }
+    // Play at the end means play again.
+    with(&|p| p.resume());
+    sleep(600);
+    let (_, at) = report("replayed");
+    if !(0.1..=0.9).contains(&at) {
+        println!("[selftest] FAIL: replay should start over");
+    }
+    let failed = seen.lock().unwrap().failed;
+    *player.lock().unwrap() = None;
+    sleep(100);
+    println!("[selftest] {}", if failed { "player FAILED" } else { "player done" });
 }
 
 // The NAL types in one Annex-B access unit, in order.
@@ -481,4 +703,136 @@ fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_ico
         .build()
         .ok()?;
     Some((tray, open_id, exit_id))
+}
+
+// Developer probe: a styled bubble with the transparent selection overlay
+// and the link's hand-cursor boxes (LinkProbeWindow in app.slint), driven
+// with synthetic mouse events: hovering the link must reach its box, and
+// a press, a drag and a double click on it must still reach the text
+// underneath. "keep" after the flag leaves the window up for a real mouse.
+fn overlay_selftest() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let win = LinkProbeWindow::new().expect("selftest window");
+    {
+        let weak = win.as_weak();
+        win.on_link_pressed(move |x, y| {
+            let weak = weak.clone();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(win) = weak.upgrade() {
+                    bridge::replay_link_press(
+                        win.window(),
+                        x,
+                        y,
+                        &|on| win.set_link_press_through(on),
+                        &|| win.get_link_release_seen(),
+                    );
+                }
+            });
+        });
+    }
+    let keep = std::env::args().any(|a| a == "keep");
+    let weak = win.as_weak();
+    let step = std::rc::Rc::new(std::cell::Cell::new(0u32));
+    let script = slint::Timer::default();
+    script.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(150), move || {
+        let Some(win) = weak.upgrade() else { return };
+        let (start, end) = (win.get_link_start(), win.get_link_end());
+        let (x, y) = (win.get_box_x() + win.get_box_w() / 2.0, win.get_box_y() + win.get_box_h() / 2.0);
+        let at = |x: f32, y: f32| slint::LogicalPosition::new(x, y);
+        let left = PointerEventButton::Left;
+        let send = |event| win.window().dispatch_event(event);
+        let n = step.get();
+        step.set(n + 1);
+        match n {
+            // Let the first layout and the probe's measurement happen.
+            0 | 1 => {}
+            2 => {
+                println!(
+                    "[selftest] link box {:.0},{:.0} {:.0}x{:.0}",
+                    win.get_box_x(),
+                    win.get_box_y(),
+                    win.get_box_w(),
+                    win.get_box_h()
+                );
+                if win.get_box_w() < 40.0 || win.get_box_h() < 10.0 {
+                    println!("[selftest] FAIL: the link was not measured");
+                }
+                send(WindowEvent::PointerMoved { position: at(x, y) });
+            }
+            3 => {
+                println!("[selftest] hovering the link: box hovered = {}", win.get_hovered());
+                if !win.get_hovered() {
+                    println!("[selftest] FAIL: the hand-cursor box is not what the mouse is over");
+                }
+                send(WindowEvent::PointerMoved { position: at(30.0, y) });
+            }
+            4 => {
+                if win.get_hovered() {
+                    println!("[selftest] FAIL: the box claims plain text too");
+                }
+                // A press on the link, then a drag to the right.
+                send(WindowEvent::PointerMoved { position: at(x, y) });
+                send(WindowEvent::PointerPressed { position: at(x, y), button: left });
+            }
+            5 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] press on the link: anchor={anchor} cursor={cursor}");
+                if anchor != cursor || anchor < start || anchor > end {
+                    println!("[selftest] FAIL: the press did not reach the text under the link");
+                }
+                send(WindowEvent::PointerMoved { position: at(x + 60.0, y) });
+            }
+            6 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] drag from the link: anchor={anchor} cursor={cursor}");
+                if cursor <= anchor {
+                    println!("[selftest] FAIL: a drag that starts on a link does not select");
+                }
+                send(WindowEvent::PointerReleased { position: at(x + 60.0, y), button: left });
+            }
+            // Past the double-click interval, so the next press is a new one.
+            7..=10 => {}
+            11 => {
+                // A plain click: down and up before the replay has run.
+                send(WindowEvent::PointerPressed { position: at(x, y), button: left });
+                send(WindowEvent::PointerReleased { position: at(x, y), button: left });
+            }
+            12 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] click on the link: anchor={anchor} cursor={cursor}");
+                if anchor != cursor || anchor < start || anchor > end {
+                    println!("[selftest] FAIL: a click should put the cursor on the link");
+                }
+                send(WindowEvent::PointerMoved { position: at(x + 80.0, y) });
+            }
+            13 => {
+                if win.get_anchor() != win.get_cursor() {
+                    println!("[selftest] FAIL: the text thinks the button is still down after a click");
+                }
+                send(WindowEvent::PointerMoved { position: at(x, y) });
+            }
+            14..=17 => {}
+            18 => {
+                // Double click: selects the word under it, as on plain text.
+                for _ in 0..2 {
+                    send(WindowEvent::PointerPressed { position: at(x, y), button: left });
+                    send(WindowEvent::PointerReleased { position: at(x, y), button: left });
+                }
+            }
+            19 => {}
+            20 => {
+                let (anchor, cursor) = (win.get_anchor(), win.get_cursor());
+                println!("[selftest] double click on the link: anchor={anchor} cursor={cursor}");
+                if anchor == cursor {
+                    println!("[selftest] FAIL: a double click on a link should select a word");
+                }
+                println!("[selftest] overlay done");
+                if !keep {
+                    slint::quit_event_loop().ok();
+                }
+            }
+            _ => {}
+        }
+    });
+    win.run().expect("event loop");
 }

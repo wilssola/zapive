@@ -20,6 +20,13 @@ fraction of the resources — about **140–180 MB of RAM** connected with
   forwarding, starring, deleting; edits and revokes are reflected.
 - Groups with sender names/colors, channels (newsletters) with metadata,
   status/stories viewer, and a call log with reject support.
+- Full-text message search backed by SQLite FTS5, in a separate,
+  keyed-and-encrypted index (see Privacy & security below) — no plaintext
+  word ever touches disk.
+- Two privacy switches, both **off by default**: sending read/played
+  receipts to others, and applying a "deleted for everyone" from someone
+  else (off keeps the message, with a small "deleted by sender"
+  indicator, instead of erasing it).
 
 **Media, fully in-process**
 - Photos, videos, GIFs, stickers, documents and voice notes — sent and
@@ -28,8 +35,19 @@ fraction of the resources — about **140–180 MB of RAM** connected with
 - Voice notes play at 1x/1.5x/2x/3x with pitch preserved (WSOLA
   time-stretch) and show real waveforms; recording encodes straight to
   ogg/opus like the phone apps do.
-- Click-to-play video overlay with soundtrack, GIF zoom, sticker/GIF
-  picker with Openverse search, in-panel media gallery.
+- Streaming video player: play/pause, seek bar, volume, keyboard
+  shortcuts, save-as, soundtrack kept in sync, clips of any length at
+  their own frame rate. GIF zoom, sticker/GIF picker with Openverse
+  search, in-panel media gallery.
+
+**Accounts**
+- Up to five WhatsApp accounts, switched from the avatar at the bottom of
+  the icon rail. One is connected at a time; the others stay linked and
+  catch up when switched to.
+- Logging out can keep the conversations on the computer: linking the
+  same number again carries on from them instead of downloading
+  everything once more. A different number starts clean.
+- Shows up under Linked devices as Windows / Mac OS / Linux.
 
 **Desktop integration**
 - Native toasts with sender avatar, click-to-open and quick actions.
@@ -50,6 +68,12 @@ fraction of the resources — about **140–180 MB of RAM** connected with
   random data key sealed by Windows DPAPI (machine + user bound) and
   optionally by a PIN (scrypt-derived key). Only whatsapp-rust's own
   protocol store (`wa.db`) stays plain SQLite.
+- The search index (`search.db`) holds no plaintext either: every word is
+  a keyed, prefix-preserving hash derived from the same data key, and the
+  snippet text is separately AES-256-GCM encrypted.
+- Read/played receipts are never sent, and a "deleted for everyone" from
+  someone else never erases the message here, unless you turn either on
+  in Settings → Privacy.
 - Optional PIN lock screen on launch.
 
 ## Performance
@@ -96,21 +120,28 @@ cargo build --release
 Linux needs `libasound2-dev libgtk-3-dev libxdo-dev`; macOS needs
 nothing extra. Both are smoke-built by CI (`.github/workflows/build.yml`)
 but not yet regularly tested. `cargo run -- --audio-selftest` exercises
-the opus encode/decode, time-stretch and waveform paths headlessly.
+the opus encode/decode, time-stretch and waveform paths headlessly;
+`--player-selftest [clip.mp4]` does the same for the video player (play,
+pause, seek, end, replay) and `--overlay-selftest` for mouse selection
+and the link cursor over a styled bubble.
 
 ## Data locations
 
 | What | Windows | macOS | Linux |
 |---|---|---|---|
 | Encrypted vault (chats, settings) | `%APPDATA%\Zapive\vault.db` | `~/Library/Application Support/Zapive/vault.db` | `$XDG_DATA_HOME/zapive/vault.db` |
+| Search index (FTS5, keyed/encrypted) | `%APPDATA%\Zapive\search.db` | `~/Library/Application Support/Zapive/search.db` | `$XDG_DATA_HOME/zapive/search.db` |
 | WhatsApp session (protocol state) | `%APPDATA%\Zapive\wa.db` | `~/Library/Application Support/Zapive/wa.db` | `$XDG_DATA_HOME/zapive/wa.db` |
 | Encrypted media + avatar cache | `%LOCALAPPDATA%\Zapive\Cache\media` | `~/Library/Caches/Zapive/media` | `$XDG_CACHE_HOME/zapive/media` |
 
 `$XDG_DATA_HOME` defaults to `~/.local/share` and `$XDG_CACHE_HOME` to
-`~/.cache`. The vault and the media cache are envelope-encrypted; `wa.db`
-is whatsapp-rust's own store, plain SQLite guarded by OS file
-permissions. Deleting the cache never loses the account; deleting
-`wa.db` requires pairing again.
+`~/.cache`. The vault, the search index and the media cache are
+encrypted (see Privacy & security above); `wa.db` is whatsapp-rust's own
+store, plain SQLite guarded by OS file permissions. Deleting the cache
+never loses the account; deleting `search.db` only costs a rebuild of
+the search index on next launch; deleting `wa.db` requires pairing
+again. Accounts after the first keep their own `wa-<id>.db` and
+`search-<id>.db` next to those, and their rows in the one vault.
 
 ## Credits
 

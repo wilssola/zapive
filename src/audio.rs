@@ -271,6 +271,8 @@ struct PlayShared {
     buffer: Arc<Vec<f32>>,
     cursor: AtomicUsize,
     finished: AtomicBool,
+    // f32 bits; 1.0 unless the video player's volume says otherwise.
+    gain: std::sync::atomic::AtomicU32,
 }
 
 pub struct Player {
@@ -294,6 +296,7 @@ impl Player {
             buffer: buffer.samples.clone(),
             cursor: AtomicUsize::new(start),
             finished: AtomicBool::new(false),
+            gain: std::sync::atomic::AtomicU32::new(1.0f32.to_bits()),
         });
         let cb = shared.clone();
         let mut frac = 0.0f64;
@@ -302,9 +305,10 @@ impl Player {
                 &config.config(),
                 move |out: &mut [f32], _| {
                     let mut cursor = cb.cursor.load(Ordering::Relaxed);
+                    let gain = f32::from_bits(cb.gain.load(Ordering::Relaxed));
                     for frame in out.chunks_mut(channels) {
                         let sample = if cursor < cb.buffer.len() {
-                            let s = cb.buffer[cursor];
+                            let s = cb.buffer[cursor] * gain;
                             frac += step;
                             while frac >= 1.0 {
                                 cursor += 1;
@@ -337,6 +341,18 @@ impl Player {
     pub fn resume(&self) {
         use cpal::traits::StreamTrait;
         let _ = self._stream.play();
+    }
+
+    // Jumps to `secs` (OUTPUT time). The callback picks the new cursor up
+    // on its next buffer, a few milliseconds away.
+    pub fn seek(&self, secs: f64) {
+        let at = ((secs.max(0.0) * OUT_RATE as f64) as usize).min(self.shared.buffer.len());
+        self.shared.cursor.store(at, Ordering::Relaxed);
+        self.shared.finished.store(false, Ordering::Relaxed);
+    }
+
+    pub fn set_gain(&self, gain: f32) {
+        self.shared.gain.store(gain.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     // Position in OUTPUT seconds (multiply by the rate for source time).

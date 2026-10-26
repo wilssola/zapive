@@ -3,16 +3,20 @@
 // through WaService commands. Port of src/bridge.ts on master (phases 1-2:
 // login, chat list, conversation, text messages, replies, backfill).
 use crate::i18n::{t, ta};
-use crate::markup::{MentionTarget, has_markup, to_markdown};
+use crate::markup::{MentionTarget, has_markup, render_plain, target_at, to_markdown};
 use crate::qr::{empty_image, qr_image};
 use crate::store::{
-    MessageKind, Store, StoredMessage, clean_text, display_id, format_day,
-    format_number, format_time, is_channel, is_group, normalize_jid, now_secs,
-    preview_body, reaction_summary, ticks_for,
+    Label, Member, MessageKind, Store, StoredMessage, clean_text, display_id, format_clock,
+    format_day, format_number, format_stamp, format_time, is_channel, is_group, normalize_jid,
+    now_secs, preview_body, reaction_summary, ticks_for,
 };
 use crate::vault::Vault;
-use crate::wa::{Cmd, HistoryChunk, MediaWant, QuoteRef, WaService};
-use crate::{AppWindow, CallItem, CallWindow, ChatItem, MessageItem, ReactionItem, StickerCell};
+use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
+use crate::{
+    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
+    MessageItem, PdfPage,
+    ReactionItem, SearchHit, StickerCell,
+};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -62,6 +66,22 @@ pub struct Bridge {
     refresh_queued: bool,
     save_queued: bool,
     pending_registered: bool,
+    // Accounts: which one is loaded, the wa.rs session epoch its events
+    // carry, whether it is paired right now, and the switcher's rows.
+    account: String,
+    epoch: u64,
+    registered: bool,
+    switching: bool,
+    // Set by the logout dialog: the conversations go with the session.
+    // A logout that came from the phone leaves them alone.
+    wipe_on_logout: bool,
+    accounts_model: Rc<VecModel<AccountItem>>,
+    // The open chat's contact is online; what the header falls back to
+    // when a typing/recording line ends.
+    peer_online: bool,
+    // Bumped whenever the typing line changes hands, so an expiry timer
+    // armed for an older "composing" does nothing.
+    typing_gen: u64,
     // WhatsApp events that arrived before the vault was open (the client
     // connects while the PIN screen is still up); replayed by boot.
     locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
@@ -70,6 +90,9 @@ pub struct Bridge {
     requested_avatars: HashSet<String>,
     avatar_tries: HashMap<String, u32>,
     media_inflight: HashSet<String>,
+    // Media the server refused (expired, forbidden): asked once per run,
+    // not again on every scroll.
+    media_failed: HashSet<String>,
     media_path: HashMap<String, String>,
     decoded: HashMap<String, (slint::Image, i32, i32)>,
     decoded_order: std::collections::VecDeque<String>,
@@ -99,12 +122,67 @@ pub struct Bridge {
     reactions_model: Rc<VecModel<ReactionItem>>,
     forward_model: Rc<VecModel<ChatItem>>,
     react_pick_for: Option<String>,
-    pending_forward: Option<(String, String)>,
+    // (chat, message id) pairs waiting for a destination.
+    pending_forward: Vec<(String, String)>,
+    // History sync progress, for the banner and its dialog.
+    sync_batches: u32,
+    sync_messages: usize,
+    // Multi-select mode over the open conversation.
+    select_mode: bool,
+    selected: Vec<String>,
+    // The "@" being typed: byte range of "@query" in the composer.
+    mention_at: Option<(usize, usize)>,
+    // Labels inserted into the composer and the jids they stand for;
+    // "all" is the whole group.
+    mentions: Vec<(String, String)>,
+    mention_model: Rc<VecModel<MemberItem>>,
+    // Group rosters are refreshed at most every few minutes.
+    group_meta_at: HashMap<String, Instant>,
+    // Search: hits in the sidebar (all chats) and in the open chat.
+    search_model: Rc<VecModel<SearchHit>>,
+    chat_search_model: Rc<VecModel<SearchHit>>,
+    chat_search_query: String,
+    chat_search_pos: usize,
+    // Decoded sticker frames keyed by content hash, shared by every
+    // message carrying the same sticker and by the picker.
+    stickers: HashMap<String, Rc<Vec<slint::Image>>>,
+    sticker_order: std::collections::VecDeque<String>,
+    sticker_bytes: usize,
+    // Member picker for "add member", and the info panel roster.
+    member_model: Rc<VecModel<MemberItem>>,
+    member_picked: HashSet<String>,
+    info_member_model: Rc<VecModel<MemberItem>>,
+    label_model: Rc<VecModel<LabelItem>>,
+    // What the confirm dialog will do when accepted.
+    confirm_action: Option<ConfirmAction>,
+    // PDF viewer: the worker, the open document's page sizes (points),
+    // and which pages are rendered at which width.
+    pdf: crate::pdf::PdfWorker,
+    pdf_gen: u64,
+    pdf_id: String,
+    pdf_path: Option<std::path::PathBuf>,
+    pdf_sizes: Vec<(f32, f32)>,
+    pdf_model: Rc<VecModel<PdfPage>>,
+    pdf_zoom: f32,
+    pdf_page_w: f32,
+    pdf_rendered: HashMap<usize, u32>,
+    pdf_pending: HashSet<(usize, u32)>,
+    // Drag selection over the conversation: where the press started and
+    // where every visible row currently sits (list coordinates).
+    drag_anchor: Option<(String, f32)>,
+    row_geom: HashMap<String, (f32, f32, u32)>,
+    geom_epoch: u32,
+    row_gc_queued: bool,
+    // Who a pending "share group history" dialog is about.
+    share_target: Option<(String, String)>,
     pending_image: Option<std::path::PathBuf>,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String)>,
     notify_queued: bool,
+    // A check the user asked for from Settings: it also reports "nothing
+    // new", where the periodic one stays quiet.
+    update_manual: bool,
     // Status/stories, calls, channels and the info panel.
     status_model: Rc<VecModel<ChatItem>>,
     calls_model: Rc<VecModel<CallItem>>,
@@ -124,8 +202,16 @@ pub struct Bridge {
     zoom_frames: Vec<slint::Image>,
     zoom_idx: usize,
     zoom_timer: slint::Timer,
+    video: Option<crate::video::Playback>,
     video_audio: Option<crate::audio::Player>,
     video_id: Option<String>,
+    // Told apart from a player that was closed or replaced.
+    video_gen: u64,
+    video_playing: bool,
+    video_pos: f64,
+    video_duration: f64,
+    video_volume: f32,
+    video_muted: bool,
     // Keeps one-shot timers alive until they fire.
     oneshots: Vec<slint::Timer>,
 }
@@ -135,6 +221,25 @@ struct Anim {
     idx: usize,
     looping: bool,
 }
+
+// Destructive actions wait for a second click.
+enum ConfirmAction {
+    ExitGroup(String),
+    ClearChat(String),
+    DeleteSelected { for_everyone: bool },
+    DeleteChat(String),
+    // Primary button wipes the conversations too; the secondary keeps them.
+    Logout,
+    RemoveAccount(String),
+    // From the login screen: drop what a past session left on disk.
+    ForgetConversations,
+}
+
+const STICKER_CACHE_MAX: usize = 64;
+const STICKER_CACHE_BYTES: usize = 24 * 1024 * 1024;
+// How long a fetched roster is trusted before the next open refreshes it.
+const GROUP_META_TTL: Duration = Duration::from_secs(10 * 60);
+const SEARCH_LIMIT: usize = 60;
 
 // Whatever the call screen is currently showing. One at a time: a second
 // offer arriving mid-call is turned down rather than queued.
@@ -178,8 +283,8 @@ const DECODE_CACHE_MAX: usize = 50;
 // 1280px, so one entry can be 6 MB of RGBA and fifty of them 300 MB. These
 // budgets are what actually keeps the caches honest; the counts above stay
 // as a ceiling on bookkeeping.
-const DECODE_CACHE_BYTES: usize = 64 * 1024 * 1024;
-const ANIM_CACHE_BYTES: usize = 24 * 1024 * 1024;
+const DECODE_CACHE_BYTES: usize = 32 * 1024 * 1024;
+const ANIM_CACHE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ANIMATIONS: usize = 6;
 // How many chats keep their message lists in RAM at once.
 const WARM_MAX: usize = 8;
@@ -198,6 +303,70 @@ fn image_bytes(image: &slint::Image) -> usize {
 }
 
 // WhatsApp-style thumbnail box: fit within 330x380, never upscale.
+// Plays a press that landed on a link's hand-cursor box again, with the
+// boxes out of the way, so it reaches the selectable text under them.
+// `pass_through` and `released` reach the window's link-press-through and
+// link-release-seen properties (the selftest has a window of its own).
+pub fn replay_link_press(
+    window: &slint::Window,
+    x: f32,
+    y: f32,
+    pass_through: &dyn Fn(bool),
+    released: &dyn Fn() -> bool,
+) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    thread_local! {
+        // The last press replayed: when, where, and its place in a run of
+        // clicks (1 = single, 2 = double, 3 = triple).
+        static LAST: std::cell::Cell<Option<(Instant, f32, f32, u8)>> = const { std::cell::Cell::new(None) };
+    }
+    // Slint counts clicks from the presses it sees, and it has now seen
+    // this one twice. Count them here instead and spell the run out.
+    let run = LAST.with(|last| {
+        let run = match last.get() {
+            Some((at, lx, ly, n))
+                if at.elapsed() < Duration::from_millis(450)
+                    && (lx - x).abs() < 6.0
+                    && (ly - y).abs() < 6.0
+                    && n < 3 =>
+            {
+                n + 1
+            }
+            _ => 1,
+        };
+        last.set(Some((Instant::now(), x, y, run)));
+        run
+    });
+    let position = slint::LogicalPosition::new(x, y);
+    pass_through(true);
+    // The box still holds the mouse grab from the real press. A press of
+    // another button is refused by it (it is disabled now), which frees
+    // the grab, and it also restarts Slint's own click counter.
+    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Other });
+    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Other });
+    for click in 1..=run {
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        if click < run {
+            window
+                .dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        }
+    }
+    // A click quicker than this replay: the button is already up, and
+    // the release went to the box instead of the text.
+    if released() {
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+    }
+    pass_through(false);
+}
+
+// A video's box when only its thumbnail is known: the thumbnail's shape
+// at the size a clip gets, scaled up as well as down.
+fn poster_box(w: i32, h: i32) -> (i32, i32) {
+    let (w, h) = (w.max(1) as f64, h.max(1) as f64);
+    let scale = (330.0 / w).min(380.0 / h);
+    (((w * scale).round() as i32).max(1), ((h * scale).round() as i32).max(1))
+}
+
 fn bubble_fit(w: i32, h: i32) -> (i32, i32) {
     let scale = (330.0 / w as f64).min(380.0 / h as f64).min(1.0);
     (((w as f64 * scale).round() as i32).max(1), ((h as f64 * scale).round() as i32).max(1))
@@ -218,9 +387,19 @@ pub fn ui_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
 // processing an event then would build on empty state and a later save
 // would clobber the vault. Park them and let boot replay in order.
 pub fn wa_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
+    wa_apply_at(crate::wa::SESSION_EPOCH.load(std::sync::atomic::Ordering::SeqCst), f);
+}
+
+// `epoch` is the session the work came from. The bridge holds one
+// account's conversations at a time, so anything produced under another
+// epoch than the one it has loaded is for a store that is not here.
+pub fn wa_apply_at(epoch: u64, f: impl FnOnce(&mut Bridge) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || {
         BRIDGE.with(|cell| {
             if let Some(bridge) = cell.borrow_mut().as_mut() {
+                if bridge.epoch != epoch {
+                    return;
+                }
                 if bridge.vault.as_ref().is_none_or(|v| v.locked()) {
                     // ~10k events covers hours on the lock screen; past
                     // that, keep the newest.
@@ -267,6 +446,22 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let sticker_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
     let fav_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
     let gif_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
+    let mention_model = Rc::new(VecModel::<MemberItem>::default());
+    let search_model = Rc::new(VecModel::<SearchHit>::default());
+    let chat_search_model = Rc::new(VecModel::<SearchHit>::default());
+    let member_model = Rc::new(VecModel::<MemberItem>::default());
+    let info_member_model = Rc::new(VecModel::<MemberItem>::default());
+    let label_model = Rc::new(VecModel::<LabelItem>::default());
+    let pdf_model = Rc::new(VecModel::<PdfPage>::default());
+    let accounts_model = Rc::new(VecModel::<AccountItem>::default());
+    ui.set_accounts(ModelRc::from(accounts_model.clone()));
+    ui.set_pdf_pages(ModelRc::from(pdf_model.clone()));
+    ui.set_mention_rows(ModelRc::from(mention_model.clone()));
+    ui.set_search_hits(ModelRc::from(search_model.clone()));
+    ui.set_chat_search_rows(ModelRc::from(chat_search_model.clone()));
+    ui.set_member_rows(ModelRc::from(member_model.clone()));
+    ui.set_info_member_rows(ModelRc::from(info_member_model.clone()));
+    ui.set_labels(ModelRc::from(label_model.clone()));
     ui.set_sticker_rows(ModelRc::from(sticker_model.clone()));
     ui.set_fav_rows(ModelRc::from(fav_model.clone()));
     ui.set_gif_rows(ModelRc::from(gif_model.clone()));
@@ -311,11 +506,20 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         refresh_queued: false,
         save_queued: false,
         pending_registered: false,
+        account: String::new(),
+        epoch: 0,
+        registered: false,
+        switching: false,
+        wipe_on_logout: false,
+        accounts_model: accounts_model.clone(),
+        peer_online: false,
+        typing_gen: 0,
         locked_backlog: Vec::new(),
         avatars: HashMap::new(),
         requested_avatars: HashSet::new(),
         avatar_tries: HashMap::new(),
         media_inflight: HashSet::new(),
+        media_failed: HashSet::new(),
         media_path: HashMap::new(),
         decoded: HashMap::new(),
         decoded_order: std::collections::VecDeque::new(),
@@ -339,11 +543,47 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         reactions_model,
         forward_model,
         react_pick_for: None,
-        pending_forward: None,
+        pending_forward: Vec::new(),
+        sync_batches: 0,
+        sync_messages: 0,
+        select_mode: false,
+        selected: Vec::new(),
+        mention_at: None,
+        mentions: Vec::new(),
+        mention_model,
+        group_meta_at: HashMap::new(),
+        search_model,
+        chat_search_model,
+        chat_search_query: String::new(),
+        chat_search_pos: 0,
+        stickers: HashMap::new(),
+        sticker_order: std::collections::VecDeque::new(),
+        sticker_bytes: 0,
+        member_model,
+        member_picked: HashSet::new(),
+        info_member_model,
+        label_model,
+        confirm_action: None,
+        pdf: crate::pdf::PdfWorker::start(),
+        pdf_gen: 0,
+        pdf_id: String::new(),
+        pdf_path: None,
+        pdf_sizes: Vec::new(),
+        pdf_model,
+        pdf_zoom: 1.0,
+        pdf_page_w: 0.0,
+        pdf_rendered: HashMap::new(),
+        pdf_pending: HashSet::new(),
+        drag_anchor: None,
+        row_geom: HashMap::new(),
+        geom_epoch: 0,
+        row_gc_queued: false,
+        share_target: None,
         pending_image: None,
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        update_manual: false,
         status_model,
         calls_model,
         info_media_model,
@@ -360,8 +600,15 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         zoom_frames: Vec::new(),
         zoom_idx: 0,
         zoom_timer: slint::Timer::default(),
+        video: None,
         video_audio: None,
         video_id: None,
+        video_gen: 0,
+        video_playing: false,
+        video_pos: 0.0,
+        video_duration: 0.0,
+        video_volume: 1.0,
+        video_muted: false,
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
@@ -388,8 +635,32 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_logout(|| {
         defer(|b| {
             b.ui.set_settings_open(false);
-            b.ui.set_status_text(t("status.loggingOut").into());
-            b.wa.send(Cmd::Logout);
+            b.ask_confirm(
+                t("logout.title"),
+                t("logout.body"),
+                t("logout.wipe"),
+                ConfirmAction::Logout,
+            );
+            b.ui.set_confirm_secondary(t("logout.keep").into());
+        });
+    });
+    ui.on_switch_account(|id| {
+        let id = id.to_string();
+        defer(move |b| b.switch_account(&id));
+    });
+    ui.on_add_account(|| defer(|b| b.add_account()));
+    ui.on_remove_account(|id| {
+        let id = id.to_string();
+        defer(move |b| b.ask_remove_account(&id));
+    });
+    ui.on_forget_conversations(|| {
+        defer(|b| {
+            b.ask_confirm(
+                t("forget.title"),
+                t("forget.body"),
+                t("forget.action"),
+                ConfirmAction::ForgetConversations,
+            );
         });
     });
     ui.on_unlock(|pin| {
@@ -412,6 +683,22 @@ fn wire_callbacks(ui: &AppWindow) {
             b.ui.set_settings_status(t("lang.restart").into());
         });
     });
+    ui.on_send_receipts_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("send_receipts", if on { "1" } else { "0" });
+            }
+            b.ui.set_send_receipts(on);
+        });
+    });
+    ui.on_apply_deletions_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("apply_deletions", if on { "1" } else { "0" });
+            }
+            b.ui.set_apply_deletions(on);
+        });
+    });
 
     ui.on_open_chat(|jid| {
         let jid = jid.to_string();
@@ -420,6 +707,14 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_chat_hover(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.chat_hover(&jid));
+    });
+    ui.set_app_version(crate::update::current_version().into());
+    ui.on_update_check(|| {
+        defer(|b| {
+            b.update_manual = true;
+            b.ui.set_settings_status(t("update.checking").into());
+            b.wa.send(Cmd::CheckUpdate);
+        });
     });
     ui.on_update_apply(|| {
         defer(|b| {
@@ -601,6 +896,28 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.open_video(&id));
     });
     ui.on_close_video(|| defer(|b| b.close_video()));
+    ui.on_video_toggle(|| defer(|b| b.video_toggle()));
+    ui.on_video_seek(|fraction| {
+        defer(move |b| {
+            let to = fraction as f64 * b.video_duration;
+            b.video_seek(to);
+        });
+    });
+    ui.on_video_seek_by(|secs| {
+        defer(move |b| {
+            let to = b.video_pos + secs as f64;
+            b.video_seek(to);
+        });
+    });
+    ui.on_video_set_volume(|volume| defer(move |b| b.video_set_volume(volume, volume <= 0.0)));
+    ui.on_video_mute_toggle(|| {
+        defer(|b| {
+            let (volume, muted) = (b.video_volume, !b.video_muted);
+            // Unmuting a slider dragged to zero would stay silent.
+            b.video_set_volume(if !muted && volume <= 0.0 { 1.0 } else { volume }, muted);
+        });
+    });
+    ui.on_video_save(|| defer(|b| b.video_save()));
     ui.on_status_open(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.open_status_viewer(&jid));
@@ -679,13 +996,257 @@ fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
-    ui.on_copy_text(|id| {
+    // Documents: view in-app (PDF) or with the system, and save a copy.
+    ui.on_doc_view(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_document(&id));
+    });
+    ui.on_doc_save(|id| {
+        let id = id.to_string();
+        defer(move |b| b.save_document(&id));
+    });
+    ui.on_pdf_close(|| defer(|b| b.close_pdf()));
+    ui.on_pdf_scrolled(|y| defer(move |b| b.pdf_scrolled(y)));
+    ui.on_pdf_zoom(|step| defer(move |b| b.pdf_zoom_step(step)));
+    ui.on_pdf_goto(|delta| defer(move |b| b.pdf_goto(delta)));
+    ui.on_pdf_view_resized(|| defer(|b| b.pdf_layout(true)));
+    ui.on_pdf_open_external(|| {
+        defer(|b| {
+            if let Some(path) = b.pdf_path.clone() {
+                crate::platform::open_path(&path.to_string_lossy());
+            }
+        });
+    });
+    ui.on_pdf_save_as(|| {
+        defer(|b| {
+            let id = b.pdf_id.clone();
+            b.save_document(&id);
+        });
+    });
+    ui.on_pdf_install_engine(|| {
+        defer(|b| {
+            b.ui.set_pdf_installing(true);
+            b.ui.set_pdf_status(t("pdf.installing").into());
+            b.wa.send(Cmd::PdfEngineInstall);
+        });
+    });
+    // Status viewer: play a video update in the player.
+    ui.on_status_play(|| defer(|b| b.play_status_video()));
+    // Drag selection over the conversation.
+    ui.on_row_geom(|id, y, h| {
         let id = id.to_string();
         defer(move |b| {
-            if let Some(m) = b.find_message(&id) {
-                let text = m.text.clone();
-                let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(text));
+            let epoch = b.geom_epoch;
+            b.row_geom.insert(id.clone(), (y, h, epoch));
+            b.media_for_visible_row(&id);
+        });
+    });
+    ui.on_conv_scrolled(|| {
+        defer(|b| {
+            b.geom_epoch = b.geom_epoch.wrapping_add(1);
+            b.schedule_row_gc();
+        });
+    });
+    ui.on_open_lightbox(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_lightbox(&id));
+    });
+    ui.on_share_accept(|| defer(|b| b.share_history_send()));
+    ui.on_share_cancel(|| {
+        defer(|b| {
+            b.share_target = None;
+            b.ui.set_share_open(false);
+        });
+    });
+    ui.on_drag_start(|id, y| {
+        let id = id.to_string();
+        defer(move |b| b.drag_anchor = Some((id, y)));
+    });
+    ui.on_drag_move(|y| defer(move |b| b.drag_move(y)));
+    ui.on_drag_end(|| defer(|b| b.drag_anchor = None));
+    // A press on a link's hand-cursor box, to be handed to the text
+    // underneath. Not from inside the callback: that runs in the middle
+    // of Slint dispatching the very press being replaced.
+    ui.on_link_pressed({
+        let weak = ui.as_weak();
+        move |x, y| {
+            let weak = weak.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    replay_link_press(
+                        ui.window(),
+                        x,
+                        y,
+                        &|on| ui.set_link_press_through(on),
+                        &|| ui.get_link_release_seen(),
+                    );
+                }
+            });
+        }
+    });
+    ui.on_open_link_at(|id, offset| {
+        let id = id.to_string();
+        defer(move |b| b.open_link_at(&id, offset.max(0) as usize));
+    });
+    ui.on_copy_text(|id| {
+        let id = id.to_string();
+        defer(move |b| b.copy_messages(&[id]));
+    });
+    // Sync banner and its progress dialog.
+    ui.on_sync_clicked(|| defer(|b| b.show_sync_dialog()));
+    ui.on_day_at_top(|day| {
+        let day = day.to_string();
+        defer(move |b| {
+            if b.ui.get_floating_day() != day.as_str() {
+                b.ui.set_floating_day(day.into());
             }
+        });
+    });
+    // Composer: mentions.
+    ui.on_composer_changed(|text, cursor| {
+        let text = text.to_string();
+        defer(move |b| b.composer_changed(&text, cursor.max(0) as usize));
+    });
+    ui.on_mention_pick(|idx| defer(move |b| b.mention_pick(idx.max(0) as usize)));
+    ui.on_mention_close(|| defer(|b| b.ui.set_mention_open(false)));
+    // Selection mode.
+    ui.on_select_start(|id| {
+        let id = id.to_string();
+        defer(move |b| b.select_start(&id));
+    });
+    ui.on_toggle_select(|id| {
+        let id = id.to_string();
+        defer(move |b| b.toggle_select(&id));
+    });
+    ui.on_select_cancel(|| defer(|b| b.select_end()));
+    ui.on_select_copy(|| {
+        defer(|b| {
+            let ids = b.selected_in_order();
+            b.copy_messages(&ids);
+            b.select_end();
+        });
+    });
+    ui.on_select_forward(|| defer(|b| b.request_forward_selected()));
+    ui.on_select_star(|| defer(|b| b.star_selected()));
+    ui.on_select_delete(|| defer(|b| b.confirm_delete_selected()));
+    // Chat menu.
+    ui.on_menu_add_member(|| defer(|b| b.open_member_picker()));
+    ui.on_menu_search(|| defer(|b| b.open_chat_search()));
+    ui.on_menu_mute(|hours| defer(move |b| b.mute_current(hours)));
+    ui.on_menu_ephemeral(|secs| defer(move |b| b.set_ephemeral_current(secs.max(0) as u32)));
+    ui.on_menu_favorite(|| defer(|b| b.toggle_favorite()));
+    ui.on_menu_list(|id| {
+        let id = id.to_string();
+        defer(move |b| b.toggle_list(&id));
+    });
+    ui.on_menu_new_list(|name| {
+        let name = name.to_string();
+        defer(move |b| b.create_list(&name));
+    });
+    ui.on_menu_delete_list(|id| {
+        let id = id.to_string();
+        defer(move |b| b.delete_list(&id));
+    });
+    ui.on_menu_export(|| defer(|b| b.export_chat()));
+    ui.on_menu_close_chat(|| defer(|b| b.close_chat()));
+    ui.on_menu_clear(|| {
+        defer(|b| {
+            if let Some(jid) = b.current_jid.clone() {
+                b.ask_confirm(
+                    t("confirm.clearTitle"),
+                    t("confirm.clearBody"),
+                    t("confirm.clear"),
+                    ConfirmAction::ClearChat(jid),
+                );
+            }
+        });
+    });
+    ui.on_menu_delete_chat(|| {
+        defer(|b| {
+            if let Some(jid) = b.current_jid.clone() {
+                b.ask_confirm(
+                    t("confirm.deleteChatTitle"),
+                    t("confirm.deleteChatBody"),
+                    t("confirm.delete"),
+                    ConfirmAction::DeleteChat(jid),
+                );
+            }
+        });
+    });
+    ui.on_menu_exit_group(|| {
+        defer(|b| {
+            if let Some(jid) = b.current_jid.clone() {
+                let name = b.store.chat_name(&jid);
+                b.ask_confirm(
+                    ta("confirm.exitTitle", &[&name]),
+                    t("confirm.exitBody"),
+                    t("confirm.exit"),
+                    ConfirmAction::ExitGroup(jid),
+                );
+            }
+        });
+    });
+    ui.on_confirm_accept(|| defer(|b| b.confirm_accepted()));
+    ui.on_confirm_other(|| defer(|b| b.confirm_secondary()));
+    // Member picker.
+    ui.on_member_search(|query| {
+        let query = query.to_string();
+        defer(move |b| b.fill_member_rows(&query));
+    });
+    ui.on_member_toggle(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| {
+            if !b.member_picked.remove(&jid) {
+                b.member_picked.insert(jid);
+            }
+            let count = b.member_picked.len() as i32;
+            b.ui.set_member_count(count);
+            for i in 0..b.member_model.row_count() {
+                if let Some(mut row) = b.member_model.row_data(i) {
+                    let checked = b.member_picked.contains(row.jid.as_str());
+                    if row.checked != checked {
+                        row.checked = checked;
+                        b.member_model.set_row_data(i, row);
+                    }
+                }
+            }
+        });
+    });
+    ui.on_member_confirm(|| defer(|b| b.confirm_add_members()));
+    // Search.
+    ui.on_open_hit(|jid, id| {
+        let (jid, id) = (jid.to_string(), id.to_string());
+        defer(move |b| b.open_hit(&jid, &id));
+    });
+    ui.on_chat_search_changed(|query| {
+        let query = query.to_string();
+        defer(move |b| b.chat_search(&query));
+    });
+    ui.on_chat_search_step(|delta| defer(move |b| b.chat_search_step(delta)));
+    ui.on_chat_search_close(|| {
+        defer(|b| {
+            b.ui.set_chat_search_open(false);
+            b.ui.set_highlight_id("".into());
+        });
+    });
+    ui.on_notice_clicked(|id| {
+        let id = id.to_string();
+        defer(move |b| {
+            if let Some(rest) = id.strip_prefix("sys:invite:")
+                && let Some((_, member)) = rest.split_once(':')
+                && let Some(group) = b.current_jid.clone()
+            {
+                b.open_share_dialog(&group, member);
+            } else {
+                b.open_contact_info();
+            }
+        });
+    });
+    ui.on_open_member(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| {
+            b.ui.set_info_open(false);
+            b.open_dm(&jid, None);
         });
     });
 }
@@ -696,8 +1257,29 @@ impl Bridge {
     // Called from main once the vault is open (or right away without PIN).
     pub fn boot(&mut self, vault: Vault, registered: bool) {
         crate::media::clean_tmp();
+        crate::media::migrate_cache();
+        // main opened this account's session and pointed the vault at it.
+        self.account = vault.account();
+        self.registered = registered;
+        let known: Vec<String> = vault.accounts().into_iter().map(|a| a.id).collect();
+        crate::paths::sweep_accounts(&known);
         self.store.load_from(&vault);
+        // Known from the last run, so own rows have a face before the
+        // connection comes up.
+        if let Some(me) = vault
+            .accounts()
+            .into_iter()
+            .find(|a| a.id == self.account)
+            .map(|a| a.jid)
+            .filter(|s| !s.is_empty())
+        {
+            self.store.set_self(&[&me]);
+            self.self_jid = me;
+        }
         self.media_key = vault.key_handle();
+        if let Some(volume) = vault.setting_get("video_volume").and_then(|v| v.parse::<f32>().ok()) {
+            self.video_volume = volume.clamp(0.0, 1.0);
+        }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
         self.vault = Some(vault);
         println!(
@@ -708,9 +1290,14 @@ impl Bridge {
         );
         self.ui.set_pin_set(self.vault.as_ref().is_some_and(|v| v.has_pin()));
         self.ui.set_screen(if registered { "main" } else { "login" }.into());
+        self.refresh_accounts();
+        self.refresh_labels();
         self.refresh_chats();
         self.refresh_statuses();
         self.refresh_calls();
+        // Chats stored before the search index existed get indexed from
+        // the vault in the background, a few at a time.
+        self.once(4000, |b| b.index_backfill());
         // Before any call can start, so the first one already uses the
         // devices the user picked.
         self.load_devices();
@@ -794,14 +1381,36 @@ impl Bridge {
         self.ui.set_status_text(text.into());
     }
 
-    pub fn on_open(&mut self, pn: &str, lid: &str) {
+    pub fn on_open(&mut self, pn: &str, lid: &str, name: &str) {
         self.ui.set_alert_open(false);
         self.ui.set_status_text(t("status.connected").into());
         if self.ui.get_screen() == "login" {
             self.ui.set_screen("main".into());
         }
+        // Conversations kept from an earlier session are picked up again
+        // only by the number they belong to. Anyone else pairing into
+        // this slot starts clean, before the first history chunk lands.
+        let me = normalize_jid(if pn.is_empty() { lid } else { pn });
+        let kept = self.account_entry().map(|a| a.jid).unwrap_or_default();
+        if !kept.is_empty() && kept != normalize_jid(pn) && kept != normalize_jid(lid) {
+            println!("[store] a different number paired; dropping the kept conversations");
+            self.wipe_conversations();
+        }
+        self.registered = true;
         self.store.set_self(&[pn, lid]);
-        self.self_jid = normalize_jid(pn);
+        // A LID-primary session may carry no phone jid at all; our own
+        // rows (voice notes, search hits) still need an identity.
+        self.self_jid = me;
+        let jid = self.self_jid.clone();
+        let name = name.trim().to_string();
+        self.update_account(|a| {
+            a.jid = jid;
+            if !name.is_empty() {
+                a.name = name;
+            }
+        });
+        self.refresh_accounts();
+        self.queue_avatar(&self.self_jid.clone());
         if !self.groups_fetched {
             self.groups_fetched = true;
             self.wa.send(Cmd::FetchGroups);
@@ -826,20 +1435,98 @@ impl Bridge {
     }
 
     pub fn on_logged_out(&mut self) {
-        self.current_jid = None;
-        self.groups_fetched = false;
+        self.registered = false;
         self.ui.set_pairing_mode(false);
         self.ui.set_pairing_code("".into());
-        self.ui.set_chat_open(false);
+        self.ui.set_qr_image(crate::qr::empty_image());
         self.ui.set_screen("login".into());
-        // Wipe local conversation data along with the session.
+        self.close_session_views();
+        // The session is gone either way; the conversations go with it
+        // only when the user asked for that. Kept, they are what a new
+        // pairing of the same number picks up again instead of waiting
+        // for the phone to send everything once more.
+        if std::mem::take(&mut self.wipe_on_logout) {
+            self.wipe_conversations();
+            self.forget_account_identity();
+        } else {
+            self.save_now();
+        }
+        self.refresh_accounts();
+    }
+
+    fn logout(&mut self, wipe: bool) {
+        self.wipe_on_logout = wipe;
+        self.ui.set_status_text(t("status.loggingOut").into());
+        self.wa.send(Cmd::Logout);
+    }
+
+    fn save_now(&mut self) {
+        if let Some(vault) = self.vault.take() {
+            if !vault.locked() {
+                self.store.save_to(&vault);
+            }
+            self.vault = Some(vault);
+        }
+    }
+
+    // Whatever is on screen belongs to a session that just ended.
+    fn close_session_views(&mut self) {
+        self.current_jid = None;
+        self.groups_fetched = false;
+        self.ui.set_chat_open(false);
+        self.ui.set_settings_open(false);
+        self.ui.set_info_open(false);
+        self.ui.set_account_menu_open(false);
+        self.close_video();
+        self.select_end();
+    }
+
+    // Drops the loaded account's conversations, in memory and on disk.
+    fn wipe_conversations(&mut self) {
+        self.current_jid = None;
+        self.ui.set_chat_open(false);
+        self.clear_store_state();
+        if let Some(vault) = &self.vault {
+            vault.del_prefix("store:");
+            // The on-disk data key can outlive the account (only the
+            // vault's own `store:` keys were just wiped above), so a
+            // fresh pairing must not inherit the previous account's
+            // search index.
+            self.store.search.reset(vault);
+        }
+        self.refresh_labels();
+        self.refresh_chats();
+        self.refresh_statuses();
+        self.refresh_calls();
+    }
+
+    // Empties everything derived from one account's store. The store on
+    // disk is untouched: this is also how the bridge lets go of an
+    // account it is switching away from.
+    fn clear_store_state(&mut self) {
         self.store = Store::default();
+        self.self_jid.clear();
         self.chats_model.set_vec(Vec::new());
         self.messages_model.set_vec(Vec::new());
+        self.status_model.set_vec(Vec::new());
+        self.calls_model.set_vec(Vec::new());
+        self.warm_order.clear();
+        self.truncated.clear();
+        self.scroll_pos.clear();
+        self.history_batches = 0;
+        self.history_pending = false;
+        self.sync_batches = 0;
+        self.sync_messages = 0;
+        self.requested_channels.clear();
+        self.pending_forward.clear();
+        self.notify_queue.clear();
+        self.audio_buffers.clear();
+        self.waves.clear();
         self.avatars.clear();
         self.requested_avatars.clear();
         self.avatar_tries.clear();
         self.media_inflight.clear();
+        self.media_failed.clear();
         self.media_path.clear();
         self.decoded.clear();
         self.decoded_order.clear();
@@ -847,8 +1534,313 @@ impl Bridge {
         self.animated.clear();
         self.anim_order.clear();
         self.anim_bytes = 0;
-        if let Some(vault) = &self.vault {
-            vault.del_prefix("store:");
+        self.stickers.clear();
+        self.sticker_order.clear();
+        self.sticker_bytes = 0;
+        self.group_meta_at.clear();
+        self.search_model.set_vec(Vec::new());
+        self.chat_search_model.set_vec(Vec::new());
+        self.label_model.set_vec(Vec::new());
+    }
+
+    // ---- accounts ----
+
+    fn account_entry(&self) -> Option<crate::vault::Account> {
+        self.vault.as_ref()?.accounts().into_iter().find(|a| a.id == self.account)
+    }
+
+    fn update_account(&mut self, f: impl FnOnce(&mut crate::vault::Account)) {
+        let Some(vault) = &self.vault else { return };
+        let mut list = vault.accounts();
+        if let Some(entry) = list.iter_mut().find(|a| a.id == self.account) {
+            f(entry);
+        }
+        vault.set_accounts(&list);
+    }
+
+    // With the conversations gone nothing ties the slot to a number.
+    fn forget_account_identity(&mut self) {
+        self.update_account(|a| {
+            a.jid.clear();
+            a.name.clear();
+        });
+    }
+
+    fn refresh_accounts(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let list = vault.accounts();
+        let rows: Vec<AccountItem> = list
+            .iter()
+            .map(|a| {
+                let number = if a.jid.is_empty() { String::new() } else { format_number(&a.jid) };
+                let name = if !a.name.is_empty() {
+                    a.name.clone()
+                } else if !number.is_empty() {
+                    number.clone()
+                } else {
+                    t("account.new")
+                };
+                let avatar = self.avatars.get(&a.jid).cloned().flatten();
+                AccountItem {
+                    id: a.id.as_str().into(),
+                    initial: initial_of(&name).into(),
+                    detail: if name == number { "".into() } else { number.into() },
+                    name: name.into(),
+                    active: a.id == self.account,
+                    colorIdx: color_idx_of(&a.jid),
+                    hasAvatar: avatar.is_some(),
+                    avatar: avatar.unwrap_or_default(),
+                }
+            })
+            .collect();
+        if let Some(mine) = rows.iter().find(|row| row.active) {
+            self.ui.set_my_account(mine.clone());
+        }
+        self.ui.set_can_add_account(list.len() < crate::vault::MAX_ACCOUNTS);
+        self.ui.set_account_count(list.len() as i32);
+        self.accounts_model.set_vec(rows);
+        // The login screen offers the conversations a past session left.
+        let kept = self.account_entry().map(|a| a.jid).unwrap_or_default();
+        let has_kept = !self.registered && !self.store.chats.is_empty();
+        self.ui.set_kept_conversations(has_kept);
+        self.ui.set_kept_number(
+            if has_kept && !kept.is_empty() { format_number(&kept).into() } else { "".into() },
+        );
+    }
+
+    pub fn switch_account(&mut self, id: &str) {
+        self.ui.set_account_menu_open(false);
+        let Some(vault) = &self.vault else { return };
+        if self.switching
+            || id == self.account
+            || vault.locked()
+            || !vault.accounts().iter().any(|a| a.id == id)
+        {
+            return;
+        }
+        // A call belongs to the account it runs on.
+        if self.call.is_some() {
+            self.ui.set_status_text(t("account.inCall").into());
+            return;
+        }
+        self.switching = true;
+        self.ui.set_account_switching(true);
+        self.save_now();
+        self.wa.send(Cmd::SwitchAccount(id.to_string()));
+    }
+
+    pub fn add_account(&mut self) {
+        let Some(vault) = &self.vault else { return };
+        let mut list = vault.accounts();
+        if list.len() >= crate::vault::MAX_ACCOUNTS || self.switching {
+            return;
+        }
+        let id = loop {
+            let id = format!("{:08x}", rand::random::<u32>());
+            if !list.iter().any(|a| a.id == id) {
+                break id;
+            }
+        };
+        list.push(crate::vault::Account { id: id.clone(), ..Default::default() });
+        vault.set_accounts(&list);
+        self.switch_account(&id);
+    }
+
+    fn ask_remove_account(&mut self, id: &str) {
+        self.ui.set_account_menu_open(false);
+        let Some(vault) = &self.vault else { return };
+        let Some(entry) = vault.accounts().into_iter().find(|a| a.id == id) else { return };
+        // The loaded account goes through the logout dialog instead: its
+        // session has to be closed on the phone's side too.
+        if id == self.account {
+            return;
+        }
+        let label = if !entry.name.is_empty() {
+            entry.name
+        } else if !entry.jid.is_empty() {
+            format_number(&entry.jid)
+        } else {
+            t("account.new")
+        };
+        self.ask_confirm(
+            ta("account.removeTitle", &[&label]),
+            t("account.removeBody"),
+            t("account.removeAction"),
+            ConfirmAction::RemoveAccount(id.to_string()),
+        );
+    }
+
+    // Only ever an account that is not loaded: its session database is
+    // closed, so the files can simply go. The phone keeps listing the
+    // device until it is removed there (or WhatsApp expires it).
+    fn remove_account(&mut self, id: &str) {
+        let Some(vault) = &self.vault else { return };
+        if id == self.account {
+            return;
+        }
+        let mut list = vault.accounts();
+        list.retain(|a| a.id != id);
+        vault.set_accounts(&list);
+        vault.wipe_account(id);
+        crate::paths::remove_db(&crate::paths::wa_session_path(id));
+        crate::paths::remove_db(&crate::paths::search_index_path(id));
+        self.refresh_accounts();
+    }
+
+    // Developer probe (--accounts-selftest): walks the account switcher on
+    // the real session plumbing -- add an account, leave a trace in the
+    // first one's store, switch back and forth -- and reports after each
+    // step. Refuses to touch a data directory that holds a paired session:
+    // point APPDATA/XDG_DATA_HOME at an empty one.
+    pub fn accounts_selftest(&mut self, step: u32) {
+        let ids = |b: &Bridge| -> Vec<String> {
+            b.vault.as_ref().map(|v| v.accounts().into_iter().map(|a| a.id).collect()).unwrap_or_default()
+        };
+        let fail = |what: &str| println!("[selftest] FAIL: {what}");
+        match step {
+            0 => {
+                if self.registered || ids(self).len() != 1 {
+                    println!("[selftest] refusing: this data directory is in use");
+                    slint::quit_event_loop().ok();
+                    return;
+                }
+                // Something that must survive a round trip, and must not
+                // show up in the other account.
+                self.store.upsert_chat("5511999990000@s.whatsapp.net", Some("Probe"), 1, None, None, None);
+                self.add_account();
+                println!("[selftest] add account: switching = {}", self.switching);
+            }
+            1 => {
+                let list = ids(self);
+                println!(
+                    "[selftest] on the new account: id {:?}, {} account(s), {} chat(s), screen {}",
+                    self.account,
+                    list.len(),
+                    self.store.chats.len(),
+                    self.ui.get_screen()
+                );
+                if self.switching || self.account.is_empty() || list.len() != 2 {
+                    fail("adding an account should land on a second, new one");
+                }
+                if !self.store.chats.is_empty() {
+                    fail("the first account's conversations leaked into the new one");
+                }
+                if self.ui.get_screen() != "login" {
+                    fail("an unpaired account should be on the login screen");
+                }
+                self.switch_account("");
+            }
+            2 => {
+                let list = ids(self);
+                println!(
+                    "[selftest] back on the first: id {:?}, {} account(s), {} chat(s)",
+                    self.account,
+                    list.len(),
+                    self.store.chats.len()
+                );
+                if !self.account.is_empty() {
+                    fail("switching back did not happen");
+                }
+                if self.store.chats.len() != 1 {
+                    fail("the first account's conversations did not come back");
+                }
+                // Never paired, nothing in it: the slot should be gone.
+                if list.len() != 1 {
+                    fail("the abandoned empty account was kept");
+                }
+                // The limit.
+                for _ in 0..8 {
+                    let Some(vault) = &self.vault else { break };
+                    let mut list = vault.accounts();
+                    if list.len() >= crate::vault::MAX_ACCOUNTS {
+                        break;
+                    }
+                    list.push(crate::vault::Account {
+                        id: format!("probe{}", list.len()),
+                        jid: "5511888880000@s.whatsapp.net".into(),
+                        ..Default::default()
+                    });
+                    vault.set_accounts(&list);
+                }
+                self.add_account();
+                if self.switching || ids(self).len() != crate::vault::MAX_ACCOUNTS {
+                    fail("a sixth account was accepted");
+                }
+                self.refresh_accounts();
+                println!(
+                    "[selftest] at the limit: {} accounts, can add = {}",
+                    ids(self).len(),
+                    self.ui.get_can_add_account()
+                );
+                println!("[selftest] accounts done");
+                slint::quit_event_loop().ok();
+            }
+            _ => {}
+        }
+    }
+
+    // wa.rs has the other account's client built (not yet connected).
+    pub fn on_account_ready(&mut self, account: &str, registered: bool, epoch: u64) {
+        // Whatever the old session delivered since the switch was asked.
+        self.save_now();
+        let previous = std::mem::replace(&mut self.account, account.to_string());
+        let abandoned = previous != account && !self.registered && self.store.chats.is_empty();
+        self.epoch = epoch;
+        self.registered = registered;
+        self.switching = false;
+        self.close_session_views();
+        self.clear_store_state();
+        if let Some(vault) = self.vault.take() {
+            vault.set_account(account);
+            vault.set_active_account(account);
+            self.store.load_from(&vault);
+            self.vault = Some(vault);
+        }
+        // "Add account" backed out of before pairing: the empty slot
+        // would otherwise sit in the switcher forever.
+        if abandoned {
+            self.remove_account(&previous);
+        }
+        if let Some(me) = self.account_entry().map(|a| a.jid).filter(|s| !s.is_empty()) {
+            self.store.set_self(&[&me]);
+            self.self_jid = me;
+        }
+        self.ui.set_qr_image(crate::qr::empty_image());
+        self.ui.set_pairing_mode(false);
+        self.ui.set_pairing_code("".into());
+        self.ui.set_status_text(t("status.connecting").into());
+        self.ui.set_alert_open(false);
+        self.ui.set_screen(if registered { "main" } else { "login" }.into());
+        self.ui.set_account_switching(false);
+        self.refresh_accounts();
+        self.refresh_labels();
+        self.refresh_chats();
+        self.refresh_statuses();
+        self.refresh_calls();
+        self.once(4000, |b| b.index_backfill());
+        self.wa.send(Cmd::Start);
+    }
+
+    // Indexes cold chats that have messages on disk but no index yet;
+    // a handful per tick so the UI never notices.
+    fn index_backfill(&mut self) {
+        let Some(vault) = self.vault.take() else { return };
+        let pending: Vec<String> = vault
+            .keys("store:msgs:")
+            .into_iter()
+            .map(|k| k["store:msgs:".len()..].to_string())
+            .filter(|jid| !self.store.search.has_chat(jid))
+            .take(6)
+            .collect();
+        for jid in &pending {
+            self.store.index_from_vault(&vault, jid);
+        }
+        if !pending.is_empty() {
+            self.store.search.save_to(&vault);
+        }
+        self.vault = Some(vault);
+        if !pending.is_empty() {
+            self.once(250, |b| b.index_backfill());
         }
     }
 
@@ -905,6 +1897,13 @@ impl Bridge {
         }
         self.scroll_up_fetch = false;
         self.schedule_refresh_chats();
+        if chunk.on_demand || self.history_pending {
+            self.sync_batches += 1;
+        }
+        self.sync_messages += added;
+        if self.ui.get_sync_open() {
+            self.ui.set_sync_detail(self.sync_summary().into());
+        }
         if self.history_pending {
             self.set_pending(false);
             if added > 0 {
@@ -944,19 +1943,52 @@ impl Bridge {
                 continue;
             }
             let content: &wa::Message = &inbound.message;
-            // Deleted-for-everyone arrives as a protocol REVOKE.
+            // A disappearing-messages change in a one-to-one chat comes as
+            // a protocol message; it shows as a notice, like on the phone.
+            if let Some(pm) = content.protocol_message.as_option()
+                && pm.r#type == Some(wa::message::protocol_message::Type::EPHEMERAL_SETTING)
+            {
+                let chat_jid = self.store.canon_owned(&normalize_jid(&chat));
+                let secs = pm.ephemeral_expiration.unwrap_or(0);
+                let actor = if info.source.is_from_me {
+                    self.self_jid.clone()
+                } else {
+                    info.source.sender.to_non_ad_string()
+                };
+                let body = crate::wa_map::group_notice(&self.store, "ephemeral", Some(&actor), &[], "", secs);
+                self.add_system_message(&chat_jid, &info.id, info.timestamp.timestamp(), body);
+                if let Some(meta) = self.store.chats.get_mut(&chat_jid) {
+                    meta.ephemeral = secs;
+                }
+                self.apply_chat_settings_ui();
+                continue;
+            }
+            // Deleted-for-everyone arrives as a protocol REVOKE. Applied
+            // destructively (today's behaviour) when "apply deletions" is
+            // on, or when it came from one of this account's own devices
+            // (phone or another linked device) so they all stay
+            // consistent; otherwise the message is kept and only
+            // flagged, so the reader can still see it and the sender
+            // can't quietly erase it here.
             if let Some(pm) = content.protocol_message.as_option()
                 && pm.r#type == Some(wa::message::protocol_message::Type::Revoke)
                 && let Some(target) = pm.key.as_option().and_then(|k| k.id.clone())
             {
                 let chat_jid = self.store.canon_owned(&normalize_jid(&chat));
-                if self.store.mark_deleted(&chat_jid, &target)
-                    && Some(&chat_jid) == self.current_jid.as_ref()
-                {
+                let destructive = self.ui.get_apply_deletions() || info.source.is_from_me;
+                let changed = if destructive {
+                    self.store.mark_deleted(&chat_jid, &target)
+                } else {
+                    self.store.mark_revoked(&chat_jid, &target)
+                };
+                if changed && Some(&chat_jid) == self.current_jid.as_ref() {
                     self.patch_row(&target, |row| {
-                        row.deleted = true;
-                        row.kind = "text".into();
-                        row.text = t("msg.deleted").into();
+                        if destructive {
+                            row.deleted = true;
+                            row.kind = "text".into();
+                            row.text = t("msg.deleted").into();
+                        }
+                        row.revoked = true;
                     });
                 }
                 self.schedule_refresh_chats();
@@ -981,13 +2013,27 @@ impl Bridge {
                 continue;
             }
             if Some(&jid) == self.current_jid.as_ref() {
+                // The message they were typing has arrived. In a group
+                // someone else may still be at it; their next refresh
+                // puts the line back.
+                if !from_me {
+                    self.clear_typing();
+                }
                 self.push_message_row(&jid);
+                self.send_view_receipts(&jid);
             } else if !from_me {
+                let mut muted = false;
                 if let Some(meta) = self.store.chats.get_mut(&jid) {
                     meta.unread += 1;
                     if mentions_me {
                         meta.mentioned = true;
                     }
+                    muted = meta.is_muted();
+                }
+                // A muted chat still counts unread; it just stays quiet,
+                // unless someone tagged us.
+                if muted && !mentions_me {
+                    continue;
                 }
                 if let Some(m) = self.store.messages_for(&jid).last().cloned() {
                     let body = self.store.named_mentions(&notification_body(&m));
@@ -1037,12 +2083,33 @@ impl Bridge {
         if Some(&jid) != self.current_jid.as_ref() {
             return;
         }
-        let text = if state.contains("Composing") {
-            if media.contains("Audio") { t("presence.recording") } else { t("presence.typing") }
-        } else {
-            String::new()
-        };
+        if !state.contains("Composing") {
+            self.clear_typing();
+            return;
+        }
+        let text =
+            if media.contains("Audio") { t("presence.recording") } else { t("presence.typing") };
         self.ui.set_current_status(text.into());
+        // A "composing" is only good for a while: the peer's client
+        // refreshes it as long as they keep going, and the "paused" that
+        // should end it is routinely lost (the app is killed, the network
+        // drops, the phone sleeps). WhatsApp's own clients age it out
+        // after about 25s, so this one does too.
+        self.typing_gen += 1;
+        let generation = self.typing_gen;
+        self.once(25_000, move |b| {
+            if b.typing_gen == generation {
+                b.clear_typing();
+            }
+        });
+    }
+
+    // Back from typing/recording to what is known of the contact.
+    fn clear_typing(&mut self) {
+        self.typing_gen += 1;
+        self.ui.set_current_status(
+            if self.peer_online { t("presence.online").into() } else { "".into() },
+        );
     }
 
     pub fn on_presence(&mut self, from: &str, available: bool) {
@@ -1050,11 +2117,12 @@ impl Bridge {
         if Some(&jid) != self.current_jid.as_ref() {
             return;
         }
-        // Only overwrite the idle state; typing/recording wins.
+        self.peer_online = available;
+        // Someone who just went offline is not typing either; their
+        // "paused" will never come.
         let current = self.ui.get_current_status();
-        if current.is_empty() || current == t("presence.online").as_str() {
-            self.ui
-                .set_current_status(if available { t("presence.online").into() } else { "".into() });
+        if !available || current.is_empty() || current == t("presence.online").as_str() {
+            self.clear_typing();
         }
     }
 
@@ -1125,6 +2193,28 @@ impl Bridge {
     fn set_pending(&mut self, pending: bool) {
         self.history_pending = pending;
         self.ui.set_sync_banner(if pending { t("sync.older").into() } else { "".into() });
+        if self.ui.get_sync_open() {
+            self.ui.set_sync_detail(self.sync_summary().into());
+        }
+    }
+
+    fn sync_summary(&self) -> String {
+        let progress = ta(
+            "sync.progress",
+            &[&self.sync_batches.to_string(), &self.sync_messages.to_string()],
+        );
+        if self.history_pending {
+            format!("{}\n\n{progress}", t("sync.body"))
+        } else if self.history_batches >= MAX_HISTORY_BATCHES {
+            format!("{}\n\n{progress}", t("sync.complete"))
+        } else {
+            format!("{}\n\n{progress}", t("sync.idle"))
+        }
+    }
+
+    fn show_sync_dialog(&mut self) {
+        self.ui.set_sync_detail(self.sync_summary().into());
+        self.ui.set_sync_open(true);
     }
 
     fn pull_older_history(&mut self) {
@@ -1240,6 +2330,7 @@ impl Bridge {
     fn to_chat_row(&self, jid: &str, preview: &str, timestamp: i64, unread: u32, mentioned: bool) -> ChatItem {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
+        let meta = self.store.chats.get(jid);
         ChatItem {
             jid: jid.into(),
             name: name.clone().into(),
@@ -1251,11 +2342,17 @@ impl Bridge {
             colorIdx: color_idx_of(jid),
             unread: unread as i32,
             mentioned: mentioned && unread > 0,
-            pinned: self.store.chats.get(jid).map(|c| c.pinned > 0).unwrap_or(false),
+            pinned: meta.map(|c| c.pinned > 0).unwrap_or(false),
+            muted: meta.map(|c| c.is_muted()).unwrap_or(false),
         }
     }
 
     fn visible_chats(&self) -> Vec<(String, String, i64, u32, bool)> {
+        let search = crate::search::fold(&self.search_text);
+        let label_chats = self
+            .tab
+            .strip_prefix("label:")
+            .and_then(|id| self.store.label_chats.get(id));
         self.store
             .sorted_chats()
             .into_iter()
@@ -1282,12 +2379,21 @@ impl Bridge {
                     if meta.archived {
                         return false;
                     }
-                    if self.tab == "unread" && meta.unread == 0 {
+                    match self.tab.as_str() {
+                        "unread" if meta.unread == 0 => return false,
+                        "favorites" if !meta.favorite => return false,
+                        "groups" if !is_group(&meta.jid) => return false,
+                        _ => {}
+                    }
+                    if let Some(set) = label_chats
+                        && !set.contains(&meta.jid)
+                    {
                         return false;
                     }
                 }
-                if !self.search_text.is_empty()
-                    && !self.store.chat_name(&meta.jid).to_lowercase().contains(&self.search_text)
+                if !search.is_empty()
+                    && !crate::search::fold(&self.store.chat_name(&meta.jid)).contains(&search)
+                    && !meta.jid.contains(&search)
                 {
                     return false;
                 }
@@ -1333,6 +2439,7 @@ impl Bridge {
                         || cur.unread != next.unread
                         || cur.mentioned != next.mentioned
                         || cur.pinned != next.pinned
+                        || cur.muted != next.muted
                         || cur.hasAvatar != next.hasAvatar
                 })
                 .unwrap_or(true);
@@ -1349,8 +2456,88 @@ impl Bridge {
                 model.remove(model.row_count() - 1);
             }
         }
+        self.refresh_search_hits();
         self.ensure_avatars();
         self.schedule_save();
+    }
+
+    // Messages matching the sidebar search, across every chat.
+    fn refresh_search_hits(&mut self) {
+        if self.search_text.chars().count() < 2 {
+            if self.search_model.row_count() > 0 {
+                self.search_model.set_vec(Vec::new());
+            }
+            return;
+        }
+        let hits = self.store.search.search(&self.search_text, None, SEARCH_LIMIT);
+        let rows: Vec<SearchHit> = hits.iter().map(|h| self.to_hit(h, true)).collect();
+        for h in &hits {
+            self.queue_avatar(&h.jid);
+        }
+        self.search_model.set_vec(rows);
+    }
+
+    fn to_hit(&self, h: &crate::search::Hit, with_chat: bool) -> SearchHit {
+        let name = if with_chat {
+            self.store.chat_name(&h.jid)
+        } else if h.from_me {
+            t("reactions.you")
+        } else if h.sender.is_empty() {
+            self.store.chat_name(&h.jid)
+        } else {
+            h.sender.clone()
+        };
+        // Inside a chat the row is about the author, so it wears their
+        // picture; across chats it is about the conversation.
+        let face = if with_chat {
+            h.jid.clone()
+        } else if h.from_me {
+            self.self_jid.clone()
+        } else if h.sender_jid.is_empty() {
+            h.jid.clone()
+        } else {
+            self.store.canon_owned(&h.sender_jid)
+        };
+        let avatar = self.avatar_for(&face);
+        let who = if with_chat && is_group(&h.jid) {
+            if h.from_me { t("reactions.you") } else { h.sender.clone() }
+        } else {
+            String::new()
+        };
+        SearchHit {
+            jid: h.jid.clone().into(),
+            face: face.clone().into(),
+            id: h.id.clone().into(),
+            name: name.clone().into(),
+            sender: who.into(),
+            snippet: self.store.named_mentions(&h.snippet).into(),
+            time: format_time(h.ts).into(),
+            hasAvatar: avatar.is_some(),
+            avatar: avatar.unwrap_or_else(empty_image),
+            initial: initial_of(&name).into(),
+            colorIdx: color_idx_of(&face),
+        }
+    }
+
+    // List chips: every label, flagged when the open chat is filed there.
+    fn refresh_labels(&mut self) {
+        let current = self.current_jid.clone().unwrap_or_default();
+        let rows: Vec<LabelItem> = self
+            .store
+            .sorted_labels()
+            .into_iter()
+            .map(|l| LabelItem {
+                id: l.id.clone().into(),
+                name: l.name.clone().into(),
+                active: self
+                    .store
+                    .label_chats
+                    .get(&l.id)
+                    .map(|set| set.contains(&current))
+                    .unwrap_or(false),
+            })
+            .collect();
+        self.label_model.set_vec(rows);
     }
 
     fn schedule_save(&mut self) {
@@ -1451,16 +2638,30 @@ impl Bridge {
             self.truncated.remove(&current);
             self.clear_reply();
         }
+        if self.current_jid.as_deref() != Some(jid) {
+            self.select_end();
+            self.ui.set_chat_search_open(false);
+            self.chat_search_model.set_vec(Vec::new());
+            self.ui.set_mention_open(false);
+            self.mentions.clear();
+        }
         self.current_jid = Some(jid.to_string());
         self.ui.set_selected_jid(jid.into());
         self.ui.set_stick_bottom(true);
+        self.ui.set_chat_menu_open(false);
         if let Some(meta) = self.store.chats.get_mut(jid) {
             meta.unread = 0;
             meta.mentioned = false;
         }
+        self.send_view_receipts(jid);
+        self.peer_online = false;
+        self.typing_gen += 1;
         self.ui.set_current_status("".into());
         self.wa.send(Cmd::SubscribePresence(jid.to_string()));
         self.apply_header(jid);
+        self.apply_chat_settings_ui();
+        self.refresh_labels();
+        self.ensure_group_meta(jid);
         let list = self.store.messages_for(jid);
         // Jumping to a message means starting the list there: the row
         // lands at the top exactly, instead of chasing a pixel offset
@@ -1487,6 +2688,7 @@ impl Bridge {
             self.ui.set_stick_bottom(false);
             println!("[jump] {jid} at row {from}/{}", list.len());
         }
+        self.apply_cached_stickers(jid);
         let anchored_top = at.is_some();
         self.ui.set_scroll_armed(!anchored_top);
         let saved = if anchored_top { Some(0.0) } else { self.scroll_pos.get(jid).copied() };
@@ -1534,6 +2736,7 @@ impl Bridge {
             .map(|(i, m)| self.to_row(m, if i > 0 { list.get(i - 1) } else { None }))
             .collect();
         self.messages_model.set_vec(rows);
+        self.apply_cached_stickers(jid);
     }
 
     // Inserts freshly fetched history above the current rows and shifts
@@ -1600,14 +2803,41 @@ impl Bridge {
 
     // Formatted or mention-carrying messages render as styled text; plain
     // ones keep the selectable input.
-    fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool) {
+    // The styled rendering, whether there is one, the same words as plain
+    // text for the selectable overlay, and where the links are in those.
+    fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool, String, Vec<LinkSpan>) {
         let body = if m.deleted { "" } else { m.text.as_str() };
-        let empty = || slint::StyledText::from_plain_text("");
-        if body.is_empty() || !has_markup(body) {
-            return (empty(), false);
+        let none = || (slint::StyledText::from_plain_text(""), false, String::new(), Vec::new());
+        // File names and durations are literal, underscores and all.
+        if matches!(m.kind, MessageKind::Doc | MessageKind::Audio | MessageKind::System) {
+            return none();
         }
+        if body.is_empty() || !has_markup(body) {
+            return none();
+        }
+        let resolve = self.mention_resolver(m);
+        match slint::StyledText::from_markdown(&to_markdown(body, &resolve)) {
+            Ok(styled) => {
+                let plain = render_plain(body, &resolve);
+                let links = plain
+                    .spans
+                    .iter()
+                    .map(|(start, end, _)| LinkSpan { start: *start as i32, end: *end as i32 })
+                    .collect();
+                (styled, true, plain.text, links)
+            }
+            Err(_) => none(),
+        }
+    }
+
+    // Names and chats for the "@number" tokens of one message.
+    fn mention_resolver<'a>(&'a self, m: &'a StoredMessage) -> impl Fn(&str) -> MentionTarget + 'a {
         let store = &self.store;
-        let resolve = |num: &str| -> MentionTarget {
+        move |num: &str| -> MentionTarget {
+            // Tagging the whole group carries the group's own id.
+            if m.jid.starts_with(num) && is_group(&m.jid) {
+                return MentionTarget { name: Some(t("mention.all")), jid: m.jid.clone() };
+            }
             // The id is either a phone number or a LID; try both before
             // falling back on the shape of the number itself.
             for form in [format!("{num}@s.whatsapp.net"), format!("{num}@lid")] {
@@ -1623,10 +2853,20 @@ impl Bridge {
             }
             let guess = if num.len() > 13 { format!("{num}@lid") } else { format!("{num}@s.whatsapp.net") };
             MentionTarget { name: None, jid: store.canon_owned(&guess) }
-        };
-        match slint::StyledText::from_markdown(&to_markdown(body, &resolve)) {
-            Ok(styled) => (styled, true),
-            Err(_) => (empty(), false),
+        }
+    }
+
+    // A click (no drag) on the selectable overlay of a styled message:
+    // opens whatever link or mention sits under that byte offset.
+    fn open_link_at(&mut self, id: &str, offset: usize) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        let target = target_at(&m.text, offset, &self.mention_resolver(&m));
+        if let Some(target) = target {
+            if target.starts_with("http://") || target.starts_with("https://") {
+                crate::platform::open_path(&target);
+            } else {
+                self.open_dm(&target, None);
+            }
         }
     }
 
@@ -1644,7 +2884,7 @@ impl Bridge {
             .unwrap_or(true);
         let sender_jid =
             if m.sender_jid.is_empty() { m.jid.clone() } else { self.store.canon_owned(&m.sender_jid) };
-        let group_indent = group && !m.from_me;
+        let group_indent = group && !m.from_me && m.kind != MessageKind::System;
         let voice_jid = if m.kind == MessageKind::Audio {
             if m.from_me { self.self_jid.clone() } else { sender_jid.clone() }
         } else {
@@ -1654,12 +2894,13 @@ impl Bridge {
         let (ticks, ticks_blue) = ticks_for(m);
         let day = format_day(m.timestamp);
         let day_label = if prev.map(|p| format_day(p.timestamp) != day).unwrap_or(true) {
-            day
+            day.clone()
         } else {
             String::new()
         };
-        let (styled, has_styled) = self.styled_for(m);
+        let (styled, has_styled, plain, links) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
+        let system = m.kind == MessageKind::System;
         MessageItem {
             id: m.id.clone().into(),
             kind: (if m.deleted {
@@ -1671,13 +2912,19 @@ impl Bridge {
                     MessageKind::Audio => "audio",
                     MessageKind::Doc => "doc",
                     MessageKind::Video => "video",
+                    MessageKind::System => "system",
                 }
             })
             .into(),
             text: if m.deleted { t("msg.deleted").into() } else { m.text.clone().into() },
             fromMe: m.from_me,
             sender: m.sender.clone().into(),
-            showSender: group && !m.from_me && first_of_run,
+            showSender: group && !m.from_me && first_of_run && !system,
+            dayFull: day.into(),
+            selected: self.selected.iter().any(|s| s == &m.id),
+            // The collapsed roster notice opens the group info on click;
+            // an invite-link join offers to share the recent history.
+            clickable: system && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
             // Saved contacts show their address-book name without the ~.
             senderLabel: if group && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid) {
                 format!("~ {}", self.store.chat_name(&sender_jid)).into()
@@ -1685,7 +2932,7 @@ impl Bridge {
                 self.store.chat_name(if sender_jid.is_empty() { &m.jid } else { &sender_jid }).into()
             },
             firstOfRun: first_of_run,
-            time: format_time(m.timestamp).into(),
+            time: format_clock(m.timestamp).into(),
             // Rebuilt rows keep already-decoded media so scrollback and
             // re-opens draw instantly.
             picture: self
@@ -1730,8 +2977,15 @@ impl Bridge {
             },
             sticker: m.sticker,
             gif: m.gif,
+            videoLen: if m.kind == MessageKind::Video && !m.gif && m.duration_sec > 0 {
+                crate::store::format_duration(m.duration_sec).into()
+            } else {
+                "".into()
+            },
             styled,
             hasStyled: has_styled,
+            links: ModelRc::new(VecModel::from(links)),
+            plain: plain.into(),
             linkTitle: m.link_title.trim().into(),
             linkDesc: m.link_desc.trim().into(),
             linkHost: link_host.into(),
@@ -1753,6 +3007,7 @@ impl Bridge {
             senderJid: sender_jid.into(),
             forwarded: m.forwarded,
             deleted: m.deleted,
+            revoked: m.revoked,
             starred: m.starred,
             hasQuote: !m.quote_text.is_empty() || !m.quote_id.is_empty(),
             quoteName: if m.quote_author.is_empty() {
@@ -1786,9 +3041,12 @@ impl Bridge {
     // ---- composing ----
 
     fn handle_send_text(&mut self, text: &str) {
-        let body = text.trim().to_string();
+        let mut body = text.trim().to_string();
         let Some(jid) = self.current_jid.clone() else { return };
         if body.is_empty() {
+            return;
+        }
+        if !self.store.chats.get(&jid).map(|c| c.can_send()).unwrap_or(true) {
             return;
         }
         let quote = self.reply_to.take().and_then(|id| {
@@ -1801,7 +3059,126 @@ impl Bridge {
             })
         });
         self.clear_reply();
-        self.wa.send(Cmd::SendText { jid, body, quote });
+        self.ui.set_mention_open(false);
+        // "@Name" in the composer goes out as "@<number>" plus the jid in
+        // the context, which is how every client renders a mention.
+        let mut mentions: Vec<String> = Vec::new();
+        let mut mention_all = None;
+        let picked = std::mem::take(&mut self.mentions);
+        for (label, target) in picked {
+            let token = format!("@{label}");
+            if !body.contains(&token) {
+                continue;
+            }
+            if target == "all" {
+                let user = jid.split('@').next().unwrap_or("").to_string();
+                body = body.replace(&token, &format!("@{user}"));
+                mention_all = Some(self.store.chat_name(&jid));
+            } else {
+                let user = target.split('@').next().unwrap_or("").to_string();
+                body = body.replace(&token, &format!("@{user}"));
+                if !mentions.contains(&target) {
+                    mentions.push(target);
+                }
+            }
+        }
+        self.wa.send(Cmd::SendText { jid, body, quote, mentions, mention_all });
+    }
+
+    // ---- mentions ----
+
+    // Called on every composer edit with the cursor's byte offset: an
+    // "@word" right before the cursor opens the member list.
+    fn composer_changed(&mut self, text: &str, cursor: usize) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        if !is_group(&jid) {
+            return;
+        }
+        let Some((at, cursor)) = crate::markup::mention_query(text, cursor) else {
+            self.mention_at = None;
+            self.ui.set_mention_open(false);
+            return;
+        };
+        let query = crate::search::fold(&text[at + 1..cursor]);
+        self.mention_at = Some((at, cursor));
+        let members: Vec<Member> = self.store.members_of(&jid).to_vec();
+        let mut rows: Vec<MemberItem> = Vec::new();
+        let all_label = t("mention.all");
+        if query.is_empty() || crate::search::fold(&all_label).starts_with(&query) {
+            rows.push(MemberItem {
+                jid: "all".into(),
+                name: all_label.into(),
+                number: t("mention.allHint").into(),
+                hasAvatar: false,
+                avatar: empty_image(),
+                initial: "@".into(),
+                colorIdx: 0,
+                checked: false,
+                admin: false,
+            });
+        }
+        for m in members {
+            let canon = self.store.canon_owned(&m.jid);
+            if self.store.self_jids.contains(&canon) {
+                continue;
+            }
+            let name = self.store.chat_name(&canon);
+            let number = if m.phone.is_empty() { format_number(&canon) } else { format_number(&m.phone) };
+            if !query.is_empty()
+                && !crate::search::fold(&name).contains(&query)
+                && !number.replace(' ', "").contains(&query)
+            {
+                continue;
+            }
+            rows.push(self.to_member_row(&canon, &name, &number, m.admin, false));
+            if rows.len() >= 8 {
+                break;
+            }
+        }
+        if rows.is_empty() {
+            self.ui.set_mention_open(false);
+            return;
+        }
+        for row in &rows {
+            if row.jid != "all" {
+                self.queue_avatar(row.jid.as_str());
+            }
+        }
+        self.mention_model.set_vec(rows);
+        self.ui.set_mention_open(true);
+    }
+
+    fn mention_pick(&mut self, idx: usize) {
+        let Some(row) = self.mention_model.row_data(idx) else { return };
+        let Some((at, end)) = self.mention_at.take() else { return };
+        self.ui.set_mention_open(false);
+        let text = self.ui.get_composer_text().to_string();
+        if at > text.len() || end > text.len() {
+            return;
+        }
+        let label = if row.jid == "all" { t("mention.all") } else { row.name.to_string() };
+        let label = clean_text(&label).replace('@', "");
+        let insert = format!("@{label} ");
+        let next = format!("{}{}{}", &text[..at], insert, &text[end..]);
+        let cursor = (at + insert.len()) as i32;
+        self.mentions.retain(|(l, _)| l != &label);
+        self.mentions.push((label, row.jid.to_string()));
+        self.ui.invoke_set_composer(next.into(), cursor);
+    }
+
+    fn to_member_row(&self, jid: &str, name: &str, number: &str, admin: bool, checked: bool) -> MemberItem {
+        let avatar = self.avatar_for(jid);
+        MemberItem {
+            jid: jid.into(),
+            name: name.into(),
+            number: number.into(),
+            hasAvatar: avatar.is_some(),
+            avatar: avatar.unwrap_or_else(empty_image),
+            initial: initial_of(name).into(),
+            colorIdx: color_idx_of(jid),
+            checked,
+            admin,
+        }
     }
 
     fn start_reply(&mut self, id: &str) {
@@ -1863,6 +3240,9 @@ impl Bridge {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
                 self.patch_avatar_everywhere(jid, &image);
+                if jid == self.self_jid {
+                    self.refresh_accounts();
+                }
             }
             (None, true) => {
                 // Confirmed: no picture. The initial stays.
@@ -1878,6 +3258,18 @@ impl Bridge {
                     self.once(1500, move |b| b.queue_avatar(&jid));
                 }
             }
+        }
+    }
+
+    // Which jid a search row's picture belongs to.
+    fn hit_face(&self, row: &SearchHit) -> String {
+        row.face.to_string()
+    }
+
+    pub fn on_avatar_large(&mut self, jid: &str, img: crate::media::Decoded) {
+        if self.ui.get_info_open() && self.current_jid.as_deref() == Some(jid) {
+            self.ui.set_info_avatar(image_of(&img));
+            self.ui.set_info_has_avatar(true);
         }
     }
 
@@ -1897,6 +3289,52 @@ impl Bridge {
         if Some(&jid.to_string()) == self.current_jid.as_ref() {
             self.ui.set_current_avatar(image.clone());
             self.ui.set_current_avatar_has(true);
+        }
+        // Calls and status lists.
+        for i in 0..self.calls_model.row_count() {
+            if let Some(mut row) = self.calls_model.row_data(i)
+                && row.from == jid
+                && !row.hasAvatar
+            {
+                row.avatar = image.clone();
+                row.hasAvatar = true;
+                self.calls_model.set_row_data(i, row);
+            }
+        }
+        for i in 0..self.status_model.row_count() {
+            if let Some(mut row) = self.status_model.row_data(i)
+                && (row.jid == jid || self.store.canon(row.jid.as_str()) == jid)
+                && !row.hasAvatar
+            {
+                row.avatar = image.clone();
+                row.hasAvatar = true;
+                self.status_model.set_row_data(i, row);
+            }
+        }
+        for model in [&self.member_model, &self.info_member_model, &self.mention_model] {
+            for i in 0..model.row_count() {
+                if let Some(mut row) = model.row_data(i)
+                    && row.jid == jid
+                    && !row.hasAvatar
+                {
+                    row.avatar = image.clone();
+                    row.hasAvatar = true;
+                    model.set_row_data(i, row);
+                }
+            }
+        }
+        // Search hits (sidebar and in-chat) that show this face.
+        for model in [&self.search_model, &self.chat_search_model] {
+            for i in 0..model.row_count() {
+                if let Some(mut row) = model.row_data(i)
+                    && !row.hasAvatar
+                    && self.hit_face(&row) == jid
+                {
+                    row.avatar = image.clone();
+                    row.hasAvatar = true;
+                    model.set_row_data(i, row);
+                }
+            }
         }
         // Sender and voice-note avatars inside message rows.
         for i in 0..self.messages_model.row_count() {
@@ -1918,17 +3356,17 @@ impl Bridge {
         }
     }
 
-    // Requests download/decoding for every media-bearing message of a chat,
-    // newest first.
+    // Media is fetched and decoded for the rows on screen, as they report
+    // their position; a whole chat's pictures never sit in RAM at once.
     fn load_media_for_chat(&mut self, jid: &str) {
+        let ids: Vec<String> = self.row_geom.keys().cloned().collect();
+        let known: HashSet<String> = ids.into_iter().collect();
         let pending: Vec<StoredMessage> = self
             .store
             .messages_for(jid)
             .iter()
-            .rev()
-            .filter(|m| {
-                m.kind != MessageKind::Text || !m.link_title.is_empty() || !m.link_url.is_empty()
-            })
+            .filter(|m| known.contains(&m.id))
+            .filter(|m| needs_media(m))
             .cloned()
             .collect();
         for m in pending {
@@ -1936,32 +3374,228 @@ impl Bridge {
         }
     }
 
+    // A row just reported where it is: if it shows media that is not
+    // loaded (never was, or was released while off screen), ask for it.
+    fn media_for_visible_row(&mut self, id: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        if self.media_inflight.contains(id) || self.media_failed.contains(id) {
+            return;
+        }
+        let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id).cloned() else { return };
+        if !needs_media(&m) {
+            return;
+        }
+        let loaded = (0..self.messages_model.row_count())
+            .filter_map(|i| self.messages_model.row_data(i))
+            .find(|row| row.id == id)
+            .map(|row| {
+                let visual = matches!(m.kind, MessageKind::Image | MessageKind::Video);
+                (visual && row.mediaReady && (row.picture.size().width > 0 || m.kind == MessageKind::Video))
+                    || (!visual && m.kind != MessageKind::Text && row.mediaReady)
+                    || (m.kind == MessageKind::Text && row.hasLinkThumb)
+            })
+            .unwrap_or(true);
+        if !loaded {
+            self.request_media(&m);
+        }
+    }
+
+    fn schedule_row_gc(&mut self) {
+        if self.row_gc_queued {
+            return;
+        }
+        self.row_gc_queued = true;
+        self.once(500, |b| {
+            b.row_gc_queued = false;
+            b.gc_row_images();
+        });
+    }
+
+    // Rows that have not reported a position since the last two scroll
+    // steps are off screen: their bitmaps go, the row keeps its size.
+    fn gc_row_images(&mut self) {
+        let epoch = self.geom_epoch;
+        let mut freed = 0usize;
+        for i in 0..self.messages_model.row_count() {
+            let Some(mut row) = self.messages_model.row_data(i) else { continue };
+            let near = self
+                .row_geom
+                .get(row.id.as_str())
+                .is_some_and(|(_, _, e)| epoch.wrapping_sub(*e) <= 2);
+            if near {
+                continue;
+            }
+            let has_pic = row.picture.size().width > 0;
+            if !has_pic && !row.hasLinkThumb {
+                continue;
+            }
+            let id = row.id.to_string();
+            if has_pic {
+                freed += image_bytes(&row.picture);
+                row.picture = empty_image();
+                // Stickers and GIFs animate from their own caches; a photo
+                // or poster is simply asked for again when it returns.
+                if !row.sticker {
+                    row.mediaReady = false;
+                }
+                self.drop_animation(&id);
+            }
+            if row.hasLinkThumb {
+                freed += image_bytes(&row.linkThumb);
+                row.linkThumb = empty_image();
+                row.hasLinkThumb = false;
+            }
+            self.messages_model.set_row_data(i, row);
+            if let Some((old, _, _)) = self.decoded.remove(&id) {
+                self.decoded_bytes = self.decoded_bytes.saturating_sub(image_bytes(&old));
+                self.decoded_order.retain(|k| k != &id);
+            }
+        }
+        if freed > 4 * 1024 * 1024 {
+            println!("[media] released {} MB of off-screen pictures", freed / (1024 * 1024));
+        }
+    }
+
+    // ---- lightbox ----
+
+    // The bubble holds a small decode; the lightbox wants the real thing.
+    fn open_lightbox(&mut self, id: &str) {
+        let Some(row) = (0..self.messages_model.row_count())
+            .filter_map(|i| self.messages_model.row_data(i))
+            .find(|r| r.id == id)
+        else {
+            return;
+        };
+        self.ui.set_lightbox_image(row.picture.clone());
+        self.ui.set_lightbox_id(id.into());
+        self.ui.set_lightbox_open(true);
+        if let Some(path) = self.media_path.get(id) {
+            self.wa.send(Cmd::DecodeFull { id: id.to_string(), path: std::path::PathBuf::from(path) });
+        }
+    }
+
+    pub fn on_full_image(&mut self, id: &str, img: crate::media::Decoded) {
+        if self.ui.get_lightbox_open() && self.ui.get_lightbox_id() == id {
+            self.ui.set_lightbox_image(image_of(&img));
+        }
+    }
+
+    // ---- share group history with a newcomer ----
+
+    fn open_share_dialog(&mut self, group: &str, member: &str) {
+        let name = self.store.chat_name(member);
+        let number = format_number(member);
+        let avatar = self.avatar_for(member);
+        self.queue_avatar(member);
+        self.share_target = Some((group.to_string(), member.to_string()));
+        self.ui.set_share_name(if number.is_empty() || name == number { name.clone() } else { number.clone() }.into());
+        self.ui.set_share_has_avatar(avatar.is_some());
+        self.ui.set_share_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui.set_share_initial(initial_of(&name).into());
+        self.ui.set_share_color_idx(color_idx_of(member));
+        self.ui.set_share_sending(false);
+        self.ui.set_share_open(true);
+    }
+
+    fn share_history_send(&mut self) {
+        let Some((group, member)) = self.share_target.clone() else { return };
+        self.warm_chat(&group);
+        // The last few days of the group, newest 100 messages, as the
+        // WebMessageInfo records a history payload is made of.
+        let cutoff = now_secs() - 7 * 24 * 3600;
+        let mut messages: Vec<wa::WebMessageInfo> = self
+            .store
+            .messages_for(&group)
+            .iter()
+            .rev()
+            .filter(|m| m.kind != MessageKind::System && !m.deleted && m.timestamp >= cutoff)
+            .filter_map(|m| {
+                let raw = m.raw.as_deref()?;
+                use whatsapp_rust::waproto::buffa::MessageField;
+                Some(wa::WebMessageInfo {
+                    key: MessageField::some(wa::MessageKey {
+                        remote_jid: Some(group.clone()),
+                        from_me: Some(m.from_me),
+                        id: Some(m.id.clone()),
+                        participant: Some(if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() }),
+                    }),
+                    message: MessageField::some(raw.clone()),
+                    message_timestamp: Some(m.timestamp as u64),
+                    push_name: if m.sender.is_empty() { None } else { Some(m.sender.clone()) },
+                    ..Default::default()
+                })
+            })
+            .take(100)
+            .collect();
+        messages.reverse();
+        if messages.is_empty() {
+            self.share_target = None;
+            self.ui.set_share_open(false);
+            return;
+        }
+        self.ui.set_share_sending(true);
+        self.wa.send(Cmd::ShareHistory { group, member, messages });
+    }
+
+    pub fn on_share_result(&mut self, ok: bool) {
+        self.ui.set_share_sending(false);
+        self.ui.set_share_open(false);
+        if let Some((group, member)) = self.share_target.take()
+            && ok
+        {
+            let who = crate::wa_map::notice_name(&self.store, &member);
+            let body = ta("notice.historyShared", &[&who]);
+            self.add_system_message(&group, &format!("sys:shared:{}", now_secs()), now_secs(), body);
+        }
+    }
+
     fn request_media(&mut self, m: &StoredMessage) {
-        if m.deleted || self.media_inflight.contains(&m.id) {
+        if m.deleted || self.media_inflight.contains(&m.id) || self.media_failed.contains(&m.id) {
             return;
         }
         let Some(raw) = m.raw.clone() else { return };
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let inner = raw.get_base_message();
         match m.kind {
+            MessageKind::System => {}
             MessageKind::Text => {
-                // Link preview thumbnail travels inside the message itself.
-                if let Some(thumb) = inner
-                    .extended_text_message
-                    .as_option()
-                    .and_then(|e| e.jpeg_thumbnail.as_ref())
-                    .filter(|t| !t.is_empty())
+                let Some(ext) = inner.extended_text_message.as_option() else { return };
+                let inline = ext.jpeg_thumbnail.clone().filter(|t| !t.is_empty()).unwrap_or_default();
+                // The card's real picture lives on the CDN; the inline
+                // jpeg is a placeholder-sized copy, kept as the fallback.
+                let hi_res = ext.thumbnail_direct_path.clone().zip(ext.media_key.clone()).zip(
+                    ext.thumbnail_sha256.clone().zip(ext.thumbnail_enc_sha256.clone()),
+                );
+                if let Some(((direct_path, media_key), (sha256, enc_sha256))) = hi_res
+                    && !direct_path.is_empty()
+                    && !media_key.is_empty()
                 {
                     self.media_inflight.insert(m.id.clone());
-                    self.wa.send(Cmd::DecodeThumb {
+                    self.wa.send(Cmd::LinkThumb {
                         id: m.id.clone(),
-                        bytes: thumb.to_vec(),
-                        link: true,
+                        direct_path,
+                        media_key,
+                        sha256,
+                        enc_sha256,
+                        fallback: inline,
                     });
+                } else if !inline.is_empty() {
+                    self.media_inflight.insert(m.id.clone());
+                    self.wa.send(Cmd::DecodeThumb { id: m.id.clone(), bytes: inline, link: true });
                 }
                 return;
             }
             MessageKind::Image => {
+                // A sticker seen before (in any chat) is served from the
+                // frame cache: no download, no decode.
+                if m.sticker
+                    && let Some(key) = sticker_key(m)
+                    && let Some(frames) = self.stickers.get(&key).cloned()
+                {
+                    self.touch_sticker(&key);
+                    self.show_sticker_frames(&m.id, &frames);
+                    return;
+                }
                 self.media_inflight.insert(m.id.clone());
                 self.wa.send(Cmd::Media {
                     id: m.id.clone(),
@@ -1999,7 +3633,7 @@ impl Bridge {
                     id: m.id.clone(),
                     mimetype: m.mimetype.clone(),
                     message: raw,
-                    want: MediaWant::File,
+                    want: MediaWant::Video,
                 });
             }
             MessageKind::Audio | MessageKind::Doc => {
@@ -2054,6 +3688,7 @@ impl Bridge {
 
     pub fn on_media_missing(&mut self, id: &str) {
         self.media_inflight.remove(id);
+        self.media_failed.insert(id.to_string());
         self.patch_row(id, |row| {
             row.kind = "text".into();
             row.text = t("media.unavailable").into();
@@ -2077,6 +3712,13 @@ impl Bridge {
             .unwrap_or(false);
         if is_audio && !self.waves.contains_key(id) {
             self.wa.send(Cmd::Waveform { id: id.to_string(), path: path.to_path_buf() });
+        }
+        // A video status waiting on its clip gets the poster frame now.
+        if let Some((items, idx)) = &self.viewer
+            && items[*idx].id == id
+        {
+            self.ui.set_sv_video_ready(true);
+            self.wa.send(Cmd::StatusPoster { id: id.to_string(), path: path.to_path_buf() });
         }
         self.restick();
     }
@@ -2105,23 +3747,87 @@ impl Bridge {
             self.on_media_missing(id);
             return;
         }
-        let images: Vec<slint::Image> = frames.iter().map(image_of).collect();
-        let (w, h) = (frames[0].w as i32, frames[0].h as i32);
-        self.remember_decoded(id, images[0].clone(), w, h);
+        let images: Rc<Vec<slint::Image>> = Rc::new(frames.iter().map(image_of).collect());
         let path_str = path.to_string_lossy().into_owned();
-        self.media_path.insert(id.to_string(), path_str.clone());
-        let first = images[0].clone();
+        self.media_path.insert(id.to_string(), path_str);
+        // Cached under the content hash, so the same sticker in another
+        // chat (or the picker) never touches the network again.
+        let key = self
+            .current_jid
+            .as_ref()
+            .and_then(|jid| self.store.messages_for(jid).iter().find(|m| m.id == id))
+            .and_then(sticker_key)
+            .or_else(|| self.store.messages.values().flatten().find(|m| m.id == id).and_then(sticker_key));
+        if let Some(key) = key {
+            self.remember_sticker(&key, images.clone());
+        }
+        self.show_sticker_frames(id, &images);
+        self.restick();
+    }
+
+    // Puts cached frames on a message's row (and the picker cell) and
+    // starts the animation when there is more than one.
+    fn show_sticker_frames(&mut self, id: &str, frames: &Rc<Vec<slint::Image>>) {
+        let Some(first) = frames.first().cloned() else { return };
+        let size = first.size();
+        let (w, h) = (size.width as i32, size.height as i32);
+        self.remember_decoded(id, first.clone(), w, h);
+        let ready_path = self.media_path.get(id).cloned().unwrap_or_default();
+        self.patch_sticker_cells(id, &first);
         self.patch_row(id, |row| {
             row.picture = first;
             row.picW = w;
             row.picH = h;
-            row.mediaPath = path_str.into();
+            row.mediaPath = ready_path.into();
             row.mediaReady = true;
         });
-        if images.len() > 1 {
-            self.start_animation(id, images, true);
+        if frames.len() > 1 {
+            self.start_animation(id, frames.as_ref().clone(), true);
         }
-        self.restick();
+    }
+
+    fn remember_sticker(&mut self, key: &str, frames: Rc<Vec<slint::Image>>) {
+        if let Some(old) = self.stickers.remove(key) {
+            self.sticker_bytes = self.sticker_bytes.saturating_sub(old.iter().map(image_bytes).sum::<usize>());
+            self.sticker_order.retain(|k| k != key);
+        }
+        self.sticker_bytes += frames.iter().map(image_bytes).sum::<usize>();
+        self.sticker_order.push_back(key.to_string());
+        self.stickers.insert(key.to_string(), frames);
+        while self.sticker_order.len() > STICKER_CACHE_MAX
+            || (self.sticker_bytes > STICKER_CACHE_BYTES && self.sticker_order.len() > 1)
+        {
+            let Some(evicted) = self.sticker_order.pop_front() else { break };
+            if let Some(old) = self.stickers.remove(&evicted) {
+                self.sticker_bytes =
+                    self.sticker_bytes.saturating_sub(old.iter().map(image_bytes).sum::<usize>());
+            }
+        }
+    }
+
+    // Marks a cached sticker as recently used.
+    fn touch_sticker(&mut self, key: &str) {
+        self.sticker_order.retain(|k| k != key);
+        self.sticker_order.push_back(key.to_string());
+    }
+
+    // After a conversation is (re)built, stickers already in the cache
+    // show at once instead of waiting for the media pipeline.
+    fn apply_cached_stickers(&mut self, jid: &str) {
+        let hits: Vec<(String, String)> = self
+            .store
+            .messages_for(jid)
+            .iter()
+            .filter(|m| m.sticker && !m.deleted)
+            .filter_map(|m| sticker_key(m).map(|k| (m.id.clone(), k)))
+            .filter(|(_, k)| self.stickers.contains_key(k))
+            .collect();
+        for (id, key) in hits {
+            if let Some(frames) = self.stickers.get(&key).cloned() {
+                self.touch_sticker(&key);
+                self.show_sticker_frames(&id, &frames);
+            }
+        }
     }
 
     pub fn on_media_gif(&mut self, id: &str, path: &std::path::Path, frames: Vec<crate::media::Decoded>) {
@@ -2150,6 +3856,19 @@ impl Bridge {
         self.restick();
     }
 
+    // The clip's own first picture, replacing the blurry thumbnail.
+    pub fn on_video_poster(&mut self, id: &str, img: crate::media::Decoded) {
+        let image = image_of(&img);
+        let (pic_w, pic_h) = poster_box(img.w as i32, img.h as i32);
+        self.remember_decoded(id, image.clone(), pic_w, pic_h);
+        self.patch_row(id, |row| {
+            row.picture = image.clone();
+            row.picW = pic_w;
+            row.picH = pic_h;
+        });
+        self.restick();
+    }
+
     pub fn on_thumb(&mut self, id: &str, link: bool, img: crate::media::Decoded) {
         let image = image_of(&img);
         let (w, h) = (img.w as i32, img.h as i32);
@@ -2162,13 +3881,22 @@ impl Bridge {
                 row.linkThumbH = h;
             });
         } else {
-            // Video poster: the bubble keeps its box; ready comes with the
-            // clip download.
-            let (pic_w, pic_h) = bubble_fit(w, h);
+            // Video poster. The embedded thumbnail is around a hundred
+            // pixels wide, and sizing the bubble to it is what made video
+            // previews tiny: the box comes from the clip's own size, and
+            // the thumbnail only lends its shape when that is unknown. A
+            // sharp poster replaces it once the clip is here.
+            if self.decoded.contains_key(id) {
+                return;
+            }
+            let sized = self.find_message(id).is_some_and(|m| m.media_w > 0 && m.media_h > 0);
+            let (pic_w, pic_h) = poster_box(w, h);
             self.patch_row(id, |row| {
                 row.picture = image.clone();
-                row.picW = pic_w;
-                row.picH = pic_h;
+                if !sized {
+                    row.picW = pic_w;
+                    row.picH = pic_h;
+                }
             });
             self.feed_viewer(id, &image);
         }
@@ -2271,9 +3999,18 @@ impl Bridge {
         let rows: Vec<ChatItem> = authors
             .iter()
             .map(|(jid, latest, _count)| {
-                self.to_chat_row(jid, "", latest.timestamp, 0, false)
+                // Authors are keyed by the identity the update arrived
+                // with; the picture belongs to the canonical one.
+                let canon = self.store.canon_owned(jid);
+                let mut row = self.to_chat_row(&canon, "", latest.timestamp, 0, false);
+                row.jid = jid.clone().into();
+                row
             })
             .collect();
+        for (jid, _, _) in &authors {
+            let canon = self.store.canon_owned(jid);
+            self.queue_avatar(&canon);
+        }
         self.status_model.set_vec(rows);
     }
 
@@ -2309,6 +4046,16 @@ impl Bridge {
         self.ui.set_sv_count(count as i32);
         let has_image = item.kind == MessageKind::Image;
         self.ui.set_sv_has_image(false);
+        let is_video = item
+            .raw
+            .as_deref()
+            .map(|raw| {
+                use whatsapp_rust::proto_helpers::MessageExt as _;
+                raw.get_base_message().video_message.is_set()
+            })
+            .unwrap_or(false);
+        self.ui.set_sv_is_video(is_video);
+        self.ui.set_sv_video_ready(is_video && self.media_path.contains_key(&item.id));
         if has_image {
             if let Some((img, _, _)) = self.decoded.get(&item.id) {
                 self.ui.set_sv_image(img.clone());
@@ -2340,10 +4087,43 @@ impl Bridge {
                         message: raw,
                         want: MediaWant::Image,
                     });
+                } else if inner.video_message.is_set() && !self.media_inflight.contains(&item.id) {
+                    // A video update: the clip itself, for a sharp poster
+                    // frame now and playback on click.
+                    match self.media_path.get(&item.id).cloned() {
+                        Some(path) => self.wa.send(Cmd::StatusPoster {
+                            id: item.id.clone(),
+                            path: std::path::PathBuf::from(path),
+                        }),
+                        None => {
+                            self.media_inflight.insert(item.id.clone());
+                            self.wa.send(Cmd::Media {
+                                id: item.id.clone(),
+                                mimetype: if item.mimetype.is_empty() { "video/mp4".into() } else { item.mimetype.clone() },
+                                message: raw,
+                                want: MediaWant::File,
+                            });
+                        }
+                    }
                 }
             }
         }
         self.ui.set_sv_open(true);
+    }
+
+    // The clip of a video update landed: draw its first frame.
+    pub fn on_status_poster(&mut self, id: &str, img: crate::media::Decoded) {
+        let image = image_of(&img);
+        self.feed_viewer(id, &image);
+    }
+
+    fn play_status_video(&mut self) {
+        let Some((items, idx)) = &self.viewer else { return };
+        let item = items[*idx].clone();
+        let Some(path) = self.media_path.get(&item.id).map(std::path::PathBuf::from) else { return };
+        self.close_video();
+        self.video_id = Some(item.id.clone());
+        self.play_clip(path, item.media_w, item.media_h, item.duration_sec, None);
     }
 
     // Puts a freshly decoded bitmap on the open viewer when it matches.
@@ -2394,6 +4174,10 @@ impl Bridge {
                 }
             })
             .collect();
+        let jids: Vec<String> = self.store.calls.iter().take(60).map(|c| c.jid.clone()).collect();
+        for jid in jids {
+            self.queue_avatar(&jid);
+        }
         self.calls_model.set_vec(rows);
     }
 
@@ -3020,6 +4804,15 @@ impl Bridge {
         self.ui.set_info_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_info_initial(initial_of(&name).into());
         self.ui.set_info_color_idx(color_idx_of(&jid));
+        self.ui.set_chat_menu_open(false);
+        self.info_member_model.set_vec(Vec::new());
+        // The 140px portrait wants a bigger cut than the list keeps.
+        self.wa.send(Cmd::AvatarLarge(jid.clone()));
+        if group {
+            self.fill_info_members(&jid);
+            self.group_meta_at.remove(&jid);
+            self.ensure_group_meta(&jid);
+        }
         // Shared media: the last 12 pictures already decoded.
         let cells: Vec<StickerCell> = self
             .store
@@ -3069,16 +4862,800 @@ impl Bridge {
 
     fn clear_current_chat(&mut self) {
         let Some(jid) = self.current_jid.clone() else { return };
-        self.store.messages.remove(&jid);
-        if let Some(meta) = self.store.chats.get_mut(&jid) {
-            meta.preview = String::new();
-        }
-        if let Some(vault) = &self.vault {
-            vault.del(&format!("store:msgs:{jid}"));
-        }
-        self.messages_model.set_vec(Vec::new());
+        self.clear_chat(&jid, true);
         self.ui.set_info_open(false);
+    }
+
+    // Empties a conversation here and, when asked, on the phone too.
+    fn clear_chat(&mut self, jid: &str, remote: bool) {
+        self.store.clear_messages(jid);
+        if Some(jid) == self.current_jid.as_deref() {
+            self.messages_model.set_vec(Vec::new());
+            self.select_end();
+        }
+        if remote {
+            self.wa.send(Cmd::ClearChat(jid.to_string()));
+        }
         self.schedule_refresh_chats();
+    }
+
+    // The phone cleared or deleted a chat; mirror it.
+    pub fn on_chat_cleared(&mut self, jid: &str, deleted: bool) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        if deleted {
+            self.store.delete_chat(&jid);
+            if Some(&jid) == self.current_jid.as_ref() {
+                self.close_chat();
+            }
+            self.schedule_refresh_chats();
+        } else {
+            self.clear_chat(&jid, false);
+        }
+    }
+
+    fn close_chat(&mut self) {
+        self.select_end();
+        self.ui.set_chat_menu_open(false);
+        self.ui.set_chat_search_open(false);
+        self.ui.set_info_open(false);
+        self.ui.set_chat_open(false);
+        self.ui.set_selected_jid("".into());
+        self.current_jid = None;
+        self.messages_model.set_vec(Vec::new());
+        self.sync_mini_player();
+    }
+
+    // ---- chat settings (mute, favorite, lists, disappearing) ----
+
+    // Pushes the open chat's flags to the header menu.
+    fn apply_chat_settings_ui(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let meta = self.store.chats.get(&jid).cloned().unwrap_or_default();
+        self.ui.set_current_is_group(is_group(&jid));
+        self.ui.set_current_can_send(meta.can_send() && !is_channel(&jid));
+        self.ui.set_current_left(meta.left);
+        self.ui.set_current_muted(meta.is_muted());
+        self.ui.set_current_mute_label(if meta.muted == -1 {
+            t("mute.always")
+        } else if meta.is_muted() {
+            ta("mute.until", &[&format_stamp(meta.muted)])
+        } else {
+            String::new()
+        }.into());
+        self.ui.set_current_favorite(meta.favorite);
+        self.ui.set_current_ephemeral(meta.ephemeral as i32);
+        self.ui.set_current_ephemeral_label(
+            if meta.ephemeral > 0 { crate::wa_map::ephemeral_label(meta.ephemeral) } else { String::new() }.into(),
+        );
+        self.ui.set_current_admin(meta.admin);
+    }
+
+    // Groups are refreshed on open, at most once per TTL.
+    fn ensure_group_meta(&mut self, jid: &str) {
+        if !is_group(jid) {
+            return;
+        }
+        let fresh = self.group_meta_at.get(jid).is_some_and(|at| at.elapsed() < GROUP_META_TTL);
+        if fresh {
+            return;
+        }
+        self.group_meta_at.insert(jid.to_string(), Instant::now());
+        self.wa.send(Cmd::FetchGroupMeta(jid.to_string()));
+    }
+
+    pub fn on_group_meta(&mut self, snap: GroupSnapshot) {
+        let jid = self.store.canon_owned(&normalize_jid(&snap.jid));
+        if !snap.subject.is_empty() {
+            self.store.set_name(&jid, &snap.subject);
+        }
+        // The roster pairs every LID with its phone number: that is what
+        // turns "@2785...@lid" mentions into names.
+        let mut learned = false;
+        let mut with_phone = 0;
+        for m in &snap.members {
+            if m.jid.ends_with("@lid") && !m.phone.is_empty() {
+                with_phone += 1;
+                learned |= self.store.learn_alias(&m.jid, &m.phone);
+            }
+            // A server-side display name fills in for people who never
+            // wrote here, so their mentions read as names.
+            if !m.name.is_empty() {
+                let canon = self.store.canon_owned(&m.jid);
+                if !self.store.contacts.contains_key(&canon) && !self.store.push_names.contains_key(&canon) {
+                    self.store.push_names.insert(canon, m.name.clone());
+                    learned = true;
+                }
+            }
+        }
+        println!(
+            "[group] {} roster: {} members, {} with a phone, announce={}",
+            jid,
+            snap.members.len(),
+            with_phone,
+            snap.announce
+        );
+        self.store.set_members(&jid, snap.members);
+        let admin = self.store.self_is_admin(&jid);
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.announce = snap.announce;
+            meta.admin = admin;
+            meta.ephemeral = snap.ephemeral;
+            meta.left = false;
+        }
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.apply_chat_settings_ui();
+            if self.ui.get_info_open() {
+                self.ui.set_info_desc(snap.desc.clone().into());
+                self.fill_info_members(&jid);
+            }
+            // Newly paired identities may name mentions that were drawn
+            // as bare numbers.
+            if learned && self.ui.get_stick_bottom() {
+                self.rebuild_conversation(&jid);
+                self.scroll_to_end();
+            }
+        }
+        self.schedule_refresh_chats();
+    }
+
+    // A group notification: a notice in the conversation plus whatever
+    // it changes about the roster or the settings.
+    pub fn on_group_update(&mut self, change: GroupChange) {
+        let jid = self.store.canon_owned(&normalize_jid(&change.jid));
+        let who: Vec<String> = change
+            .who
+            .iter()
+            .map(|(j, pn)| {
+                if let Some(pn) = pn {
+                    self.store.learn_alias(j, pn);
+                }
+                self.store.canon_owned(j)
+            })
+            .collect();
+        if let (Some(actor), Some(pn)) = (&change.actor, &change.actor_pn) {
+            self.store.learn_alias(actor, pn);
+        }
+        let actor = change.actor.as_ref().map(|a| self.store.canon_owned(a));
+        let me_involved = who.iter().any(|w| self.store.self_jids.contains(w));
+        match change.kind {
+            "add" | "remove" | "promote" | "demote" => {
+                if !self.store.patch_members(&jid, &who, change.kind) {
+                    self.group_meta_at.remove(&jid);
+                    self.ensure_group_meta(&jid);
+                }
+                if me_involved {
+                    let admin = self.store.self_is_admin(&jid);
+                    if let Some(meta) = self.store.chats.get_mut(&jid) {
+                        meta.admin = admin;
+                        if change.kind == "remove" {
+                            meta.left = true;
+                        } else if change.kind == "add" {
+                            meta.left = false;
+                        }
+                    }
+                }
+            }
+            "subject" => self.store.set_name(&jid, &change.text),
+            "announce" | "not_announce" => {
+                if let Some(meta) = self.store.chats.get_mut(&jid) {
+                    meta.announce = change.kind == "announce";
+                }
+            }
+            "ephemeral" => {
+                if let Some(meta) = self.store.chats.get_mut(&jid) {
+                    meta.ephemeral = change.number;
+                }
+            }
+            _ => {}
+        }
+        let kind = if change.kind == "add" && change.reason == "invite" { "invite" } else { change.kind };
+        let body = crate::wa_map::group_notice(
+            &self.store,
+            kind,
+            actor.as_deref(),
+            &who,
+            &change.text,
+            change.number,
+        );
+        if !body.is_empty() {
+            let invite = change.kind == "invite" || (change.kind == "add" && change.reason == "invite");
+            let id = if invite && who.len() == 1 && !me_involved {
+                format!("sys:invite:{}:{}", change.ts, who[0])
+            } else {
+                format!("sys:{}:{}:{}", change.ts, change.kind, who.join(","))
+            };
+            self.add_system_message(&jid, &id, change.ts, body);
+        }
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.apply_header(&jid);
+            self.apply_chat_settings_ui();
+            if self.ui.get_info_open() {
+                self.fill_info_members(&jid);
+            }
+        }
+        self.schedule_refresh_chats();
+    }
+
+    // Stores a notice and shows it if the chat is open.
+    fn add_system_message(&mut self, jid: &str, id: &str, ts: i64, body: String) {
+        if !self.store.chats.contains_key(jid) {
+            self.store.upsert_chat(jid, None, 0, None, None, None);
+        }
+        let ts = if ts > 0 { ts } else { now_secs() };
+        let stored = crate::wa_map::system_message(jid, id, ts, body);
+        if self.store.add_message(stored) && Some(jid) == self.current_jid.as_deref() {
+            self.push_message_row(jid);
+        }
+    }
+
+    pub fn on_group_left(&mut self, jid: &str) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.left = true;
+        }
+        let body = t("notice.youLeft");
+        self.add_system_message(&jid, &format!("sys:left:{}", now_secs()), now_secs(), body);
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.apply_chat_settings_ui();
+        }
+        self.schedule_refresh_chats();
+    }
+
+    pub fn on_mute(&mut self, jid: &str, muted: i64) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.muted = muted;
+        }
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.apply_chat_settings_ui();
+        }
+        self.schedule_refresh_chats();
+    }
+
+    // `hours`: 0 unmutes, -1 mutes for good, otherwise mutes that long.
+    fn mute_current(&mut self, hours: i32) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.ui.set_chat_menu_open(false);
+        let muted = match hours {
+            0 => 0,
+            h if h < 0 => -1,
+            h => now_secs() + h as i64 * 3600,
+        };
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.muted = muted;
+        }
+        match muted {
+            0 => self.wa.send(Cmd::Unmute(jid)),
+            -1 => self.wa.send(Cmd::Mute { jid, until_ms: 0 }),
+            until => self.wa.send(Cmd::Mute { jid, until_ms: until * 1000 }),
+        }
+        self.apply_chat_settings_ui();
+        self.schedule_refresh_chats();
+    }
+
+    fn set_ephemeral_current(&mut self, secs: u32) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.ui.set_chat_menu_open(false);
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.ephemeral = secs;
+        }
+        let body = crate::wa_map::group_notice(&self.store, "ephemeral", Some(&self.self_jid.clone()), &[], "", secs);
+        self.add_system_message(&jid, &format!("sys:eph:{}", now_secs()), now_secs(), body);
+        self.wa.send(Cmd::SetEphemeral { jid, group: is_group(self.current_jid.as_deref().unwrap_or("")), secs });
+        self.apply_chat_settings_ui();
+    }
+
+    fn toggle_favorite(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.ui.set_chat_menu_open(false);
+        let next = !self.store.chats.get(&jid).map(|c| c.favorite).unwrap_or(false);
+        if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.favorite = next;
+        }
+        let all: Vec<String> =
+            self.store.chats.values().filter(|c| c.favorite).map(|c| c.jid.clone()).collect();
+        self.wa.send(Cmd::Favorites(all));
+        self.apply_chat_settings_ui();
+        self.schedule_refresh_chats();
+    }
+
+    fn toggle_list(&mut self, id: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let on = !self
+            .store
+            .label_chats
+            .get(id)
+            .map(|set| set.contains(&jid))
+            .unwrap_or(false);
+        if self.store.set_label_chat(id, &jid, on) {
+            self.wa.send(Cmd::LabelChat { label_id: id.to_string(), jid, on });
+        }
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+    }
+
+    fn create_list(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let id = self.store.next_label_id();
+        let order = self.store.labels.len() as i32;
+        let label = Label { id: id.clone(), name: name.to_string(), color: order % 20, order };
+        self.store.upsert_label(label);
+        self.wa.send(Cmd::LabelCreate { id: id.clone(), name: name.to_string(), color: order % 20, order });
+        // A list made from a chat's menu starts with that chat in it.
+        if let Some(jid) = self.current_jid.clone()
+            && self.store.set_label_chat(&id, &jid, true)
+        {
+            self.wa.send(Cmd::LabelChat { label_id: id, jid, on: true });
+        }
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+    }
+
+    fn delete_list(&mut self, id: &str) {
+        self.store.remove_label(id);
+        self.wa.send(Cmd::LabelDelete(id.to_string()));
+        if self.tab == format!("label:{id}") {
+            self.tab = "all".into();
+            self.ui.set_chat_tab("all".into());
+        }
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+    }
+
+    pub fn on_label(&mut self, id: &str, name: &str, color: i32, order: i32, deleted: bool) {
+        if deleted {
+            self.store.remove_label(id);
+        } else if !name.is_empty() {
+            self.store.upsert_label(Label { id: id.to_string(), name: name.to_string(), color, order });
+        }
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+    }
+
+    pub fn on_label_chat(&mut self, id: &str, jid: &str, on: bool) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        self.store.set_label_chat(id, &jid, on);
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+    }
+
+    // ---- confirm dialog ----
+
+    fn ask_confirm(&mut self, title: String, body: String, action: String, what: ConfirmAction) {
+        self.ui.set_chat_menu_open(false);
+        self.confirm_action = Some(what);
+        self.ui.set_confirm_title(title.into());
+        self.ui.set_confirm_text(body.into());
+        self.ui.set_confirm_action(action.into());
+        self.ui.set_confirm_secondary("".into());
+        self.ui.set_confirm_open(true);
+    }
+
+    fn confirm_accepted(&mut self) {
+        self.ui.set_confirm_open(false);
+        let Some(action) = self.confirm_action.take() else { return };
+        match action {
+            ConfirmAction::ExitGroup(jid) => {
+                self.wa.send(Cmd::LeaveGroup(jid));
+            }
+            ConfirmAction::ClearChat(jid) => self.clear_chat(&jid, true),
+            ConfirmAction::DeleteChat(jid) => {
+                self.store.delete_chat(&jid);
+                self.wa.send(Cmd::DeleteChat(jid.clone()));
+                if Some(&jid) == self.current_jid.as_ref() {
+                    self.close_chat();
+                }
+                self.schedule_refresh_chats();
+            }
+            ConfirmAction::DeleteSelected { for_everyone } => self.delete_selected(for_everyone),
+            ConfirmAction::Logout => self.logout(true),
+            ConfirmAction::RemoveAccount(id) => self.remove_account(&id),
+            ConfirmAction::ForgetConversations => {
+                self.wipe_conversations();
+                self.forget_account_identity();
+                self.refresh_accounts();
+            }
+        }
+    }
+
+    // The dialog's second button: "delete for me" when the primary one
+    // is "delete for everyone".
+    fn confirm_secondary(&mut self) {
+        self.ui.set_confirm_open(false);
+        match self.confirm_action.take() {
+            Some(ConfirmAction::DeleteSelected { .. }) => self.delete_selected(false),
+            Some(ConfirmAction::Logout) => self.logout(false),
+            _ => {}
+        }
+    }
+
+    // ---- selection mode ----
+
+    fn select_start(&mut self, id: &str) {
+        self.select_mode = true;
+        self.selected.clear();
+        self.ui.set_chat_menu_open(false);
+        self.ui.set_react_bar_id("".into());
+        self.ui.set_select_mode(true);
+        if !id.is_empty() {
+            self.toggle_select(id);
+        } else {
+            self.ui.set_select_count(0);
+        }
+    }
+
+    fn toggle_select(&mut self, id: &str) {
+        if !self.select_mode {
+            self.select_start(id);
+            return;
+        }
+        let on = if let Some(at) = self.selected.iter().position(|s| s == id) {
+            self.selected.remove(at);
+            false
+        } else {
+            self.selected.push(id.to_string());
+            true
+        };
+        self.patch_row(id, |row| row.selected = on);
+        self.ui.set_select_count(self.selected.len() as i32);
+    }
+
+    fn select_end(&mut self) {
+        if !self.select_mode && self.selected.is_empty() {
+            self.ui.set_select_mode(false);
+            return;
+        }
+        self.select_mode = false;
+        let ids = std::mem::take(&mut self.selected);
+        for id in ids {
+            self.patch_row(&id, |row| row.selected = false);
+        }
+        self.ui.set_select_mode(false);
+        self.ui.set_select_count(0);
+    }
+
+    // Selected ids in conversation order, so a copy reads top to bottom.
+    fn selected_in_order(&self) -> Vec<String> {
+        let Some(jid) = self.current_jid.as_ref() else { return Vec::new() };
+        self.store
+            .messages_for(jid)
+            .iter()
+            .filter(|m| self.selected.iter().any(|s| s == &m.id))
+            .map(|m| m.id.clone())
+            .collect()
+    }
+
+    // One message copies as its text; several copy the way WhatsApp
+    // does, each on a line with its stamp and author.
+    fn copy_messages(&mut self, ids: &[String]) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let lines: Vec<String> = ids
+            .iter()
+            .filter_map(|id| self.store.messages_for(&jid).iter().find(|m| &m.id == id))
+            .map(|m| {
+                if ids.len() == 1 {
+                    return self.store.named_mentions(&m.text);
+                }
+                let body = self.store.named_mentions(&copy_body(m));
+                {
+                    let who = if m.from_me {
+                        self.store.chat_name(&self.self_jid)
+                    } else if m.sender.is_empty() {
+                        self.store.chat_name(&m.jid)
+                    } else {
+                        m.sender.clone()
+                    };
+                    format!("[{}] {who}: {body}", format_stamp(m.timestamp))
+                }
+            })
+            .collect();
+        if lines.is_empty() {
+            return;
+        }
+        let text = lines.join("\n");
+        if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
+            eprintln!("[clipboard] copy failed: {e}");
+        }
+    }
+
+    fn request_forward_selected(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let ids = self.selected_in_order();
+        if ids.is_empty() {
+            return;
+        }
+        let count = ids.len();
+        self.pending_forward = ids.iter().map(|id| (jid.clone(), id.clone())).collect();
+        self.fill_forward_rows("");
+        let preview = if count == 1 {
+            self.find_message(&ids[0]).map(preview_body).unwrap_or_default()
+        } else {
+            ta("forward.count", &[&count.to_string()])
+        };
+        let image = if count == 1 { self.decoded.get(&ids[0]).map(|(img, _, _)| img.clone()) } else { None };
+        self.ui.set_forward_preview_text(preview.into());
+        self.ui.set_forward_preview_has_image(image.is_some());
+        self.ui.set_forward_preview_image(image.unwrap_or_else(empty_image));
+        self.ui.set_forward_open(true);
+        self.select_end();
+    }
+
+    fn star_selected(&mut self) {
+        let ids = self.selected_in_order();
+        // Starring the lot when any is unstarred; unstarring otherwise.
+        let any_unstarred = ids.iter().any(|id| self.find_message(id).is_some_and(|m| !m.starred));
+        for id in ids {
+            let starred = self.find_message(&id).map(|m| m.starred).unwrap_or(false);
+            if starred != any_unstarred {
+                self.toggle_star(&id);
+            }
+        }
+        self.select_end();
+    }
+
+    fn confirm_delete_selected(&mut self) {
+        let ids = self.selected_in_order();
+        if ids.is_empty() {
+            return;
+        }
+        let all_mine = ids.iter().all(|id| self.find_message(id).is_some_and(|m| m.from_me));
+        let count = ids.len().to_string();
+        self.confirm_action = Some(ConfirmAction::DeleteSelected { for_everyone: all_mine });
+        self.ui.set_confirm_title(ta("confirm.deleteTitle", &[&count]).into());
+        self.ui.set_confirm_text(t("confirm.deleteBody").into());
+        self.ui.set_confirm_action(
+            t(if all_mine { "confirm.deleteEveryone" } else { "confirm.deleteMe" }).into(),
+        );
+        self.ui.set_confirm_secondary(if all_mine { t("confirm.deleteMe") } else { String::new() }.into());
+        self.ui.set_confirm_open(true);
+    }
+
+    fn delete_selected(&mut self, for_everyone: bool) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let ids = self.selected_in_order();
+        if for_everyone {
+            for id in &ids {
+                self.delete_message(id);
+            }
+        } else {
+            for id in &ids {
+                if let Some(m) = self.find_message(id).cloned() {
+                    self.wa.send(Cmd::DeleteForMe {
+                        jid: jid.clone(),
+                        id: id.clone(),
+                        from_me: m.from_me,
+                        participant: self.key_participant(&m),
+                        ts: m.timestamp,
+                    });
+                }
+            }
+            if self.store.remove_messages(&jid, &ids) {
+                self.rebuild_conversation(&jid);
+                self.schedule_refresh_chats();
+            }
+        }
+        self.select_end();
+    }
+
+    // ---- member picker (add to group) ----
+
+    fn open_member_picker(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        if !is_group(&jid) {
+            return;
+        }
+        self.ui.set_chat_menu_open(false);
+        self.member_picked.clear();
+        self.ui.set_member_count(0);
+        self.fill_member_rows("");
+        self.ui.set_member_pick_open(true);
+    }
+
+    // Saved contacts not yet in the group, narrowed by the search box.
+    fn fill_member_rows(&mut self, query: &str) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        let q = crate::search::fold(query.trim());
+        let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
+        let in_group: HashSet<String> = self
+            .store
+            .members_of(&jid)
+            .iter()
+            .flat_map(|m| [self.store.canon_owned(&m.jid), m.phone.clone()])
+            .collect();
+        let mut candidates: Vec<String> = self
+            .store
+            .saved_contacts
+            .iter()
+            .chain(self.store.chats.keys())
+            .filter(|j| j.ends_with("@s.whatsapp.net") && !in_group.contains(*j))
+            .cloned()
+            .collect();
+        candidates.sort();
+        candidates.dedup();
+        let rows: Vec<MemberItem> = candidates
+            .iter()
+            .filter(|j| {
+                if q.is_empty() {
+                    return true;
+                }
+                crate::search::fold(&self.store.chat_name(j)).contains(&q)
+                    || (!digits.is_empty() && j.contains(&digits))
+            })
+            .take(300)
+            .map(|j| {
+                let name = self.store.chat_name(j);
+                self.to_member_row(j, &name, &format_number(j), false, self.member_picked.contains(j))
+            })
+            .collect();
+        for row in &rows {
+            self.queue_avatar(row.jid.as_str());
+        }
+        self.member_model.set_vec(rows);
+    }
+
+    fn confirm_add_members(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.ui.set_member_pick_open(false);
+        let members: Vec<String> = self.member_picked.drain().collect();
+        if members.is_empty() {
+            return;
+        }
+        self.wa.send(Cmd::AddMembers { jid, members });
+    }
+
+    pub fn on_members_added(&mut self, jid: &str, failed: &[String]) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        self.group_meta_at.remove(&jid);
+        self.ensure_group_meta(&jid);
+        if !failed.is_empty() {
+            let names: Vec<String> = failed.iter().map(|j| self.store.chat_name(j)).collect();
+            self.ui.set_status_text(ta("members.addFailed", &[&names.join(", ")]).into());
+        }
+    }
+
+    // Roster shown in the group info panel.
+    fn fill_info_members(&mut self, jid: &str) {
+        let members: Vec<Member> = self.store.members_of(jid).to_vec();
+        let mut rows: Vec<MemberItem> = members
+            .iter()
+            .map(|m| {
+                let canon = self.store.canon_owned(&m.jid);
+                let name = if self.store.self_jids.contains(&canon) {
+                    t("reactions.you")
+                } else {
+                    self.store.chat_name(&canon)
+                };
+                let number = if m.phone.is_empty() { format_number(&canon) } else { format_number(&m.phone) };
+                self.to_member_row(&canon, &name, &number, m.admin, false)
+            })
+            .collect();
+        rows.sort_by(|a, b| b.admin.cmp(&a.admin).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        for row in &rows {
+            self.queue_avatar(row.jid.as_str());
+        }
+        let count = rows.len();
+        self.info_member_model.set_vec(rows);
+        if count > 0 {
+            self.ui.set_info_members(ta("info.members", &[&count.to_string()]).into());
+        }
+    }
+
+    // ---- export ----
+
+    // Writes the conversation as WhatsApp's "export chat" text file.
+    fn export_chat(&mut self) {
+        let Some(jid) = self.current_jid.clone() else { return };
+        self.ui.set_chat_menu_open(false);
+        self.warm_chat(&jid);
+        let name = self.store.chat_name(&jid);
+        let me = self.store.chat_name(&self.self_jid);
+        let lines: Vec<String> = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .map(|m| {
+                let stamp = format_stamp(m.timestamp).replace(' ', ", ");
+                if m.kind == MessageKind::System {
+                    return format!("{stamp} - {}", m.text);
+                }
+                let who = if m.from_me {
+                    me.clone()
+                } else if m.sender.is_empty() {
+                    name.clone()
+                } else {
+                    m.sender.clone()
+                };
+                format!("{stamp} - {who}: {}", self.store.named_mentions(&copy_body(m)))
+            })
+            .collect();
+        let text = lines.join("\n");
+        let file_name = format!(
+            "WhatsApp Chat - {}.txt",
+            name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect::<String>()
+        );
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new()
+                .set_file_name(&file_name)
+                .add_filter("Text", &["txt"])
+                .save_file();
+            if let Some(path) = picked
+                && let Err(e) = std::fs::write(&path, text)
+            {
+                eprintln!("[export] write failed: {e}");
+            }
+        });
+    }
+
+    // ---- search ----
+
+    fn open_chat_search(&mut self) {
+        self.ui.set_chat_menu_open(false);
+        self.ui.set_info_open(false);
+        self.ui.set_chat_search_open(true);
+        self.chat_search(&self.chat_search_query.clone());
+    }
+
+    fn chat_search(&mut self, query: &str) {
+        self.chat_search_query = query.to_string();
+        self.chat_search_pos = 0;
+        let Some(jid) = self.current_jid.clone() else { return };
+        if query.trim().is_empty() {
+            self.chat_search_model.set_vec(Vec::new());
+            self.ui.set_chat_search_count("".into());
+            self.ui.set_highlight_id("".into());
+            return;
+        }
+        let hits = self.store.search.search(query, Some(&jid), 200);
+        let count = hits.len();
+        let rows: Vec<SearchHit> = hits.iter().map(|h| self.to_hit(h, false)).collect();
+        let faces: HashSet<String> = hits
+            .iter()
+            .map(|h| {
+                if h.from_me {
+                    self.self_jid.clone()
+                } else if h.sender_jid.is_empty() {
+                    h.jid.clone()
+                } else {
+                    self.store.canon_owned(&h.sender_jid)
+                }
+            })
+            .collect();
+        for face in faces {
+            self.queue_avatar(&face);
+        }
+        self.chat_search_model.set_vec(rows);
+        self.ui.set_chat_search_count(
+            if count == 0 { t("search.none") } else { ta("search.results", &[&count.to_string()]) }.into(),
+        );
+    }
+
+    // Up/down through the hits, newest first.
+    fn chat_search_step(&mut self, delta: i32) {
+        let count = self.chat_search_model.row_count();
+        if count == 0 {
+            return;
+        }
+        let next = (self.chat_search_pos as i32 + delta).rem_euclid(count as i32) as usize;
+        self.chat_search_pos = next;
+        if let Some(row) = self.chat_search_model.row_data(next) {
+            let (jid, id) = (row.jid.to_string(), row.id.to_string());
+            self.open_hit(&jid, &id);
+        }
+    }
+
+    // Jumps to a message and flashes it.
+    fn open_hit(&mut self, jid: &str, id: &str) {
+        self.open_dm(jid, Some(id));
+        self.ui.set_highlight_id(id.into());
+        let id = id.to_string();
+        self.once(2500, move |b| {
+            if b.ui.get_highlight_id() == id.as_str() {
+                b.ui.set_highlight_id("".into());
+            }
+        });
     }
 
     // ---- sticker & GIF pickers ----
@@ -3087,19 +5664,38 @@ impl Bridge {
         let cells: Vec<StickerCell> = items
             .iter()
             .map(|m| {
-                let ready = self.decoded.contains_key(&m.id);
+                let cached = sticker_key(m)
+                    .and_then(|k| self.stickers.get(&k))
+                    .and_then(|frames| frames.first().cloned())
+                    .or_else(|| self.decoded.get(&m.id).map(|(img, _, _)| img.clone()));
                 StickerCell {
                     id: m.id.clone().into(),
-                    pic: self
-                        .decoded
-                        .get(&m.id)
-                        .map(|(img, _, _)| img.clone())
-                        .unwrap_or_else(empty_image),
-                    ready,
+                    ready: cached.is_some(),
+                    pic: cached.unwrap_or_else(empty_image),
                 }
             })
             .collect();
         cells.chunks(4).map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec())))).collect()
+    }
+
+    // A sticker's picker cell is filled from the frame cache the moment
+    // its frames land.
+    fn patch_sticker_cells(&self, id: &str, image: &slint::Image) {
+        for model in [&self.sticker_model, &self.fav_model] {
+            for r in 0..model.row_count() {
+                let Some(row) = model.row_data(r) else { continue };
+                for c in 0..row.row_count() {
+                    if let Some(mut cell) = row.row_data(c)
+                        && cell.id == id
+                        && !cell.ready
+                    {
+                        cell.pic = image.clone();
+                        cell.ready = true;
+                        row.set_row_data(c, cell);
+                    }
+                }
+            }
+        }
     }
 
     // Fills the sticker tab with recent/starred stickers (lazy decode).
@@ -3131,14 +5727,23 @@ impl Bridge {
             .collect();
         let recent_grid = self.sticker_grid(recents);
         self.sticker_model.set_vec(recent_grid);
+        // Cached stickers fill their cells right away; the rest download.
         for m in fav_pending.into_iter().chain(recent_pending) {
+            if let Some(frames) = sticker_key(&m).and_then(|k| self.stickers.get(&k)).cloned()
+                && let Some(first) = frames.first()
+            {
+                self.patch_sticker_cells(&m.id, first);
+                continue;
+            }
             self.request_media(&m);
         }
     }
 
     fn send_sticker_by_id(&mut self, id: &str) {
         let Some(jid) = self.current_jid.clone() else { return };
-        // Panel stickers are past messages: forwarding reuses their CDN copy.
+        // Panel stickers are past messages: reusing their CDN copy skips a
+        // re-upload, but this is a fresh send, not a forward (WhatsApp
+        // itself never tags a re-sent sticker as forwarded).
         let raw = self
             .store
             .messages
@@ -3148,7 +5753,7 @@ impl Bridge {
             .and_then(|m| m.raw.clone());
         if let Some(message) = raw {
             self.ui.set_picker_open(false);
-            self.wa.send(Cmd::Forward { jid, message });
+            self.wa.send(Cmd::ResendMedia { jid, message });
         }
     }
 
@@ -3179,7 +5784,8 @@ impl Bridge {
             self.wa.send(Cmd::SendGifUrl { jid, url });
             return;
         }
-        // A history GIF: forward the original message.
+        // A history GIF: resend the original message's CDN copy, not a
+        // forward (see send_sticker_by_id).
         let raw = self
             .store
             .messages
@@ -3188,8 +5794,291 @@ impl Bridge {
             .find(|m| m.id == id && m.gif)
             .and_then(|m| m.raw.clone());
         if let Some(message) = raw {
-            self.wa.send(Cmd::Forward { jid, message });
+            self.wa.send(Cmd::ResendMedia { jid, message });
         }
+    }
+
+    // ---- documents and the PDF viewer ----
+
+    // The decrypted copy of a downloaded document, when it is here.
+    fn plain_document(&self, id: &str) -> Option<(StoredMessage, std::path::PathBuf)> {
+        let m = self.find_message(id)?.clone();
+        let cached = std::path::PathBuf::from(self.media_path.get(id)?);
+        let plain = crate::media::temp_plain(&self.media_key, &cached)?;
+        // The temp copy carries the cache name; the real file name matters
+        // to whatever opens it, so it gets a sibling with that name.
+        let named = plain.with_file_name(sanitize_file_name(&m.text));
+        if !named.exists() {
+            let _ = std::fs::copy(&plain, &named);
+        }
+        Some((m, if named.exists() { named } else { plain }))
+    }
+
+    fn open_document(&mut self, id: &str) {
+        let Some((m, path)) = self.plain_document(id) else { return };
+        if crate::pdf::is_pdf(&m.mimetype, &m.text) {
+            self.open_pdf(id, &m.text, path);
+        } else {
+            crate::platform::open_path(&path.to_string_lossy());
+        }
+    }
+
+    fn save_document(&mut self, id: &str) {
+        let Some((m, path)) = self.plain_document(id) else { return };
+        let name = sanitize_file_name(&m.text);
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+            if let Some(target) = picked
+                && let Err(e) = std::fs::copy(&path, &target)
+            {
+                eprintln!("[doc] save failed: {e}");
+            }
+        });
+    }
+
+    fn open_pdf(&mut self, id: &str, title: &str, path: std::path::PathBuf) {
+        self.pdf_gen += 1;
+        self.pdf_id = id.to_string();
+        self.pdf_path = Some(path.clone());
+        self.pdf_sizes.clear();
+        self.pdf_rendered.clear();
+        self.pdf_pending.clear();
+        self.pdf_zoom = 1.0;
+        self.pdf_model.set_vec(Vec::new());
+        self.ui.set_pdf_title(title.into());
+        self.ui.set_pdf_page(0);
+        self.ui.set_pdf_count(0);
+        self.ui.set_pdf_total_h(0.0);
+        self.ui.set_pdf_total_w(0.0);
+        self.ui.set_pdf_engine_missing(false);
+        self.ui.set_pdf_installing(false);
+        self.ui.set_pdf_status(t("pdf.loading").into());
+        self.ui.set_pdf_zoom_label("100%".into());
+        self.ui.set_pdf_open(true);
+        self.pdf.send(crate::pdf::PdfReq::Open { path, generation: self.pdf_gen });
+    }
+
+    fn close_pdf(&mut self) {
+        self.ui.set_pdf_open(false);
+        self.pdf_gen += 1;
+        self.pdf_model.set_vec(Vec::new());
+        self.pdf_sizes.clear();
+        self.pdf_rendered.clear();
+        self.pdf_pending.clear();
+        self.pdf.send(crate::pdf::PdfReq::Close);
+    }
+
+    pub fn on_pdf_engine_missing(&mut self, generation: u64) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.ui.set_pdf_engine_missing(true);
+        self.ui.set_pdf_status(t("pdf.engineMissing").into());
+    }
+
+    pub fn on_pdf_engine_installed(&mut self, result: Result<(), String>) {
+        self.ui.set_pdf_installing(false);
+        match result {
+            Ok(()) => {
+                self.pdf.send(crate::pdf::PdfReq::Rebind);
+                self.ui.set_pdf_engine_missing(false);
+                if let (Some(path), false) = (self.pdf_path.clone(), self.pdf_id.is_empty()) {
+                    let (id, title) = (self.pdf_id.clone(), self.ui.get_pdf_title().to_string());
+                    self.open_pdf(&id, &title, path);
+                }
+            }
+            Err(e) => self.ui.set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
+        }
+    }
+
+    pub fn on_pdf_failed(&mut self, generation: u64, reason: &str) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.ui.set_pdf_status(ta("pdf.failed", &[reason]).into());
+    }
+
+    pub fn on_pdf_opened(&mut self, generation: u64, sizes: Vec<(f32, f32)>) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.ui.set_pdf_status("".into());
+        self.ui.set_pdf_count(sizes.len() as i32);
+        self.pdf_sizes = sizes;
+        self.pdf_layout(false);
+        self.ui.invoke_pdf_set_scroll(0.0);
+        self.pdf_scrolled(0.0);
+    }
+
+    // Lays the pages out top to bottom at the current zoom (1.0 = page
+    // width fills the viewer) and asks for whatever is on screen.
+    fn pdf_layout(&mut self, keep_scroll: bool) {
+        if self.pdf_sizes.is_empty() {
+            return;
+        }
+        const MARGIN: f32 = 24.0;
+        const GAP: f32 = 16.0;
+        let view_w = self.ui.get_pdf_view_w().max(200.0);
+        let old_page_w = self.pdf_page_w;
+        let page_w = ((view_w - 2.0 * MARGIN) * self.pdf_zoom).max(120.0);
+        self.pdf_page_w = page_w;
+        let mut y = GAP;
+        let mut rows: Vec<PdfPage> = Vec::with_capacity(self.pdf_sizes.len());
+        for (i, (pw, ph)) in self.pdf_sizes.iter().enumerate() {
+            let h = page_w * (ph / pw.max(1.0));
+            let old = self.pdf_model.row_data(i);
+            let rendered_w = self.pdf_rendered.get(&i).copied().unwrap_or(0);
+            let keep = old.as_ref().filter(|_| rendered_w > 0);
+            rows.push(PdfPage {
+                index: i as i32,
+                y,
+                w: page_w,
+                h,
+                pic: keep.map(|o| o.pic.clone()).unwrap_or_else(empty_image),
+                ready: keep.is_some_and(|o| o.ready),
+            });
+            y += h + GAP;
+        }
+        self.ui.set_pdf_total_h(y);
+        self.ui.set_pdf_total_w((page_w + 2.0 * MARGIN).max(view_w));
+        self.pdf_model.set_vec(rows);
+        self.ui.set_pdf_zoom_label(format!("{}%", (self.pdf_zoom * 100.0).round() as i32).into());
+        if keep_scroll && old_page_w > 0.0 {
+            let ratio = page_w / old_page_w;
+            let scroll = self.ui.get_pdf_scroll() * ratio;
+            self.ui.invoke_pdf_set_scroll(scroll);
+            self.pdf_scrolled(scroll);
+        }
+    }
+
+    // Renders the pages around the viewport at the exact width they are
+    // drawn at, and lets pages far away go.
+    fn pdf_scrolled(&mut self, scroll: f32) {
+        if self.pdf_sizes.is_empty() {
+            return;
+        }
+        let view_h = self.ui.get_pdf_view_h().max(200.0);
+        let (top, bottom) = (scroll - view_h * 0.5, scroll + view_h * 1.5);
+        let width = self.pdf_page_w.round() as u32;
+        let mut current = 0;
+        for i in 0..self.pdf_model.row_count() {
+            let Some(row) = self.pdf_model.row_data(i) else { continue };
+            if row.y <= scroll + view_h * 0.35 {
+                current = i;
+            }
+            let visible = row.y + row.h >= top && row.y <= bottom;
+            if visible {
+                if self.pdf_rendered.get(&i) != Some(&width) && !self.pdf_pending.contains(&(i, width)) {
+                    self.pdf_pending.insert((i, width));
+                    self.pdf.send(crate::pdf::PdfReq::Render { page: i, width, generation: self.pdf_gen });
+                }
+            } else if row.ready && (row.y + row.h < top - view_h * 2.0 || row.y > bottom + view_h * 2.0) {
+                // Out of reach: drop the pixels, keep the slot.
+                let mut cleared = row;
+                cleared.pic = empty_image();
+                cleared.ready = false;
+                self.pdf_model.set_row_data(i, cleared);
+                self.pdf_rendered.remove(&i);
+            }
+        }
+        self.ui.set_pdf_page(current as i32 + 1);
+    }
+
+    pub fn on_pdf_page(&mut self, generation: u64, page: usize, img: crate::media::Decoded) {
+        if generation != self.pdf_gen {
+            return;
+        }
+        self.pdf_pending.retain(|(p, _)| *p != page);
+        let width = self.pdf_page_w.round() as u32;
+        // A page rendered for an older zoom is still better than blank;
+        // the current width was requested again if it differs.
+        if let Some(mut row) = self.pdf_model.row_data(page) {
+            row.pic = image_of(&img);
+            row.ready = true;
+            self.pdf_model.set_row_data(page, row);
+        }
+        self.pdf_rendered.insert(page, if img.w == width { width } else { img.w });
+    }
+
+    fn pdf_zoom_step(&mut self, step: i32) {
+        let next = match step {
+            0 => 1.0,
+            s if s > 0 => (self.pdf_zoom * 1.25).min(4.0),
+            _ => (self.pdf_zoom / 1.25).max(0.4),
+        };
+        if (next - self.pdf_zoom).abs() < 0.001 {
+            return;
+        }
+        self.pdf_zoom = next;
+        self.pdf_layout(true);
+    }
+
+    fn pdf_goto(&mut self, delta: i32) {
+        let count = self.pdf_model.row_count() as i32;
+        if count == 0 {
+            return;
+        }
+        let target = (self.ui.get_pdf_page() - 1 + delta).clamp(0, count - 1);
+        if let Some(row) = self.pdf_model.row_data(target as usize) {
+            let y = (row.y - 16.0).max(0.0);
+            self.ui.invoke_pdf_set_scroll(y);
+            self.pdf_scrolled(y);
+        }
+    }
+
+    // ---- drag selection ----
+
+    // The pointer moved while pressed on a row's background: every row
+    // between the anchor and the pointer joins the selection.
+    fn drag_move(&mut self, y: f32) {
+        let Some((anchor_id, anchor_y)) = self.drag_anchor.clone() else { return };
+        if (y - anchor_y).abs() < 8.0 && !self.select_mode {
+            return;
+        }
+        let (lo, hi) = (anchor_y.min(y), anchor_y.max(y));
+        let epoch = self.geom_epoch;
+        let Some(jid) = self.current_jid.clone() else { return };
+        let mut wanted: Vec<String> = self
+            .row_geom
+            .iter()
+            .filter(|(_, (_, _, e))| *e == epoch)
+            .filter(|(_, (ry, rh, _))| *ry <= hi && ry + rh >= lo)
+            .map(|(id, _)| id.clone())
+            .collect();
+        if !wanted.iter().any(|w| w == &anchor_id) {
+            wanted.push(anchor_id);
+        }
+        // Only real messages, in conversation order.
+        let ordered: Vec<String> = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .filter(|m| m.kind != MessageKind::System && wanted.iter().any(|w| w == &m.id))
+            .map(|m| m.id.clone())
+            .collect();
+        self.set_selection(ordered);
+    }
+
+    fn set_selection(&mut self, ids: Vec<String>) {
+        if !self.select_mode {
+            self.select_mode = true;
+            self.ui.set_select_mode(true);
+            self.ui.set_chat_menu_open(false);
+            self.ui.set_react_bar_id("".into());
+        }
+        let previous = std::mem::replace(&mut self.selected, ids);
+        for id in &previous {
+            if !self.selected.contains(id) {
+                self.patch_row(id, |row| row.selected = false);
+            }
+        }
+        let now = self.selected.clone();
+        for id in &now {
+            if !previous.contains(id) {
+                self.patch_row(id, |row| row.selected = true);
+            }
+        }
+        self.ui.set_select_count(self.selected.len() as i32);
     }
 
     // ---- video overlay (GIF zoom and click-to-play) ----
@@ -3207,26 +6096,61 @@ impl Bridge {
                 self.zoom_frames = vec![img.clone()];
             }
             self.start_zoom_loop();
+            self.ui.set_video_is_clip(false);
+            self.ui.set_video_loading(false);
             self.ui.set_video_w(m.media_w.max(320) as i32);
             self.ui.set_video_h(m.media_h.max(240) as i32);
             self.ui.set_video_open(true);
             self.wa.send(Cmd::ZoomFrames { id: id.to_string(), path });
             return;
         }
-        self.ui.set_video_w(m.media_w.max(320) as i32);
-        self.ui.set_video_h(m.media_h.max(240) as i32);
+        let poster = self.decoded.get(id).map(|(img, _, _)| img.clone());
+        self.play_clip(path, m.media_w, m.media_h, m.duration_sec, poster);
+    }
+
+    // Opens the player on a cached clip. `poster` stands in until the
+    // first picture is decoded.
+    fn play_clip(
+        &mut self,
+        path: std::path::PathBuf,
+        w: u32,
+        h: u32,
+        seconds: u32,
+        poster: Option<slint::Image>,
+    ) {
+        self.video_gen += 1;
+        let generation = self.video_gen;
+        self.video_playing = true;
+        self.video_pos = 0.0;
+        self.video_duration = seconds as f64;
+        self.ui.set_video_frame(poster.unwrap_or_else(empty_image));
+        self.ui.set_video_w(w.max(1) as i32);
+        self.ui.set_video_h(h.max(1) as i32);
+        self.ui.set_video_is_clip(true);
+        self.ui.set_video_loading(true);
+        self.ui.set_video_playing(true);
+        self.ui.set_video_ended(false);
+        self.ui.set_video_progress(0.0);
+        self.ui.set_video_pos_label("0:00".into());
+        self.ui.set_video_duration_label(crate::store::format_duration(seconds).into());
+        self.ui.set_video_volume(self.video_volume);
+        self.ui.set_video_muted(self.video_muted);
         self.ui.set_video_open(true);
-        self.wa.send(Cmd::PlayVideo { id: id.to_string(), path });
+        self.video = Some(crate::video::Playback::start(self.media_key.clone(), path, move |event| {
+            ui_apply(move |b| b.on_video_event(generation, event));
+        }));
     }
 
     fn close_video(&mut self) {
-        self.wa.send(Cmd::StopVideo);
         self.zoom_timer.stop();
         self.zoom_frames.clear();
         self.zoom_idx = 0;
+        self.video_gen += 1;
+        self.video = None;
         self.video_audio = None;
         self.video_id = None;
         self.ui.set_video_open(false);
+        self.ui.set_video_frame(empty_image());
     }
 
     fn start_zoom_loop(&mut self) {
@@ -3260,39 +6184,160 @@ impl Bridge {
         self.start_zoom_loop();
     }
 
-    pub fn on_video_audio(&mut self, id: &str, buffer: crate::audio::AudioBuffer) {
-        if self.video_id.as_deref() == Some(id) {
-            self.video_audio = crate::audio::Player::start(&buffer, 0.0);
-        }
-    }
-
-    pub fn on_video_frame(&mut self, id: &str, frame: crate::media::Decoded) {
-        if self.video_id.as_deref() != Some(id) {
+    // What the player threads report. `generation` is the clip they were
+    // started for: a closed or replaced player keeps talking for a moment.
+    pub fn on_video_event(&mut self, generation: u64, event: crate::video::PlayerEvent) {
+        use crate::video::PlayerEvent;
+        if generation != self.video_gen {
             return;
         }
-        self.ui.set_video_w(frame.w as i32);
-        self.ui.set_video_h(frame.h as i32);
-        self.ui.set_video_frame(image_of(&frame));
+        match event {
+            PlayerEvent::Ready { w, h, duration } => {
+                self.video_duration = duration;
+                self.ui.set_video_w(w.max(1) as i32);
+                self.ui.set_video_h(h.max(1) as i32);
+                self.ui.set_video_duration_label(
+                    crate::store::format_duration(duration.round() as u32).into(),
+                );
+            }
+            PlayerEvent::Frame { frame, pos, resync } => {
+                self.ui.set_video_w(frame.w as i32);
+                self.ui.set_video_h(frame.h as i32);
+                self.ui.set_video_frame(image_of(&frame));
+                self.ui.set_video_loading(false);
+                self.set_video_pos(pos);
+                // The first picture after a start, a resume or a seek is
+                // where the sound is lined up with the picture again.
+                if resync && let Some(audio) = &self.video_audio {
+                    audio.seek(pos);
+                    if self.video_playing { audio.resume() } else { audio.pause() }
+                }
+                if let Some(video) = &self.video {
+                    video.frame_shown();
+                }
+            }
+            PlayerEvent::Audio(buffer) => {
+                // Decoded whole while the picture was already running.
+                let audio = crate::audio::Player::start(&buffer, self.video_pos);
+                if let Some(audio) = &audio {
+                    audio.set_gain(if self.video_muted { 0.0 } else { self.video_volume });
+                    if !self.video_playing {
+                        audio.pause();
+                    }
+                }
+                self.video_audio = audio;
+            }
+            PlayerEvent::Ended => {
+                self.video_playing = false;
+                self.ui.set_video_playing(false);
+                self.ui.set_video_ended(true);
+                self.set_video_pos(self.video_duration);
+                if let Some(audio) = &self.video_audio {
+                    audio.pause();
+                }
+            }
+            // Not H.264 in an MP4 (HEVC from an iPhone sent as a file,
+            // say): whatever the system plays videos with gets it.
+            PlayerEvent::Failed => {
+                let cached = self.video_id.as_ref().and_then(|id| self.media_path.get(id)).cloned();
+                self.close_video();
+                if let Some(cached) = cached
+                    && let Some(plain) =
+                        crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached))
+                {
+                    crate::platform::open_path(&plain.to_string_lossy());
+                }
+            }
+        }
     }
 
-    pub fn on_video_ended(&mut self, id: &str) {
-        if self.video_id.as_deref() == Some(id) {
-            self.close_video();
+    fn set_video_pos(&mut self, pos: f64) {
+        self.video_pos = pos;
+        let total = self.video_duration.max(0.001);
+        self.ui.set_video_progress((pos / total).clamp(0.0, 1.0) as f32);
+        self.ui.set_video_pos_label(crate::store::format_duration(pos as u32).into());
+    }
+
+    fn video_toggle(&mut self) {
+        let Some(video) = &self.video else { return };
+        if self.video_playing {
+            video.pause();
+            if let Some(audio) = &self.video_audio {
+                audio.pause();
+            }
+        } else {
+            // The sound comes back with the next picture (see `resync`).
+            video.resume();
+            self.ui.set_video_ended(false);
         }
+        self.video_playing = !self.video_playing;
+        self.ui.set_video_playing(self.video_playing);
+    }
+
+    fn video_seek(&mut self, secs: f64) {
+        let Some(video) = &self.video else { return };
+        let secs = secs.clamp(0.0, self.video_duration);
+        // Quiet until the picture lands where it was asked to go.
+        if let Some(audio) = &self.video_audio {
+            audio.pause();
+        }
+        video.seek(secs);
+        self.ui.set_video_ended(false);
+        self.set_video_pos(secs);
+    }
+
+    fn video_set_volume(&mut self, volume: f32, muted: bool) {
+        self.video_volume = volume.clamp(0.0, 1.0);
+        self.video_muted = muted;
+        self.ui.set_video_volume(self.video_volume);
+        self.ui.set_video_muted(muted);
+        if let Some(audio) = &self.video_audio {
+            audio.set_gain(if muted { 0.0 } else { self.video_volume });
+        }
+        if let Some(vault) = &self.vault {
+            vault.setting_set("video_volume", &format!("{:.2}", self.video_volume));
+        }
+    }
+
+    fn video_save(&mut self) {
+        let Some(id) = self.video_id.clone() else { return };
+        let Some(cached) = self.media_path.get(&id).map(std::path::PathBuf::from) else { return };
+        let Some(plain) = crate::media::temp_plain(&self.media_key, &cached) else { return };
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let name = format!("VID-{stamp}.mp4");
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+            if let Some(target) = picked
+                && let Err(e) = std::fs::copy(&plain, &target)
+            {
+                eprintln!("[video] save failed: {e}");
+            }
+        });
     }
 
     // ---- self-update ----
 
     fn update_tick(&mut self) {
         self.wa.send(Cmd::CheckUpdate);
-        // Check again every 6 hours while the app stays open.
-        self.once(21_600_000, |b| b.update_tick());
+        // Check again every hour while the app stays open: a release
+        // published during the day shows up the same day.
+        self.once(3_600_000, |b| b.update_tick());
     }
 
-    pub fn on_update_available(&mut self, version: &str) {
-        self.ui.set_update_version(version.into());
-        if self.ui.get_update_state() == 0 {
-            self.ui.set_update_state(1);
+    pub fn on_update_checked(&mut self, found: Option<String>) {
+        let manual = std::mem::take(&mut self.update_manual);
+        match found {
+            Some(version) => {
+                self.ui.set_update_version(version.into());
+                if self.ui.get_update_state() == 0 {
+                    self.ui.set_update_state(1);
+                }
+                if manual {
+                    self.ui.set_settings_status("".into());
+                }
+            }
+            None if manual => self.ui.set_settings_status(t("update.latest").into()),
+            None => {}
         }
     }
 
@@ -3302,9 +6347,13 @@ impl Bridge {
                 self.ui.set_update_version(version.into());
                 self.ui.set_update_state(3);
             }
+            // Said out loud: a release build has no console, and going
+            // quietly back to "update available" reads as a button that
+            // does nothing.
             Err(e) => {
-                eprintln!("[update] failed: {e}");
-                self.ui.set_update_state(1);
+                log::error!("[update] failed: {e}");
+                self.ui.set_update_error(e.into());
+                self.ui.set_update_state(4);
             }
         }
     }
@@ -3399,6 +6448,56 @@ impl Bridge {
             .filter(|p| !p.is_empty())
     }
 
+    // "Send message viewed" (opt-in, off by default): read receipts for
+    // every not-yet-acked incoming message in this chat, one Cmd::MarkRead
+    // per sender so a group receipt carries the right participant.
+    // Called when the chat is opened and when a message arrives while it
+    // is the open chat -- there is no window-focus tracking in this app,
+    // so "viewed" means "the chat is currently open", the same condition
+    // that already clears the local unread badge.
+    fn send_view_receipts(&mut self, jid: &str) {
+        if !self.ui.get_send_receipts() {
+            return;
+        }
+        let pending: Vec<(Option<String>, String)> = self
+            .store
+            .messages_for(jid)
+            .iter()
+            .filter(|m| !m.from_me && !m.read_sent && m.kind != MessageKind::System)
+            .map(|m| (self.key_participant(m), m.id.clone()))
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        let mut by_sender: HashMap<Option<String>, Vec<String>> = HashMap::new();
+        for (sender, id) in pending {
+            by_sender.entry(sender).or_default().push(id);
+        }
+        let mut acked = Vec::new();
+        for (sender, ids) in by_sender {
+            acked.extend(ids.iter().cloned());
+            self.wa.send(Cmd::MarkRead { jid: jid.to_string(), sender, ids });
+        }
+        self.store.mark_read_sent(jid, &acked);
+    }
+
+    // The voice-note counterpart: sent once, the moment playback actually
+    // starts (see spin_audio_at, which covers both an already-decoded
+    // buffer and the post-decode resume in on_audio_ready). Reuses
+    // `read_sent` so a later seek/scrub on the same note doesn't re-send.
+    fn send_played_receipt(&mut self, jid: &str, id: &str) {
+        if !self.ui.get_send_receipts() {
+            return;
+        }
+        let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id) else { return };
+        if m.from_me || m.read_sent {
+            return;
+        }
+        let sender = self.key_participant(m);
+        self.wa.send(Cmd::MarkPlayed { jid: jid.to_string(), sender, id: id.to_string() });
+        self.store.mark_read_sent(jid, &[id.to_string()]);
+    }
+
     fn send_reaction(&mut self, id: &str, emoji: &str) {
         let Some(m) = self.find_message(id).cloned() else { return };
         // Reacting again with the same emoji removes it, like WhatsApp.
@@ -3488,6 +6587,22 @@ impl Bridge {
 
     fn delete_message(&mut self, id: &str) {
         let Some(m) = self.find_message(id).cloned() else { return };
+        // Only our own messages can be taken back from everyone; the
+        // rest go away here and on the phone.
+        if !m.from_me {
+            self.wa.send(Cmd::DeleteForMe {
+                jid: m.jid.clone(),
+                id: id.to_string(),
+                from_me: false,
+                participant: self.key_participant(&m),
+                ts: m.timestamp,
+            });
+            if self.store.remove_messages(&m.jid, &[id.to_string()]) {
+                self.rebuild_conversation(&m.jid);
+                self.schedule_refresh_chats();
+            }
+            return;
+        }
         self.wa.send(Cmd::Revoke { jid: m.jid.clone(), id: id.to_string() });
         if self.store.mark_deleted(&m.jid, id) {
             self.patch_row(id, |row| {
@@ -3504,7 +6619,7 @@ impl Bridge {
         let Some(m) = self.find_message(id) else { return };
         let preview = preview_body(m);
         let image = self.decoded.get(id).map(|(img, _, _)| img.clone());
-        self.pending_forward = Some((jid, id.to_string()));
+        self.pending_forward = vec![(jid, id.to_string())];
         self.fill_forward_rows("");
         // Show what is being forwarded, like WhatsApp's bottom bar.
         self.ui.set_forward_preview_text(preview.into());
@@ -3536,13 +6651,18 @@ impl Bridge {
     }
 
     fn handle_forward_to(&mut self, target: &str) {
-        let pending = self.pending_forward.take();
+        let pending = std::mem::take(&mut self.pending_forward);
         self.ui.set_forward_open(false);
-        let (Some((source, id)), false) = (pending, target.is_empty()) else { return };
-        self.warm_chat(&source);
-        let raw = self.store.messages_for(&source).iter().find(|m| m.id == id).and_then(|m| m.raw.clone());
-        if let Some(message) = raw {
-            self.wa.send(Cmd::Forward { jid: target.to_string(), message });
+        if target.is_empty() {
+            return;
+        }
+        for (source, id) in pending {
+            self.warm_chat(&source);
+            let raw =
+                self.store.messages_for(&source).iter().find(|m| m.id == id).and_then(|m| m.raw.clone());
+            if let Some(message) = raw {
+                self.wa.send(Cmd::Forward { jid: target.to_string(), message });
+            }
         }
     }
 
@@ -3694,6 +6814,7 @@ impl Bridge {
                 self.patch_row(&id, |row| row.playing = true);
             }
             self.ui.set_mini_audio_playing(true);
+            self.send_played_receipt(&jid, &id);
             return;
         }
         a.pending_offset = Some(offset_secs);
@@ -3895,6 +7016,31 @@ impl Bridge {
     }
 }
 
+// Whether a message has something to download or decode for its bubble.
+fn needs_media(m: &StoredMessage) -> bool {
+    !m.deleted
+        && (m.kind != MessageKind::Text && m.kind != MessageKind::System
+            || !m.link_title.is_empty()
+            || !m.link_url.is_empty())
+}
+
+// What a message becomes in a copy or an export: its text, or a
+// placeholder for media the way WhatsApp writes "<Media omitted>".
+fn copy_body(m: &StoredMessage) -> String {
+    if m.deleted {
+        return t("msg.deleted");
+    }
+    match m.kind {
+        MessageKind::Text | MessageKind::System => m.text.clone(),
+        MessageKind::Image if m.sticker => t("preview.sticker"),
+        MessageKind::Image | MessageKind::Video if !m.text.is_empty() => {
+            format!("{} {}", t("export.mediaOmitted"), m.text)
+        }
+        MessageKind::Doc => format!("{} ({})", t("export.mediaOmitted"), m.text),
+        _ => t("export.mediaOmitted"),
+    }
+}
+
 // Every media kind gets a translated one-liner in notifications.
 fn notification_body(m: &StoredMessage) -> String {
     if m.sticker {
@@ -3907,7 +7053,7 @@ fn notification_body(m: &StoredMessage) -> String {
         MessageKind::Video => {
             if m.gif { t("preview.gif") } else { t("preview.video") }
         }
-        MessageKind::Text => m.text.clone(),
+        MessageKind::Text | MessageKind::System => m.text.clone(),
     }
 }
 
@@ -3922,6 +7068,20 @@ fn media_box(m: &StoredMessage) -> (i32, i32) {
     let h = if m.media_h > 0 { m.media_h as f64 } else { 200.0 };
     let scale = (max_w / w).min(max_h / h).min(1.0);
     (((w * scale).round() as i32).max(1), ((h * scale).round() as i32).max(1))
+}
+
+// The content hash that identifies a sticker across messages.
+fn sticker_key(m: &StoredMessage) -> Option<String> {
+    crate::media::sticker_key(m.raw.as_deref()?)
+}
+
+// A file name safe for the temp directory and the save dialog.
+fn sanitize_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .collect();
+    if cleaned.trim().is_empty() { "document".into() } else { cleaned.trim().to_string() }
 }
 
 fn host_of(url: &str) -> String {

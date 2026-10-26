@@ -260,3 +260,225 @@ msgstr "Inicialização"
 
 msgid "Open Zapive when I sign in"
 msgstr "Abrir o Zapive ao entrar no sistema"
+
+msgid "Privacy"
+msgstr "Privacidade"
+
+msgid "Send read receipts"
+msgstr "Enviar confirmação de leitura"
+
+msgid "Apply messages deleted by the sender"
+msgstr "Aplicar mensagens apagadas pelo remetente"
+
+msgid "Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted."
+msgstr "Ambas ficam desativadas por padrão: ninguém é avisado quando você lê uma mensagem, e uma mensagem apagada por alguém continua visível aqui, marcada como apagada."
+
+msgid "Deleted by sender"
+msgstr "Apagada pelo remetente"
+
+msgid "Groups"
+msgstr "Grupos"
+
+msgid "Messages"
+msgstr "Mensagens"
+
+msgid "Group admin"
+msgstr "Admin do grupo"
+
+msgid "{} selected"
+msgstr "{} selecionada(s)"
+
+msgid "You can't send messages to this group because you're no longer a member."
+msgstr "Você não pode enviar mensagens para este grupo porque não é mais participante."
+
+msgid "Only "
+msgstr "Somente "
+
+msgid "admins"
+msgstr "admins"
+
+msgid " can send messages"
+msgstr " podem enviar mensagens"
+
+msgid "Select"
+msgstr "Selecionar"
+
+msgid "Add member"
+msgstr "Adicionar membro"
+
+msgid "Search"
+msgstr "Pesquisar"
+
+msgid "Select messages"
+msgstr "Selecionar mensagens"
+
+msgid "Unmute notifications"
+msgstr "Reativar notificações"
+
+msgid "Mute notifications"
+msgstr "Silenciar notificações"
+
+msgid "Disappearing messages"
+msgstr "Mensagens temporárias"
+
+msgid "Remove from Favorites"
+msgstr "Remover dos favoritos"
+
+msgid "Add to Favorites"
+msgstr "Adicionar aos favoritos"
+
+msgid "Add to list"
+msgstr "Adicionar à lista"
+
+msgid "Export chat"
+msgstr "Exportar conversa"
+
+msgid "Close chat"
+msgstr "Fechar conversa"
+
+msgid "Clear chat"
+msgstr "Limpar conversa"
+
+msgid "Exit group"
+msgstr "Sair do grupo"
+
+msgid "Delete chat"
+msgstr "Apagar conversa"
+
+msgid "8 hours"
+msgstr "8 horas"
+
+msgid "1 week"
+msgstr "1 semana"
+
+msgid "Always"
+msgstr "Sempre"
+
+msgid "24 hours"
+msgstr "24 horas"
+
+msgid "7 days"
+msgstr "7 dias"
+
+msgid "90 days"
+msgstr "90 dias"
+
+msgid "Off"
+msgstr "Desativadas"
+
+msgid "New list"
+msgstr "Nova lista"
+
+msgid "Participants"
+msgstr "Participantes"
+
+msgid "Search messages"
+msgstr "Pesquisar mensagens"
+
+msgid "Search for messages in this chat"
+msgstr "Pesquise mensagens nesta conversa"
+
+msgid "Syncing older messages"
+msgstr "Sincronizando mensagens antigas"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Lists organize your chats. This chat is added to the new list."
+msgstr "As listas organizam suas conversas. Esta conversa entra na nova lista."
+
+msgid "List name"
+msgstr "Nome da lista"
+
+msgid "Create"
+msgstr "Criar"
+
+msgid "Add"
+msgstr "Adicionar"
+
+msgid "View"
+msgstr "Ver"
+
+msgid "Save as..."
+msgstr "Salvar como..."
+
+msgid "Open with another app"
+msgstr "Abrir com outro app"
+
+msgid "Downloading…"
+msgstr "Baixando…"
+
+msgid "Download viewer"
+msgstr "Baixar visualizador"
+
+msgid "Send message history to {}?"
+msgstr "Enviar o histórico de mensagens para {}?"
+
+msgid "will get"
+msgstr "vai receber as"
+
+msgid "recent messages"
+msgstr "mensagens recentes"
+
+msgid "from this group."
+msgstr "deste grupo."
+
+msgid "Sending…"
+msgstr "Enviando…"
+
+msgid "Theme"
+msgstr "Tema"
+
+msgid "General"
+msgstr "Geral"
+
+msgid "Version {}"
+msgstr "Versão {}"
+
+msgid "Check for updates"
+msgstr "Verificar atualizações"
+
+msgid "Update available"
+msgstr "Atualização disponível"
+
+msgid "Restart to use version {}"
+msgstr "Reinicie para usar a versão {}"
+
+msgid "Log out"
+msgstr "Sair"
+
+msgid "Conversations of {} are saved on this computer"
+msgstr "As conversas de {} estão salvas neste computador"
+
+msgid "Conversations are saved on this computer"
+msgstr "Há conversas salvas neste computador"
+
+msgid "Link the same number and the app picks up where it left off, without downloading everything again. A different number starts clean."
+msgstr "Conecte o mesmo número e o app continua de onde parou, sem baixar tudo de novo. Um número diferente começa do zero."
+
+msgid "Erase"
+msgstr "Apagar"
+
+msgid "Other accounts"
+msgstr "Outras contas"
+
+msgid "Add account"
+msgstr "Adicionar conta"
+
+msgid "Up to 5 accounts"
+msgstr "Limite de 5 contas"
+
+msgid "Switching accounts..."
+msgstr "Trocando de conta..."
+
+msgid "Loading…"
+msgstr "Carregando…"
+
+msgid "Update failed"
+msgstr "A atualização falhou"
+
+msgid "Update failed: {}"
+msgstr "A atualização falhou: {}"
+
+msgid "Try again"
+msgstr "Tentar de novo"

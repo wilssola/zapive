@@ -10,6 +10,52 @@ export struct ChatItem {
     unread: int,
     mentioned: bool,
     pinned: bool,
+    muted: bool,
+}
+
+// A message found by search, in the sidebar (name = chat) or inside the
+// open conversation (name = author).
+export struct SearchHit {
+    jid: string,
+    // Whose picture the row shows (the author inside a chat).
+    face: string,
+    id: string,
+    name: string,
+    sender: string,
+    snippet: string,
+    time: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+}
+
+export struct MemberItem {
+    jid: string,
+    name: string,
+    number: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+    checked: bool,
+    admin: bool,
+}
+
+// One page of the open PDF, laid out by the host (viewer coordinates).
+export struct PdfPage {
+    index: int,
+    y: float,
+    w: float,
+    h: float,
+    pic: image,
+    ready: bool,
+}
+
+export struct LabelItem {
+    id: string,
+    name: string,
+    active: bool,
 }
 
 export struct ReactionItem {
@@ -36,6 +82,25 @@ export struct CallItem {
     group: bool,
 }
 
+// A link (or mention) inside a styled bubble: byte offsets into `plain`.
+export struct LinkSpan {
+    start: int,
+    end: int,
+}
+
+// One linked account, for the switcher.
+export struct AccountItem {
+    id: string,
+    name: string,
+    // The phone number, when the name is something else.
+    detail: string,
+    initial: string,
+    colorIdx: int,
+    avatar: image,
+    hasAvatar: bool,
+    active: bool,
+}
+
 export struct StickerCell {
     id: string,
     pic: image,
@@ -53,6 +118,10 @@ export struct MessageItem {
     firstOfRun: bool,
     forwarded: bool,
     deleted: bool,
+    // The sender revoked this message but it was kept ("apply deletions"
+    // off); shown as a small indicator, unlike `deleted` which replaces
+    // the whole bubble with "This message was deleted".
+    revoked: bool,
     starred: bool,
     hasQuote: bool,
     quoteName: string,
@@ -83,8 +152,14 @@ export struct MessageItem {
     senderLabel: string,
     sticker: bool,
     gif: bool,
+    // "1:23" on a video bubble; empty for GIFs.
+    videoLen: string,
     styled: styled-text,
     hasStyled: bool,
+    // The styled text as drawn, for the selectable overlay.
+    plain: string,
+    // Where its links are, for the hand cursor.
+    links: [LinkSpan],
     linkTitle: string,
     linkDesc: string,
     linkHost: string,
@@ -99,4 +174,10 @@ export struct MessageItem {
     playing: bool,
     progress: float,
     posLabel: string,
+    // The day this message belongs to, on every row (the floating
+    // header reads it from whichever row is at the top).
+    dayFull: string,
+    selected: bool,
+    // A notice that opens the group info when clicked.
+    clickable: bool,
 }

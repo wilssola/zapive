@@ -7,7 +7,7 @@ use crate::bridge::wa_apply as ui_apply;
 use crate::i18n::t;
 use crate::paths::wa_session_path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tokio::sync::mpsc;
 use whatsapp_rust::bot::{Bot, BotHandle};
 use whatsapp_rust::client::Client;
@@ -23,6 +23,13 @@ use whatsapp_rust::waproto::whatsapp as wa;
 // After this many unclean drops in a row the retry loop stops and the
 // user gets the "offline" modal instead.
 const MAX_FAILURES: u32 = 5;
+
+// Which session the UI is showing. Switching accounts swaps the client
+// under a bridge that holds one account's conversations at a time, and
+// an event of the account just left must never land in the store of the
+// one just opened. Everything headed for the bridge is stamped with the
+// epoch it was produced under and dropped if the epoch has moved on.
+pub static SESSION_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 // What a reply quotes: enough to build the context info.
 #[derive(Debug)]
@@ -41,8 +48,11 @@ pub enum MediaWant {
     Sticker,
     // Extract looping GIF frames from the clip.
     Gif,
-    // Just cache the file (audio, documents, video clips).
+    // Just cache the file (audio, documents).
     File,
+    // Cache the clip and decode its first picture for the bubble: the
+    // thumbnail embedded in the message is about a hundred pixels wide.
+    Video,
 }
 
 pub enum Cmd {
@@ -53,9 +63,40 @@ pub enum Cmd {
     // From the fatal modal's button: reconnect after conflict/offline.
     Resume,
     Logout,
+    // Closes the running session and opens another account's. Answered
+    // with Bridge::on_account_ready once the new client exists; nothing
+    // connects until the bridge has that account's store loaded and
+    // sends Start.
+    SwitchAccount(String),
     Shutdown,
-    SendText { jid: String, body: String, quote: Option<QuoteRef> },
+    // `mentions` are the jids named as @user in the body; `mention_all`
+    // carries the group subject when the body tags @all/@everyone.
+    SendText {
+        jid: String,
+        body: String,
+        quote: Option<QuoteRef>,
+        mentions: Vec<String>,
+        mention_all: Option<String>,
+    },
     FetchHistory { jid: String, oldest_id: String, from_me: bool, ts_ms: i64 },
+    // Group roster and settings, for the composer and the info panel.
+    FetchGroupMeta(String),
+    // Notifications: `until_ms` 0 mutes for good.
+    Mute { jid: String, until_ms: i64 },
+    Unmute(String),
+    // Disappearing messages; `secs` 0 turns them off.
+    SetEphemeral { jid: String, group: bool, secs: u32 },
+    LeaveGroup(String),
+    AddMembers { jid: String, members: Vec<String> },
+    // App-state chat actions mirrored to the phone.
+    ClearChat(String),
+    DeleteChat(String),
+    DeleteForMe { jid: String, id: String, from_me: bool, participant: Option<String>, ts: i64 },
+    LabelCreate { id: String, name: String, color: i32, order: i32 },
+    LabelDelete(String),
+    LabelChat { label_id: String, jid: String, on: bool },
+    // The whole favorites list, the way WhatsApp syncs it.
+    Favorites(Vec<String>),
     SubscribePresence(String),
     FetchGroups,
     // Media pipeline: the vault key arrives once the vault unlocks.
@@ -64,6 +105,26 @@ pub enum Cmd {
     // Decodes an embedded thumbnail (link previews, video posters).
     DecodeThumb { id: String, bytes: Vec<u8>, link: bool },
     FetchAvatar(String),
+    // The full-size picture for the info panel.
+    AvatarLarge(String),
+    // Downloads pdfium into the data directory for the PDF viewer.
+    PdfEngineInstall,
+    // First frame of a video status, for the viewer.
+    StatusPoster { id: String, path: std::path::PathBuf },
+    // The full-resolution decode of a cached photo, for the lightbox.
+    DecodeFull { id: String, path: std::path::PathBuf },
+    // Recent group messages, bundled for someone who just joined.
+    ShareHistory { group: String, member: String, messages: Vec<wa::WebMessageInfo> },
+    // A link preview's real thumbnail from the CDN; `fallback` is the
+    // inline jpeg used when the download fails.
+    LinkThumb {
+        id: String,
+        direct_path: String,
+        media_key: Vec<u8>,
+        sha256: Vec<u8>,
+        enc_sha256: Vec<u8>,
+        fallback: Vec<u8>,
+    },
     // Voice notes: full decode at a speed, waveform bars, send recording.
     AudioDecode { id: String, plain: std::path::PathBuf, rate_idx: usize, rate: f64 },
     Waveform { id: String, path: std::path::PathBuf },
@@ -72,20 +133,29 @@ pub enum Cmd {
     React { jid: String, id: String, from_me: bool, participant: Option<String>, emoji: String },
     Revoke { jid: String, id: String },
     Star { jid: String, id: String, from_me: bool, participant: Option<String>, starred: bool },
+    // "Send message viewed" (opt-in, off by default): blue ticks and the
+    // blue mic. `sender` is the group participant a receipt is addressed
+    // to (None in a DM), matching Client::mark_as_read/mark_as_played.
+    MarkRead { jid: String, sender: Option<String>, ids: Vec<String> },
+    MarkPlayed { jid: String, sender: Option<String>, id: String },
     Forward { jid: String, message: std::sync::Arc<wa::Message> },
+    // Re-sends a sticker/GIF already on the CDN, reusing its media
+    // reference to skip a re-upload -- but as a fresh message, not a
+    // forward: unlike Cmd::Forward, this never sets `is_forwarded`, so
+    // picking a sticker from the recents/favorites tray doesn't show a
+    // "Forwarded" tag (WhatsApp itself never tags that as a forward).
+    ResendMedia { jid: String, message: std::sync::Arc<wa::Message> },
     // Outgoing media (paths are plain files picked by the user).
     SendImage { jid: String, path: std::path::PathBuf, caption: Option<String> },
     SendDocument { jid: String, path: std::path::PathBuf },
     SendAudioFile { jid: String, path: std::path::PathBuf },
     // Decode a local image for the send-preview overlay.
     PreviewImage { path: std::path::PathBuf },
-    // Stickers, GIFs and the video player.
+    // Stickers and GIFs (the video player runs its own threads).
     SendSticker { jid: String, path: std::path::PathBuf },
     GifSearch(String),
     SendGifUrl { jid: String, url: String },
     ZoomFrames { id: String, path: std::path::PathBuf },
-    PlayVideo { id: String, path: std::path::PathBuf },
-    StopVideo,
     // Self-update.
     CheckUpdate,
     ApplyUpdate,
@@ -128,6 +198,33 @@ pub struct HistoryChunk {
     pub pushnames: Vec<(String, String)>,
 }
 
+// A group's roster and settings, flattened for the UI thread.
+pub struct GroupSnapshot {
+    pub jid: String,
+    pub subject: String,
+    pub desc: String,
+    pub announce: bool,
+    pub ephemeral: u32,
+    pub members: Vec<crate::store::Member>,
+}
+
+// One action out of a group notification, already flattened.
+pub struct GroupChange {
+    pub jid: String,
+    pub actor: Option<String>,
+    pub actor_pn: Option<String>,
+    pub ts: i64,
+    // add | remove | promote | demote | subject | description | announce |
+    // not_announce | ephemeral | locked | unlocked | delete | invite | leave
+    pub kind: &'static str,
+    // (jid, phone-number jid) of every participant the action names.
+    pub who: Vec<(String, Option<String>)>,
+    pub text: String,
+    pub number: u32,
+    // How members were added ("invite" = through the group's link).
+    pub reason: String,
+}
+
 #[derive(Clone)]
 pub struct WaService {
     cmd_tx: mpsc::UnboundedSender<Cmd>,
@@ -136,10 +233,10 @@ pub struct WaService {
 impl WaService {
     // Builds the client (blocking briefly on the runtime to open the
     // store) and reports whether a paired session already exists.
-    pub fn start(rt: &tokio::runtime::Runtime) -> Result<(Self, bool), String> {
+    pub fn start(rt: &tokio::runtime::Runtime, account: &str) -> Result<(Self, bool), String> {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let session = rt
-            .block_on(build_session(cmd_tx.clone()))
+            .block_on(build_session(cmd_tx.clone(), account))
             .map_err(|e| e.to_string())?;
         let registered = session.client.pn().is_some();
         rt.spawn(executor(session, cmd_rx, cmd_tx.clone()));
@@ -155,19 +252,48 @@ struct Session {
     // Keeps the bot's background workers (history sync intake) alive.
     _handle: BotHandle,
     client: Arc<Client>,
+    // Whose session this is (the id in the vault's account registry).
+    account: String,
+}
+
+// How this device shows up under "Linked devices" on the phone. The
+// library's default is platform UNKNOWN with the os "rust", which the
+// phone renders as "Other device" with a question mark. DESKTOP plus a
+// real OS name is what the desktop apps send, and gets the OS's own
+// name and icon. Spelled the way WhatsApp's UA parser spells them, since
+// the pair-code handshake rejects an os it does not know. Read by the
+// server at pairing only: a session paired before this shows the old
+// name until it is linked again.
+fn device_identity() -> whatsapp_rust::wacore::store::DevicePropsOverride {
+    let os = if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "Mac OS"
+    } else {
+        "Linux"
+    };
+    whatsapp_rust::wacore::store::DevicePropsOverride::new()
+        .with_os(os)
+        .with_platform_type(wa::device_props::PlatformType::DESKTOP)
 }
 
 async fn build_session(
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    account: &str,
 ) -> Result<Session, Box<dyn std::error::Error + Send + Sync>> {
-    let db_url = wa_session_path().to_string_lossy().into_owned();
+    let db_url = wa_session_path(account).to_string_lossy().into_owned();
     let store = SqliteStore::new(&db_url).await?;
-    let bot = Bot::builder().with_backend(store).build().await?;
+    let bot = Bot::builder()
+        .with_backend(store)
+        .with_device_props(device_identity())
+        .build()
+        .await?;
     let client = bot.client();
     client
         .subscribe_handler(Arc::new(Pump {
             client: client.clone(),
             cmd_tx,
+            epoch: SESSION_EPOCH.load(Ordering::SeqCst),
             rt: tokio::runtime::Handle::current(),
             failures: AtomicU32::new(0),
             stopped: AtomicBool::new(false),
@@ -177,7 +303,7 @@ async fn build_session(
     // itself ends on disconnect, but the workers stay up, so later resumes
     // just spawn client.run() again.
     let handle = bot.spawn();
-    Ok(Session { _handle: handle, client })
+    Ok(Session { _handle: handle, client, account: account.to_string() })
 }
 
 fn parse_jid(jid: &str) -> Option<whatsapp_rust::Jid> {
@@ -484,6 +610,8 @@ fn fail_call(reason: &str) {
 struct Pump {
     client: Arc<Client>,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    // The epoch this client was built under; see SESSION_EPOCH.
+    epoch: u64,
     rt: tokio::runtime::Handle,
     failures: AtomicU32,
     stopped: AtomicBool,
@@ -491,6 +619,10 @@ struct Pump {
 
 impl EventHandler for Pump {
     fn handle_event(&self, event: Arc<Event>) {
+        // A client that was switched away from may still be draining.
+        if self.epoch != SESSION_EPOCH.load(Ordering::SeqCst) {
+            return;
+        }
         match &*event {
             Event::PairingQrCode(qr) => {
                 let code = qr.code.clone();
@@ -504,7 +636,9 @@ impl EventHandler for Pump {
                 self.stopped.store(false, Ordering::Relaxed);
                 let pn = self.client.pn().map(|j| j.to_non_ad_string()).unwrap_or_default();
                 let lid = self.client.lid().map(|j| j.to_non_ad_string()).unwrap_or_default();
-                ui_apply(move |b| b.on_open(&pn, &lid));
+                // What the account switcher calls this account.
+                let name = self.client.push_name();
+                ui_apply(move |b| b.on_open(&pn, &lid, &name));
             }
             Event::StreamReplaced(_) => {
                 // WhatsApp keeps one desktop session per account: the
@@ -556,6 +690,7 @@ impl EventHandler for Pump {
                 // Decoding inflates megabytes of protobuf: keep it off the
                 // event bus thread and off the UI.
                 let event = event.clone();
+                let epoch = self.epoch;
                 self.rt.spawn(async move {
                     let Event::HistorySync(lazy) = &*event else { return };
                     let Some(hs) = lazy.get() else {
@@ -594,7 +729,11 @@ impl EventHandler for Pump {
                             chunk.pushnames.push((id, name));
                         }
                     }
-                    ui_apply(move |b| b.on_history_chunk(chunk));
+                    // Decoding takes long enough for an account switch
+                    // to slip in, so the chunk carries the epoch of the
+                    // client it came from, not of whoever is current by
+                    // the time it is ready.
+                    crate::bridge::wa_apply_at(epoch, move |b| b.on_history_chunk(chunk));
                 });
             }
             // Every <call> stanza arrives as IncomingCall, not just the
@@ -689,6 +828,106 @@ impl EventHandler for Pump {
                 let read = u.action.read.unwrap_or(true);
                 ui_apply(move |b| b.on_mark_read(&jid, read));
             }
+            Event::MuteUpdate(u) => {
+                let jid = u.jid.to_non_ad_string();
+                let muted = u.action.muted.unwrap_or(false);
+                // -1 = indefinite, otherwise an expiry in ms.
+                let until = u.action.mute_end_timestamp.unwrap_or(0);
+                let muted = if !muted {
+                    0
+                } else if until <= 0 {
+                    -1
+                } else {
+                    until / 1000
+                };
+                ui_apply(move |b| b.on_mute(&jid, muted));
+            }
+            Event::ClearChatUpdate(u) => {
+                let jid = u.jid.to_non_ad_string();
+                ui_apply(move |b| b.on_chat_cleared(&jid, false));
+            }
+            Event::DeleteChatUpdate(u) => {
+                let jid = u.jid.to_non_ad_string();
+                ui_apply(move |b| b.on_chat_cleared(&jid, true));
+            }
+            Event::LabelEditUpdate(u) => {
+                let id = u.label_id.clone();
+                let name = u.action.name.clone().unwrap_or_default();
+                let color = u.action.color.unwrap_or(0);
+                let order = u.action.order_index.unwrap_or(0);
+                let deleted = u.action.deleted.unwrap_or(false);
+                ui_apply(move |b| b.on_label(&id, &name, color, order, deleted));
+            }
+            Event::LabelAssociationUpdate(u) => {
+                let id = u.label_id.clone();
+                let jid = u.chat_jid.to_non_ad_string();
+                let on = u.action.labeled.unwrap_or(false);
+                ui_apply(move |b| b.on_label_chat(&id, &jid, on));
+            }
+            Event::GroupUpdate(u) => {
+                use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction as A;
+                let jid = u.group_jid.to_non_ad_string();
+                let actor = u.participant.as_ref().map(|j| j.to_non_ad_string());
+                let actor_pn = u.participant_pn.as_ref().map(|j| j.to_non_ad_string());
+                let ts = u.timestamp.timestamp();
+                let people = |list: &[whatsapp_rust::wacore::stanza::groups::GroupParticipantInfo]| {
+                    list.iter()
+                        .map(|p| {
+                            (p.jid.to_non_ad_string(), p.phone_number.as_ref().map(|j| j.to_non_ad_string()))
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let mut change = GroupChange {
+                    jid,
+                    actor,
+                    actor_pn,
+                    ts,
+                    kind: "",
+                    who: Vec::new(),
+                    text: String::new(),
+                    number: 0,
+                    reason: String::new(),
+                };
+                match &*u.action {
+                    A::Add { participants, reason } => {
+                        change.kind = "add";
+                        change.who = people(participants);
+                        change.reason = reason.clone().unwrap_or_default();
+                    }
+                    A::Remove { participants, .. } => {
+                        change.kind = "remove";
+                        change.who = people(participants);
+                    }
+                    A::Promote { participants } => {
+                        change.kind = "promote";
+                        change.who = people(participants);
+                    }
+                    A::Demote { participants } => {
+                        change.kind = "demote";
+                        change.who = people(participants);
+                    }
+                    A::Subject { subject, .. } => {
+                        change.kind = "subject";
+                        change.text = subject.clone();
+                    }
+                    A::Description { description, .. } => {
+                        change.kind = "description";
+                        change.text = description.clone().unwrap_or_default();
+                    }
+                    A::Announce => change.kind = "announce",
+                    A::NotAnnounce => change.kind = "not_announce",
+                    A::Ephemeral { expiration, .. } => {
+                        change.kind = "ephemeral";
+                        change.number = *expiration;
+                    }
+                    A::Locked { .. } => change.kind = "locked",
+                    A::Unlocked => change.kind = "unlocked",
+                    A::Delete { .. } => change.kind = "delete",
+                    A::Invite { .. } => change.kind = "invite",
+                    _ => return,
+                }
+                ui_apply(move |b| b.on_group_update(change));
+            }
             Event::ContactUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let name = u
@@ -726,8 +965,6 @@ async fn executor(
     let mut media_key = crate::vault::KeyHandle::default();
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
-    // Bumped on every play/stop; running frame loops exit when it moves.
-    let video_gen = Arc::new(std::sync::atomic::AtomicU64::new(0));
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             Cmd::MediaKey(key) => {
@@ -738,18 +975,37 @@ async fn executor(
                 let key = media_key.clone();
                 let sem = media_sem.clone();
                 tokio::spawn(async move {
-                    let _permit = sem.acquire_owned().await;
                     let Some(path) =
-                        crate::media::ensure_cached(&client, &key, &id, &mimetype, &message).await
+                        crate::media::ensure_cached(&client, &key, &id, &mimetype, &message, &sem).await
                     else {
                         ui_apply(move |b| b.on_media_missing(&id));
                         return;
                     };
                     match want {
                         MediaWant::File => ui_apply(move |b| b.on_media_file(&id, &path)),
+                        MediaWant::Video => {
+                            // Playable the moment the file is here; the
+                            // poster follows when it is decoded.
+                            {
+                                let (id, path) = (id.clone(), path.clone());
+                                ui_apply(move |b| b.on_media_file(&id, &path));
+                            }
+                            let poster = tokio::task::spawn_blocking(move || {
+                                crate::media::temp_plain(&key, &path)
+                                    .and_then(|p| crate::video::poster(&p, crate::media::BUBBLE_PX))
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+                            if let Some(img) = poster {
+                                ui_apply(move |b| b.on_video_poster(&id, img));
+                            }
+                        }
                         MediaWant::Image => {
+                            // Bubble size only; the lightbox asks for a
+                            // full decode when it opens.
                             let decoded = crate::media::read_cached(&key, &path)
-                                .and_then(|d| crate::media::decode_bytes(&d, 1280));
+                                .and_then(|d| crate::media::decode_bytes(&d, crate::media::BUBBLE_PX));
                             match decoded {
                                 Some(img) => ui_apply(move |b| b.on_media_image(&id, &path, img)),
                                 None => ui_apply(move |b| b.on_media_missing(&id)),
@@ -784,7 +1040,7 @@ async fn executor(
             Cmd::DecodeThumb { id, bytes, link } => {
                 tokio::spawn(async move {
                     if let Some(img) =
-                        tokio::task::spawn_blocking(move || crate::media::decode_bytes(&bytes, 1280))
+                        tokio::task::spawn_blocking(move || crate::media::decode_bytes(&bytes, crate::media::BUBBLE_PX))
                             .await
                             .ok()
                             .flatten()
@@ -836,6 +1092,27 @@ async fn executor(
                     }
                 });
             }
+            Cmd::MarkRead { jid, sender, ids } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let sender = sender.and_then(|p| parse_jid(&p));
+                    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+                    if let Err(e) = client.mark_as_read(&chat, sender.as_ref(), &id_refs).await {
+                        eprintln!("[wa] read receipt failed: {e}");
+                    }
+                });
+            }
+            Cmd::MarkPlayed { jid, sender, id } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let sender = sender.and_then(|p| parse_jid(&p));
+                    if let Err(e) = client.mark_as_played(&chat, sender.as_ref(), &[id.as_str()]).await {
+                        eprintln!("[wa] played receipt failed: {e}");
+                    }
+                });
+            }
             Cmd::Forward { jid, message } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
@@ -848,6 +1125,28 @@ async fn executor(
                             ui_apply(move |b| b.echo_sent(&jid, &id, echoed));
                         }
                         Err(e) => eprintln!("[wa] forward failed: {e}"),
+                    }
+                });
+            }
+            Cmd::ResendMedia { jid, message } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::proto_helpers::MessageExt as _;
+                    let Some(to) = parse_jid(&jid) else { return };
+                    // A plain send, not forward_message: prepare_for_forward
+                    // always stamps `is_forwarded`, which is wrong here --
+                    // this is a fresh message that merely reuses an
+                    // already-uploaded CDN blob. Clearing context_info
+                    // strips it (and any stale quote/mention data) so
+                    // neither side sees it as forwarded.
+                    let mut message = (*message).clone();
+                    message.set_context_info(wa::ContextInfo::default());
+                    match client.send_message(to, message.clone()).await {
+                        Ok(sent) => {
+                            let id = sent.message_id;
+                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                        }
+                        Err(e) => eprintln!("[wa] resend failed: {e}"),
                     }
                 });
             }
@@ -1135,70 +1434,15 @@ async fn executor(
                     }
                 });
             }
-            Cmd::PlayVideo { id, path } => {
-                video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let generation = video_gen.load(std::sync::atomic::Ordering::SeqCst);
-                let key = media_key.clone();
-                let gen_handle = video_gen.clone();
-                tokio::spawn(async move {
-                    let Some(plain) = ({
-                        let key = key.clone();
-                        let path = path.clone();
-                        tokio::task::spawn_blocking(move || crate::media::temp_plain(&key, &path))
-                            .await
-                            .ok()
-                            .flatten()
-                    }) else {
-                        return;
-                    };
-                    // Soundtrack decoded whole; playback starts UI-side in
-                    // sync with the first frame.
-                    let audio_plain = plain.clone();
-                    let audio = tokio::task::spawn_blocking(move || {
-                        crate::audio::decode_with_tempo(&audio_plain, 1.0)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    let id_for_audio = id.clone();
-                    if let Some(buffer) = audio {
-                        ui_apply(move |b| b.on_video_audio(&id_for_audio, buffer));
-                    }
-                    // Paced frame loop on a blocking thread; a newer
-                    // generation (or StopVideo) ends it.
-                    tokio::task::spawn_blocking(move || {
-                        let frames = crate::video::frames(&plain, 560, 15.0, 900);
-                        let started = std::time::Instant::now();
-                        for (i, frame) in frames.into_iter().enumerate() {
-                            if gen_handle.load(std::sync::atomic::Ordering::SeqCst) != generation {
-                                return;
-                            }
-                            let due = std::time::Duration::from_millis((i as u64) * 1000 / 15);
-                            if let Some(wait) = due.checked_sub(started.elapsed()) {
-                                std::thread::sleep(wait);
-                            }
-                            let id = id.clone();
-                            ui_apply(move |b| b.on_video_frame(&id, frame));
-                        }
-                        let id_done = id.clone();
-                        ui_apply(move |b| b.on_video_ended(&id_done));
-                    });
-                });
-            }
-            Cmd::StopVideo => {
-                video_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
             Cmd::CheckUpdate => {
                 tokio::spawn(async move {
                     let found = tokio::task::spawn_blocking(crate::update::check)
                         .await
                         .ok()
                         .flatten();
-                    if let Some(version) = found {
-                        // Direct apply: the banner must show on the lock
-                        // and login screens, not wait in the backlog.
-                        crate::bridge::ui_apply(move |b| b.on_update_available(&version));
-                    }
+                    // Direct apply: the banner must show on the lock
+                    // and login screens, not wait in the backlog.
+                    crate::bridge::ui_apply(move |b| b.on_update_checked(found));
                 });
             }
             Cmd::ApplyUpdate => {
@@ -1468,6 +1712,258 @@ async fn executor(
                     }
                 });
             }
+            Cmd::FetchGroupMeta(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    match client.groups().get_metadata(&target).await {
+                        Ok(meta) => {
+                            let members = meta
+                                .participants
+                                .iter()
+                                .map(|p| crate::store::Member {
+                                    jid: p.jid.to_non_ad_string(),
+                                    phone: p
+                                        .phone_number
+                                        .as_ref()
+                                        .map(|j| j.to_non_ad_string())
+                                        .unwrap_or_default(),
+                                    name: p
+                                        .details
+                                        .as_ref()
+                                        .and_then(|d| d.display_name.as_ref())
+                                        .map(|n| n.to_string())
+                                        .unwrap_or_default(),
+                                    admin: p.is_admin(),
+                                })
+                                .collect();
+                            let snap = GroupSnapshot {
+                                jid,
+                                subject: meta.subject.clone(),
+                                desc: meta.description.clone().unwrap_or_default(),
+                                announce: meta.is_announcement,
+                                ephemeral: meta
+                                    .ephemeral
+                                    .as_ref()
+                                    .and_then(|e| e.expiration)
+                                    .unwrap_or(0),
+                                members,
+                            };
+                            ui_apply(move |b| b.on_group_meta(snap));
+                        }
+                        Err(e) => eprintln!("[wa] group metadata failed for {jid}: {e}"),
+                    }
+                });
+            }
+            Cmd::Mute { jid, until_ms } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    let actions = client.chat_actions();
+                    let result = if until_ms > 0 {
+                        actions.mute_chat_until(&target, until_ms).await
+                    } else {
+                        actions.mute_chat(&target).await
+                    };
+                    if let Err(e) = result {
+                        eprintln!("[wa] mute failed: {e}");
+                    }
+                });
+            }
+            Cmd::Unmute(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    if let Err(e) = client.chat_actions().unmute_chat(&target).await {
+                        eprintln!("[wa] unmute failed: {e}");
+                    }
+                });
+            }
+            Cmd::SetEphemeral { jid, group, secs } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    if group {
+                        if let Err(e) = client.groups().set_ephemeral(target, secs).await {
+                            eprintln!("[wa] ephemeral setting failed: {e}");
+                        }
+                        return;
+                    }
+                    // One-to-one chats carry the timer as a protocol
+                    // message, the way the phone announces it.
+                    use whatsapp_rust::waproto::buffa::MessageField;
+                    let mut pm = wa::message::ProtocolMessage::default();
+                    pm.r#type = Some(wa::message::protocol_message::Type::EPHEMERAL_SETTING);
+                    pm.ephemeral_expiration = Some(secs);
+                    let mut message = wa::Message::default();
+                    message.protocol_message = MessageField::some(pm);
+                    if let Err(e) = client.send_message(target, message).await {
+                        eprintln!("[wa] ephemeral setting failed: {e}");
+                    }
+                });
+            }
+            Cmd::LeaveGroup(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    match client.groups().leave(target).await {
+                        Ok(()) => ui_apply(move |b| b.on_group_left(&jid)),
+                        Err(e) => eprintln!("[wa] leave group failed: {e}"),
+                    }
+                });
+            }
+            Cmd::AddMembers { jid, members } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    let who: Vec<whatsapp_rust::Jid> =
+                        members.iter().filter_map(|m| parse_jid(m)).collect();
+                    match client.groups().add_participants(target, &who).await {
+                        Ok(results) => {
+                            let failed: Vec<String> = results
+                                .iter()
+                                .filter(|r| r.error.is_some())
+                                .map(|r| r.jid.to_non_ad_string())
+                                .collect();
+                            ui_apply(move |b| b.on_members_added(&jid, &failed));
+                        }
+                        Err(e) => eprintln!("[wa] add members failed: {e}"),
+                    }
+                });
+            }
+            Cmd::ClearChat(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    if let Err(e) = client.chat_actions().clear_chat(&target, false, false, None).await {
+                        eprintln!("[wa] clear chat failed: {e}");
+                    }
+                });
+            }
+            Cmd::DeleteChat(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(target) = parse_jid(&jid) else { return };
+                    if let Err(e) = client.chat_actions().delete_chat(&target, false, None).await {
+                        eprintln!("[wa] delete chat failed: {e}");
+                    }
+                });
+            }
+            Cmd::DeleteForMe { jid, id, from_me, participant, ts } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let participant = participant.and_then(|p| parse_jid(&p));
+                    if let Err(e) = client
+                        .chat_actions()
+                        .delete_message_for_me(
+                            &chat,
+                            participant.as_ref(),
+                            &id,
+                            from_me,
+                            false,
+                            Some(ts * 1000),
+                        )
+                        .await
+                    {
+                        eprintln!("[wa] delete for me failed: {e}");
+                    }
+                });
+            }
+            Cmd::LabelCreate { id, name, color, order } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::waproto::buffa::MessageField;
+                    let value = wa::SyncActionValue {
+                        label_edit_action: MessageField::some(wa::sync_action_value::LabelEditAction {
+                            name: Some(name),
+                            color: Some(color),
+                            predefined_id: None,
+                            deleted: Some(false),
+                            order_index: Some(order),
+                            is_active: Some(true),
+                            ..Default::default()
+                        }),
+                        timestamp: Some(now_ms()),
+                        ..Default::default()
+                    };
+                    if let Err(e) = client
+                        .send_app_state_action(&whatsapp_rust::schemas::LABEL_EDIT, &[&id], &value)
+                        .await
+                    {
+                        eprintln!("[wa] label create failed: {e}");
+                    }
+                });
+            }
+            Cmd::LabelDelete(id) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::waproto::buffa::MessageField;
+                    let value = wa::SyncActionValue {
+                        label_edit_action: MessageField::some(wa::sync_action_value::LabelEditAction {
+                            deleted: Some(true),
+                            ..Default::default()
+                        }),
+                        timestamp: Some(now_ms()),
+                        ..Default::default()
+                    };
+                    if let Err(e) = client
+                        .send_app_state_action(&whatsapp_rust::schemas::LABEL_EDIT, &[&id], &value)
+                        .await
+                    {
+                        eprintln!("[wa] label delete failed: {e}");
+                    }
+                });
+            }
+            Cmd::LabelChat { label_id, jid, on } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::waproto::buffa::MessageField;
+                    let value = wa::SyncActionValue {
+                        label_association_action: MessageField::some(
+                            wa::sync_action_value::LabelAssociationAction {
+                                labeled: Some(on),
+                                ..Default::default()
+                            },
+                        ),
+                        timestamp: Some(now_ms()),
+                        ..Default::default()
+                    };
+                    if let Err(e) = client
+                        .send_app_state_action(
+                            &whatsapp_rust::schemas::LABEL_JID,
+                            &[&label_id, &jid],
+                            &value,
+                        )
+                        .await
+                    {
+                        eprintln!("[wa] label assignment failed: {e}");
+                    }
+                });
+            }
+            Cmd::Favorites(jids) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::waproto::buffa::MessageField;
+                    let favorites = jids
+                        .into_iter()
+                        .map(|id| wa::sync_action_value::favorites_action::Favorite { id: Some(id) })
+                        .collect();
+                    let value = wa::SyncActionValue {
+                        favorites_action: MessageField::some(wa::sync_action_value::FavoritesAction {
+                            favorites,
+                        }),
+                        timestamp: Some(now_ms()),
+                        ..Default::default()
+                    };
+                    if let Err(e) = client
+                        .send_app_state_action(&whatsapp_rust::schemas::FAVORITES, &[], &value)
+                        .await
+                    {
+                        eprintln!("[wa] favorites sync failed: {e}");
+                    }
+                });
+            }
             Cmd::AudioDecode { id, plain, rate_idx, rate } => {
                 tokio::spawn(async move {
                     let buffer = tokio::task::spawn_blocking(move || {
@@ -1574,9 +2070,11 @@ async fn executor(
                             if meta.len() == 0 {
                                 return Some((None, fresh)); // remembered "no picture"
                             }
-                            let img = crate::media::read_cached(&key, &path)
-                                .and_then(|b| crate::media::decode_cover(&b, 64))?;
-                            Some((Some(img), fresh))
+                            let bytes = crate::media::read_cached(&key, &path)?;
+                            let img = crate::media::decode_cover(&bytes, crate::media::AVATAR_PX)?;
+                            // A preview-sized file counts as stale, so the
+                            // full picture replaces it.
+                            Some((Some(img), fresh && crate::media::avatar_is_full(&bytes)))
                         })
                         .await
                         .ok()
@@ -1591,14 +2089,16 @@ async fn executor(
                     }
                     let _permit = sem.acquire_owned().await;
                     let Some(target) = parse_jid(&jid) else { return };
-                    let result = client.contacts().get_profile_picture(&target, true).await;
+                    // The preview the server offers is a 96px thumbnail
+                    // that blurs at any real size; the full picture is
+                    // what WhatsApp Web shows, so fetch that and cut it.
+                    let result = picture_url(&client, &target).await;
                     match result {
-                        Ok(Some(pic)) => {
-                            let url = pic.url.clone();
+                        Ok(Some(url)) => {
                             let img = tokio::task::spawn_blocking(move || {
                                 let mut res = ureq::get(&url).call().ok()?;
                                 let bytes = res.body_mut().read_to_vec().ok()?;
-                                let img = crate::media::decode_cover(&bytes, 64)?;
+                                let img = crate::media::decode_cover(&bytes, crate::media::AVATAR_PX)?;
                                 let _ = std::fs::write(&path, key.encrypt_bytes(&bytes));
                                 Some(img)
                             })
@@ -1623,6 +2123,182 @@ async fn executor(
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 });
             }
+            Cmd::PdfEngineInstall => {
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(crate::pdf::install_engine)
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()));
+                    ui_apply(move |b| b.on_pdf_engine_installed(result));
+                });
+            }
+            Cmd::DecodeFull { id, path } => {
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let img = tokio::task::spawn_blocking(move || {
+                        crate::media::read_cached(&key, &path)
+                            .and_then(|d| crate::media::decode_bytes(&d, crate::media::FULL_PX))
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = img {
+                        ui_apply(move |b| b.on_full_image(&id, img));
+                    }
+                });
+            }
+            Cmd::ShareHistory { group, member, messages } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    use whatsapp_rust::waproto::buffa::{Message as _, MessageField};
+                    let Some(to) = parse_jid(&group) else { return };
+                    let count = messages.len() as i64;
+                    let oldest = messages.iter().filter_map(|m| m.message_timestamp).min().unwrap_or(0) as i64;
+                    let bundle = wa::GroupHistory { messages, ..Default::default() };
+                    let bytes = bundle.encode_to_vec();
+                    let upload = match client
+                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::History, Default::default())
+                        .await
+                    {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[wa] history bundle upload failed: {e}");
+                            ui_apply(|b| b.on_share_result(false));
+                            return;
+                        }
+                    };
+                    let message = wa::Message {
+                        message_history_bundle: MessageField::some(wa::message::MessageHistoryBundle {
+                            mimetype: Some("application/x-protobuf".into()),
+                            file_sha256: Some(upload.file_sha256.to_vec()),
+                            media_key: Some(upload.media_key.to_vec()),
+                            file_enc_sha256: Some(upload.file_enc_sha256.to_vec()),
+                            direct_path: Some(upload.direct_path),
+                            media_key_timestamp: Some(upload.media_key_timestamp),
+                            message_history_metadata: MessageField::some(wa::message::MessageHistoryMetadata {
+                                history_receivers: vec![member.clone()],
+                                oldest_message_timestamp_in_window: Some(oldest),
+                                message_count: Some(count),
+                                oldest_message_timestamp_in_bundle: Some(oldest),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    match client.send_message(to, message).await {
+                        Ok(_) => ui_apply(|b| b.on_share_result(true)),
+                        Err(e) => {
+                            eprintln!("[wa] history bundle send failed: {e}");
+                            ui_apply(|b| b.on_share_result(false));
+                        }
+                    }
+                });
+            }
+            Cmd::StatusPoster { id, path } => {
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let frame = tokio::task::spawn_blocking(move || {
+                        crate::media::temp_plain(&key, &path)
+                            .map(|p| crate::video::frames(&p, 1080, 1.0, 1))
+                            .and_then(|f| f.into_iter().next())
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = frame {
+                        ui_apply(move |b| b.on_status_poster(&id, img));
+                    }
+                });
+            }
+            Cmd::AvatarLarge(jid) => {
+                let client = session.client.clone();
+                let key = media_key.clone();
+                tokio::spawn(async move {
+                    let path = crate::media::avatar_cache_path(&jid);
+                    let cached = {
+                        let (key, path) = (key.clone(), path.clone());
+                        tokio::task::spawn_blocking(move || {
+                            crate::media::read_cached(&key, &path)
+                                .and_then(|b| crate::media::decode_cover(&b, crate::media::AVATAR_LARGE_PX))
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    };
+                    if let Some(img) = cached {
+                        ui_apply(move |b| b.on_avatar_large(&jid, img));
+                        return;
+                    }
+                    let Some(target) = parse_jid(&jid) else { return };
+                    let Ok(Some(url)) = picture_url(&client, &target).await else { return };
+                    let img = tokio::task::spawn_blocking(move || {
+                        let mut res = ureq::get(&url).call().ok()?;
+                        let bytes = res.body_mut().read_to_vec().ok()?;
+                        let img = crate::media::decode_cover(&bytes, crate::media::AVATAR_LARGE_PX)?;
+                        let _ = std::fs::write(&path, key.encrypt_bytes(&bytes));
+                        Some(img)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(img) = img {
+                        ui_apply(move |b| b.on_avatar_large(&jid, img));
+                    }
+                });
+            }
+            Cmd::LinkThumb { id, direct_path, media_key: mk, sha256, enc_sha256, fallback } => {
+                let client = session.client.clone();
+                let key = media_key.clone();
+                let sem = media_sem.clone();
+                tokio::spawn(async move {
+                    let path = crate::media::link_thumb_path(&id);
+                    let mut bytes = {
+                        let (key, path) = (key.clone(), path.clone());
+                        tokio::task::spawn_blocking(move || crate::media::read_cached(&key, &path))
+                            .await
+                            .ok()
+                            .flatten()
+                    };
+                    if bytes.is_none() {
+                        let params = whatsapp_rust::download::DownloadParams::encrypted(
+                            direct_path,
+                            &mk,
+                            &sha256,
+                            &enc_sha256,
+                            0,
+                            whatsapp_rust::wacore::download::MediaType::LinkThumbnail,
+                        );
+                        crate::media::wait_for_backoff().await;
+                        let mut attempt = {
+                            let _permit = sem.acquire().await;
+                            client.download(&params).await
+                        };
+                        if attempt.as_ref().is_err_and(|e| crate::media::rate_limited(&e.to_string())) {
+                            crate::media::note_rate_limit();
+                            crate::media::wait_for_backoff().await;
+                            let _permit = sem.acquire().await;
+                            attempt = client.download(&params).await;
+                        }
+                        match attempt {
+                            Ok(data) => {
+                                let sealed = key.encrypt_bytes(&data);
+                                let _ = tokio::fs::write(&path, sealed).await;
+                                bytes = Some(data);
+                            }
+                            Err(e) => eprintln!("[media] link thumbnail failed for {id}: {e}"),
+                        }
+                    }
+                    let data = bytes.unwrap_or(fallback);
+                    let img = tokio::task::spawn_blocking(move || crate::media::decode_bytes(&data, crate::media::CARD_PX))
+                        .await
+                        .ok()
+                        .flatten();
+                    match img {
+                        Some(img) => ui_apply(move |b| b.on_thumb(&id, true, img)),
+                        None => ui_apply(move |b| b.on_media_missing(&id)),
+                    }
+                });
+            }
             Cmd::Start | Cmd::Resume => {
                 let client = session.client.clone();
                 tokio::spawn(async move { client.run().await });
@@ -1643,23 +2319,37 @@ async fn executor(
                     }
                 });
             }
-            Cmd::SendText { jid, body, quote } => {
+            Cmd::SendText { jid, body, quote, mentions, mention_all } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
                     use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
                     let Some(to) = parse_jid(&jid) else { return };
-                    let message = match &quote {
+                    let mut ctx = match &quote {
                         Some(q) => {
                             let Some(sender) = parse_jid(&q.sender_jid) else { return };
-                            let ctx = whatsapp_rust::proto_helpers::build_quote_context_with_info(
+                            Some(whatsapp_rust::proto_helpers::build_quote_context_with_info(
                                 q.id.clone(),
                                 &sender,
                                 &to,
                                 &to,
                                 &q.message,
-                            );
-                            wa::Message::text_with_context(body.clone(), ctx)
+                            ))
                         }
+                        None => None,
+                    };
+                    if !mentions.is_empty() || mention_all.is_some() {
+                        let mut info = ctx.take().unwrap_or_default();
+                        info.mentioned_jid = mentions.clone();
+                        if let Some(subject) = &mention_all {
+                            info.group_mentions = vec![wa::GroupMention {
+                                group_jid: Some(jid.clone()),
+                                group_subject: Some(subject.clone()),
+                            }];
+                        }
+                        ctx = Some(info);
+                    }
+                    let message = match ctx {
+                        Some(ctx) => wa::Message::text_with_context(body.clone(), ctx),
                         None => wa::Message::text(body.clone()),
                     };
                     match client.send_message(to, message.clone()).await {
@@ -1723,16 +2413,50 @@ async fn executor(
                 session.client.disconnect().await;
                 ui_apply(|b| b.on_fatal("offline"));
             }
+            Cmd::SwitchAccount(account) => {
+                // A call cannot follow the user to another account.
+                if let Some(live) = take_live() {
+                    let _ =
+                        session.client.voip().terminate(&live.id, &live.peer, &live.creator).await;
+                    live.handle.hangup_local().await;
+                }
+                session.client.disconnect().await;
+                let previous = session.account.clone();
+                drop(session);
+                SESSION_EPOCH.fetch_add(1, Ordering::SeqCst);
+                let opened = match build_session(cmd_tx.clone(), &account).await {
+                    Ok(next) => Ok(next),
+                    Err(e) => {
+                        eprintln!("[wa] cannot open account {account:?}: {e}");
+                        build_session(cmd_tx.clone(), &previous).await
+                    }
+                };
+                match opened {
+                    Ok(next) => {
+                        session = next;
+                        let account = session.account.clone();
+                        let registered = session.client.pn().is_some();
+                        let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
+                        // Not through the epoch-stamped path on purpose:
+                        // this is the message that opens the new epoch.
+                        crate::bridge::ui_apply(move |b| {
+                            b.on_account_ready(&account, registered, epoch)
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[wa] session rebuild failed: {e}");
+                        let msg = t("status.connectFailed");
+                        crate::bridge::ui_apply(move |b| b.on_status(&msg));
+                        return;
+                    }
+                }
+            }
             Cmd::ResetSession => {
                 session.client.disconnect().await;
+                let account = session.account.clone();
                 drop(session);
-                let path = wa_session_path();
-                for suffix in ["", "-wal", "-shm"] {
-                    let mut p = path.as_os_str().to_owned();
-                    p.push(suffix);
-                    let _ = std::fs::remove_file(std::path::PathBuf::from(p));
-                }
-                match build_session(cmd_tx.clone()).await {
+                crate::paths::remove_db(&wa_session_path(&account));
+                match build_session(cmd_tx.clone(), &account).await {
                     Ok(next) => {
                         session = next;
                         ui_apply(|b| b.on_logged_out());
@@ -1760,6 +2484,38 @@ async fn executor(
             }
         }
     }
+}
+
+// Where a jid's full-size picture can be fetched from. Channels answer
+// through their metadata, groups through the group picture query when
+// the contact query has nothing, people through the contact query.
+// Ok(None) means "no picture"; Err means "ask again later".
+async fn picture_url(client: &Arc<Client>, jid: &whatsapp_rust::Jid) -> Result<Option<String>, ()> {
+    if jid.to_string().ends_with("@newsletter") {
+        return match client.newsletter().get_metadata(jid).await {
+            Ok(meta) => Ok(meta.picture_url.clone().or(meta.preview_url.clone())),
+            Err(_) => Err(()),
+        };
+    }
+    let is_group = jid.to_string().ends_with("@g.us");
+    match client.contacts().get_profile_picture(jid, false).await {
+        Ok(Some(pic)) => return Ok(Some(pic.url.clone())),
+        Ok(None) if !is_group => return Ok(None),
+        Err(_) if !is_group => return Err(()),
+        _ => {}
+    }
+    use whatsapp_rust::features::PictureType;
+    match client.groups().get_profile_pictures(vec![jid.clone()], PictureType::Image).await {
+        Ok(list) => Ok(list.into_iter().next().and_then(|p| p.url)),
+        Err(_) => Err(()),
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn urlencode(s: &str) -> String {
