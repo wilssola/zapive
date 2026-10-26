@@ -482,3 +482,15 @@ msgstr "A atualização falhou: {}"
 
 msgid "Try again"
 msgstr "Tentar de novo"
+
+msgid "Automatic downloads"
+msgstr "Transferências automáticas"
+
+msgid "Voice messages are always downloaded automatically."
+msgstr "As mensagens de voz são sempre transferidas automaticamente."
+
+msgid "Videos"
+msgstr "Vídeos"
+
+msgid "Documents"
+msgstr "Documentos"

@@ -191,6 +191,7 @@ export component AppWindow inherits Window {
     callback attach-doc();
     callback play-audio(string);
     callback copy-text(string);
+    callback copy-image(string);
     // A plain click on a styled message, as a byte offset into `plain`.
     callback open-link-at(string, int);
     callback audio-toggle(string);
@@ -423,6 +424,17 @@ export component AppWindow inherits Window {
     in-out property <bool> apply-deletions: false;
     callback send-receipts-changed(bool);
     callback apply-deletions-changed(bool);
+    callback download-media(string);
+    in-out property <bool> auto-download-photos: true;
+    callback auto-download-photos-changed(bool);
+    in-out property <bool> auto-download-audio: true;
+    callback auto-download-audio-changed(bool);
+    in-out property <bool> auto-download-video: true;
+    callback auto-download-video-changed(bool);
+    in-out property <bool> auto-download-documents: true;
+    callback auto-download-documents-changed(bool);
+    in-out property <bool> auto-download-stickers: true;
+    callback auto-download-stickers-changed(bool);
 
     // Lightbox
     in-out property <bool> lightbox-open: false;
@@ -972,7 +984,7 @@ export component AppWindow inherits Window {
                                 alignment: center;
                                 horizontal-stretch: 0;
                                 Avatar {
-                                    width: 46px;
+                                    width: 140px;
                                     height: 46px;
                                     src: call.avatar;
                                     has-image: call.hasAvatar;
@@ -1913,12 +1925,15 @@ export component AppWindow inherits Window {
 
                                 // Still downloading: the thumbnail that came
                                 // with the message, dimmed, in the clip's box.
-                                if msg.kind == "video" && !msg.mediaReady && msg.picW > 0: Rectangle {
+                                if msg.kind == "video" && !msg.mediaReady && msg.picW > 0: TouchArea {
+                                    mouse-cursor: pointer;
+                                    enabled: !msg.mediaLoading;
+                                    clicked => { root.download-media(msg.id); }
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
-                                    border-radius: 6px;
-                                    background: Theme.hover;
-                                    clip: true;
+
+                                    Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: Theme.hover; }
+
                                     Image {
                                         source: msg.picture;
                                         width: parent.width;
@@ -1933,13 +1948,11 @@ export component AppWindow inherits Window {
                                         x: (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
                                         background: #00000090;
-                                        Image {
-                                            source: @image-url("../icons/download.svg");
-                                            colorize: white;
-                                            width: 22px;
-                                            height: 22px;
-                                            x: 12px;
-                                            y: 12px;
+                                        Text {
+                                            text: msg.mediaLoading ? @tr("Downloading…") : @tr("Download");
+                                            color: white;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
                                         }
                                     }
                                 }
@@ -2034,11 +2047,34 @@ export component AppWindow inherits Window {
                                 }
                                 // Placeholder of the final size: the bubble
                                 // never changes height once the image lands.
-                                if msg.kind == "image" && !msg.mediaReady: Rectangle {
+                                if msg.kind == "image" && !msg.mediaReady: TouchArea {
+                                    mouse-cursor: pointer;
+                                    enabled: !msg.mediaLoading;
+                                    clicked => { root.download-media(msg.id); }
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
-                                    border-radius: 6px;
-                                    background: Theme.hover;
+
+                                    Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: Theme.hover; }
+                                    Image {
+                                        source: msg.picture;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        image-fit: cover;
+                                    }
+                                    Rectangle {
+                                        width: 140px;
+                                        height: 36px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 18px;
+                                        background: #000000a0;
+                                        Text {
+                                            text: msg.mediaLoading ? @tr("Downloading…") : @tr("Download");
+                                            color: white;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
                                 }
 
                                 if msg.kind == "doc": VerticalLayout {
@@ -2049,7 +2085,6 @@ export component AppWindow inherits Window {
                                         background: msg.fromMe ? #00000014 : #00000010;
                                         doc-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            enabled: msg.mediaReady;
                                             clicked => { root.doc-view(msg.id); }
                                         }
                                         HorizontalLayout {
@@ -2082,11 +2117,10 @@ export component AppWindow inherits Window {
                                             height: 30px;
                                             view-touch := TouchArea {
                                                 mouse-cursor: pointer;
-                                                enabled: msg.mediaReady;
                                                 clicked => { root.doc-view(msg.id); }
                                             }
                                             Text {
-                                                text: @tr("View");
+                                                text: msg.mediaReady ? @tr("View") : @tr("Download");
                                                 color: msg.mediaReady ? Theme.accent : Theme.text-dim;
                                                 font-size: 13px;
                                                 font-weight: 700;
@@ -2130,7 +2164,6 @@ export component AppWindow inherits Window {
                                                 ? @image-url("../icons/player-pause.svg")
                                                 : @image-url("../icons/player-play.svg");
                                             icon-size: 20px;
-                                            enabled: msg.mediaReady;
                                             clicked => { root.audio-toggle(msg.id); }
                                         }
                                     }
@@ -2472,6 +2505,11 @@ export component AppWindow inherits Window {
                             msg-menu := ContextMenuArea {
                                 enabled: !root.select-mode && !msg.deleted;
                                 Menu {
+                                    MenuItem {
+                                        title: @tr("Copy image");
+                                        enabled: msg.kind == "image" && msg.mediaReady;
+                                        activated => { root.copy-image(msg.id); }
+                                    }
                                     MenuItem {
                                         title: @tr("Reply");
                                         activated => { root.request-reply(msg.id); }
@@ -3446,7 +3484,11 @@ export component AppWindow inherits Window {
                                     color-idx: root.info-color-idx;
                                 }
                             }
-                            Text {
+                            TextInput {
+                                read-only: true;
+                                single-line: false;
+                                selection-background-color: Theme.accent;
+                                selection-foreground-color: white;
                                 text: root.info-name;
                                 color: Theme.text;
                                 font-size: 20px;
@@ -3454,7 +3496,12 @@ export component AppWindow inherits Window {
                                 horizontal-alignment: center;
                                 wrap: word-wrap;
                             }
-                            if root.info-id != "": Text {
+                            if root.info-id != "": TextInput {
+                                read-only: true;
+                                single-line: false;
+                                wrap: word-wrap;
+                                selection-background-color: Theme.accent;
+                                selection-foreground-color: white;
                                 text: root.info-id;
                                 color: Theme.text-dim;
                                 font-size: 14px;
@@ -3472,7 +3519,11 @@ export component AppWindow inherits Window {
                                 font-size: 13px;
                                 font-weight: 700;
                             }
-                            if root.info-about != "" || root.info-desc != "": Text {
+                            if root.info-about != "" || root.info-desc != "": TextInput {
+                                read-only: true;
+                                single-line: false;
+                                selection-background-color: Theme.accent;
+                                selection-foreground-color: white;
                                 text: root.info-is-group ? root.info-desc : root.info-about;
                                 color: Theme.text;
                                 font-size: 14px;
@@ -4562,6 +4613,45 @@ export component AppWindow inherits Window {
                                             current-pin.text = "";
                                         }
                                     }
+                                }
+                            }
+                        }
+                        SettingsCard {
+                            title: @tr("Automatic downloads");
+                            Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; wrap: word-wrap; }
+                            SettingsRow {
+                                label: @tr("Photos");
+                                Toggle {
+                                    on: root.auto-download-photos;
+                                    clicked => { root.auto-download-photos-changed(!root.auto-download-photos); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Audio");
+                                Toggle {
+                                    on: root.auto-download-audio;
+                                    clicked => { root.auto-download-audio-changed(!root.auto-download-audio); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Videos");
+                                Toggle {
+                                    on: root.auto-download-video;
+                                    clicked => { root.auto-download-video-changed(!root.auto-download-video); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Documents");
+                                Toggle {
+                                    on: root.auto-download-documents;
+                                    clicked => { root.auto-download-documents-changed(!root.auto-download-documents); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Stickers");
+                                Toggle {
+                                    on: root.auto-download-stickers;
+                                    clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
                                 }
                             }
                         }
