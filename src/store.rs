@@ -1287,8 +1287,7 @@ pub fn preview_body(stored: &StoredMessage) -> String {
         }
         MessageKind::Doc => ta("preview.document", &[&stored.text]),
         MessageKind::Text | MessageKind::System => {
-            let collapsed: String = stored.text.split_whitespace().collect::<Vec<_>>().join(" ");
-            collapsed.chars().take(80).collect()
+            stored.text.split_whitespace().collect::<Vec<_>>().join(" ")
         }
     }
 }
