@@ -36,9 +36,10 @@ const RING_TIMEOUT_MS: u64 = 45_000;
 // How long the call screen stays up after the call ends.
 const CALL_LINGER_MS: u64 = 2_000;
 
-// Curated emoji palette for the picker (variation selectors stripped so
-// every glyph renders in Slint).
-const EMOJIS: &str = "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😜 🤪 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👹 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙌 👏 🤝 👍 👎 👊 ✊ 🤛 🤜 🤞 ✌ 🤟 🤘 👌 🤏 👈 👉 👆 👇 ☝ ✋ 🤚 🖐 🖖 👋 🤙 💪 🙏 ❤ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💕 💞 💓 💯 💥 💫 🔥 ⭐ 🌟 ⚡ 🎉 🎈 🎁 🏆 ⚽ 🎮 🎵 ☕ 🍻 🍕 🍔 🎂 🍫 🚀 ✈ 🚗 💰";
+// Curated emoji palette for the picker. The few whose default presentation
+// is text (heart, victory hand, ...) carry U+FE0F, so they go out to
+// WhatsApp the way a phone sends them.
+const EMOJIS: &str = "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😜 🤪 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👹 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙌 👏 🤝 👍 👎 👊 ✊ 🤛 🤜 🤞 ✌️ 🤟 🤘 👌 🤏 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 🤙 💪 🙏 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💕 💞 💓 💯 💥 💫 🔥 ⭐ 🌟 ⚡ 🎉 🎈 🎁 🏆 ⚽ 🎮 🎵 ☕ 🍻 🍕 🍔 🎂 🍫 🚀 ✈️ 🚗 💰";
 
 pub struct Bridge {
     ui: AppWindow,
@@ -2290,8 +2291,11 @@ impl Bridge {
                 .iter()
                 .find(|m| m.id == target)
                 .map(reaction_summary);
-            if let Some(summary) = summary {
-                self.patch_row(target, |row| row.reactions = summary.into());
+            if let Some((emoji, count)) = summary {
+                self.patch_row(target, |row| {
+                    row.reactions = emoji.into();
+                    row.reactionCount = count.into();
+                });
             }
         }
         // A reaction is the chat's latest activity, and WhatsApp says so in
@@ -2892,6 +2896,7 @@ impl Bridge {
         };
         let (pic_w, pic_h) = media_box(m);
         let (ticks, ticks_blue) = ticks_for(m);
+        let (reactions, reaction_count) = reaction_summary(m);
         let day = format_day(m.timestamp);
         let day_label = if prev.map(|p| format_day(p.timestamp) != day).unwrap_or(true) {
             day.clone()
@@ -2944,7 +2949,8 @@ impl Bridge {
             picH: self.decoded.get(&m.id).map(|&(_, _, h)| h).unwrap_or(pic_h),
             mediaPath: self.media_path.get(&m.id).cloned().unwrap_or_default().into(),
             mediaReady: self.media_path.contains_key(&m.id),
-            reactions: reaction_summary(m).into(),
+            reactions: reactions.into(),
+            reactionCount: reaction_count.into(),
             dayLabel: day_label.into(),
             ticks: ticks.into(),
             ticksBlue: ticks_blue,
@@ -6518,7 +6524,10 @@ impl Bridge {
                 .find(|x| x.id == id)
                 .map(reaction_summary)
                 .unwrap_or_default();
-            self.patch_row(id, |row| row.reactions = summary.into());
+            self.patch_row(id, |row| {
+                row.reactions = summary.0.into();
+                row.reactionCount = summary.1.into();
+            });
         }
         self.schedule_save();
     }

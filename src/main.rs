@@ -7,6 +7,7 @@ mod audio;
 mod bridge;
 mod call;
 mod camera;
+mod fonts;
 mod i18n;
 mod logging;
 mod markup;
@@ -112,6 +113,7 @@ fn main() {
     // straight into the tray instead of popping the window open.
     let autostarted = std::env::args().any(|a| a == "--autostart");
 
+    fonts::install_emoji();
     let ui = AppWindow::new().expect("failed to create the main window");
     ui.set_language_mode(language.as_str().into());
     ui.set_autostart(platform::autostart_enabled());

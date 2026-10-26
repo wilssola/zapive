@@ -15,6 +15,8 @@ slint = { version = "1.18", default-features = false, features = [
     "renderer-software",
     "accessibility",
     "compat-1-2",
+    # Registers the bundled emoji font as a fallback at run time.
+    "unstable-fontique-011",
 ] }
 # The feature set is picked explicitly rather than taken from the defaults,
 # which carry `tokio-native` this build does not need.

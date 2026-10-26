@@ -1,8 +1,8 @@
-import "../fonts/noto_color/NotoColorEmoji-Regular.ttf";
-
-// Text drawn with the bundled Noto Color Emoji, so reactions and the
-// picker look the same on every system. Characters the font lacks fall
-// back to the regular fonts.
+// Text drawn with the bundled Noto Color Emoji first, for the places that
+// show only emoji (picker, reactions). The font is registered at start-up
+// by src/fonts.rs, which also puts it in every other text's fallback chain;
+// here it leads, so even symbols the UI font also has (❤, ✈) come out in
+// color. The font maps digits and spaces too, so mixed text stays a Text.
 export component EmojiText inherits Text {
     font-family: "Noto Color Emoji";
 }

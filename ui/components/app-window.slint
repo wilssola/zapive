@@ -2445,7 +2445,7 @@ export component AppWindow inherits Window {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 spacing: 2px;
-                                for e in ["\u{1f44d}", "\u{2764}", "\u{1f602}",
+                                for e in ["\u{1f44d}", "\u{2764}\u{fe0f}", "\u{1f602}",
                                           "\u{1f62e}", "\u{1f622}", "\u{1f64f}"]:
                                     Rectangle {
                                         width: 30px;
@@ -2489,7 +2489,7 @@ export component AppWindow inherits Window {
                             x: msg.fromMe
                                 ? bubble.x + bubble.width - self.width - 4px
                                 : bubble.x + 4px;
-                            width: react-text.preferred-width + 14px;
+                            width: chip-row.preferred-width + 14px;
                             height: 21px;
                             border-radius: 10.5px;
                             background: Theme.pill;
@@ -2499,14 +2499,22 @@ export component AppWindow inherits Window {
                                 mouse-cursor: pointer;
                                 clicked => { root.show-reactions(msg.id); }
                             }
-                            react-text := EmojiText {
-                                text: msg.reactions;
-                                font-size: 11px;
-                                color: Theme.text;
-                                width: parent.width;
-                                height: parent.height;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            // The emoji and the count apart: the emoji font
+                            // has digits of its own.
+                            chip-row := HorizontalLayout {
+                                alignment: center;
+                                spacing: 3px;
+                                EmojiText {
+                                    text: msg.reactions;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                                if msg.reactionCount != "": Text {
+                                    text: msg.reactionCount;
+                                    font-size: 11px;
+                                    color: Theme.text;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
                         // Selection mode: a click anywhere on the row
