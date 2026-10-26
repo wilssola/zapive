@@ -1,0 +1,29 @@
+import { Theme } from "theme.slint";
+
+// Round accent button with a label, for dialogs.
+export component DialogButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    mouse-cursor: pointer;
+    width: btn-text.preferred-width + 32px;
+    height: 36px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 18px;
+        background: root.primary
+            ? (root.has-hover ? (root.danger ? #c9302c : Theme.accent.darker(0.15)) : (root.danger ? #ea0038 : Theme.accent))
+            : (root.has-hover ? Theme.hover : transparent);
+        btn-text := Text {
+            text: root.label;
+            color: root.primary ? white : Theme.accent;
+            font-size: 14px;
+            font-weight: 700;
+            width: parent.width;
+            height: parent.height;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

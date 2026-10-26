@@ -1,16 +1,25 @@
 import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { ChatItem, ReactionItem, CallItem, StickerCell, MessageItem, MemberItem } from "types.slint";
+import { ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem } from "types.slint";
 import { Avatar } from "avatar.slint";
 import { GreenLink } from "green-link.slint";
 import { IconButton } from "icon-button.slint";
 import { FilterChip } from "filter-chip.slint";
-import { MenuRow } from "rows/menu.slint";
+import { DialogButton } from "dialog-button.slint";
+import { Toggle } from "toggle.slint";
+import { SettingsCard } from "settings-card.slint";
+import { SettingsRow } from "settings-row.slint";
+import { LinkHover } from "link-hover.slint";
+import { EmojiText } from "emoji.slint";
 import { UpdateBanner } from "update-banner.slint";
+import { MenuRow } from "rows/menu.slint";
+import { MemberRow } from "rows/member.slint";
+import { HitRow } from "rows/hit.slint";
+import { AccountRow } from "rows/account.slint";
 
 export component AppWindow inherits Window {
     title: "Zapive";
-    icon: @image-url("zapive.png");
+    icon: @image-url("../zapive.png");
     preferred-width: 1100px;
     preferred-height: 700px;
     background: Theme.bg;
@@ -487,7 +496,7 @@ export component AppWindow inherits Window {
             alignment: center;
             spacing: 10px;
             Image {
-                source: @image-url("icons/lock.svg");
+                source: @image-url("../icons/lock.svg");
                 colorize: Theme.text;
                 width: 26px;
                 height: 26px;
@@ -654,7 +663,7 @@ export component AppWindow inherits Window {
                     padding-right: 24px;
                     spacing: 16px;
                     Image {
-                        source: @image-url("icons/archive.svg");
+                        source: @image-url("../icons/archive.svg");
                         colorize: Theme.accent;
                         width: 22px;
                         height: 22px;
@@ -759,7 +768,7 @@ export component AppWindow inherits Window {
                 spacing: 8px;
                 alignment: start;
                 IconButton {
-                    icon: @image-url("icons/message-circle.svg");
+                    icon: @image-url("../icons/message-circle.svg");
                     active: root.sidebar-view == "chats";
                     clicked => {
                         root.sidebar-view = "chats";
@@ -767,17 +776,17 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
-                    icon: @image-url("icons/circle-dot.svg");
+                    icon: @image-url("../icons/circle-dot.svg");
                     active: root.sidebar-view == "status";
                     clicked => { root.sidebar-view = "status"; }
                 }
                 IconButton {
-                    icon: @image-url("icons/phone.svg");
+                    icon: @image-url("../icons/phone.svg");
                     active: root.sidebar-view == "calls";
                     clicked => { root.sidebar-view = "calls"; }
                 }
                 IconButton {
-                    icon: @image-url("icons/speakerphone.svg");
+                    icon: @image-url("../icons/speakerphone.svg");
                     active: root.sidebar-view == "channels";
                     clicked => {
                         root.sidebar-view = "channels";
@@ -785,7 +794,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
-                    icon: @image-url("icons/users-group.svg");
+                    icon: @image-url("../icons/users-group.svg");
                     active: root.sidebar-view == "communities";
                     clicked => {
                         root.sidebar-view = "communities";
@@ -794,7 +803,7 @@ export component AppWindow inherits Window {
                 }
                 Rectangle { vertical-stretch: 1; }
                 IconButton {
-                    icon: @image-url("icons/settings.svg");
+                    icon: @image-url("../icons/settings.svg");
                     clicked => {
                         root.settings-status = "";
                         root.settings-open = true;
@@ -988,7 +997,7 @@ export component AppWindow inherits Window {
                                 }
                                 // Redial, the way the phone's call log does.
                                 if !call.group: IconButton {
-                                    icon: @image-url("icons/phone.svg");
+                                    icon: @image-url("../icons/phone.svg");
                                     icon-size: 18px;
                                     width: 30px;
                                     height: 30px;
@@ -1168,7 +1177,7 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 1;
                                     }
                                     if chat.muted: Image {
-                                        source: @image-url("icons/bell-off.svg");
+                                        source: @image-url("../icons/bell-off.svg");
                                         colorize: Theme.text-dim;
                                         width: 14px;
                                         height: 14px;
@@ -1176,7 +1185,7 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 0;
                                     }
                                     if chat.pinned: Image {
-                                        source: @image-url("icons/pin.svg");
+                                        source: @image-url("../icons/pin.svg");
                                         colorize: Theme.text-dim;
                                         width: 14px;
                                         height: 14px;
@@ -1184,7 +1193,7 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 0;
                                     }
                                     if chat.mentioned: Image {
-                                        source: @image-url("icons/at.svg");
+                                        source: @image-url("../icons/at.svg");
                                         colorize: Theme.accent;
                                         width: 15px;
                                         height: 15px;
@@ -1266,8 +1275,8 @@ export component AppWindow inherits Window {
                             }
                             Image {
                                 source: root.mini-audio-playing
-                                    ? @image-url("icons/player-pause.svg")
-                                    : @image-url("icons/player-play.svg");
+                                    ? @image-url("../icons/player-pause.svg")
+                                    : @image-url("../icons/player-play.svg");
                                 colorize: white;
                                 width: 18px;
                                 height: 18px;
@@ -1293,7 +1302,7 @@ export component AppWindow inherits Window {
                                         color-idx: root.mini-audio-color-idx;
                                     }
                                     Image {
-                                        source: @image-url("icons/microphone.svg");
+                                        source: @image-url("../icons/microphone.svg");
                                         colorize: white;
                                         width: 14px;
                                         height: 14px;
@@ -1323,7 +1332,7 @@ export component AppWindow inherits Window {
                                 clicked => { root.mini-audio-close(); }
                             }
                             Image {
-                                source: @image-url("icons/x.svg");
+                                source: @image-url("../icons/x.svg");
                                 colorize: white;
                                 width: 16px;
                                 height: 16px;
@@ -1421,21 +1430,21 @@ export component AppWindow inherits Window {
                         if root.current-callable: VerticalLayout {
                             alignment: center;
                             IconButton {
-                                icon: @image-url("icons/video.svg");
+                                icon: @image-url("../icons/video.svg");
                                 clicked => { root.start-video-call(root.current-jid); }
                             }
                         }
                         if root.current-callable: VerticalLayout {
                             alignment: center;
                             IconButton {
-                                icon: @image-url("icons/phone.svg");
+                                icon: @image-url("../icons/phone.svg");
                                 clicked => { root.start-call(root.current-jid); }
                             }
                         }
                         VerticalLayout {
                             alignment: center;
                             IconButton {
-                                icon: @image-url("icons/search.svg");
+                                icon: @image-url("../icons/search.svg");
                                 active: root.chat-search-open;
                                 clicked => { root.menu-search(); }
                             }
@@ -1443,7 +1452,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
-                                icon: @image-url("icons/dots-vertical.svg");
+                                icon: @image-url("../icons/dots-vertical.svg");
                                 active: root.chat-menu-open;
                                 clicked => {
                                     root.chat-menu-sub = "";
@@ -1473,7 +1482,7 @@ export component AppWindow inherits Window {
                                 padding-right: 10px;
                                 spacing: 6px;
                                 Image {
-                                    source: @image-url("icons/refresh.svg");
+                                    source: @image-url("../icons/refresh.svg");
                                     colorize: Theme.text-dim;
                                     width: 13px;
                                     height: 13px;
@@ -1613,7 +1622,7 @@ export component AppWindow inherits Window {
                             border-color: msg.selected ? Theme.accent : Theme.text-dim;
                             background: msg.selected ? Theme.accent : transparent;
                             if msg.selected: Image {
-                                source: @image-url("icons/check.svg");
+                                source: @image-url("../icons/check.svg");
                                 colorize: white;
                                 width: 14px;
                                 height: 14px;
@@ -1766,7 +1775,7 @@ export component AppWindow inherits Window {
                                     spacing: 4px;
                                     alignment: start;
                                     Image {
-                                        source: @image-url("icons/corner-up-right.svg");
+                                        source: @image-url("../icons/corner-up-right.svg");
                                         colorize: Theme.text-dim;
                                         width: 12px;
                                         height: 12px;
@@ -1787,7 +1796,7 @@ export component AppWindow inherits Window {
                                     spacing: 4px;
                                     alignment: start;
                                     Image {
-                                        source: @image-url("icons/trash.svg");
+                                        source: @image-url("../icons/trash.svg");
                                         colorize: Theme.text-dim;
                                         width: 12px;
                                         height: 12px;
@@ -1824,7 +1833,7 @@ export component AppWindow inherits Window {
                                         y: (parent.height - self.height) / 2;
                                         background: #00000090;
                                         Image {
-                                            source: @image-url("icons/download.svg");
+                                            source: @image-url("../icons/download.svg");
                                             colorize: white;
                                             width: 22px;
                                             height: 22px;
@@ -1861,7 +1870,7 @@ export component AppWindow inherits Window {
                                             padding-right: 6px;
                                             spacing: 4px;
                                             Image {
-                                                source: @image-url("icons/video.svg");
+                                                source: @image-url("../icons/video.svg");
                                                 colorize: white;
                                                 width: 12px;
                                                 height: 12px;
@@ -1902,7 +1911,7 @@ export component AppWindow inherits Window {
                                         y: (parent.height - self.height) / 2;
                                         background: #000000a0;
                                         Image {
-                                            source: @image-url("icons/player-play.svg");
+                                            source: @image-url("../icons/player-play.svg");
                                             colorize: white;
                                             width: 28px;
                                             height: 28px;
@@ -1949,7 +1958,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 alignment: center;
                                                 Image {
-                                                    source: @image-url("icons/file-text.svg");
+                                                    source: @image-url("../icons/file-text.svg");
                                                     colorize: Theme.icon;
                                                     width: 26px;
                                                     height: 26px;
@@ -2017,8 +2026,8 @@ export component AppWindow inherits Window {
                                         alignment: center;
                                         IconButton {
                                             icon: msg.playing
-                                                ? @image-url("icons/player-pause.svg")
-                                                : @image-url("icons/player-play.svg");
+                                                ? @image-url("../icons/player-pause.svg")
+                                                : @image-url("../icons/player-play.svg");
                                             icon-size: 20px;
                                             enabled: msg.mediaReady;
                                             clicked => { root.audio-toggle(msg.id); }
@@ -2109,7 +2118,7 @@ export component AppWindow inherits Window {
                                                 color-idx: msg.voiceColorIdx;
                                             }
                                             if !msg.playing: Image {
-                                                source: @image-url("icons/microphone.svg");
+                                                source: @image-url("../icons/microphone.svg");
                                                 colorize: #53bdeb;
                                                 width: 15px;
                                                 height: 15px;
@@ -2400,7 +2409,7 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 4px;
                                 IconButton {
-                                    icon: @image-url("icons/mood-smile.svg");
+                                    icon: @image-url("../icons/mood-smile.svg");
                                     icon-size: 17px;
                                     clicked => {
                                         root.react-bar-id =
@@ -2408,12 +2417,12 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 IconButton {
-                                    icon: @image-url("icons/corner-up-right.svg");
+                                    icon: @image-url("../icons/corner-up-right.svg");
                                     icon-size: 17px;
                                     clicked => { root.request-forward(msg.id); }
                                 }
                                 IconButton {
-                                    icon: @image-url("icons/chevron-down.svg");
+                                    icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
                                     clicked => { msg-menu.show({ x: 0px, y: bubble.height }); }
                                 }
@@ -2447,7 +2456,7 @@ export component AppWindow inherits Window {
                                                 root.react-bar-id = "";
                                             }
                                         }
-                                        Text {
+                                        EmojiText {
                                             text: e;
                                             font-size: emoji-touch.has-hover ? 24px : 20px;
                                             horizontal-alignment: center;
@@ -2466,7 +2475,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     Image {
-                                        source: @image-url("icons/plus.svg");
+                                        source: @image-url("../icons/plus.svg");
                                         colorize: Theme.text-dim;
                                         width: 16px;
                                         height: 16px;
@@ -2490,7 +2499,7 @@ export component AppWindow inherits Window {
                                 mouse-cursor: pointer;
                                 clicked => { root.show-reactions(msg.id); }
                             }
-                            react-text := Text {
+                            react-text := EmojiText {
                                 text: msg.reactions;
                                 font-size: 11px;
                                 color: Theme.text;
@@ -2587,7 +2596,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
-                                icon: @image-url("icons/x.svg");
+                                icon: @image-url("../icons/x.svg");
                                 clicked => { root.cancel-reply(); }
                             }
                         }
@@ -2602,7 +2611,7 @@ export component AppWindow inherits Window {
                         padding: 11px;
                         spacing: 8px;
                         IconButton {
-                            icon: @image-url("icons/x.svg");
+                            icon: @image-url("../icons/x.svg");
                             clicked => { root.select-cancel(); }
                         }
                         Text {
@@ -2613,22 +2622,22 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         IconButton {
-                            icon: @image-url("icons/star.svg");
+                            icon: @image-url("../icons/star.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-star(); }
                         }
                         IconButton {
-                            icon: @image-url("icons/copy.svg");
+                            icon: @image-url("../icons/copy.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-copy(); }
                         }
                         IconButton {
-                            icon: @image-url("icons/corner-up-right.svg");
+                            icon: @image-url("../icons/corner-up-right.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-forward(); }
                         }
                         IconButton {
-                            icon: @image-url("icons/trash.svg");
+                            icon: @image-url("../icons/trash.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-delete(); }
                         }
@@ -2685,7 +2694,7 @@ export component AppWindow inherits Window {
                         padding: 11px;
                         spacing: 10px;
                         IconButton {
-                            icon: @image-url("icons/trash.svg");
+                            icon: @image-url("../icons/trash.svg");
                             clicked => { root.rec-cancel(); }
                         }
                         Rectangle {
@@ -2714,7 +2723,7 @@ export component AppWindow inherits Window {
                                 background: root.rec-view-once ? Theme.chip-active-bg
                                     : vo-touch.has-hover ? Theme.hover : transparent;
                                 Image {
-                                    source: @image-url("icons/eye.svg");
+                                    source: @image-url("../icons/eye.svg");
                                     colorize: root.rec-view-once ? Theme.accent : Theme.icon;
                                     width: 22px;
                                     height: 22px;
@@ -2724,7 +2733,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         IconButton {
-                            icon: @image-url("icons/send-2.svg");
+                            icon: @image-url("../icons/send-2.svg");
                             clicked => { root.rec-stop(); }
                         }
                     }
@@ -2734,14 +2743,14 @@ export component AppWindow inherits Window {
                         padding: 11px;
                         spacing: 8px;
                         IconButton {
-                            icon: @image-url("icons/plus.svg");
+                            icon: @image-url("../icons/plus.svg");
                             clicked => {
                                 root.picker-open = false;
                                 root.attach-open = !root.attach-open;
                             }
                         }
                         IconButton {
-                            icon: @image-url("icons/mood-smile.svg");
+                            icon: @image-url("../icons/mood-smile.svg");
                             clicked => {
                                 root.attach-open = false;
                                 root.picker-open = !root.picker-open;
@@ -2820,12 +2829,12 @@ export component AppWindow inherits Window {
                             }
                         }
                         IconButton {
-                            icon: @image-url("icons/microphone.svg");
+                            icon: @image-url("../icons/microphone.svg");
                             y: parent.height - self.height - 11px;
                             clicked => { root.rec-start(); }
                         }
                         IconButton {
-                            icon: @image-url("icons/send-2.svg");
+                            icon: @image-url("../icons/send-2.svg");
                             y: parent.height - self.height - 11px;
                             clicked => {
                                 root.send-message(message-input.text);
@@ -2854,7 +2863,7 @@ export component AppWindow inherits Window {
                     clicked => { root.jump-latest(); }
                 }
                 Image {
-                    source: @image-url("icons/chevron-right.svg");
+                    source: @image-url("../icons/chevron-right.svg");
                     colorize: Theme.icon;
                     width: 22px;
                     height: 22px;
@@ -2916,7 +2925,7 @@ export component AppWindow inherits Window {
                                         height: parent.height;
                                         border-radius: 6px;
                                         background: em-touch.has-hover ? Theme.hover : transparent;
-                                        Text {
+                                        EmojiText {
                                             text: e;
                                             font-size: 24px;
                                             width: parent.width;
@@ -2939,7 +2948,7 @@ export component AppWindow inherits Window {
                                 accepted => { root.gif-search(self.text); }
                             }
                             IconButton {
-                                icon: @image-url("icons/search.svg");
+                                icon: @image-url("../icons/search.svg");
                                 clicked => { root.gif-search(gif-input.text); }
                             }
                         }
@@ -3091,27 +3100,27 @@ export component AppWindow inherits Window {
                     if root.chat-menu-sub == "": VerticalLayout {
                         spacing: 1px;
                         if root.current-is-group && !root.current-left: MenuRow {
-                            icon: @image-url("icons/user-plus.svg");
+                            icon: @image-url("../icons/user-plus.svg");
                             label: @tr("Add member");
                             clicked => { root.menu-add-member(); }
                         }
                         MenuRow {
-                            icon: @image-url("icons/info-circle.svg");
+                            icon: @image-url("../icons/info-circle.svg");
                             label: root.current-is-group ? @tr("Group info") : @tr("Contact info");
                             clicked => { root.chat-menu-open = false; root.open-info(); }
                         }
                         MenuRow {
-                            icon: @image-url("icons/search.svg");
+                            icon: @image-url("../icons/search.svg");
                             label: @tr("Search");
                             clicked => { root.menu-search(); }
                         }
                         MenuRow {
-                            icon: @image-url("icons/checkbox.svg");
+                            icon: @image-url("../icons/checkbox.svg");
                             label: @tr("Select messages");
                             clicked => { root.select-start(""); }
                         }
                         MenuRow {
-                            icon: root.current-muted ? @image-url("icons/bell.svg") : @image-url("icons/bell-off.svg");
+                            icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
                             label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
                             detail: root.current-mute-label;
                             submenu: !root.current-muted;
@@ -3121,47 +3130,47 @@ export component AppWindow inherits Window {
                             }
                         }
                         if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
-                            icon: @image-url("icons/clock-pause.svg");
+                            icon: @image-url("../icons/clock-pause.svg");
                             label: @tr("Disappearing messages");
                             detail: root.current-ephemeral-label;
                             submenu: true;
                             clicked => { root.chat-menu-sub = "ephemeral"; }
                         }
                         MenuRow {
-                            icon: root.current-favorite ? @image-url("icons/heart-filled.svg") : @image-url("icons/heart.svg");
+                            icon: root.current-favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
                             label: root.current-favorite ? @tr("Remove from Favorites") : @tr("Add to Favorites");
                             clicked => { root.menu-favorite(); }
                         }
                         MenuRow {
-                            icon: @image-url("icons/list-details.svg");
+                            icon: @image-url("../icons/list-details.svg");
                             label: @tr("Add to list");
                             submenu: true;
                             clicked => { root.chat-menu-sub = "lists"; }
                         }
                         MenuRow {
-                            icon: @image-url("icons/download.svg");
+                            icon: @image-url("../icons/download.svg");
                             label: @tr("Export chat");
                             clicked => { root.menu-export(); }
                         }
                         MenuRow {
-                            icon: @image-url("icons/circle-x.svg");
+                            icon: @image-url("../icons/circle-x.svg");
                             label: @tr("Close chat");
                             clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
                         MenuRow {
-                            icon: @image-url("icons/circle-minus.svg");
+                            icon: @image-url("../icons/circle-minus.svg");
                             label: @tr("Clear chat");
                             clicked => { root.menu-clear(); }
                         }
                         if root.current-is-group && !root.current-left: MenuRow {
-                            icon: @image-url("icons/logout.svg");
+                            icon: @image-url("../icons/logout.svg");
                             label: @tr("Exit group");
                             tint: #f05d4d;
                             clicked => { root.menu-exit-group(); }
                         }
                         if !root.current-is-group || root.current-left: MenuRow {
-                            icon: @image-url("icons/trash.svg");
+                            icon: @image-url("../icons/trash.svg");
                             label: @tr("Delete chat");
                             tint: #f05d4d;
                             clicked => { root.menu-delete-chat(); }
@@ -3170,40 +3179,40 @@ export component AppWindow inherits Window {
                     if root.chat-menu-sub == "mute": VerticalLayout {
                         spacing: 1px;
                         MenuRow {
-                            icon: @image-url("icons/arrow-left.svg");
+                            icon: @image-url("../icons/arrow-left.svg");
                             label: @tr("Mute notifications");
                             clicked => { root.chat-menu-sub = ""; }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
-                        MenuRow { icon: @image-url("icons/bell-off.svg"); label: @tr("8 hours"); clicked => { root.menu-mute(8); } }
-                        MenuRow { icon: @image-url("icons/bell-off.svg"); label: @tr("1 week"); clicked => { root.menu-mute(168); } }
-                        MenuRow { icon: @image-url("icons/bell-off.svg"); label: @tr("Always"); clicked => { root.menu-mute(-1); } }
+                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("8 hours"); clicked => { root.menu-mute(8); } }
+                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("1 week"); clicked => { root.menu-mute(168); } }
+                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("Always"); clicked => { root.menu-mute(-1); } }
                     }
                     if root.chat-menu-sub == "ephemeral": VerticalLayout {
                         spacing: 1px;
                         MenuRow {
-                            icon: @image-url("icons/arrow-left.svg");
+                            icon: @image-url("../icons/arrow-left.svg");
                             label: @tr("Disappearing messages");
                             clicked => { root.chat-menu-sub = ""; }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
                         MenuRow {
-                            icon: root.current-ephemeral == 86400 ? @image-url("icons/check.svg") : @image-url("icons/clock-pause.svg");
+                            icon: root.current-ephemeral == 86400 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
                             label: @tr("24 hours");
                             clicked => { root.menu-ephemeral(86400); }
                         }
                         MenuRow {
-                            icon: root.current-ephemeral == 604800 ? @image-url("icons/check.svg") : @image-url("icons/clock-pause.svg");
+                            icon: root.current-ephemeral == 604800 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
                             label: @tr("7 days");
                             clicked => { root.menu-ephemeral(604800); }
                         }
                         MenuRow {
-                            icon: root.current-ephemeral == 7776000 ? @image-url("icons/check.svg") : @image-url("icons/clock-pause.svg");
+                            icon: root.current-ephemeral == 7776000 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
                             label: @tr("90 days");
                             clicked => { root.menu-ephemeral(7776000); }
                         }
                         MenuRow {
-                            icon: root.current-ephemeral == 0 ? @image-url("icons/check.svg") : @image-url("icons/circle-x.svg");
+                            icon: root.current-ephemeral == 0 ? @image-url("../icons/check.svg") : @image-url("../icons/circle-x.svg");
                             label: @tr("Off");
                             clicked => { root.menu-ephemeral(0); }
                         }
@@ -3211,19 +3220,19 @@ export component AppWindow inherits Window {
                     if root.chat-menu-sub == "lists": VerticalLayout {
                         spacing: 1px;
                         MenuRow {
-                            icon: @image-url("icons/arrow-left.svg");
+                            icon: @image-url("../icons/arrow-left.svg");
                             label: @tr("Add to list");
                             clicked => { root.chat-menu-sub = ""; }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
                         for lb in root.labels: MenuRow {
-                            icon: lb.active ? @image-url("icons/check.svg") : @image-url("icons/list-details.svg");
+                            icon: lb.active ? @image-url("../icons/check.svg") : @image-url("../icons/list-details.svg");
                             label: lb.name;
                             tint: lb.active ? Theme.accent : Theme.text;
                             clicked => { root.menu-list(lb.id); }
                         }
                         MenuRow {
-                            icon: @image-url("icons/plus.svg");
+                            icon: @image-url("../icons/plus.svg");
                             label: @tr("New list");
                             clicked => { root.chat-menu-open = false; root.new-list-open = true; }
                         }
@@ -3245,22 +3254,22 @@ export component AppWindow inherits Window {
                     padding: 8px;
                     spacing: 2px;
                     MenuRow {
-                        icon: @image-url("icons/file-text.svg");
+                        icon: @image-url("../icons/file-text.svg");
                         label: @tr("Document");
                         clicked => { root.attach-open = false; root.attach-doc(); }
                     }
                     MenuRow {
-                        icon: @image-url("icons/photo.svg");
+                        icon: @image-url("../icons/photo.svg");
                         label: @tr("Photos");
                         clicked => { root.attach-open = false; root.attach-image(); }
                     }
                     MenuRow {
-                        icon: @image-url("icons/music.svg");
+                        icon: @image-url("../icons/music.svg");
                         label: @tr("Audio");
                         clicked => { root.attach-open = false; root.attach-audio(); }
                     }
                     MenuRow {
-                        icon: @image-url("icons/sticker-2.svg");
+                        icon: @image-url("../icons/sticker-2.svg");
                         label: @tr("Sticker");
                         clicked => { root.attach-open = false; root.attach-sticker(); }
                     }
@@ -3291,7 +3300,7 @@ export component AppWindow inherits Window {
                         padding-right: 10px;
                         spacing: 10px;
                         IconButton {
-                            icon: @image-url("icons/x.svg");
+                            icon: @image-url("../icons/x.svg");
                             clicked => { root.close-info(); }
                         }
                         Text {
@@ -3392,12 +3401,12 @@ export component AppWindow inherits Window {
                             }
                             Rectangle { height: 6px; }
                             MenuRow {
-                                icon: @image-url("icons/archive.svg");
+                                icon: @image-url("../icons/archive.svg");
                                 label: root.info-archived ? @tr("Unarchive chat") : @tr("Archive chat");
                                 clicked => { root.toggle-archive(); }
                             }
                             MenuRow {
-                                icon: @image-url("icons/trash.svg");
+                                icon: @image-url("../icons/trash.svg");
                                 label: @tr("Clear messages on this device");
                                 clicked => { root.clear-chat(); }
                             }
@@ -3426,7 +3435,7 @@ export component AppWindow inherits Window {
                     padding-right: 10px;
                     spacing: 10px;
                     IconButton {
-                        icon: @image-url("icons/x.svg");
+                        icon: @image-url("../icons/x.svg");
                         clicked => { root.chat-search-close(); }
                     }
                     Text {
@@ -3438,12 +3447,12 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                     }
                     IconButton {
-                        icon: @image-url("icons/chevron-up.svg");
+                        icon: @image-url("../icons/chevron-up.svg");
                         enabled: root.chat-search-rows.length > 0;
                         clicked => { root.chat-search-step(1); }
                     }
                     IconButton {
-                        icon: @image-url("icons/chevron-down.svg");
+                        icon: @image-url("../icons/chevron-down.svg");
                         enabled: root.chat-search-rows.length > 0;
                         clicked => { root.chat-search-step(-1); }
                     }
@@ -3550,7 +3559,7 @@ export component AppWindow inherits Window {
                 }
                 Rectangle { height: 1px; background: Theme.border; }
                 if root.can-add-account: MenuRow {
-                    icon: @image-url("icons/user-plus.svg");
+                    icon: @image-url("../icons/user-plus.svg");
                     label: @tr("Add account");
                     clicked => { root.add-account(); }
                 }
@@ -3563,7 +3572,7 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                 }
                 MenuRow {
-                    icon: @image-url("icons/logout.svg");
+                    icon: @image-url("../icons/logout.svg");
                     label: @tr("Log out");
                     tint: #f05d4d;
                     clicked => {
@@ -3804,7 +3813,7 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                     IconButton {
-                        icon: @image-url("icons/x.svg");
+                        icon: @image-url("../icons/x.svg");
                         clicked => { root.member-pick-open = false; }
                     }
                 }
@@ -3864,7 +3873,7 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                 }
                 IconButton {
-                    icon: @image-url("icons/x.svg");
+                    icon: @image-url("../icons/x.svg");
                     clicked => { root.status-close(); }
                 }
             }
@@ -3891,7 +3900,7 @@ export component AppWindow inherits Window {
                         clicked => { root.status-play(); }
                     }
                     Image {
-                        source: @image-url("icons/player-play.svg");
+                        source: @image-url("../icons/player-play.svg");
                         colorize: white;
                         width: 34px;
                         height: 34px;
@@ -3919,13 +3928,13 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
-                    icon: @image-url("icons/chevron-left.svg");
+                    icon: @image-url("../icons/chevron-left.svg");
                     x: 4px;
                     y: (parent.height - self.height) / 2;
                     clicked => { root.status-prev(); }
                 }
                 IconButton {
-                    icon: @image-url("icons/chevron-right.svg");
+                    icon: @image-url("../icons/chevron-right.svg");
                     x: parent.width - self.width - 4px;
                     y: (parent.height - self.height) / 2;
                     clicked => { root.status-next(); }
@@ -4042,7 +4051,7 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                     IconButton {
-                        icon: @image-url("icons/x.svg");
+                        icon: @image-url("../icons/x.svg");
                         clicked => { root.reactions-open = false; }
                     }
                 }
@@ -4085,7 +4094,7 @@ export component AppWindow inherits Window {
                             }
                             VerticalLayout {
                                 alignment: center;
-                                Text {
+                                EmojiText {
                                     text: r.emoji;
                                     font-size: 20px;
                                 }
@@ -4121,7 +4130,7 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                     IconButton {
-                        icon: @image-url("icons/x.svg");
+                        icon: @image-url("../icons/x.svg");
                         clicked => { root.forward-open = false; }
                     }
                 }
@@ -4136,7 +4145,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             Image {
-                                source: @image-url("icons/search.svg");
+                                source: @image-url("../icons/search.svg");
                                 colorize: Theme.text-dim;
                                 width: 16px;
                                 height: 16px;
@@ -4256,7 +4265,7 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         IconButton {
-                            icon: @image-url("icons/x.svg");
+                            icon: @image-url("../icons/x.svg");
                             y: (parent.height - self.height) / 2;
                             clicked => { root.settings-open = false; }
                         }
@@ -4514,7 +4523,7 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 alignment: start;
                 IconButton {
-                    icon: @image-url("icons/x.svg");
+                    icon: @image-url("../icons/x.svg");
                     clicked => { root.cancel-send-image(); }
                 }
             }
@@ -4570,7 +4579,7 @@ export component AppWindow inherits Window {
                     padding-right: 10px;
                     spacing: 6px;
                     IconButton {
-                        icon: @image-url("icons/x.svg");
+                        icon: @image-url("../icons/x.svg");
                         clicked => { root.pdf-close(); }
                     }
                     Text {
@@ -4585,7 +4594,7 @@ export component AppWindow inherits Window {
                     if root.pdf-count > 0: HorizontalLayout {
                         spacing: 2px;
                         IconButton {
-                            icon: @image-url("icons/chevron-up.svg");
+                            icon: @image-url("../icons/chevron-up.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-goto(-1); }
                         }
@@ -4596,7 +4605,7 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                         }
                         IconButton {
-                            icon: @image-url("icons/chevron-down.svg");
+                            icon: @image-url("../icons/chevron-down.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-goto(1); }
                         }
@@ -4605,7 +4614,7 @@ export component AppWindow inherits Window {
                     if root.pdf-count > 0: HorizontalLayout {
                         spacing: 2px;
                         IconButton {
-                            icon: @image-url("icons/circle-minus.svg");
+                            icon: @image-url("../icons/circle-minus.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-zoom(-1); }
                         }
@@ -4624,18 +4633,18 @@ export component AppWindow inherits Window {
                             }
                         }
                         IconButton {
-                            icon: @image-url("icons/plus.svg");
+                            icon: @image-url("../icons/plus.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-zoom(1); }
                         }
                     }
                     Rectangle { width: 12px; }
                     IconButton {
-                        icon: @image-url("icons/download.svg");
+                        icon: @image-url("../icons/download.svg");
                         clicked => { root.pdf-save-as(); }
                     }
                     IconButton {
-                        icon: @image-url("icons/corner-up-right.svg");
+                        icon: @image-url("../icons/corner-up-right.svg");
                         clicked => { root.pdf-open-external(); }
                     }
                 }
@@ -4787,8 +4796,8 @@ export component AppWindow inherits Window {
             background: #000000a8;
             Image {
                 source: root.video-ended
-                    ? @image-url("icons/rotate-clockwise.svg")
-                    : @image-url("icons/player-play.svg");
+                    ? @image-url("../icons/rotate-clockwise.svg")
+                    : @image-url("../icons/player-play.svg");
                 colorize: white;
                 width: 36px;
                 height: 36px;
@@ -4811,12 +4820,12 @@ export component AppWindow inherits Window {
                 spacing: 6px;
                 alignment: end;
                 if root.video-is-clip: IconButton {
-                    icon: @image-url("icons/download.svg");
+                    icon: @image-url("../icons/download.svg");
                     tint: white;
                     clicked => { root.video-save(); }
                 }
                 IconButton {
-                    icon: @image-url("icons/x.svg");
+                    icon: @image-url("../icons/x.svg");
                     tint: white;
                     clicked => { root.close-video(); }
                 }
@@ -4878,10 +4887,10 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 IconButton {
                     icon: root.video-ended
-                        ? @image-url("icons/rotate-clockwise.svg")
+                        ? @image-url("../icons/rotate-clockwise.svg")
                         : (root.video-playing
-                            ? @image-url("icons/player-pause.svg")
-                            : @image-url("icons/player-play.svg"));
+                            ? @image-url("../icons/player-pause.svg")
+                            : @image-url("../icons/player-play.svg"));
                     tint: white;
                     clicked => { root.video-toggle(); }
                 }
@@ -4894,8 +4903,8 @@ export component AppWindow inherits Window {
                 Rectangle { horizontal-stretch: 1; }
                 IconButton {
                     icon: root.video-muted || root.video-volume <= 0
-                        ? @image-url("icons/volume-off.svg")
-                        : @image-url("icons/volume.svg");
+                        ? @image-url("../icons/volume-off.svg")
+                        : @image-url("../icons/volume.svg");
                     tint: white;
                     clicked => { root.video-mute-toggle(); }
                 }
@@ -4948,7 +4957,7 @@ export component AppWindow inherits Window {
             image-fit: contain;
         }
         IconButton {
-            icon: @image-url("icons/x.svg");
+            icon: @image-url("../icons/x.svg");
             x: parent.width - self.width - 16px;
             y: 16px;
             clicked => { root.lightbox-open = false; }

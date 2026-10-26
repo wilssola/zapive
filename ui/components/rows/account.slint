@@ -1,0 +1,75 @@
+import { AccountItem } from "../types.slint";
+import { Avatar } from "../avatar.slint";
+import { Theme } from "../theme.slint";
+
+// One account in the switcher: the loaded one carries a check, the
+// others a button that removes them from this computer.
+export component AccountRow inherits TouchArea {
+    in property <AccountItem> account;
+    callback remove();
+    mouse-cursor: pointer;
+    height: 52px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        background: root.has-hover || drop.has-hover ? Theme.hover : transparent;
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Avatar {
+            width: 36px;
+            height: 36px;
+            y: (parent.height - self.height) / 2;
+            src: root.account.avatar;
+            has-image: root.account.hasAvatar;
+            initial: root.account.initial;
+            color-idx: root.account.colorIdx;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.account.name;
+                color: Theme.text;
+                font-size: 14px;
+                overflow: elide;
+            }
+            if root.account.detail != "": Text {
+                text: root.account.detail;
+                color: Theme.text-dim;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+        Rectangle { width: 24px; }
+    }
+    if root.account.active: Image {
+        source: @image-url("../../icons/check.svg");
+        colorize: Theme.accent;
+        x: parent.width - self.width - 14px;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+    }
+    drop := TouchArea {
+        visible: !root.account.active;
+        x: parent.width - self.width - 8px;
+        y: (parent.height - self.height) / 2;
+        width: 30px;
+        height: 30px;
+        mouse-cursor: pointer;
+        clicked => { root.remove(); }
+        Image {
+            source: @image-url("../../icons/trash.svg");
+            colorize: drop.has-hover ? #f05d4d : Theme.text-dim;
+            width: 16px;
+            height: 16px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}

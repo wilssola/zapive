@@ -1,0 +1,30 @@
+import { Theme } from "theme.slint";
+
+// A settings group: a title over a card of rows, and an optional note
+// under it.
+export component SettingsCard inherits VerticalLayout {
+    in property <string> title;
+    in property <string> hint;
+    spacing: 8px;
+    Text {
+        text: root.title;
+        color: Theme.accent;
+        font-size: 13px;
+        font-weight: 700;
+    }
+    Rectangle {
+        border-radius: 10px;
+        background: Theme.bg;
+        VerticalLayout {
+            padding-top: 2px;
+            padding-bottom: 2px;
+            @children
+        }
+    }
+    if root.hint != "": Text {
+        text: root.hint;
+        color: Theme.text-dim;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+}

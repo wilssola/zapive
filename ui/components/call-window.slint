@@ -14,6 +14,8 @@ export component CallWindow inherits Window {
     preferred-width: 360px;
     preferred-height: 540px;
     background: Theme.dark ? #111b21 : #f0f2f5;
+    // Matches AppWindow's default-font-weight (see its comment).
+    default-font-weight: 500;
     init => {
         Theme.dark = root.dark-theme;
     }
