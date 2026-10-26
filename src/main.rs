@@ -61,16 +61,14 @@ fn main() {
         return;
     }
 
-    if !single::claim_single_instance() {
-        println!("another instance is running; raising it instead");
+    let Some(_instance_guard) = single::claim_single_instance() else {
         return;
-    }
+    };
 
     let mut app_vault = match vault::Vault::new() {
         Ok(vault) => vault,
         Err(e) => {
             eprintln!("[vault] cannot open: {e}");
-            single::release_single_instance();
             return;
         }
     };
@@ -104,7 +102,6 @@ fn main() {
     // (opus encode -> decode with atempo -> waveform) and exits.
     if std::env::args().any(|a| a == "--audio-selftest") {
         audio_selftest();
-        single::release_single_instance();
         return;
     }
 
@@ -155,7 +152,6 @@ fn main() {
             ui.set_screen("login".into());
             ui.set_status_text(i18n::ta("status.connectFailed", &[&e]).into());
             ui.run().expect("event loop failed");
-            single::release_single_instance();
             return;
         }
     };
@@ -286,7 +282,6 @@ fn main() {
         ui.run().expect("event loop failed");
     }
     wa.send(wa::Cmd::Shutdown);
-    single::release_single_instance();
 }
 
 // Coming back from the tray goes through Slint: the toolkit tracks the

@@ -1,87 +1,135 @@
-// WhatsApp allows one desktop session per account: a second copy of the
-// app makes the server drop the stream with "conflict" and both copies
-// reconnect in a loop. A lock file holding the running pid keeps that
-// from happening — a second launch brings the first window forward and
-// exits. The file name differs from the Node build's `instance.lock` so
-// the two apps can coexist while the rewrite reaches parity.
 use crate::paths::data_dir;
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io;
+use std::path::{Path, PathBuf};
 
-fn lock_path() -> PathBuf {
-    data_dir().join("zapive.pid")
+pub struct InstanceGuard {
+    _lock: File,
+    directory: PathBuf,
 }
 
-fn raise_path() -> PathBuf {
-    data_dir().join("zapive.raise")
-}
-
-#[cfg(windows)]
-fn alive(pid: u32) -> bool {
-    use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED};
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    if pid == 0 || pid == std::process::id() {
-        return false;
+impl Drop for InstanceGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.directory.join("zapive.pid"));
+        let _ = std::fs::remove_file(self.directory.join("zapive.raise"));
     }
-    unsafe {
-        match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-            Ok(handle) => {
-                let _ = CloseHandle(handle);
-                true
+}
+
+fn try_claim(directory: &Path) -> io::Result<Option<InstanceGuard>> {
+    std::fs::create_dir_all(directory)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join("zapive.instance.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return Ok(None),
+        Err(TryLockError::Error(error)) => return Err(error),
+    }
+    let guard = InstanceGuard {
+        _lock: lock,
+        directory: directory.to_path_buf(),
+    };
+    match std::fs::remove_file(directory.join("zapive.raise")) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::write(directory.join("zapive.pid"), std::process::id().to_string())?;
+    Ok(Some(guard))
+}
+
+pub fn claim_single_instance() -> Option<InstanceGuard> {
+    let directory = data_dir();
+    match try_claim(&directory) {
+        Ok(Some(guard)) => Some(guard),
+        Ok(None) => {
+            if let Ok(text) = std::fs::read_to_string(directory.join("zapive.pid"))
+                && let Ok(pid) = text.trim().parse::<u32>()
+            {
+                crate::platform::allow_foreground(pid);
             }
-            // Access denied means the process exists but belongs to someone else.
-            Err(e) => e.code() == ERROR_ACCESS_DENIED.to_hresult(),
+            if let Err(error) = std::fs::write(directory.join("zapive.raise"), b"") {
+                eprintln!("[single] cannot request foreground: {error}");
+            }
+            println!("another instance is running; raising it instead");
+            None
+        }
+        Err(error) => {
+            eprintln!("[single] cannot acquire instance lock: {error}");
+            None
         }
     }
 }
 
-#[cfg(not(windows))]
-fn alive(pid: u32) -> bool {
-    if pid == 0 || pid == std::process::id() {
-        return false;
-    }
-    // Signal 0 probes for existence; EPERM still means the pid is alive.
-    let r = unsafe { libc::kill(pid as i32, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-// True when this process may run; false when another instance owns the
-// session (it is raised instead).
-pub fn claim_single_instance() -> bool {
-    let lock = lock_path();
-    if let Ok(text) = std::fs::read_to_string(&lock)
-        && let Ok(pid) = text.trim().parse::<u32>()
-        && alive(pid)
-    {
-        // Leave the window alone and ask its own process to raise it: a
-        // window parked in the tray is hidden, and unhiding it from here
-        // would desync the toolkit, which then stops honouring the close
-        // button. Handing the foreground right over first is what lets
-        // the older process take focus.
-        crate::platform::allow_foreground(pid);
-        let _ = std::fs::write(raise_path(), b"");
-        return false;
-    }
-    // A marker left by a launch that raced with a shutdown would raise the
-    // window the moment this instance starts polling.
-    let _ = std::fs::remove_file(raise_path());
-    let _ = std::fs::write(&lock, std::process::id().to_string());
-    true
-}
-
-// Polled by the running instance: true means another launch asked for the
-// window. Removing the file is the same act as taking the request, so a
-// burst of launches raises the window once.
 pub fn take_raise_request() -> bool {
-    std::fs::remove_file(raise_path()).is_ok()
+    std::fs::remove_file(data_dir().join("zapive.raise")).is_ok()
 }
 
-// Called on the way out; only removes the lock this process wrote.
-pub fn release_single_instance() {
-    let lock = lock_path();
-    if let Ok(text) = std::fs::read_to_string(&lock)
-        && text.trim() == std::process::id().to_string()
-    {
-        let _ = std::fs::remove_file(&lock);
-        let _ = std::fs::remove_file(raise_path());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct TempDirectory(PathBuf);
+
+    impl TempDirectory {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let directory = std::env::temp_dir().join(format!(
+                "zapive-single-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&directory).unwrap();
+            Self(directory)
+        }
+    }
+
+    impl Drop for TempDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn contention_and_reacquisition_keep_stable_lock_file() {
+        let directory = TempDirectory::new();
+        let first = try_claim(&directory.0).unwrap().unwrap();
+        assert!(try_claim(&directory.0).unwrap().is_none());
+        drop(first);
+        assert!(directory.0.join("zapive.instance.lock").exists());
+        assert!(!directory.0.join("zapive.pid").exists());
+        let second = try_claim(&directory.0).unwrap().unwrap();
+        assert!(try_claim(&directory.0).unwrap().is_none());
+        drop(second);
+    }
+
+    #[test]
+    fn stale_pid_is_ignored_and_unwind_releases_lock() {
+        let directory = TempDirectory::new();
+        std::fs::write(directory.0.join("zapive.pid"), "1").unwrap();
+        std::fs::write(directory.0.join("zapive.raise"), b"").unwrap();
+        let result = std::panic::catch_unwind(|| {
+            let _guard = try_claim(&directory.0).unwrap().unwrap();
+            assert!(!directory.0.join("zapive.raise").exists());
+            panic!("release on unwind");
+        });
+        assert!(result.is_err());
+        assert!(try_claim(&directory.0).unwrap().is_some());
+    }
+
+    #[test]
+    fn invalid_lock_path_fails_closed() {
+        let directory = TempDirectory::new();
+        std::fs::create_dir(directory.0.join("zapive.instance.lock")).unwrap();
+        assert!(try_claim(&directory.0).is_err());
+        assert!(!directory.0.join("zapive.pid").exists());
     }
 }
