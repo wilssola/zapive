@@ -240,6 +240,14 @@ pub struct Label {
     pub color: i32,
     #[serde(default)]
     pub order: i32,
+    #[serde(default)]
+    pub list_type: Option<i32>,
+}
+
+impl Label {
+    pub fn is_builtin_filter(&self) -> bool {
+        matches!(self.list_type, Some(1..=3))
+    }
 }
 
 fn is_zero_i64(n: &i64) -> bool {
@@ -1310,6 +1318,26 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_filters_use_protocol_type_not_names_or_label_ids() {
+        for list_type in [1, 2, 3] {
+            for name in ["Unread", "Não lidas", "Groups", "Grupos", "Favorites", "Favoritos", "renamed"] {
+                let label = Label { id: "123".into(), name: name.into(), list_type: Some(list_type), ..Default::default() };
+                assert!(label.is_builtin_filter());
+                let restored: Label = serde_json::from_str(&serde_json::to_string(&label).unwrap()).unwrap();
+                assert!(restored.is_builtin_filter());
+            }
+        }
+        for list_type in [None, Some(0), Some(4), Some(5), Some(6), Some(7), Some(12)] {
+            for id in ["1", "2", "3", "unread", "groups", "favorites"] {
+                let label = Label { id: id.into(), name: "Unread".into(), list_type, ..Default::default() };
+                assert!(!label.is_builtin_filter());
+            }
+        }
+        let legacy: Label = serde_json::from_str(r#"{"id":"1","name":"Groups"}"#).unwrap();
+        assert!(!legacy.is_builtin_filter());
+    }
 
     fn text_msg(jid: &str, id: &str, text: &str) -> StoredMessage {
         let mut m = crate::wa_map::system_message(jid, id, 1, text.to_string());

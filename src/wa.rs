@@ -857,7 +857,8 @@ impl EventHandler for Pump {
                 let color = u.action.color.unwrap_or(0);
                 let order = u.action.order_index.unwrap_or(0);
                 let deleted = u.action.deleted.unwrap_or(false);
-                ui_apply(move |b| b.on_label(&id, &name, color, order, deleted));
+                let list_type = u.action.r#type.map(|kind| kind as i32);
+                ui_apply(move |b| b.on_label(&id, &name, color, order, deleted, list_type));
             }
             Event::LabelAssociationUpdate(u) => {
                 let id = u.label_id.clone();

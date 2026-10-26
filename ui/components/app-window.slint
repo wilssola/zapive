@@ -280,6 +280,7 @@ export component AppWindow inherits Window {
     // "" | "mute" | "ephemeral" | "lists"
     in-out property <string> chat-menu-sub: "";
     in-out property <[LabelItem]> labels;
+    in-out property <[LabelItem]> label-chips;
     callback menu-add-member();
     callback menu-search();
     callback menu-mute(int);
@@ -1112,7 +1113,7 @@ export component AppWindow inherits Window {
                             active: root.chat-tab == "groups";
                             clicked => { root.chat-tab = "groups"; root.tab-changed("groups"); }
                         }
-                        for lb in root.labels: FilterChip {
+                        for lb in root.label-chips: FilterChip {
                             label: lb.name;
                             active: root.chat-tab == "label:" + lb.id;
                             clicked => {

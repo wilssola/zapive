@@ -157,6 +157,7 @@ pub struct Bridge {
     member_picked: HashSet<String>,
     info_member_model: Rc<VecModel<MemberItem>>,
     label_model: Rc<VecModel<LabelItem>>,
+    label_chip_model: Rc<VecModel<LabelItem>>,
     // What the confirm dialog will do when accepted.
     confirm_action: Option<ConfirmAction>,
     // PDF viewer: the worker, the open document's page sizes (points),
@@ -456,6 +457,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let member_model = Rc::new(VecModel::<MemberItem>::default());
     let info_member_model = Rc::new(VecModel::<MemberItem>::default());
     let label_model = Rc::new(VecModel::<LabelItem>::default());
+    let label_chip_model = Rc::new(VecModel::<LabelItem>::default());
     let pdf_model = Rc::new(VecModel::<PdfPage>::default());
     let accounts_model = Rc::new(VecModel::<AccountItem>::default());
     ui.set_accounts(ModelRc::from(accounts_model.clone()));
@@ -466,6 +468,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     ui.set_member_rows(ModelRc::from(member_model.clone()));
     ui.set_info_member_rows(ModelRc::from(info_member_model.clone()));
     ui.set_labels(ModelRc::from(label_model.clone()));
+    ui.set_label_chips(ModelRc::from(label_chip_model.clone()));
     ui.set_sticker_rows(ModelRc::from(sticker_model.clone()));
     ui.set_fav_rows(ModelRc::from(fav_model.clone()));
     ui.set_gif_rows(ModelRc::from(gif_model.clone()));
@@ -570,6 +573,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         member_picked: HashSet::new(),
         info_member_model,
         label_model,
+        label_chip_model,
         confirm_action: None,
         pdf: crate::pdf::PdfWorker::start(),
         pdf_gen: 0,
@@ -1613,6 +1617,7 @@ impl Bridge {
         self.search_model.set_vec(Vec::new());
         self.chat_search_model.set_vec(Vec::new());
         self.label_model.set_vec(Vec::new());
+        self.label_chip_model.set_vec(Vec::new());
     }
 
     // ---- accounts ----
@@ -2619,6 +2624,9 @@ impl Bridge {
                     .unwrap_or(false),
             })
             .collect();
+        self.label_chip_model.set_vec(rows.iter().filter(|row| {
+            self.store.labels.get(row.id.as_str()).is_some_and(|label| !label.is_builtin_filter())
+        }).cloned().collect::<Vec<_>>());
         self.label_model.set_vec(rows);
     }
 
@@ -5351,7 +5359,7 @@ impl Bridge {
         }
         let id = self.store.next_label_id();
         let order = self.store.labels.len() as i32;
-        let label = Label { id: id.clone(), name: name.to_string(), color: order % 20, order };
+        let label = Label { id: id.clone(), name: name.to_string(), color: order % 20, order, list_type: Some(5) };
         self.store.upsert_label(label);
         self.wa.send(Cmd::LabelCreate { id: id.clone(), name: name.to_string(), color: order % 20, order });
         // A list made from a chat's menu starts with that chat in it.
@@ -5375,11 +5383,12 @@ impl Bridge {
         self.schedule_refresh_chats();
     }
 
-    pub fn on_label(&mut self, id: &str, name: &str, color: i32, order: i32, deleted: bool) {
+    pub fn on_label(&mut self, id: &str, name: &str, color: i32, order: i32, deleted: bool, list_type: Option<i32>) {
         if deleted {
             self.store.remove_label(id);
         } else if !name.is_empty() {
-            self.store.upsert_label(Label { id: id.to_string(), name: name.to_string(), color, order });
+            let list_type = list_type.or_else(|| self.store.labels.get(id).and_then(|l| l.list_type));
+            self.store.upsert_label(Label { id: id.to_string(), name: name.to_string(), color, order, list_type });
         }
         self.refresh_labels();
         self.schedule_refresh_chats();
