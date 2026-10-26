@@ -131,10 +131,13 @@ pub fn ticks_for(m: &StoredMessage) -> (&'static str, bool) {
     }
 }
 
-pub fn reaction_summary(m: &StoredMessage) -> String {
+// The reaction chip under a bubble: up to three distinct emoji, and how
+// many reacted when more than one did. Kept apart so the count is drawn in
+// the text font rather than the emoji one.
+pub fn reaction_summary(m: &StoredMessage) -> (String, String) {
     let values: Vec<&String> = m.reactions.values().filter(|v| !v.is_empty()).collect();
     if values.is_empty() {
-        return String::new();
+        return (String::new(), String::new());
     }
     let mut unique: Vec<&str> = Vec::new();
     for v in &values {
@@ -145,8 +148,8 @@ pub fn reaction_summary(m: &StoredMessage) -> String {
             }
         }
     }
-    let joined: String = unique.concat();
-    if values.len() > 1 { format!("{joined} {}", values.len()) } else { joined }
+    let count = if values.len() > 1 { values.len().to_string() } else { String::new() };
+    (unique.concat(), count)
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -1,0 +1,41 @@
+import { Theme } from "theme.slint";
+
+// One round call button with its caption underneath.
+export component CallAction inherits TouchArea {
+    in property <string> label;
+    in property <image> icon;
+    in property <color> tint;
+    in property <color> icon-tint: #ffffff;
+    // The hang-up glyph is the handset upside down.
+    in property <bool> rotated: false;
+    mouse-cursor: pointer;
+    width: 74px;
+    height: 92px;
+    VerticalLayout {
+        spacing: 8px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 60px;
+                height: 60px;
+                border-radius: 30px;
+                background: root.tint;
+                opacity: root.has-hover ? 0.85 : 1.0;
+                Image {
+                    source: root.icon;
+                    colorize: root.icon-tint;
+                    width: 27px;
+                    height: 27px;
+                    transform-rotation: root.rotated ? 135deg : 0deg;
+                }
+            }
+        }
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}

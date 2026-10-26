@@ -1,0 +1,25 @@
+import { Theme } from "theme.slint";
+
+export component IconButton inherits TouchArea {
+    in property <image> icon;
+    in property <bool> active: false;
+    in property <length> icon-size: 22px;
+    in property <color> tint: Theme.icon;
+    width: 40px;
+    height: 40px;
+    mouse-cursor: pointer;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        background: root.active ? Theme.selected : root.has-hover ? Theme.hover : transparent;
+        Image {
+            source: root.icon;
+            colorize: root.tint;
+            width: root.icon-size;
+            height: root.icon-size;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}

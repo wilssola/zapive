@@ -1,0 +1,54 @@
+import { Theme } from "../theme.slint";
+
+export component MenuRow inherits TouchArea {
+    in property <image> icon;
+    in property <string> label;
+    // A second, dimmer line under the label ("Muted always").
+    in property <string> detail;
+    in property <bool> submenu: false;
+    in property <color> tint: Theme.text;
+    mouse-cursor: pointer;
+    height: root.detail != "" ? 50px : 40px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        background: root.has-hover ? Theme.hover : transparent;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 10px;
+            Image {
+                source: root.icon;
+                colorize: root.tint == Theme.text ? Theme.icon : root.tint;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.label;
+                    color: root.tint;
+                    font-size: 14px;
+                    overflow: elide;
+                }
+                if root.detail != "": Text {
+                    text: root.detail;
+                    color: Theme.text-dim;
+                    font-size: 11px;
+                    overflow: elide;
+                }
+            }
+            if root.submenu: Image {
+                source: @image-url("../../icons/chevron-right.svg");
+                colorize: Theme.text-dim;
+                width: 14px;
+                height: 14px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}

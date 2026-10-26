@@ -1,0 +1,65 @@
+import { SearchHit } from "../types.slint";
+import { Avatar } from "../avatar.slint";
+import { Theme } from "../theme.slint";
+
+// A search result row: avatar, who, snippet and when.
+export component HitRow inherits TouchArea {
+    in property <SearchHit> hit;
+    mouse-cursor: pointer;
+    height: 68px;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.has-hover ? Theme.hover : transparent;
+        HorizontalLayout {
+            padding-left: 13px;
+            padding-right: 15px;
+            spacing: 13px;
+            VerticalLayout {
+                alignment: center;
+                Avatar {
+                    width: 40px;
+                    height: 40px;
+                    src: root.hit.avatar;
+                    has-image: root.hit.hasAvatar;
+                    initial: root.hit.initial;
+                    color-idx: root.hit.colorIdx;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.hit.name;
+                        color: Theme.text;
+                        font-size: 14px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.hit.time;
+                        color: Theme.text-dim;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: root.hit.sender != "" ? root.hit.sender + ": " + root.hit.snippet : root.hit.snippet;
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    overflow: elide;
+                }
+            }
+        }
+        Rectangle {
+            x: 66px;
+            y: parent.height - 1px;
+            width: parent.width - 66px;
+            height: 1px;
+            background: Theme.border;
+        }
+    }
+}

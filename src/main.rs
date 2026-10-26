@@ -7,6 +7,7 @@ mod audio;
 mod bridge;
 mod call;
 mod camera;
+mod fonts;
 mod i18n;
 mod logging;
 mod markup;
@@ -109,6 +110,7 @@ fn main() {
     // straight into the tray instead of popping the window open.
     let autostarted = std::env::args().any(|a| a == "--autostart");
 
+    fonts::install_emoji();
     let ui = AppWindow::new().expect("failed to create the main window");
     ui.set_language_mode(language.as_str().into());
     ui.set_autostart(platform::autostart_enabled());
@@ -701,10 +703,11 @@ fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_ico
 }
 
 // Developer probe: a styled bubble with the transparent selection overlay
-// and the link's hand-cursor boxes (LinkProbeWindow in app.slint), driven
-// with synthetic mouse events: hovering the link must reach its box, and
-// a press, a drag and a double click on it must still reach the text
-// underneath. "keep" after the flag leaves the window up for a real mouse.
+// and the link's hand-cursor boxes (LinkProbeWindow, in
+// ui/components/link-probe-window.slint), driven with synthetic mouse
+// events: hovering the link must reach its box, and a press, a drag and
+// a double click on it must still reach the text underneath. "keep" after
+// the flag leaves the window up for a real mouse.
 fn overlay_selftest() {
     use slint::platform::{PointerEventButton, WindowEvent};
     let win = LinkProbeWindow::new().expect("selftest window");

@@ -1,0 +1,27 @@
+export component Avatar inherits Rectangle {
+    in property <image> src;
+    in property <bool> has-image;
+    in property <string> initial;
+    in property <int> color-idx;
+    property <[color]> avatar-colors: [#6bcbef, #e17ab0, #91ab01, #f05d4d, #ffbc38, #8b7add, #02a698, #ee6e51];
+
+    border-radius: self.width / 2;
+    clip: true;
+    background: self.has-image ? transparent : self.avatar-colors[self.color-idx];
+
+    if self.has-image: Image {
+        source: root.src;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+    }
+    if !self.has-image: Text {
+        text: root.initial;
+        color: white;
+        font-size: root.width * 0.4;
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

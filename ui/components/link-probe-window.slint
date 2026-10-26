@@ -1,0 +1,64 @@
+import { LinkHover } from "link-hover.slint";
+
+// Developer probe (--overlay-selftest): a styled bubble put together the
+// way the conversation does it -- StyledText, the transparent selection
+// overlay, the link's hand-cursor boxes -- on its own, so the mouse path
+// through it can be driven and checked without the whole app.
+export component LinkProbeWindow inherits Window {
+    title: "Zapive Selftest";
+    width: 480px;
+    height: 220px;
+    background: rgb(32,44,51);
+    in property <string> plain: "Cupom no APP: veja https://x.io/a agora mesmo";
+    in property <int> link-start: 19;
+    in property <int> link-end: 35;
+    in-out property <bool> link-press-through: false;
+    in-out property <bool> link-release-seen: false;
+    callback link-pressed(length, length);
+    out property <int> anchor: sel.anchor-position-byte-offset;
+    out property <int> cursor: sel.cursor-position-byte-offset;
+    out property <bool> hovered: hover.hovered;
+    // The link's first-line box, in window coordinates.
+    out property <length> box-x: hover.absolute-position.x + hover.sx;
+    out property <length> box-y: hover.absolute-position.y + hover.sy;
+    out property <length> box-w: (hover.one-line ? hover.ex : hover.width) - hover.sx;
+    out property <length> box-h: hover.line-h;
+    Rectangle {
+        x: 20px;
+        y: 20px;
+        width: body.width;
+        height: body.preferred-height;
+        body := StyledText {
+            text: @markdown("Cupom no APP: veja [https://x.io/a](https://x.io/a) agora *mesmo*");
+            default-color: rgb(233,237,239);
+            default-font-size: 14px;
+            link-color: rgb(0,168,132);
+            width: min(self.preferred-width, 400px);
+        }
+        sel := TextInput {
+            text: root.plain;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            font-size: 14px;
+            color: rgba(0,0,0,0.004);
+            selection-background-color: rgb(51,144,236);
+            selection-foreground-color: white;
+            width: parent.width;
+            height: parent.height;
+        }
+        hover := LinkHover {
+            width: parent.width;
+            height: parent.height;
+            text: root.plain;
+            start: root.link-start;
+            end: root.link-end;
+            pass-through: root.link-press-through;
+            press(x, y) => {
+                root.link-release-seen = false;
+                root.link-pressed(x, y);
+            }
+            release => { root.link-release-seen = true; }
+        }
+    }
+}
