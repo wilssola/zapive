@@ -103,6 +103,8 @@ export component AppWindow inherits Window {
     callback status-close();
     in-out property <string> selected-jid: "";
     in-out property <string> chat-tab: "all";
+    in-out property <int> archived-unread-count: 0;
+    in-out property <bool> archived-mentioned: false;
     callback open-chat(string);
     // Fired when the pointer settles on a chat row: the backend preloads
     // that chat's messages so a likely click opens instantly.
@@ -764,6 +766,7 @@ export component AppWindow inherits Window {
             width: 60px;
             background: Theme.header;
             VerticalLayout {
+                width: 100%;
                 padding: 10px;
                 spacing: 8px;
                 alignment: start;
@@ -801,7 +804,16 @@ export component AppWindow inherits Window {
                         root.view-changed("communities");
                     }
                 }
-                Rectangle { vertical-stretch: 1; }
+            }
+            VerticalLayout {
+                width: 100%;
+                height: self.preferred-height;
+                y: parent.height - self.height;
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-bottom: 0px;
+                spacing: 8px;
+                Rectangle { height: 1px; background: Theme.border; }
                 IconButton {
                     icon: @image-url("../icons/settings.svg");
                     clicked => {
@@ -1096,10 +1108,53 @@ export component AppWindow inherits Window {
                                 root.tab-changed("label:" + lb.id);
                             }
                         }
-                        FilterChip {
-                            label: @tr("Archived");
-                            active: root.chat-tab == "archived";
-                            clicked => { root.chat-tab = "archived"; root.tab-changed("archived"); }
+                    }
+                }
+
+                if root.sidebar-view == "chats" && root.search-hits.length == 0: Rectangle {
+                    height: 48px;
+                    background: root.chat-tab == "archived" ? Theme.selected : archive-touch.has-hover ? Theme.hover : transparent;
+                    HorizontalLayout {
+                        padding-left: 24px;
+                        padding-right: 20px;
+                        spacing: 24px;
+                        Rectangle {
+                            width: 20px;
+                            Image {
+                                width: 20px;
+                                height: 20px;
+                                y: (parent.height - self.height) / 2;
+                                source: @image-url("../icons/archive.svg");
+                                colorize: Theme.accent;
+                            }
+                        }
+                        Text {
+                            text: @tr("Archived");
+                            color: Theme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if root.archived-mentioned: Text {
+                            text: "@";
+                            color: Theme.accent;
+                            font-size: 16px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        if root.archived-unread-count > 0: Text {
+                            text: root.archived-unread-count;
+                            color: Theme.accent;
+                            font-size: 13px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                    archive-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.chat-tab = root.chat-tab == "archived" ? "all" : "archived";
+                            root.tab-changed(root.chat-tab);
                         }
                     }
                 }
@@ -1175,6 +1230,25 @@ export component AppWindow inherits Window {
                                         font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
+                                        Tooltip {
+                                            Rectangle {
+                                                width: min(420px, preview-tooltip.preferred-width + 24px);
+                                                height: preview-tooltip.preferred-height + 16px;
+                                                background: Theme.header;
+                                                border-color: Theme.border;
+                                                border-width: 1px;
+                                                border-radius: 6px;
+                                                preview-tooltip := Text {
+                                                    x: 12px;
+                                                    y: 8px;
+                                                    width: parent.width - 24px;
+                                                    text: chat.preview;
+                                                    color: Theme.text;
+                                                    font-size: 13px;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
                                     }
                                     if chat.muted: Image {
                                         source: @image-url("../icons/bell-off.svg");
@@ -1573,6 +1647,12 @@ export component AppWindow inherits Window {
                                     root.drag-move(msg-row.vis-y / 1px + self.mouse-y / 1px);
                                 }
                             }
+                            double-clicked => {
+                                if (!root.select-mode && !msg.deleted) {
+                                    root.request-reply(msg.id);
+                                    message-input.focus();
+                                }
+                            }
                         }
                         if root.select-mode && msg.selected: Rectangle {
                             background: Theme.accent.with-alpha(0.14);
@@ -1640,7 +1720,21 @@ export component AppWindow inherits Window {
                             (msg.kind == "image" || msg.kind == "video") && msg.picW > 0
                                 ? max(150px, msg.picW * 1px)
                                 : max-text-w;
-                        property <length> day-offset: msg.dayLabel != "" ? 34px : 0;
+                        property <length> unread-offset: msg.unread-boundary ? 34px : 0;
+                        property <length> day-offset: (msg.dayLabel != "" ? 34px : 0) + unread-offset;
+                        if msg.unread-boundary: Rectangle {
+                            y: msg.dayLabel != "" ? 34px : 0px;
+                            width: parent.width;
+                            height: 34px;
+                            background: Theme.pill;
+                            Text {
+                                text: @tr("Unread messages");
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
                         height: msg.kind == "system"
                             ? sys-pill.height + 12px + self.day-offset
                             : bubble.height + (msg.firstOfRun ? 16px : 6px)
@@ -1697,6 +1791,13 @@ export component AppWindow inherits Window {
                                 color: Theme.text-dim;
                                 x: parent.width - self.width - 9px;
                                 y: 7px;
+                            }
+                            TouchArea {
+                                enabled: !root.select-mode && !msg.deleted;
+                                double-clicked => {
+                                    root.request-reply(msg.id);
+                                    message-input.focus();
+                                }
                             }
                             content := VerticalLayout {
                                 padding: 6px;
@@ -2312,20 +2413,23 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                if !msg.hasStyled && (msg.kind == "text" || ((msg.kind == "image" || msg.kind == "video") && msg.text != "")): TextInput {
-                                    text: msg.deleted ? "🚫 " + msg.text : msg.text;
-                                    read-only: true;
-                                    single-line: false;
-                                    wrap: word-wrap;
-                                    font-size: 14px;
-                                    font-italic: msg.deleted;
-                                    color: msg.deleted ? Theme.text-dim : Theme.bubble-text;
-                                    selection-background-color: #3390ec;
-                                    selection-foreground-color: white;
-                                    // captions wrap to the image width
-                                    width: min(self.preferred-width,
-                                        msg-row.content-w);
-                                    height: self.preferred-height;
+                                if !msg.hasStyled && (msg.kind == "text" || ((msg.kind == "image" || msg.kind == "video") && msg.text != "")): Rectangle {
+                                    width: min(plain-text.preferred-width, msg-row.content-w);
+                                    height: plain-text.preferred-height;
+                                    plain-text := TextInput {
+                                        text: msg.deleted ? "🚫 " + msg.text : msg.text;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        font-size: 14px;
+                                        font-italic: msg.deleted;
+                                        color: msg.deleted ? Theme.text-dim : Theme.bubble-text;
+                                        selection-background-color: #3390ec;
+                                        selection-foreground-color: white;
+                                        // captions wrap to the image width
+                                        width: parent.width;
+                                        height: self.preferred-height;
+                                    }
                                 }
 
                                 // Stickers have no bubble, so the timestamp
