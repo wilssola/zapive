@@ -1996,13 +1996,35 @@ export component AppWindow inherits Window {
                                         height: 36px;
                                         border-radius: 18px;
                                         x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
+                                        y: (parent.height - self.height) / 2 + 22px;
                                         background: #00000090;
-                                        Text {
-                                            text: msg.mediaLoading ? round(clamp(msg.mediaProgress, 0, 100)) + "%" : (msg.kind == "image" ? @tr("Image") : @tr("Video")) + " · " + msg.mediaSize;
-                                            color: white;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                        Image {
+                                            source: msg.kind == "image" ? @image-url("../icons/photo.svg") : @image-url("../icons/video.svg");
+                                            width: 32px;
+                                            height: 32px;
+                                            x: (parent.width - self.width) / 2;
+                                            y: -44px;
+                                            colorize: white;
+                                        }
+                                        HorizontalLayout {
+                                            y: (parent.height - self.height) / 2;
+                                            height: 18px;
+                                            padding-left: 12px;
+                                            padding-right: 12px;
+                                            spacing: 6px;
+                                            alignment: center;
+                                            Image {
+                                                source: @image-url("../icons/download.svg");
+                                                width: 18px;
+                                                height: 18px;
+                                                colorize: white;
+                                            }
+                                            Text {
+                                                text: msg.mediaLoading ? (msg.mediaProgress < 0 ? @tr("Downloading…") : round(clamp(msg.mediaProgress, 0, 100)) + "%") : @tr("Download");
+                                                color: white;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }
@@ -2115,14 +2137,36 @@ export component AppWindow inherits Window {
                                         width: 140px;
                                         height: 36px;
                                         x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
+                                        y: (parent.height - self.height) / 2 + 22px;
                                         border-radius: 18px;
                                         background: #000000a0;
-                                        Text {
-                                            text: msg.mediaLoading ? round(clamp(msg.mediaProgress, 0, 100)) + "%" : (msg.kind == "image" ? @tr("Image") : @tr("Video")) + " · " + msg.mediaSize;
-                                            color: white;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                        Image {
+                                            source: msg.kind == "image" ? @image-url("../icons/photo.svg") : @image-url("../icons/video.svg");
+                                            width: 32px;
+                                            height: 32px;
+                                            x: (parent.width - self.width) / 2;
+                                            y: -44px;
+                                            colorize: white;
+                                        }
+                                        HorizontalLayout {
+                                            y: (parent.height - self.height) / 2;
+                                            height: 18px;
+                                            padding-left: 12px;
+                                            padding-right: 12px;
+                                            spacing: 6px;
+                                            alignment: center;
+                                            Image {
+                                                source: @image-url("../icons/download.svg");
+                                                width: 18px;
+                                                height: 18px;
+                                                colorize: white;
+                                            }
+                                            Text {
+                                                text: msg.mediaLoading ? (msg.mediaProgress < 0 ? @tr("Downloading…") : round(clamp(msg.mediaProgress, 0, 100)) + "%") : @tr("Download");
+                                                color: white;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }

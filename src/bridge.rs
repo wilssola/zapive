@@ -2345,6 +2345,15 @@ impl Bridge {
 
     // The just-sent message flows through the normal pipeline; the later
     // echo from the server is deduplicated by id in the store.
+    pub fn echo_sent_from(&mut self, jid: &str, id: &str, message: wa::Message, origin: Option<String>) {
+        if let Some(origin) = origin {
+            if let Some(vault) = &self.vault {
+                vault.setting_set(&format!("media-source:{id}"), &origin);
+            }
+        }
+        self.echo_sent(jid, id, message);
+    }
+
     pub fn echo_sent(&mut self, jid: &str, id: &str, message: wa::Message) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3293,6 +3302,10 @@ impl Bridge {
                 .cloned()
                 .unwrap_or_default()
                 .into(),
+            mediaKind: "".into(),
+            mediaOffer: false,
+            mediaProgress: -1.0,
+            mediaSize: "".into(),
             mediaReady: self.media_path.contains_key(&m.id),
             mediaLoading: self.media_inflight.contains(&m.id),
             reactions: reactions.into(),
@@ -7702,8 +7715,8 @@ impl Bridge {
         match kind {
             // WhatsApp-style confirmation: caption field before sending.
             "image" => self.wa.send(Cmd::PreviewImage { path }),
-            "audio" => self.wa.send(Cmd::SendAudioFile { jid, path }),
-            _ => self.wa.send(Cmd::SendDocument { jid, path }),
+            "audio" => self.wa.send(Cmd::SendAudioFile { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
+            _ => self.wa.send(Cmd::SendDocument { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
         }
     }
 
@@ -7722,6 +7735,7 @@ impl Bridge {
         let caption = caption.trim();
         self.wa.send(Cmd::SendImage {
             jid,
+            origin: Some(path.to_string_lossy().into_owned()),
             path,
             caption: (!caption.is_empty()).then(|| caption.to_string()),
         });
