@@ -2382,7 +2382,7 @@ impl Bridge {
                 .messages_for(&chat_jid)
                 .iter()
                 .find(|m| m.id == target)
-                .map(|m| preview_body(m).chars().take(32).collect())
+                .map(preview_body)
                 .unwrap_or_default();
             let name = self.store.chat_name(&self.store.canon_owned(&normalize_jid(reactor)));
             let who = if from_me {

@@ -1243,25 +1243,7 @@ export component AppWindow inherits Window {
                                         font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
-                                        preview-hover := TouchArea {
-                                            changed has-hover => {
-                                                if !self.has-hover {
-                                                    preview-popup.close();
-                                                }
-                                            }
-                                        }
-                                        Timer {
-                                            interval: 500ms;
-                                            running: preview-hover.has-hover;
-                                            triggered => {
-                                                preview-popup.show();
-                                                self.running = false;
-                                            }
-                                        }
-                                        preview-popup := PopupWindow {
-                                            x: preview-hover.mouse-x;
-                                            y: preview-hover.mouse-y + 20px;
-                                            close-policy: no-auto-close;
+                                        Tooltip {
                                             Rectangle {
                                                 width: min(420px, preview-tooltip.preferred-width + 24px);
                                                 height: preview-tooltip.preferred-height + 16px;
