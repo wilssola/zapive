@@ -342,7 +342,7 @@ dependencies = [
  "clipboard-win",
  "image",
  "log",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -948,7 +948,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5"
 dependencies = [
- "objc2 0.6.4",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -1479,8 +1479,7 @@ dependencies = [
 [[package]]
 name = "const-field-offset"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d535c69e75b4e3c69e17205b5b37a91936c54086cecd339b70071500786acb9c"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "const-field-offset-macro",
  "field-offset",
@@ -1489,8 +1488,7 @@ dependencies = [
 [[package]]
 name = "const-field-offset-macro"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93d5848843a221ac268cfdd6bfd14e68d5d3dfa79d52c880aafab93f9517fb74"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2152,7 +2150,7 @@ dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
  "libc",
- "objc2 0.6.4",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -2172,7 +2170,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -2463,26 +2461,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "femtovg"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31eebf3ab1b76359ccd5f850c07a7c6b2722c64d9127c40e02358e83f3ff9b1a"
-dependencies = [
- "bitflags 2.13.1",
- "bytemuck",
- "fnv",
- "glow",
- "imgref",
- "itertools 0.15.0",
- "log",
- "rgb",
- "slotmap",
- "swash",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2613,7 +2591,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "linebender_resource_handle",
  "memmap2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-text",
  "objc2-foundation 0.3.2",
@@ -2782,28 +2760,6 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
-]
-
-[[package]]
-name = "gbm"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce852e998d3ca5e4a97014fb31c940dc5ef344ec7d364984525fd11e8a547e6a"
-dependencies = [
- "bitflags 2.13.1",
- "drm",
- "drm-fourcc",
- "gbm-sys",
- "libc",
-]
-
-[[package]]
-name = "gbm-sys"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c13a5f2acc785d8fb6bf6b7ab6bfb0ef5dad4f4d97e8e70bb8e470722312f76f"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -3086,7 +3042,7 @@ dependencies = [
  "glutin_glx_sys",
  "glutin_wgl_sys",
  "libloading 0.8.9",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -3160,7 +3116,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.54.0",
 ]
 
 [[package]]
@@ -3490,70 +3446,44 @@ dependencies = [
 
 [[package]]
 name = "i-slint-backend-linuxkms"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4f4679cd1788d9a7004c205c16c2fd7380ae27aeeb5ccfac2fb86849be92f10"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
- "bytemuck",
  "calloop 0.14.4",
  "cfg_aliases",
  "drm",
- "gbm",
- "glutin",
  "i-slint-common",
  "i-slint-core",
- "i-slint-renderer-femtovg",
- "i-slint-renderer-software",
+ "i-slint-renderer-skia",
  "input",
  "libseat",
  "memmap2",
  "nix",
- "raw-window-handle",
  "xkbcommon",
 ]
 
 [[package]]
 name = "i-slint-backend-selector"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aae6ba886a5085f34692a7021eb6225d2786ab2800ffbc8a1d20371456e736a"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
- "cfg-if 1.0.4",
  "cfg_aliases",
  "i-slint-backend-linuxkms",
- "i-slint-backend-testing",
  "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
- "i-slint-renderer-femtovg",
-]
-
-[[package]]
-name = "i-slint-backend-testing"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2890ef1b9bead9f327d358aa925b6136ebe6b119fe5e302f6f06ef23453fa25"
-dependencies = [
- "cfg_aliases",
- "i-slint-common",
- "i-slint-core",
- "i-slint-renderer-software",
- "vtable",
 ]
 
 [[package]]
 name = "i-slint-backend-winit"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9639d746caa964a88ad764c32b6c5163e1cefd4b7443b3269162aa65c33c81d8"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "accesskit",
  "accesskit_winit",
  "arboard",
  "block2 0.6.2",
- "bytemuck",
- "cfg-if 1.0.4",
  "cfg_aliases",
  "futures",
  "glutin",
@@ -3561,20 +3491,16 @@ dependencies = [
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
- "i-slint-renderer-femtovg",
  "i-slint-renderer-skia",
- "i-slint-renderer-software",
- "imgref",
  "lyon_path",
- "muda 0.19.3",
- "objc2 0.6.4",
+ "muda 0.21.2",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
  "objc2-ui-kit 0.3.2",
  "pin-weak",
  "raw-window-handle",
- "rgb",
  "scoped-tls-hkt",
  "scopeguard",
  "softbuffer",
@@ -3590,9 +3516,8 @@ dependencies = [
 
 [[package]]
 name = "i-slint-common"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520fa2961d5c09f3630fd1bdd7e8df0250a40004e85ca3ee6202264dc412f2c5"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "derive_more",
  "fontique",
@@ -3600,6 +3525,7 @@ dependencies = [
  "icu_decimal",
  "icu_locale_core",
  "icu_provider",
+ "objc2 0.6.5",
  "pulldown-cmark",
  "resvg",
  "skrifa",
@@ -3607,9 +3533,8 @@ dependencies = [
 
 [[package]]
 name = "i-slint-compiler"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2412bc535ec506ca7917fdda20a2fb0a32cb03c5f9b215566d098b949d31b720"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "annotate-snippets",
  "by_address",
@@ -3634,6 +3559,7 @@ dependencies = [
  "smol_str 0.3.6",
  "strum",
  "swash",
+ "syn 3.0.4",
  "typed-index-collections",
  "unicode-segmentation",
  "url",
@@ -3641,13 +3567,12 @@ dependencies = [
 
 [[package]]
 name = "i-slint-core"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76b8b730a020446b367e0033e6a1e17719df6b35fd4a65f723e86a7147fbc983"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "accesskit",
  "bitflags 2.13.1",
- "cfg-if 1.0.4",
+ "bytemuck",
  "chrono",
  "clru",
  "const-field-offset",
@@ -3663,7 +3588,7 @@ dependencies = [
  "lyon_geom",
  "lyon_path",
  "num-traits",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "once_cell",
@@ -3694,9 +3619,8 @@ dependencies = [
 
 [[package]]
 name = "i-slint-core-macros"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cd88de59a6d5178643dc3a18e8b92f09c118d2c642cad7b8b16342b0d133a85"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "quote",
  "serde_json",
@@ -3704,34 +3628,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "i-slint-renderer-femtovg"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d639b7c55640274d077f16136ad405ccf607bda1754cce3f02c47ec08d31f1d7"
-dependencies = [
- "cfg-if 1.0.4",
- "const-field-offset",
- "femtovg",
- "glow",
- "i-slint-common",
- "i-slint-core",
- "i-slint-core-macros",
- "imgref",
- "lyon_path",
- "pin-weak",
- "rgb",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "i-slint-renderer-skia"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "815501a47406f473af92b2666d79b4b15af28a3e9f22020e5a6da16331482ab8"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "bytemuck",
- "cfg-if 1.0.4",
  "cfg_aliases",
  "clru",
  "const-field-offset",
@@ -3741,7 +3642,7 @@ dependencies = [
  "i-slint-core",
  "i-slint-core-macros",
  "lyon_path",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -3765,9 +3666,8 @@ dependencies = [
 
 [[package]]
 name = "i-slint-renderer-software"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeaa80487398676502661f4bfb4f665d53be0433b0ad83445ca3cca43ddc51b9"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "bytemuck",
  "clru",
@@ -3794,7 +3694,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4274,6 +4174,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags 2.13.1",
+ "serde",
+]
+
+[[package]]
 name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4572,7 +4482,7 @@ checksum = "fd604973958ddcc11b561193c0fb96ba146506ef2f231ef2e7c35fd2cbc9beca"
 dependencies = [
  "cc",
  "log",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "time",
  "uuid",
@@ -4758,7 +4668,7 @@ dependencies = [
  "crossbeam-channel",
  "dpi",
  "gtk",
- "keyboard-types",
+ "keyboard-types 0.7.0",
  "libxdo",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
@@ -4771,18 +4681,17 @@ dependencies = [
 
 [[package]]
 name = "muda"
-version = "0.19.3"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dd04e60bc0b07438a6771710ee1698f98f6ebbc7f89b61264af1563b8aeb878"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
 dependencies = [
  "crossbeam-channel",
  "dpi",
- "keyboard-types",
- "objc2 0.6.4",
+ "keyboard-types 0.8.3",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
- "once_cell",
  "png 0.18.1",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
@@ -5123,7 +5032,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5157,9 +5066,9 @@ dependencies = [
 
 [[package]]
 name = "objc2"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a12a8ed07aefc768292f076dc3ac8c48f3781c8f2d5851dd3d98950e8c5a89f"
+checksum = "08849bbd4767dfae9457696856ae1c84fe4e0281bbe4a7abff2d0e06fb7981f8"
 dependencies = [
  "objc2-encode",
 ]
@@ -5188,7 +5097,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
@@ -5203,7 +5112,7 @@ checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
 dependencies = [
  "bitflags 2.13.1",
  "libc",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -5241,7 +5150,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
 dependencies = [
  "dispatch2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-audio-types",
  "objc2-core-foundation",
 ]
@@ -5253,7 +5162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.4",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -5276,7 +5185,7 @@ checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.1",
  "dispatch2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -5287,7 +5196,7 @@ checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
 dependencies = [
  "bitflags 2.13.1",
  "dispatch2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-io-surface",
 ]
@@ -5354,7 +5263,7 @@ dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
  "libc",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
 ]
 
@@ -5365,7 +5274,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
 ]
 
@@ -5401,7 +5310,7 @@ checksum = "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
 
@@ -5425,7 +5334,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96c1358452b371bf9f104e21ec536d37a650eb10f7ee379fff67d2e08d537f1f"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
@@ -5471,7 +5380,7 @@ checksum = "d87d638e33c06f577498cbcc50491496a3ed4246998a7fbba7ccb98b1e7eab22"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -5628,7 +5537,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -5696,9 +5605,9 @@ dependencies = [
 
 [[package]]
 name = "parlance"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6937eda350acc1a5d05872c3cbf99fe78619c269096e2be3d4a350058639d5"
+checksum = "73072a9470554c8e794778acece2312661218aaabb635600957d952cf01c716e"
 
 [[package]]
 name = "parley"
@@ -5763,9 +5672,9 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "image",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "js-sys",
- "libloading 0.8.9",
+ "libloading 0.7.4",
  "log",
  "maybe-owned",
  "once_cell",
@@ -6506,7 +6415,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40d213455a5f1dc59214213c7330e074ddf8114c9a42411eb890c767357ce135"
 dependencies = [
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -6714,7 +6623,7 @@ dependencies = [
  "dispatch2",
  "js-sys",
  "log",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -7467,9 +7376,8 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slint"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "460524eed7afee6000683eccb97df58198265384099c76dade430cdae08b9b94"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "const-field-offset",
  "i-slint-backend-linuxkms",
@@ -7477,7 +7385,6 @@ dependencies = [
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
- "i-slint-renderer-femtovg",
  "i-slint-renderer-software",
  "num-traits",
  "once_cell",
@@ -7489,9 +7396,8 @@ dependencies = [
 
 [[package]]
 name = "slint-build"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6cfc9bb0dd48d01508f9e21511d0215e78e8e3be032bacd6be61744abe03c83"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "derive_more",
  "fontique",
@@ -7502,9 +7408,8 @@ dependencies = [
 
 [[package]]
 name = "slint-macros"
-version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a4d3e807d538d047a4b6b6c54586569d350dd795ce52b33c4992507de467104"
+version = "1.19.0"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "i-slint-compiler",
  "proc-macro2",
@@ -7523,9 +7428,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.16.0"
+version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
+checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 dependencies = [
  "serde",
 ]
@@ -7598,7 +7503,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -7633,11 +7538,12 @@ checksum = "aac18da81ebbf05109ab275b157c22a653bb3c12cf884450179942f81bcbf6c3"
 dependencies = [
  "as-raw-xcb-connection",
  "bytemuck",
+ "drm",
  "fastrand",
  "js-sys",
  "memmap2",
  "ndk",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
@@ -8525,7 +8431,7 @@ dependencies = [
  "dirs",
  "libappindicator",
  "muda 0.15.3",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -8865,8 +8771,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vtable"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "515a4b5b1399cc46fb0dc4081436cb40a3852a2d3e94fd1fa50bb68a334896eb"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "const-field-offset",
  "portable-atomic",
@@ -8877,8 +8782,7 @@ dependencies = [
 [[package]]
 name = "vtable-macro"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8191d73ececf73fc94e65809bf0e667525a0bcff9aeeb8d042a4173a508332a1"
+source = "git+https://github.com/slint-ui/slint?rev=e492aa764c83c5b5c2cd9b6f04c840d6039339c0#e492aa764c83c5b5c2cd9b6f04c840d6039339c0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9273,7 +9177,7 @@ dependencies = [
  "jni 0.22.4",
  "log",
  "ndk-context",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "url",
@@ -9411,7 +9315,7 @@ dependencies = [
  "log",
  "naga",
  "naga-types",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
@@ -10225,9 +10129,9 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wl-clipboard-rs"
-version = "0.9.3"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9651471a32e87d96ef3a127715382b2d11cc7c8bb9822ded8a7cc94072eb0a3"
+checksum = "959c7ac3b8afde864f7a7448ac16f29b2b83350b7eccbf77fb781c3999aa6848"
 dependencies = [
  "libc",
  "log",
@@ -10481,7 +10385,7 @@ dependencies = [
  "mp4",
  "nokhwa",
  "notify-rust",
- "objc2 0.6.4",
+ "objc2 0.6.5",
  "ogg",
  "openh264",
  "opus-pure",
