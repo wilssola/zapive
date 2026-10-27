@@ -66,6 +66,12 @@ msgstr "Arquivadas"
 msgid "Select a conversation to start"
 msgstr "Selecione uma conversa para começar"
 
+msgid "Your conversations"
+msgstr "Suas conversas"
+
+msgid "Your groups"
+msgstr "Seus grupos"
+
 msgid "Forwarded"
 msgstr "Encaminhada"
 

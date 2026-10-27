@@ -12,6 +12,7 @@ import { SettingsRow } from "settings-row.slint";
 import { LinkHover } from "link-hover.slint";
 import { EmojiText } from "emoji.slint";
 import { UpdateBanner } from "update-banner.slint";
+import { HomeScreen } from "home-screen.slint";
 import { MenuRow } from "rows/menu.slint";
 import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
@@ -121,6 +122,9 @@ export component AppWindow inherits Window {
 
     // "locked" | "login" | "main"
     in-out property <string> screen: "login";
+    changed screen => {
+        if (self.screen == "main") { capture-scope.focus(); }
+    }
     in-out property <string> status-text: @tr("Connecting...");
 
     // Lock screen
@@ -839,12 +843,35 @@ export component AppWindow inherits Window {
                 root.select-copy();
                 return accept;
             }
-            if (event.text == Key.Escape && root.select-mode) {
-                root.select-cancel();
-                return accept;
-            }
-            if (event.text == Key.Escape && root.pdf-open) {
-                root.pdf-close();
+            if (event.text == Key.Escape) {
+                if (root.video-open) { root.close-video(); }
+                else if (root.lightbox-open) { root.lightbox-open = false; }
+                else if (root.pdf-open) { root.pdf-close(); }
+                else if (root.confirm-open) { root.confirm-open = false; }
+                else if (root.preview-open) { root.cancel-send-image(); }
+                else if (root.share-open) { root.share-cancel(); }
+                else if (root.member-pick-open) { root.member-pick-open = false; }
+                else if (root.new-list-open) { root.new-list-open = false; }
+                else if (root.forward-open) { root.forward-open = false; }
+                else if (root.settings-open) { root.settings-open = false; }
+                else if (root.account-menu-open) { root.account-menu-open = false; }
+                else if (root.sv-open) { root.status-close(); }
+                else if (root.sync-open) { root.sync-open = false; }
+                else if (root.chat-menu-open) { root.chat-menu-open = false; }
+                else if (root.mention-open) { root.mention-close(); }
+                else if (root.picker-open) { root.picker-open = false; }
+                else if (root.attach-open) { root.attach-open = false; }
+                else if (root.select-mode) { root.select-cancel(); }
+                else if (root.info-open) { root.close-info(); }
+                else if (root.chat-search-open) { root.chat-search-close(); }
+                else {
+                    root.menu-close-chat();
+                    root.sidebar-view = "chats";
+                    root.view-changed("chats");
+                    search-box.text = "";
+                    root.search-changed("");
+                }
+                capture-scope.focus();
                 return accept;
             }
             reject
@@ -1077,7 +1104,7 @@ export component AppWindow inherits Window {
                                 alignment: center;
                                 horizontal-stretch: 0;
                                 Avatar {
-                                    width: 140px;
+                                    width: 46px;
                                     height: 46px;
                                     src: call.avatar;
                                     has-image: call.hasAvatar;
@@ -1614,23 +1641,31 @@ export component AppWindow inherits Window {
         Rectangle {
             background: Theme.conv-background;
 
-            VerticalBox {
+            HomeScreen {
                 visible: !root.chat-open;
                 width: 100%;
                 height: 100%;
-                alignment: center;
-                Text {
-                    text: "Zapive";
-                    color: Theme.text;
-                    font-size: 28px;
-                    font-weight: 300;
-                    horizontal-alignment: center;
+                conversations => {
+                    root.sidebar-view = "chats";
+                    root.view-changed("chats");
+                    root.chat-tab = "all";
+                    root.tab-changed("all");
+                    search-box.text = "";
+                    root.search-changed("");
+                    search-box.focus();
                 }
-                Text {
-                    text: @tr("Select a conversation to start");
-                    color: Theme.text-dim;
-                    font-size: 14px;
-                    horizontal-alignment: center;
+                groups => {
+                    root.sidebar-view = "chats";
+                    root.view-changed("chats");
+                    root.chat-tab = "groups";
+                    root.tab-changed("groups");
+                    search-box.text = "";
+                    root.search-changed("");
+                    search-box.focus();
+                }
+                settings => {
+                    root.settings-open = true;
+                    root.settings-opened();
                 }
             }
 
@@ -3849,7 +3884,6 @@ export component AppWindow inherits Window {
             }
         }
     }
-    } // capture-scope
 
     // ---------- Contact / group info ----------
     if root.info-open: Rectangle {
@@ -5699,5 +5733,6 @@ export component AppWindow inherits Window {
             y: 16px;
             clicked => { root.lightbox-open = false; }
         }
+    }
     }
 }
