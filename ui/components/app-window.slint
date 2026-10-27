@@ -51,13 +51,48 @@ component BubbleMeta {
     height: 14px;
     HorizontalLayout {
         spacing: 4px;
+        if ticks != "": Ticks { ticks: ticks; blue: blue; }
         Text {
             text: time;
             font-size: 10px;
             color: fromMe ? Theme.time-out : Theme.text-dim;
             vertical-alignment: center;
         }
-        if ticks != "": Ticks { ticks: ticks; blue: blue; }
+    }
+}
+
+component InfoAction inherits TouchArea {
+    in property <image> icon;
+    in property <string> label;
+    mouse-cursor: self.enabled ? pointer : default;
+    height: 62px;
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        background: root.has-hover && root.enabled ? Theme.selected : Theme.dark ? #15262d : Theme.header;
+        opacity: root.enabled ? 1 : 0.4;
+        Image {
+            source: root.icon;
+            colorize: Theme.icon;
+            width: 20px;
+            height: 20px;
+            x: (parent.width - self.width) / 2;
+            y: 11px;
+        }
+        Text {
+            text: root.label;
+            color: Theme.text-dim;
+            font-size: 11px;
+            width: parent.width;
+            height: 16px;
+            y: 37px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -352,6 +387,8 @@ export component AppWindow inherits Window {
     callback member-toggle(string);
     callback member-confirm();
     in-out property <[MemberItem]> info-member-rows;
+    in-out property <[MemberItem]> info-common-groups;
+    in-out property <string> info-common-groups-state;
     callback open-member(string);
 
     // Search: sidebar hits across chats, and the in-chat panel
@@ -2314,13 +2351,13 @@ export component AppWindow inherits Window {
                                                 font-size: 11px;
                                                 horizontal-stretch: 1;
                                             }
+                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
                                             Text {
                                                 text: msg.time;
                                                 font-size: 10px;
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 vertical-alignment: center;
                                             }
-                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
                                         }
                                     }
                                     VerticalLayout {
@@ -2468,7 +2505,7 @@ export component AppWindow inherits Window {
                                     stamp-in := Rectangle {
                                         width: stamp-lay.preferred-width;
                                         height: stamp-lay.preferred-height;
-                                        x: parent.width - stamp-lay.preferred-width;
+                                        x: bubble.width - 24px - stamp-lay.preferred-width;
                                         y: parent.height - stamp-lay.preferred-height - 1px;
                                         stamp-lay := HorizontalLayout {
                                             BubbleMeta {
@@ -2566,7 +2603,7 @@ export component AppWindow inherits Window {
                                     stamp-in2 := Rectangle {
                                         width: stamp-lay2.preferred-width;
                                         height: stamp-lay2.preferred-height;
-                                        x: parent.width - stamp-lay2.preferred-width;
+                                        x: bubble.width - 24px - stamp-lay2.preferred-width;
                                         y: parent.height - stamp-lay2.preferred-height - 1px;
                                         stamp-lay2 := HorizontalLayout {
                                             BubbleMeta {
@@ -2596,13 +2633,13 @@ export component AppWindow inherits Window {
                                             spacing: 4px;
                                             padding-left: msg.sticker ? 7px : 0;
                                             padding-right: msg.sticker ? 7px : 0;
+                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
                                             Text {
                                                 text: msg.time;
                                                 font-size: 10px;
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 vertical-alignment: center;
                                             }
-                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
                                         }
                                     }
                                 }
@@ -3732,35 +3769,45 @@ export component AppWindow inherits Window {
 
     // ---------- Contact / group info ----------
     if root.info-open: Rectangle {
-        background: #00000066;
+        background: #00000030;
         TouchArea { clicked => { root.close-info(); } }
-        Rectangle {
-            width: 400px;
-            height: parent.height;
-            x: parent.width - self.width;
-            background: Theme.panel;
+        info-panel := Rectangle {
+            property <bool> media-expanded: false;
+            property <bool> actions-expanded: false;
+            width: min(360px, parent.width - 16px);
+            height: parent.height - 16px;
+            x: parent.width - self.width - 8px;
+            y: 8px;
+            border-radius: 18px;
+            border-width: 1px;
+            border-color: Theme.dark ? #1c3038 : Theme.border;
+            background: Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel;
+            clip: true;
             TouchArea { }
-            VerticalBox {
-                padding: 0;
-                spacing: 0;
+            VerticalLayout {
+                padding: 0px;
+                spacing: 0px;
                 Rectangle {
-                    height: 54px;
-                    background: Theme.header;
+                    height: 56px;
                     HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 10px;
-                        IconButton {
-                            icon: @image-url("../icons/x.svg");
-                            clicked => { root.close-info(); }
-                        }
+                        padding-left: 20px;
+                        padding-right: 12px;
+                        spacing: 8px;
                         Text {
                             text: root.info-is-group ? @tr("Group info") : @tr("Contact info");
                             color: Theme.text;
-                            font-size: 16px;
-                            font-weight: 700;
+                            font-size: 14px;
+                            font-weight: 600;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            width: 32px;
+                            height: 32px;
+                            icon-size: 18px;
+                            y: (parent.height - self.height) / 2;
+                            icon: @image-url("../icons/x.svg");
+                            clicked => { root.close-info(); }
                         }
                     }
                 }
@@ -3772,19 +3819,32 @@ export component AppWindow inherits Window {
                         width: parent.width;
                         info-col := VerticalLayout {
                             width: parent.width;
-                            padding: 20px;
-                            spacing: 14px;
+                            padding-left: 18px;
+                            padding-right: 18px;
+                            padding-top: 10px;
+                            padding-bottom: 18px;
+                            spacing: 0px;
                             HorizontalLayout {
                                 alignment: center;
-                                Avatar {
-                                    width: 140px;
-                                    height: 140px;
-                                    src: root.info-avatar;
-                                    has-image: root.info-has-avatar;
-                                    initial: root.info-initial;
-                                    color-idx: root.info-color-idx;
+                                Rectangle {
+                                    width: 84px;
+                                    height: 84px;
+                                    border-radius: 42px;
+                                    border-width: 2px;
+                                    border-color: Theme.dark ? #174039 : Theme.border;
+                                    Avatar {
+                                        x: 5px;
+                                        y: 5px;
+                                        width: 74px;
+                                        height: 74px;
+                                        src: root.info-avatar;
+                                        has-image: root.info-has-avatar;
+                                        initial: root.info-initial;
+                                        color-idx: root.info-color-idx;
+                                    }
                                 }
                             }
+                            Rectangle { height: 14px; }
                             TextInput {
                                 read-only: true;
                                 single-line: false;
@@ -3792,12 +3852,13 @@ export component AppWindow inherits Window {
                                 selection-foreground-color: white;
                                 text: root.info-name;
                                 color: Theme.text;
-                                font-size: 20px;
-                                font-weight: 700;
+                                font-size: 16px;
+                                font-weight: 600;
                                 horizontal-alignment: center;
                                 wrap: word-wrap;
                             }
-                            if root.info-id != "": TextInput {
+                            Rectangle { height: 5px; }
+                            if !root.info-is-group && root.info-id != "": TextInput {
                                 read-only: true;
                                 single-line: false;
                                 wrap: word-wrap;
@@ -3805,74 +3866,163 @@ export component AppWindow inherits Window {
                                 selection-foreground-color: white;
                                 text: root.info-id;
                                 color: Theme.text-dim;
-                                font-size: 14px;
+                                font-size: 12px;
                                 horizontal-alignment: center;
                             }
                             if root.info-members != "": Text {
                                 text: root.info-members;
                                 color: Theme.text-dim;
-                                font-size: 14px;
+                                font-size: 12px;
                                 horizontal-alignment: center;
                             }
-                            if root.info-about != "" || root.info-desc != "": Text {
-                                text: root.info-is-group ? @tr("Description") : @tr("About");
-                                color: Theme.accent;
-                                font-size: 13px;
-                                font-weight: 700;
+                            Rectangle { height: 18px; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                InfoAction {
+                                    icon: @image-url("../icons/phone.svg");
+                                    label: @tr("Call");
+                                    enabled: root.current-callable;
+                                    clicked => { root.start-call(root.current-jid); }
+                                }
+                                InfoAction {
+                                    icon: @image-url("../icons/video.svg");
+                                    label: @tr("Video");
+                                    enabled: root.current-callable;
+                                    clicked => { root.start-video-call(root.current-jid); }
+                                }
+                                InfoAction {
+                                    icon: @image-url("../icons/search.svg");
+                                    label: @tr("Search");
+                                    clicked => { root.close-info(); root.menu-search(); }
+                                }
+                                InfoAction {
+                                    icon: @image-url("../icons/dots-vertical.svg");
+                                    label: @tr("More");
+                                    clicked => { info-panel.actions-expanded = !info-panel.actions-expanded; }
+                                }
                             }
-                            if root.info-about != "" || root.info-desc != "": TextInput {
-                                read-only: true;
-                                single-line: false;
-                                selection-background-color: Theme.accent;
-                                selection-foreground-color: white;
-                                text: root.info-is-group ? root.info-desc : root.info-about;
-                                color: Theme.text;
-                                font-size: 14px;
-                                wrap: word-wrap;
+                            Rectangle { height: 16px; }
+                            if info-panel.actions-expanded: VerticalLayout {
+                                spacing: 0px;
+                                MenuRow {
+                                    icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
+                                    label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
+                                    clicked => { root.menu-mute(root.current-muted ? 0 : -1); }
+                                }
+                                MenuRow {
+                                    icon: @image-url("../icons/archive.svg");
+                                    label: root.info-archived ? @tr("Unarchive chat") : @tr("Archive chat");
+                                    clicked => { root.toggle-archive(); }
+                                }
+                                MenuRow {
+                                    icon: @image-url("../icons/trash.svg");
+                                    label: @tr("Clear messages on this device");
+                                    clicked => { root.clear-chat(); }
+                                }
+                                Rectangle { height: 12px; }
                             }
-                            if root.info-member-rows.length > 0: Text {
-                                text: @tr("Participants");
-                                color: Theme.accent;
-                                font-size: 13px;
-                                font-weight: 700;
+                            Rectangle { height: 1px; background: Theme.border; }
+                            if root.info-about != "" || root.info-desc != "": VerticalLayout {
+                                padding-top: 14px;
+                                padding-bottom: 14px;
+                                TextInput {
+                                    read-only: true;
+                                    single-line: false;
+                                    selection-background-color: Theme.accent;
+                                    selection-foreground-color: white;
+                                    text: root.info-is-group ? root.info-desc : root.info-about;
+                                    color: Theme.text;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { height: 14px; }
+                                Rectangle { height: 1px; background: Theme.border; }
                             }
-                            for m in root.info-member-rows: MemberRow {
-                                item: m;
-                                clicked => { root.open-member(m.jid); }
+                            MenuRow {
+                                icon: @image-url("../icons/photo.svg");
+                                label: @tr("Shared media");
+                                submenu: true;
+                                clicked => { info-panel.media-expanded = !info-panel.media-expanded; }
                             }
-                            if root.info-media.length > 0: Text {
-                                text: @tr("Shared media");
-                                color: Theme.accent;
-                                font-size: 13px;
-                                font-weight: 700;
-                            }
-                            for row in root.info-media: HorizontalLayout {
+                            if info-panel.media-expanded: VerticalLayout {
+                                padding-top: 8px;
+                                padding-bottom: 12px;
                                 spacing: 6px;
-                                alignment: start;
-                                for cell in row: Rectangle {
-                                    width: 84px;
-                                    height: 84px;
-                                    border-radius: 8px;
-                                    clip: true;
-                                    background: Theme.hover;
-                                    if cell.ready: Image {
-                                        source: cell.pic;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: cover;
+                                if root.info-media.length == 0: Text {
+                                    text: @tr("No media preview available");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                }
+                                for row in root.info-media: HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    for cell in row: Rectangle {
+                                        width: (info-panel.width - 56px) / 4;
+                                        height: self.width;
+                                        border-radius: 8px;
+                                        clip: true;
+                                        background: Theme.hover;
+                                        if cell.ready: Image {
+                                            source: cell.pic;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            image-fit: cover;
+                                        }
                                     }
                                 }
                             }
-                            Rectangle { height: 6px; }
-                            MenuRow {
-                                icon: @image-url("../icons/archive.svg");
-                                label: root.info-archived ? @tr("Unarchive chat") : @tr("Archive chat");
-                                clicked => { root.toggle-archive(); }
+                            Rectangle { height: 1px; background: Theme.border; }
+                            if root.info-is-group: HorizontalLayout {
+                                padding-top: 16px;
+                                padding-bottom: 10px;
+                                spacing: 8px;
+                                Text {
+                                    text: root.info-members != "" ? root.info-members : @tr("Participants");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                if !root.current-left: TouchArea {
+                                    width: add-member-label.preferred-width;
+                                    height: 24px;
+                                    mouse-cursor: pointer;
+                                    add-member-label := Text {
+                                        text: @tr("Add member");
+                                        color: Theme.accent;
+                                        font-size: 12px;
+                                        height: parent.height;
+                                        vertical-alignment: center;
+                                    }
+                                    clicked => { root.close-info(); root.menu-add-member(); }
+                                }
                             }
-                            MenuRow {
-                                icon: @image-url("../icons/trash.svg");
-                                label: @tr("Clear messages on this device");
-                                clicked => { root.clear-chat(); }
+                            if !root.info-is-group: VerticalLayout {
+                                padding-top: 16px;
+                                spacing: 8px;
+                                Text {
+                                    text: @tr("Groups in common") + (root.info-common-groups-state == "ready" ? " (" + root.info-common-groups.length + ")" : "");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                }
+                                if root.info-common-groups-state != "ready" || root.info-common-groups.length == 0: Text {
+                                    text: root.info-common-groups-state == "loading" ? @tr("Loading groups…")
+                                        : root.info-common-groups-state == "error" ? @tr("Could not load groups in common")
+                                        : @tr("No groups in common");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                                for group in root.info-common-groups: MemberRow {
+                                    item: group;
+                                    compact: true;
+                                    clicked => { root.close-info(); root.open-chat(group.jid); }
+                                }
+                            }
+                            for m in root.info-member-rows: MemberRow {
+                                item: m;
+                                compact: true;
+                                clicked => { root.open-member(m.jid); }
                             }
                         }
                     }

@@ -140,6 +140,8 @@ pub struct Bridge {
     mention_model: Rc<VecModel<MemberItem>>,
     // Group rosters are refreshed at most every few minutes.
     group_meta_at: HashMap<String, Instant>,
+    common_groups_cache: HashMap<String, (Instant, Vec<(String, String)>)>,
+    common_groups_pending: HashMap<String, Instant>,
     // Search: hits in the sidebar (all chats) and in the open chat.
     search_model: Rc<VecModel<SearchHit>>,
     chat_search_model: Rc<VecModel<SearchHit>>,
@@ -574,6 +576,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         mentions: Vec::new(),
         mention_model,
         group_meta_at: HashMap::new(),
+        common_groups_cache: HashMap::new(),
+        common_groups_pending: HashMap::new(),
         search_model,
         chat_search_model,
         chat_search_query: String::new(),
@@ -1653,6 +1657,8 @@ impl Bridge {
         self.sticker_order.clear();
         self.sticker_bytes = 0;
         self.group_meta_at.clear();
+        self.common_groups_cache.clear();
+        self.common_groups_pending.clear();
         self.search_model.set_vec(Vec::new());
         self.chat_search_model.set_vec(Vec::new());
         self.label_model.set_vec(Vec::new());
@@ -5530,6 +5536,29 @@ impl Bridge {
         self.ui.set_info_desc("".into());
         self.ui.set_info_is_group(group);
         self.ui.set_info_members("".into());
+        self.ui.set_info_common_groups(ModelRc::default());
+        self.ui.set_info_common_groups_state(if group { "" } else { "loading" }.into());
+        if !group {
+            let contact = self.store.canon_owned(&jid);
+            let cached = self.common_groups_cache.get(&contact).cloned();
+            if let Some((_, groups)) = &cached {
+                self.paint_common_groups(groups);
+            }
+            let fresh = cached.as_ref()
+                .is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(600));
+            let pending = self.common_groups_pending.get(&contact)
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(60));
+            if !fresh && !pending {
+                let mut identities = vec![jid.clone(), contact.clone()];
+                identities.extend(self.store.aliases.iter()
+                    .filter(|(_, phone)| **phone == contact)
+                    .map(|(lid, _)| lid.clone()));
+                identities.sort();
+                identities.dedup();
+                self.common_groups_pending.insert(contact, Instant::now());
+                self.wa.send(Cmd::FetchCommonGroups { jid: jid.clone(), identities });
+            }
+        }
         self.ui.set_info_archived(archived);
         self.ui.set_info_has_avatar(avatar.is_some());
         self.ui.set_info_avatar(avatar.unwrap_or_else(empty_image));
@@ -5579,6 +5608,35 @@ impl Bridge {
             self.ui
                 .set_info_members(ta("info.members", &[&members.to_string()]).into());
         }
+    }
+
+    pub fn on_common_groups(&mut self, jid: &str, groups: Option<Vec<(String, String)>>) {
+        let contact = self.store.canon_owned(jid);
+        self.common_groups_pending.remove(&contact);
+        if let Some(groups) = &groups {
+            self.common_groups_cache.insert(contact.clone(), (Instant::now(), groups.clone()));
+        }
+        let visible = self.current_jid.as_deref()
+            .is_some_and(|current| self.store.canon(current) == contact)
+            && self.ui.get_info_open()
+            && !self.ui.get_info_is_group();
+        if !visible {
+            return;
+        }
+        if let Some(groups) = groups {
+            self.paint_common_groups(&groups);
+        } else if !self.common_groups_cache.contains_key(&contact) {
+            self.ui.set_info_common_groups_state("error".into());
+        }
+    }
+
+    fn paint_common_groups(&self, groups: &[(String, String)]) {
+        let mut rows: Vec<MemberItem> = groups.iter()
+            .map(|(jid, name)| self.to_member_row(jid, name, "", false, false))
+            .collect();
+        rows.sort_by_key(|row| row.name.to_lowercase());
+        self.ui.set_info_common_groups(ModelRc::from(Rc::new(VecModel::from(rows))));
+        self.ui.set_info_common_groups_state("ready".into());
     }
 
     fn toggle_archive(&mut self) {

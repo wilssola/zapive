@@ -182,6 +182,7 @@ pub enum Cmd {
     SetCallVideo(bool),
     FetchChannel(String),
     FetchChatInfo { jid: String, group: bool },
+    FetchCommonGroups { jid: String, identities: Vec<String> },
     Archive { jid: String, archived: bool },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
@@ -2400,6 +2401,28 @@ async fn executor(
                     if let Some(target) = parse_jid(&jid) {
                         let _ = client.presence().subscribe(target).await;
                     }
+                });
+            }
+            Cmd::FetchCommonGroups { jid, identities } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let result = client.groups().get_participating().await;
+                    let groups = match result {
+                        Ok(groups) => Some(groups.into_iter().filter_map(|(group_jid, meta)| {
+                            let shared = meta.participants.iter().any(|participant| {
+                                std::iter::once(&participant.jid)
+                                    .chain(participant.phone_number.iter())
+                                    .chain(participant.lid.iter())
+                                    .any(|identity| identities.contains(&identity.to_non_ad_string()))
+                            });
+                            shared.then(|| (group_jid.to_non_ad_string(), meta.subject))
+                        }).collect::<Vec<_>>()),
+                        Err(error) => {
+                            log::warn!("fetch common groups failed: {error}");
+                            None
+                        }
+                    };
+                    ui_apply(move |b| b.on_common_groups(&jid, groups));
                 });
             }
             Cmd::FetchGroups => {

@@ -177,6 +177,30 @@ msgstr "Descrição"
 msgid "Shared media"
 msgstr "Mídia compartilhada"
 
+msgid "Groups in common"
+msgstr "Grupos em comum"
+
+msgid "Loading groups…"
+msgstr "Carregando grupos…"
+
+msgid "Could not load groups in common"
+msgstr "Não foi possível carregar os grupos em comum"
+
+msgid "No groups in common"
+msgstr "Nenhum grupo em comum"
+
+msgid "Call"
+msgstr "Ligar"
+
+msgid "Video"
+msgstr "Vídeo"
+
+msgid "More"
+msgstr "Mais"
+
+msgid "No media preview available"
+msgstr "Nenhuma prévia de mídia disponível"
+
 msgid "Archive chat"
 msgstr "Arquivar conversa"
 
