@@ -1433,6 +1433,11 @@ export component AppWindow inherits Window {
                                 }
                                 HorizontalLayout {
                                     spacing: 6px;
+                                    if chat.ticks != "": Ticks {
+                                        ticks: chat.ticks;
+                                        blue: chat.ticksBlue;
+                                        y: (parent.height - self.height) / 2;
+                                    }
                                     Text {
                                         text: chat.preview;
                                         color: Theme.text-dim;

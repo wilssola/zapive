@@ -2261,6 +2261,9 @@ impl Bridge {
                 });
             }
         }
+        if !changed.is_empty() {
+            self.schedule_refresh_chats();
+        }
         self.schedule_save();
     }
 
@@ -2579,10 +2582,22 @@ impl Bridge {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
         let meta = self.store.chats.get(jid);
+        let (preview, ticks, ticks_blue) = if let Some(body) = preview.strip_prefix("✓ ") {
+            let (ticks, blue) = self.store.messages.get(jid)
+                .and_then(|messages| messages.iter().max_by_key(|m| m.timestamp))
+                .filter(|m| m.from_me && m.timestamp == timestamp)
+                .map(ticks_for)
+                .unwrap_or(("✓", false));
+            (body, ticks, blue)
+        } else {
+            (preview, "", false)
+        };
         ChatItem {
             jid: jid.into(),
             name: name.clone().into(),
             preview: preview.into(),
+            ticks: ticks.into(),
+            ticksBlue: ticks_blue,
             time: format_time(timestamp).into(),
             hasAvatar: avatar.is_some(),
             avatar: avatar.unwrap_or_else(empty_image),
