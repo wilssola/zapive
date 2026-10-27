@@ -90,6 +90,8 @@ pub struct Bridge {
     requested_avatars: HashSet<String>,
     avatar_tries: HashMap<String, u32>,
     media_inflight: HashSet<String>,
+    media_previews: HashMap<String, slint::Image>,
+    preview_requested: HashSet<String>,
     // Media the server refused (expired, forbidden): asked once per run,
     // not again on every scroll.
     media_failed: HashSet<String>,
@@ -153,6 +155,7 @@ pub struct Bridge {
     member_picked: HashSet<String>,
     info_member_model: Rc<VecModel<MemberItem>>,
     label_model: Rc<VecModel<LabelItem>>,
+    label_chip_model: Rc<VecModel<LabelItem>>,
     // What the confirm dialog will do when accepted.
     confirm_action: Option<ConfirmAction>,
     // PDF viewer: the worker, the open document's page sizes (points),
@@ -475,6 +478,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let member_model = Rc::new(VecModel::<MemberItem>::default());
     let info_member_model = Rc::new(VecModel::<MemberItem>::default());
     let label_model = Rc::new(VecModel::<LabelItem>::default());
+    let label_chip_model = Rc::new(VecModel::<LabelItem>::default());
     let pdf_model = Rc::new(VecModel::<PdfPage>::default());
     let accounts_model = Rc::new(VecModel::<AccountItem>::default());
     ui.set_accounts(ModelRc::from(accounts_model.clone()));
@@ -485,6 +489,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     ui.set_member_rows(ModelRc::from(member_model.clone()));
     ui.set_info_member_rows(ModelRc::from(info_member_model.clone()));
     ui.set_labels(ModelRc::from(label_model.clone()));
+    ui.set_label_chips(ModelRc::from(label_chip_model.clone()));
     ui.set_sticker_rows(ModelRc::from(sticker_model.clone()));
     ui.set_fav_rows(ModelRc::from(fav_model.clone()));
     ui.set_gif_rows(ModelRc::from(gif_model.clone()));
@@ -534,6 +539,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         requested_avatars: HashSet::new(),
         avatar_tries: HashMap::new(),
         media_inflight: HashSet::new(),
+        media_previews: HashMap::new(),
+        preview_requested: HashSet::new(),
         media_failed: HashSet::new(),
         media_path: HashMap::new(),
         decoded: HashMap::new(),
@@ -578,6 +585,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         member_picked: HashSet::new(),
         info_member_model,
         label_model,
+        label_chip_model,
         confirm_action: None,
         pdf: crate::pdf::PdfWorker::start(),
         pdf_gen: 0,
@@ -704,6 +712,46 @@ fn wire_callbacks(ui: &AppWindow) {
                 vault.setting_set("send_receipts", if on { "1" } else { "0" });
             }
             b.ui.set_send_receipts(on);
+        });
+    });
+    ui.on_auto_download_photos_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("auto_download_photos", if on { "1" } else { "0" });
+            }
+            b.ui.set_auto_download_photos(on);
+        });
+    });
+    ui.on_auto_download_audio_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("auto_download_audio", if on { "1" } else { "0" });
+            }
+            b.ui.set_auto_download_audio(on);
+        });
+    });
+    ui.on_auto_download_video_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("auto_download_video", if on { "1" } else { "0" });
+            }
+            b.ui.set_auto_download_video(on);
+        });
+    });
+    ui.on_auto_download_documents_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("auto_download_documents", if on { "1" } else { "0" });
+            }
+            b.ui.set_auto_download_documents(on);
+        });
+    });
+    ui.on_auto_download_stickers_changed(|on| {
+        defer(move |b| {
+            if let Some(vault) = &b.vault {
+                vault.setting_set("auto_download_stickers", if on { "1" } else { "0" });
+            }
+            b.ui.set_auto_download_stickers(on);
         });
     });
     ui.on_apply_deletions_changed(|on| {
@@ -1062,6 +1110,10 @@ fn wire_callbacks(ui: &AppWindow) {
             b.schedule_row_gc();
         });
     });
+    ui.on_download_media(|id| {
+        let id = id.to_string();
+        defer(move |b| b.request_manual_media(&id));
+    });
     ui.on_open_lightbox(|id| {
         let id = id.to_string();
         defer(move |b| b.open_lightbox(&id));
@@ -1102,6 +1154,23 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_open_link_at(|id, offset| {
         let id = id.to_string();
         defer(move |b| b.open_link_at(&id, offset.max(0) as usize));
+    });
+    ui.on_copy_image(|id| {
+        let id = id.to_string();
+        defer(move |b| {
+            let Some(path) = b.media_path.get(&id).cloned() else { return };
+            std::thread::spawn(move || {
+                let Ok(image) = image::open(path) else { return };
+                let image = image.to_rgba8();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_image(arboard::ImageData {
+                        width: image.width() as usize,
+                        height: image.height() as usize,
+                        bytes: std::borrow::Cow::Owned(image.into_raw()),
+                    });
+                }
+            });
+        });
     });
     ui.on_copy_text(|id| {
         let id = id.to_string();
@@ -1568,6 +1637,8 @@ impl Bridge {
         self.requested_avatars.clear();
         self.avatar_tries.clear();
         self.media_inflight.clear();
+        self.media_previews.clear();
+        self.preview_requested.clear();
         self.media_failed.clear();
         self.media_path.clear();
         self.decoded.clear();
@@ -1583,6 +1654,7 @@ impl Bridge {
         self.search_model.set_vec(Vec::new());
         self.chat_search_model.set_vec(Vec::new());
         self.label_model.set_vec(Vec::new());
+        self.label_chip_model.set_vec(Vec::new());
     }
 
     // ---- accounts ----
@@ -2450,7 +2522,7 @@ impl Bridge {
                 .messages_for(&chat_jid)
                 .iter()
                 .find(|m| m.id == target)
-                .map(|m| preview_body(m).chars().take(32).collect())
+                .map(preview_body)
                 .unwrap_or_default();
             let name = self
                 .store
@@ -2723,6 +2795,9 @@ impl Bridge {
                     .unwrap_or(false),
             })
             .collect();
+        self.label_chip_model.set_vec(rows.iter().filter(|row| {
+            self.store.labels.get(row.id.as_str()).is_some_and(|label| !label.is_builtin_filter())
+        }).cloned().collect::<Vec<_>>());
         self.label_model.set_vec(rows);
     }
 
@@ -3002,7 +3077,7 @@ impl Bridge {
             self.scroll_to_end();
         }
         if needs_media {
-            self.request_media(&stored);
+            self.request_automatic_media(&stored);
         }
         self.queue_row_avatars(jid);
     }
@@ -3208,6 +3283,7 @@ impl Bridge {
                 .decoded
                 .get(&m.id)
                 .map(|(img, _, _)| img.clone())
+                .or_else(|| self.media_previews.get(&m.id).cloned())
                 .unwrap_or_else(empty_image),
             picW: self.decoded.get(&m.id).map(|&(_, w, _)| w).unwrap_or(pic_w),
             picH: self.decoded.get(&m.id).map(|&(_, _, h)| h).unwrap_or(pic_h),
@@ -3218,6 +3294,7 @@ impl Bridge {
                 .unwrap_or_default()
                 .into(),
             mediaReady: self.media_path.contains_key(&m.id),
+            mediaLoading: self.media_inflight.contains(&m.id),
             reactions: reactions.into(),
             reactionCount: reaction_count.into(),
             dayLabel: day_label.into(),
@@ -3713,7 +3790,7 @@ impl Bridge {
             .cloned()
             .collect();
         for m in pending {
-            self.request_media(&m);
+            self.request_automatic_media(&m);
         }
     }
 
@@ -3751,7 +3828,7 @@ impl Bridge {
             })
             .unwrap_or(true);
         if !loaded {
-            self.request_media(&m);
+            self.request_automatic_media(&m);
         }
     }
 
@@ -3820,6 +3897,9 @@ impl Bridge {
 
     // The bubble holds a small decode; the lightbox wants the real thing.
     fn open_lightbox(&mut self, id: &str) {
+        if !self.media_path.contains_key(id) {
+            self.request_manual_media(id);
+        }
         let Some(row) = (0..self.messages_model.row_count())
             .filter_map(|i| self.messages_model.row_data(i))
             .find(|r| r.id == id)
@@ -3935,6 +4015,62 @@ impl Bridge {
                 now_secs(),
                 body,
             );
+        }
+    }
+
+    fn request_automatic_media(&mut self, m: &StoredMessage) {
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        if !m.deleted && matches!(m.kind, MessageKind::Image | MessageKind::Video)
+            && !self.decoded.contains_key(&m.id) && self.preview_requested.insert(m.id.clone())
+        {
+            let bytes = m.raw.as_ref().and_then(|raw| {
+                let inner = raw.get_base_message();
+                inner.image_message.as_option().and_then(|v| v.jpeg_thumbnail.clone())
+                    .or_else(|| inner.video_message.as_option().and_then(|v| v.jpeg_thumbnail.clone()))
+            });
+            if let Some(bytes) = bytes.filter(|bytes| !bytes.is_empty()) {
+                self.wa.send(Cmd::DecodePreview { id: m.id.clone(), bytes });
+            }
+        }
+        let voice = m.raw.as_ref().is_some_and(|raw| {
+            raw.get_base_message()
+                .audio_message
+                .as_option()
+                .is_some_and(|a| a.ptt == Some(true))
+        });
+        let enabled = if m.sticker {
+            self.ui.get_auto_download_stickers()
+        } else {
+            match m.kind {
+                MessageKind::Image => self.ui.get_auto_download_photos(),
+                MessageKind::Audio => self.ui.get_auto_download_audio(),
+                MessageKind::Video => self.ui.get_auto_download_video(),
+                MessageKind::Doc => self.ui.get_auto_download_documents(),
+                _ => false,
+            }
+        };
+        let cached = m
+            .raw
+            .as_ref()
+            .is_some_and(|raw| crate::media::cached_path(&m.id, &m.mimetype, raw).1);
+        if enabled || voice || cached {
+            self.request_media(m);
+        }
+    }
+
+    fn request_manual_media(&mut self, id: &str) {
+        let message = self.current_jid.as_ref().and_then(|jid| {
+            self.store
+                .messages_for(jid)
+                .iter()
+                .find(|m| m.id == id)
+                .cloned()
+        });
+        if let Some(message) = message {
+            self.media_failed.remove(id);
+            self.request_media(&message);
+            let loading = self.media_inflight.contains(id);
+            self.patch_row(id, |row| row.mediaLoading = loading);
         }
     }
 
@@ -4055,6 +4191,8 @@ impl Bridge {
                 });
             }
         }
+        let loading = self.media_inflight.contains(&m.id);
+        self.patch_row(&m.id, |row| row.mediaLoading = loading);
     }
 
     fn remember_decoded(&mut self, id: &str, image: slint::Image, w: i32, h: i32) {
@@ -4097,17 +4235,23 @@ impl Bridge {
         });
     }
 
+    pub fn on_media_preview(&mut self, id: &str, img: Option<crate::media::Decoded>) {
+        let Some(img) = img else { return };
+        if self.decoded.contains_key(id) { return; }
+        let image = image_of(&img);
+        self.media_previews.insert(id.to_string(), image.clone());
+        self.patch_row(id, |row| row.picture = image.clone());
+    }
+
     pub fn on_media_missing(&mut self, id: &str) {
         self.media_inflight.remove(id);
+        self.patch_row(id, |row| row.mediaLoading = false);
         self.media_failed.insert(id.to_string());
-        self.patch_row(id, |row| {
-            row.kind = "text".into();
-            row.text = t("media.unavailable").into();
-        });
     }
 
     pub fn on_media_file(&mut self, id: &str, path: &std::path::Path) {
         self.media_inflight.remove(id);
+        self.patch_row(id, |row| row.mediaLoading = false);
         let path_str = path.to_string_lossy().into_owned();
         self.media_path.insert(id.to_string(), path_str.clone());
         self.patch_row(id, |row| {
@@ -4142,6 +4286,7 @@ impl Bridge {
 
     pub fn on_media_image(&mut self, id: &str, path: &std::path::Path, img: crate::media::Decoded) {
         self.media_inflight.remove(id);
+        self.patch_row(id, |row| row.mediaLoading = false);
         let image = image_of(&img);
         let (pic_w, pic_h) = bubble_fit(img.w as i32, img.h as i32);
         self.remember_decoded(id, image.clone(), pic_w, pic_h);
@@ -4165,6 +4310,7 @@ impl Bridge {
         frames: Vec<crate::media::Decoded>,
     ) {
         self.media_inflight.remove(id);
+        self.patch_row(id, |row| row.mediaLoading = false);
         if frames.is_empty() {
             self.on_media_missing(id);
             return;
@@ -4273,6 +4419,7 @@ impl Bridge {
         frames: Vec<crate::media::Decoded>,
     ) {
         self.media_inflight.remove(id);
+        self.patch_row(id, |row| row.mediaLoading = false);
         if frames.is_empty() {
             self.on_media_missing(id);
             return;
@@ -4315,6 +4462,7 @@ impl Bridge {
         let (w, h) = (img.w as i32, img.h as i32);
         if link {
             self.media_inflight.remove(id);
+            self.patch_row(id, |row| row.mediaLoading = false);
             self.patch_row(id, |row| {
                 row.linkThumb = image;
                 row.hasLinkThumb = true;
@@ -5820,12 +5968,7 @@ impl Bridge {
         }
         let id = self.store.next_label_id();
         let order = self.store.labels.len() as i32;
-        let label = Label {
-            id: id.clone(),
-            name: name.to_string(),
-            color: order % 20,
-            order,
-        };
+        let label = Label { id: id.clone(), name: name.to_string(), color: order % 20, order, list_type: Some(5) };
         self.store.upsert_label(label);
         self.wa.send(Cmd::LabelCreate {
             id: id.clone(),
@@ -5858,16 +6001,12 @@ impl Bridge {
         self.schedule_refresh_chats();
     }
 
-    pub fn on_label(&mut self, id: &str, name: &str, color: i32, order: i32, deleted: bool) {
+    pub fn on_label(&mut self, id: &str, name: &str, color: i32, order: i32, deleted: bool, list_type: Option<i32>) {
         if deleted {
             self.store.remove_label(id);
         } else if !name.is_empty() {
-            self.store.upsert_label(Label {
-                id: id.to_string(),
-                name: name.to_string(),
-                color,
-                order,
-            });
+            let list_type = list_type.or_else(|| self.store.labels.get(id).and_then(|l| l.list_type));
+            self.store.upsert_label(Label { id: id.to_string(), name: name.to_string(), color, order, list_type });
         }
         self.refresh_labels();
         self.schedule_refresh_chats();
@@ -6476,7 +6615,7 @@ impl Bridge {
                 self.patch_sticker_cells(&m.id, first);
                 continue;
             }
-            self.request_media(&m);
+            self.request_automatic_media(&m);
         }
     }
 
@@ -6566,9 +6705,11 @@ impl Bridge {
     }
 
     fn open_document(&mut self, id: &str) {
-        let Some((m, path)) = self.plain_document(id) else {
+        if !self.media_path.contains_key(id) {
+            self.request_manual_media(id);
             return;
-        };
+        }
+        let Some((m, path)) = self.plain_document(id) else { return };
         if crate::pdf::is_pdf(&m.mimetype, &m.text) {
             self.open_pdf(id, &m.text, path);
         } else {
@@ -7648,6 +7789,10 @@ impl Bridge {
                 }
                 self.ui.set_mini_audio_playing(!paused);
             }
+            return;
+        }
+        if !self.media_path.contains_key(id) {
+            self.request_manual_media(id);
             return;
         }
         self.start_audio(id, 0.0);

@@ -104,6 +104,7 @@ pub enum Cmd {
     Media { id: String, mimetype: String, message: std::sync::Arc<wa::Message>, want: MediaWant },
     // Decodes an embedded thumbnail (link previews, video posters).
     DecodeThumb { id: String, bytes: Vec<u8>, link: bool },
+    DecodePreview { id: String, bytes: Vec<u8> },
     FetchAvatar(String),
     // The full-size picture for the info panel.
     AvatarLarge(String),
@@ -856,7 +857,8 @@ impl EventHandler for Pump {
                 let color = u.action.color.unwrap_or(0);
                 let order = u.action.order_index.unwrap_or(0);
                 let deleted = u.action.deleted.unwrap_or(false);
-                ui_apply(move |b| b.on_label(&id, &name, color, order, deleted));
+                let list_type = u.action.r#type.map(|kind| kind as i32);
+                ui_apply(move |b| b.on_label(&id, &name, color, order, deleted, list_type));
             }
             Event::LabelAssociationUpdate(u) => {
                 let id = u.label_id.clone();
@@ -1035,6 +1037,17 @@ async fn executor(
                             }
                         }
                     }
+                });
+            }
+            Cmd::DecodePreview { id, bytes } => {
+                tokio::spawn(async move {
+                    let img = tokio::task::spawn_blocking(move || {
+                        let image = image::load_from_memory(&bytes).ok()?.blur(8.0).to_rgba8();
+                        Some(crate::media::Decoded {
+                            w: image.width(), h: image.height(), rgba: image.into_raw(),
+                        })
+                    }).await.ok().flatten();
+                    ui_apply(move |b| b.on_media_preview(&id, img));
                 });
             }
             Cmd::DecodeThumb { id, bytes, link } => {

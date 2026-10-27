@@ -119,6 +119,21 @@ fn main() {
     // revoke keeps its message) is what a fresh install already does.
     ui.set_send_receipts(app_vault.setting_get("send_receipts").as_deref() == Some("1"));
     ui.set_apply_deletions(app_vault.setting_get("apply_deletions").as_deref() == Some("1"));
+    ui.set_auto_download_photos(
+        app_vault.setting_get("auto_download_photos").as_deref() != Some("0"),
+    );
+    ui.set_auto_download_audio(
+        app_vault.setting_get("auto_download_audio").as_deref() != Some("0"),
+    );
+    ui.set_auto_download_video(
+        app_vault.setting_get("auto_download_video").as_deref() != Some("0"),
+    );
+    ui.set_auto_download_documents(
+        app_vault.setting_get("auto_download_documents").as_deref() != Some("0"),
+    );
+    ui.set_auto_download_stickers(
+        app_vault.setting_get("auto_download_stickers").as_deref() != Some("0"),
+    );
 
     // Theme: explicit modes win; "system" follows the OS with a slow poll.
     let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
