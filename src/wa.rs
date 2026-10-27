@@ -146,10 +146,17 @@ pub enum Cmd {
     // picking a sticker from the recents/favorites tray doesn't show a
     // "Forwarded" tag (WhatsApp itself never tags that as a forward).
     ResendMedia { jid: String, message: std::sync::Arc<wa::Message> },
-    // Outgoing media (paths are plain files picked by the user).
-    SendImage { jid: String, path: std::path::PathBuf, caption: Option<String> },
-    SendDocument { jid: String, path: std::path::PathBuf },
-    SendAudioFile { jid: String, path: std::path::PathBuf },
+    // Outgoing media (paths are plain files picked by the user). `origin` is
+    // that same file as shown in the row, which then reopens it instead of
+    // downloading the copy that just went up.
+    SendImage {
+        jid: String,
+        path: std::path::PathBuf,
+        origin: Option<String>,
+        caption: Option<String>,
+    },
+    SendDocument { jid: String, path: std::path::PathBuf, origin: Option<String> },
+    SendAudioFile { jid: String, path: std::path::PathBuf, origin: Option<String> },
     // Decode a local image for the send-preview overlay.
     PreviewImage { path: std::path::PathBuf },
     // Stickers and GIFs (the video player runs its own threads).
@@ -1163,7 +1170,8 @@ async fn executor(
                     }
                 });
             }
-            Cmd::SendImage { jid, path, caption } => {
+
+            Cmd::SendImage { jid, path, origin, caption } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
                     let Ok(bytes) = tokio::fs::read(&path).await else { return };
@@ -1194,13 +1202,13 @@ async fn executor(
                     match client.send_message(to, message.clone()).await {
                         Ok(sent) => {
                             let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
                         }
                         Err(e) => eprintln!("[wa] image send failed: {e}"),
                     }
                 });
             }
-            Cmd::SendDocument { jid, path } => {
+            Cmd::SendDocument { jid, path, origin } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
                     let Ok(bytes) = tokio::fs::read(&path).await else { return };
@@ -1229,13 +1237,13 @@ async fn executor(
                     match client.send_message(to, message.clone()).await {
                         Ok(sent) => {
                             let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
                         }
                         Err(e) => eprintln!("[wa] document send failed: {e}"),
                     }
                 });
             }
-            Cmd::SendAudioFile { jid, path } => {
+            Cmd::SendAudioFile { jid, path, origin } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
                     let Ok(bytes) = tokio::fs::read(&path).await else { return };
@@ -1268,12 +1276,13 @@ async fn executor(
                     match client.send_message(to, message.clone()).await {
                         Ok(sent) => {
                             let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
                         }
                         Err(e) => eprintln!("[wa] audio send failed: {e}"),
                     }
                 });
             }
+
             Cmd::PreviewImage { path } => {
                 tokio::spawn(async move {
                     let img = tokio::task::spawn_blocking(move || {

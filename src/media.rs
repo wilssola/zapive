@@ -109,6 +109,36 @@ fn downloadable(msg: &wa::Message) -> Option<&dyn whatsapp_rust::wacore::downloa
     None
 }
 
+// Whether the message carries media Zapive can fetch from the server.
+// Outgoing messages never need it: the file came from disk, so the
+// original copy is opened instead of downloading the round trip.
+pub fn is_downloadable(msg: &wa::Message) -> bool {
+    downloadable(msg).is_some()
+}
+
+// How many plaintext bytes the download will write, as declared by the
+// message (encrypted size on the CDN, minus padding/IV/tag).
+pub fn expected_bytes(msg: &wa::Message) -> Option<u64> {
+    downloadable(msg)?.file_length()
+}
+
+// Human size: 640 B, 18.4 KB, 3.2 MB. Empty when the size is unknown.
+pub fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 // Stickers are keyed by their content hash rather than the message id:
 // the same sticker sent ten times is one file and one decode.
 pub fn sticker_key(msg: &wa::Message) -> Option<String> {
@@ -152,15 +182,97 @@ pub async fn ensure_cached(
     msg: &wa::Message,
     sem: &std::sync::Arc<tokio::sync::Semaphore>,
 ) -> Option<PathBuf> {
+    ensure_cached_with_progress(client, Some(key), id, mimetype, msg, sem, |_| {}).await
+}
+
+struct ProgressWriter<F> {
+    bytes: std::io::Cursor<Vec<u8>>,
+    progress: std::sync::Arc<F>,
+    // Last reported byte count: the socket hands over ~16 KB chunks, which
+    // on a fast CDN would repaint the bar hundreds of times a second.
+    reported: std::sync::atomic::AtomicU64,
+}
+
+impl<F: Fn(u64)> ProgressWriter<F> {
+    fn report(&self) {
+        let written = self.bytes.position();
+        let last = self.reported.load(std::sync::atomic::Ordering::Relaxed);
+        if written.saturating_sub(last) >= PROGRESS_STEP_BYTES {
+            self.reported.store(written, std::sync::atomic::Ordering::Relaxed);
+            (self.progress)(written);
+        }
+    }
+}
+
+const PROGRESS_STEP_BYTES: u64 = 32 * 1024;
+
+impl<F: Fn(u64)> std::io::Write for ProgressWriter<F> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = std::io::Write::write(&mut self.bytes, buf)?;
+        self.report();
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut self.bytes)
+    }
+}
+
+impl<F: Fn(u64)> std::io::Seek for ProgressWriter<F> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        std::io::Seek::seek(&mut self.bytes, pos)
+    }
+}
+
+impl<F: Fn(u64)> whatsapp_rust::wacore::download::DownloadWriter for ProgressWriter<F> {
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.bytes.get_mut().truncate(usize::try_from(len).unwrap_or(usize::MAX));
+        self.reported.store(0, std::sync::atomic::Ordering::Relaxed);
+        (self.progress)(self.bytes.get_ref().len() as u64);
+        Ok(())
+    }
+}
+
+/**
+ * Reports plaintext bytes written, resetting progress when a download is
+ * retried. A cache hit does not invoke the callback.
+ *
+ * The result carries the persisted path; when `key` is None the plaintext is
+ * written in place of the sealed blob (never after a fresh download: the
+ * encryption keeps decrypted media off disk).
+ */
+pub async fn ensure_cached_with_progress<F>(
+    client: &std::sync::Arc<whatsapp_rust::client::Client>,
+    key: Option<&KeyHandle>,
+    id: &str,
+    mimetype: &str,
+    msg: &wa::Message,
+    sem: &std::sync::Arc<tokio::sync::Semaphore>,
+    progress: F,
+) -> Option<PathBuf>
+where
+    F: Fn(u64) + Send + Sync + 'static,
+{
     let (path, exists) = cached_path(id, mimetype, msg);
     if exists {
         return Some(path);
     }
+    let key = key?;
     let target = downloadable(msg)?;
+    let total = target.file_length().unwrap_or(0);
+    let progress = std::sync::Arc::new(progress);
+    let writer = || {
+        progress(0);
+        ProgressWriter {
+            bytes: std::io::Cursor::new(Vec::new()),
+            progress: progress.clone(),
+            reported: std::sync::atomic::AtomicU64::new(0),
+        }
+    };
     wait_for_backoff().await;
     let mut attempt = {
         let _permit = sem.acquire().await;
-        client.download(target).await
+        client.download_to_writer(target, writer()).await
     };
     if attempt.as_ref().is_err_and(|e| rate_limited(&e.to_string())) {
         // The server is throttling media: back everything off, then try
@@ -168,11 +280,16 @@ pub async fn ensure_cached(
         note_rate_limit();
         wait_for_backoff().await;
         let _permit = sem.acquire().await;
-        attempt = client.download(target).await;
+        attempt = client.download_to_writer(target, writer()).await;
     }
     match attempt {
         Ok(bytes) => {
-            let sealed = key.encrypt_bytes(&bytes);
+            let len = bytes.bytes.get_ref().len() as u64;
+            // The last chunk may be smaller than a step: land on the real end.
+            // A declared total smaller than what arrived must not push the
+            // bar past 100%.
+            progress(if total == 0 { len } else { len.min(total) });
+            let sealed = key.encrypt_bytes(&bytes.bytes.into_inner());
             if let Err(e) = tokio::fs::write(&path, sealed).await {
                 eprintln!("[media] cache write failed for {id}: {e}");
                 return None;
