@@ -1992,14 +1992,14 @@ export component AppWindow inherits Window {
                                         opacity: 0.55;
                                     }
                                     Rectangle {
-                                        width: 46px;
-                                        height: 46px;
-                                        border-radius: 23px;
+                                        width: 140px;
+                                        height: 36px;
+                                        border-radius: 18px;
                                         x: (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
                                         background: #00000090;
                                         Text {
-                                            text: msg.mediaLoading ? @tr("Downloading…") : @tr("Download");
+                                            text: msg.mediaLoading ? round(clamp(msg.mediaProgress, 0, 100)) + "%" : (msg.kind == "image" ? @tr("Image") : @tr("Video")) + " · " + msg.mediaSize;
                                             color: white;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
@@ -2119,7 +2119,7 @@ export component AppWindow inherits Window {
                                         border-radius: 18px;
                                         background: #000000a0;
                                         Text {
-                                            text: msg.mediaLoading ? @tr("Downloading…") : @tr("Download");
+                                            text: msg.mediaLoading ? round(clamp(msg.mediaProgress, 0, 100)) + "%" : (msg.kind == "image" ? @tr("Image") : @tr("Video")) + " · " + msg.mediaSize;
                                             color: white;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;

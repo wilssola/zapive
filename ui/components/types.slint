@@ -134,6 +134,15 @@ export struct MessageItem {
     mediaPath: string,
     mediaReady: bool,
     mediaLoading: bool,
+    // Download percentage: -1 means unknown; otherwise 0..100.
+    mediaProgress: float,
+    // Media the user has to ask for: the bubble shows its kind, its size
+    // and (once accepted) the download progress instead of opening it.
+    mediaOffer: bool,
+    // "Image", "Video", "Audio", "Document": what the offer is about.
+    mediaKind: string,
+    // Formatted file size (KB / MB), empty when unavailable.
+    mediaSize: string,
     reactions: string,
     reactionCount: string,
     dayLabel: string,
