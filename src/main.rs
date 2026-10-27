@@ -7,6 +7,7 @@ mod audio;
 mod bridge;
 mod call;
 mod camera;
+mod emoji;
 mod fonts;
 mod i18n;
 mod logging;

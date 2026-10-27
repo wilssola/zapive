@@ -185,6 +185,15 @@ fn en(key: &str) -> &'static str {
         "reactions.count" => "{0} reactions",
         "reactions.you" => "You",
         "forward.title" => "Forward message to",
+        "emoji.smileys" => "Smileys & Emotion",
+        "emoji.people" => "People & Body",
+        "emoji.animals" => "Animals & Nature",
+        "emoji.food" => "Food & Drink",
+        "emoji.activities" => "Activities",
+        "emoji.travel" => "Travel & Places",
+        "emoji.objects" => "Objects",
+        "emoji.symbols" => "Symbols",
+        "emoji.flags" => "Flags",
         _ => key_missing(key),
     }
 }
@@ -355,6 +364,15 @@ fn pt(key: &str) -> &'static str {
         "reactions.count" => "{0} reações",
         "reactions.you" => "Você",
         "forward.title" => "Encaminhar mensagem para",
+        "emoji.smileys" => "Smileys e emoções",
+        "emoji.people" => "Pessoas e corpo",
+        "emoji.animals" => "Animais e natureza",
+        "emoji.food" => "Comidas e bebidas",
+        "emoji.activities" => "Atividades",
+        "emoji.travel" => "Viagens e lugares",
+        "emoji.objects" => "Objetos",
+        "emoji.symbols" => "Símbolos",
+        "emoji.flags" => "Bandeiras",
         _ => key_missing(key),
     }
 }

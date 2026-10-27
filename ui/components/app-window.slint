@@ -1,6 +1,6 @@
 import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem } from "types.slint";
+import { ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
 import { Avatar } from "avatar.slint";
 import { GreenLink } from "green-link.slint";
 import { IconButton } from "icon-button.slint";
@@ -16,6 +16,32 @@ import { MenuRow } from "rows/menu.slint";
 import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
 import { AccountRow } from "rows/account.slint";
+
+// The time/ticks cluster that floats at the bottom-right of a bubble's
+// text block, on the space the trailing NBSP run reserves.
+component BubbleMeta {
+    in property <string> time;
+    in property <string> ticks;
+    in property <bool> blue;
+    in property <bool> fromMe;
+    height: 14px;
+    HorizontalLayout {
+        spacing: 4px;
+        Text {
+            text: time;
+            font-size: 10px;
+            color: fromMe ? Theme.time-out : Theme.text-dim;
+            vertical-alignment: center;
+        }
+        if ticks != "": Text {
+            text: ticks;
+            font-size: 10px;
+            font-weight: 700;
+            color: blue ? #53bdeb : Theme.time-out;
+            vertical-alignment: center;
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     title: "Zapive";
@@ -139,7 +165,7 @@ export component AppWindow inherits Window {
     in-out property <bool> conv-ready: false;
     in-out property <bool> picker-open: false;
     in-out property <string> picker-tab: "emoji";
-    in-out property <[[string]]> emoji-rows;
+    in-out property <[EmojiRow]> emoji-rows;
     in-out property <[[StickerCell]]> sticker-rows;
     in-out property <[[StickerCell]]> gif-rows;
     in-out property <[[StickerCell]]> fav-rows;
@@ -1720,6 +1746,11 @@ export component AppWindow inherits Window {
                             (msg.kind == "image" || msg.kind == "video") && msg.picW > 0
                                 ? max(150px, msg.picW * 1px)
                                 : max-text-w;
+                        // Whether the time/ticks float on the last text line (text paths only).
+                        property <bool> meta-inline:
+                            (msg.hasStyled || msg.kind == "text"
+                                || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
+                            && (msg.text != "" || msg.deleted);
                         property <length> unread-offset: msg.unread-boundary ? 34px : 0;
                         property <length> day-offset: (msg.dayLabel != "" ? 34px : 0) + unread-offset;
                         if msg.unread-boundary: Rectangle {
@@ -2347,6 +2378,20 @@ export component AppWindow inherits Window {
                                         link-color: Theme.accent;
                                         width: min(self.preferred-width, msg-row.max-text-w);
                                     }
+                                    stamp-in := Rectangle {
+                                        width: stamp-lay.preferred-width;
+                                        height: stamp-lay.preferred-height;
+                                        x: parent.width - stamp-lay.preferred-width;
+                                        y: parent.height - stamp-lay.preferred-height - 1px;
+                                        stamp-lay := HorizontalLayout {
+                                            BubbleMeta {
+                                                time: msg.time;
+                                                ticks: msg.ticks;
+                                                blue: msg.ticksBlue;
+                                                fromMe: msg.fromMe;
+                                            }
+                                        }
+                                    }
                                     sel-overlay := TextInput {
                                         text: msg.plain;
                                         read-only: true;
@@ -2417,7 +2462,8 @@ export component AppWindow inherits Window {
                                     width: min(plain-text.preferred-width, msg-row.content-w);
                                     height: plain-text.preferred-height;
                                     plain-text := TextInput {
-                                        text: msg.deleted ? "🚫 " + msg.text : msg.text;
+                                        text: (msg.deleted ? "🚫 " + msg.text : msg.text)
+                                            + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
                                         read-only: true;
                                         single-line: false;
                                         wrap: word-wrap;
@@ -2430,13 +2476,27 @@ export component AppWindow inherits Window {
                                         width: parent.width;
                                         height: self.preferred-height;
                                     }
+                                    stamp-in2 := Rectangle {
+                                        width: stamp-lay2.preferred-width;
+                                        height: stamp-lay2.preferred-height;
+                                        x: parent.width - stamp-lay2.preferred-width;
+                                        y: parent.height - stamp-lay2.preferred-height - 1px;
+                                        stamp-lay2 := HorizontalLayout {
+                                            BubbleMeta {
+                                                time: msg.time;
+                                                ticks: msg.ticks;
+                                                blue: msg.ticksBlue;
+                                                fromMe: msg.fromMe;
+                                            }
+                                        }
+                                    }
                                 }
 
                                 // Stickers have no bubble, so the timestamp
                                 // gets its own pill like WhatsApp draws it,
                                 // with breathing room under the artwork.
                                 if msg.sticker: Rectangle { height: 6px; }
-                                if msg.kind != "audio" && msg.kind != "system": HorizontalLayout {
+                                if msg.kind != "audio" && msg.kind != "system" && !msg-row.meta-inline: HorizontalLayout {
                                     alignment: end;
                                     Rectangle {
                                         width: stamp.preferred-width + (msg.sticker ? 14px : 0);
@@ -3024,11 +3084,20 @@ export component AppWindow inherits Window {
                     }
                     if root.picker-tab == "emoji": ListView {
                         for row in root.emoji-rows: Rectangle {
-                            height: 44px;
-                            HorizontalLayout {
+                            height: row.label != "" ? 28px : 44px;
+                            if row.label != "": Text {
+                                text: row.label;
+                                font-size: 12px;
+                                color: Theme.text-dim;
+                                x: 6px;
+                                width: parent.width - 6px;
+                                height: parent.height;
+                                vertical-alignment: center;
+                            }
+                            if row.label == "": HorizontalLayout {
                                 spacing: 2px;
                                 alignment: start;
-                                for e in row: em-touch := TouchArea {
+                                for e in row.cells: em-touch := TouchArea {
                                     width: 42px;
                                     height: 42px;
                                     mouse-cursor: pointer;
