@@ -1,0 +1,146 @@
+import { Theme } from "theme.slint";
+
+component HomeAction inherits TouchArea {
+    in property <string> label;
+    in property <image> icon;
+    mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.label;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: root.has-hover ? Theme.accent : Theme.border;
+        background: root.pressed ? Theme.selected : root.has-hover ? Theme.hover : Theme.dark ? #17292e : #ffffffb3;
+
+        Image {
+            source: root.icon;
+            colorize: root.has-hover ? Theme.accent : Theme.icon;
+            width: 25px;
+            height: 25px;
+            x: (parent.width - self.width) / 2;
+            y: parent.height * 0.19;
+        }
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 13px;
+            font-weight: 500;
+            x: 8px;
+            y: parent.height * 0.53;
+            width: parent.width - 16px;
+            height: parent.height * 0.4;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component HomeScreen inherits Rectangle {
+    callback conversations();
+    callback groups();
+    callback settings();
+    private property <bool> compact: root.height < 540px;
+    private property <length> illustration-height: max(0px, min(260px, root.height * 0.37, root.width * 0.6, root.height - root.section-gap * 2 - root.brand-height - 44px - root.tile-height - 24px));
+    private property <length> section-gap: root.compact ? 14px : 26px;
+    private property <length> brand-height: root.compact ? 46px : 60px;
+    private property <length> tile-height: root.compact ? 88px : 104px;
+    background: Theme.dark
+        ? @linear-gradient(145deg, #152c32 0%, #101f26 52%, #0d191f 100%)
+        : @linear-gradient(145deg, #e7f4ee 0%, #f5f8f7 55%, #edf4f3 100%);
+    clip: true;
+
+    Path {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 650;
+        viewbox-height: 700;
+        commands: "M-60 490 C130 310 330 690 720 380 M-60 520 C150 340 350 720 720 410 M-60 550 C170 370 370 750 720 440 M-60 580 C190 400 390 780 720 470";
+        fill: transparent;
+        stroke: Theme.dark ? #54c9a309 : #0080690c;
+        stroke-width: 1px;
+    }
+
+    content := Rectangle {
+        width: max(0px, min(520px, parent.width - 40px));
+        height: root.illustration-height + root.section-gap * 2 + root.brand-height + 44px + root.tile-height;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: transparent;
+
+        Image {
+            source: @image-url("../icons/home-illustration.svg");
+            width: min(parent.width, root.illustration-height * 1.5);
+            height: root.illustration-height;
+            x: (parent.width - self.width) / 2;
+            y: 0px;
+            image-fit: contain;
+        }
+
+        brand := HorizontalLayout {
+            x: (parent.width - self.width) / 2;
+            y: root.illustration-height + root.section-gap;
+            width: self.preferred-width;
+            height: root.brand-height;
+            spacing: 0px;
+            Text {
+                text: "Zap";
+                color: Theme.text;
+                font-size: root.compact ? 38px : 48px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: "ive";
+                color: Theme.dark ? #40e6a0 : #008b59;
+                font-size: root.compact ? 38px : 48px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        subtitle := Text {
+            x: 0px;
+            y: brand.y + brand.height + 8px;
+            width: parent.width;
+            height: 36px;
+            text: @tr("Select a conversation to start");
+            color: Theme.text-dim;
+            font-size: root.compact ? 14px : 16px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            x: 0px;
+            y: subtitle.y + subtitle.height + root.section-gap;
+            width: parent.width;
+            height: root.tile-height;
+            spacing: 12px;
+            HomeAction {
+                width: (content.width - 24px) / 3;
+                label: @tr("Your conversations");
+                icon: @image-url("../icons/message-circle.svg");
+                clicked => { root.conversations(); }
+            }
+            HomeAction {
+                width: (content.width - 24px) / 3;
+                label: @tr("Your groups");
+                icon: @image-url("../icons/users-group.svg");
+                clicked => { root.groups(); }
+            }
+            HomeAction {
+                width: (content.width - 24px) / 3;
+                label: @tr("Settings");
+                icon: @image-url("../icons/settings.svg");
+                clicked => { root.settings(); }
+            }
+        }
+    }
+}
