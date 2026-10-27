@@ -14,8 +14,7 @@ use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
     AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
-    MessageItem, PdfPage,
-    ReactionItem, SearchHit, StickerCell,
+    MessageItem, PdfPage, ReactionItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -35,11 +34,10 @@ const STALE_CALL_SECS: i64 = 75;
 const RING_TIMEOUT_MS: u64 = 45_000;
 // How long the call screen stays up after the call ends.
 const CALL_LINGER_MS: u64 = 2_000;
-
-// Curated emoji palette for the picker. The few whose default presentation
-// is text (heart, victory hand, ...) carry U+FE0F, so they go out to
-// WhatsApp the way a phone sends them.
-const EMOJIS: &str = "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😜 🤪 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👹 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙌 👏 🤝 👍 👎 👊 ✊ 🤛 🤜 🤞 ✌️ 🤟 🤘 👌 🤏 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 🤙 💪 🙏 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💕 💞 💓 💯 💥 💫 🔥 ⭐ 🌟 ⚡ 🎉 🎈 🎁 🏆 ⚽ 🎮 🎵 ☕ 🍻 🍕 🍔 🎂 🍫 🚀 ✈️ 🚗 💰";
+// A run of non-breaking spaces appended to the styled text (and its
+// plain overlay) so the text engine wraps the last line early and
+// leaves the bottom-right corner free for the floating time/ticks.
+const META_PAD: &str = "\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}";
 
 pub struct Bridge {
     ui: AppWindow,
@@ -347,19 +345,33 @@ pub fn replay_link_press(
     // The box still holds the mouse grab from the real press. A press of
     // another button is refused by it (it is disabled now), which frees
     // the grab, and it also restarts Slint's own click counter.
-    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Other });
-    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Other });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Other,
+    });
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Other,
+    });
     for click in 1..=run {
-        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
         if click < run {
-            window
-                .dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+            window.dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
         }
     }
     // A click quicker than this replay: the button is already up, and
     // the release went to the box instead of the text.
     if released() {
-        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
     }
     pass_through(false);
 }
@@ -369,12 +381,18 @@ pub fn replay_link_press(
 fn poster_box(w: i32, h: i32) -> (i32, i32) {
     let (w, h) = (w.max(1) as f64, h.max(1) as f64);
     let scale = (330.0 / w).min(380.0 / h);
-    (((w * scale).round() as i32).max(1), ((h * scale).round() as i32).max(1))
+    (
+        ((w * scale).round() as i32).max(1),
+        ((h * scale).round() as i32).max(1),
+    )
 }
 
 fn bubble_fit(w: i32, h: i32) -> (i32, i32) {
     let scale = (330.0 / w as f64).min(380.0 / h as f64).min(1.0);
-    (((w as f64 * scale).round() as i32).max(1), ((h as f64 * scale).round() as i32).max(1))
+    (
+        ((w as f64 * scale).round() as i32).max(1),
+        ((h as f64 * scale).round() as i32).max(1),
+    )
 }
 
 thread_local! {
@@ -392,7 +410,10 @@ pub fn ui_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
 // processing an event then would build on empty state and a later save
 // would clobber the vault. Park them and let boot replay in order.
 pub fn wa_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
-    wa_apply_at(crate::wa::SESSION_EPOCH.load(std::sync::atomic::Ordering::SeqCst), f);
+    wa_apply_at(
+        crate::wa::SESSION_EPOCH.load(std::sync::atomic::Ordering::SeqCst),
+        f,
+    );
 }
 
 // `epoch` is the session the work came from. The bridge holds one
@@ -479,16 +500,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     ui.set_statuses(ModelRc::from(status_model.clone()));
     ui.set_calls(ModelRc::from(calls_model.clone()));
     ui.set_info_media(ModelRc::from(info_media_model.clone()));
-    let emoji_rows: Vec<ModelRc<SharedString>> = EMOJIS
-        .split(' ')
-        .collect::<Vec<_>>()
-        .chunks(8)
-        .map(|chunk| {
-            let row: Vec<SharedString> = chunk.iter().map(|e| SharedString::from(*e)).collect();
-            ModelRc::from(Rc::new(VecModel::from(row)))
-        })
-        .collect();
-    ui.set_emoji_rows(ModelRc::from(Rc::new(VecModel::from(emoji_rows))));
+    ui.set_emoji_rows(crate::emoji::palette_rows());
     wire_callbacks(ui);
     let bridge = Bridge {
         ui: ui.clone_strong(),
@@ -1349,7 +1361,10 @@ impl Bridge {
             self.self_jid = me;
         }
         self.media_key = vault.key_handle();
-        if let Some(volume) = vault.setting_get("video_volume").and_then(|v| v.parse::<f32>().ok()) {
+        if let Some(volume) = vault
+            .setting_get("video_volume")
+            .and_then(|v| v.parse::<f32>().ok())
+        {
             self.video_volume = volume.clamp(0.0, 1.0);
         }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
@@ -1360,8 +1375,10 @@ impl Bridge {
             self.store.messages.len(),
             self.store.total_messages()
         );
-        self.ui.set_pin_set(self.vault.as_ref().is_some_and(|v| v.has_pin()));
-        self.ui.set_screen(if registered { "main" } else { "login" }.into());
+        self.ui
+            .set_pin_set(self.vault.as_ref().is_some_and(|v| v.has_pin()));
+        self.ui
+            .set_screen(if registered { "main" } else { "login" }.into());
         self.refresh_accounts();
         self.refresh_labels();
         self.refresh_chats();
@@ -1418,7 +1435,9 @@ impl Bridge {
     fn handle_autostart(&mut self, on: bool) {
         match crate::platform::autostart_set(on) {
             Ok(()) => self.ui.set_settings_status("".into()),
-            Err(e) => self.ui.set_settings_status(ta("autostart.failed", &[&e]).into()),
+            Err(e) => self
+                .ui
+                .set_settings_status(ta("autostart.failed", &[&e]).into()),
         }
         self.ui.set_autostart(crate::platform::autostart_enabled());
     }
@@ -1497,12 +1516,30 @@ impl Bridge {
     // loop in the status line.
     pub fn on_fatal(&mut self, kind: &str) {
         let conflict = kind == "conflict";
-        self.ui
-            .set_alert_title(t(if conflict { "alert.conflictTitle" } else { "alert.offlineTitle" }).into());
-        self.ui
-            .set_alert_text(t(if conflict { "alert.conflictBody" } else { "alert.offlineBody" }).into());
-        self.ui
-            .set_alert_action(t(if conflict { "alert.reconnect" } else { "alert.retry" }).into());
+        self.ui.set_alert_title(
+            t(if conflict {
+                "alert.conflictTitle"
+            } else {
+                "alert.offlineTitle"
+            })
+            .into(),
+        );
+        self.ui.set_alert_text(
+            t(if conflict {
+                "alert.conflictBody"
+            } else {
+                "alert.offlineBody"
+            })
+            .into(),
+        );
+        self.ui.set_alert_action(
+            t(if conflict {
+                "alert.reconnect"
+            } else {
+                "alert.retry"
+            })
+            .into(),
+        );
         self.ui.set_alert_open(true);
     }
 
@@ -1623,7 +1660,11 @@ impl Bridge {
     // ---- accounts ----
 
     fn account_entry(&self) -> Option<crate::vault::Account> {
-        self.vault.as_ref()?.accounts().into_iter().find(|a| a.id == self.account)
+        self.vault
+            .as_ref()?
+            .accounts()
+            .into_iter()
+            .find(|a| a.id == self.account)
     }
 
     fn update_account(&mut self, f: impl FnOnce(&mut crate::vault::Account)) {
@@ -1649,7 +1690,11 @@ impl Bridge {
         let rows: Vec<AccountItem> = list
             .iter()
             .map(|a| {
-                let number = if a.jid.is_empty() { String::new() } else { format_number(&a.jid) };
+                let number = if a.jid.is_empty() {
+                    String::new()
+                } else {
+                    format_number(&a.jid)
+                };
                 let name = if !a.name.is_empty() {
                     a.name.clone()
                 } else if !number.is_empty() {
@@ -1661,7 +1706,11 @@ impl Bridge {
                 AccountItem {
                     id: a.id.as_str().into(),
                     initial: initial_of(&name).into(),
-                    detail: if name == number { "".into() } else { number.into() },
+                    detail: if name == number {
+                        "".into()
+                    } else {
+                        number.into()
+                    },
                     name: name.into(),
                     active: a.id == self.account,
                     colorIdx: color_idx_of(&a.jid),
@@ -1673,16 +1722,19 @@ impl Bridge {
         if let Some(mine) = rows.iter().find(|row| row.active) {
             self.ui.set_my_account(mine.clone());
         }
-        self.ui.set_can_add_account(list.len() < crate::vault::MAX_ACCOUNTS);
+        self.ui
+            .set_can_add_account(list.len() < crate::vault::MAX_ACCOUNTS);
         self.ui.set_account_count(list.len() as i32);
         self.accounts_model.set_vec(rows);
         // The login screen offers the conversations a past session left.
         let kept = self.account_entry().map(|a| a.jid).unwrap_or_default();
         let has_kept = !self.registered && !self.store.chats.is_empty();
         self.ui.set_kept_conversations(has_kept);
-        self.ui.set_kept_number(
-            if has_kept && !kept.is_empty() { format_number(&kept).into() } else { "".into() },
-        );
+        self.ui.set_kept_number(if has_kept && !kept.is_empty() {
+            format_number(&kept).into()
+        } else {
+            "".into()
+        });
     }
 
     pub fn switch_account(&mut self, id: &str) {
@@ -1718,7 +1770,10 @@ impl Bridge {
                 break id;
             }
         };
-        list.push(crate::vault::Account { id: id.clone(), ..Default::default() });
+        list.push(crate::vault::Account {
+            id: id.clone(),
+            ..Default::default()
+        });
         vault.set_accounts(&list);
         self.switch_account(&id);
     }
@@ -1726,7 +1781,9 @@ impl Bridge {
     fn ask_remove_account(&mut self, id: &str) {
         self.ui.set_account_menu_open(false);
         let Some(vault) = &self.vault else { return };
-        let Some(entry) = vault.accounts().into_iter().find(|a| a.id == id) else { return };
+        let Some(entry) = vault.accounts().into_iter().find(|a| a.id == id) else {
+            return;
+        };
         // The loaded account goes through the logout dialog instead: its
         // session has to be closed on the phone's side too.
         if id == self.account {
@@ -1771,7 +1828,10 @@ impl Bridge {
     // point APPDATA/XDG_DATA_HOME at an empty one.
     pub fn accounts_selftest(&mut self, step: u32) {
         let ids = |b: &Bridge| -> Vec<String> {
-            b.vault.as_ref().map(|v| v.accounts().into_iter().map(|a| a.id).collect()).unwrap_or_default()
+            b.vault
+                .as_ref()
+                .map(|v| v.accounts().into_iter().map(|a| a.id).collect())
+                .unwrap_or_default()
         };
         let fail = |what: &str| println!("[selftest] FAIL: {what}");
         match step {
@@ -1783,7 +1843,14 @@ impl Bridge {
                 }
                 // Something that must survive a round trip, and must not
                 // show up in the other account.
-                self.store.upsert_chat("5511999990000@s.whatsapp.net", Some("Probe"), 1, None, None, None);
+                self.store.upsert_chat(
+                    "5511999990000@s.whatsapp.net",
+                    Some("Probe"),
+                    1,
+                    None,
+                    None,
+                    None,
+                );
                 self.add_account();
                 println!("[selftest] add account: switching = {}", self.switching);
             }
@@ -1878,7 +1945,11 @@ impl Bridge {
         if abandoned {
             self.remove_account(&previous);
         }
-        if let Some(me) = self.account_entry().map(|a| a.jid).filter(|s| !s.is_empty()) {
+        if let Some(me) = self
+            .account_entry()
+            .map(|a| a.jid)
+            .filter(|s| !s.is_empty())
+        {
             self.store.set_self(&[&me]);
             self.self_jid = me;
         }
@@ -1887,7 +1958,8 @@ impl Bridge {
         self.ui.set_pairing_code("".into());
         self.ui.set_status_text(t("status.connecting").into());
         self.ui.set_alert_open(false);
-        self.ui.set_screen(if registered { "main" } else { "login" }.into());
+        self.ui
+            .set_screen(if registered { "main" } else { "login" }.into());
         self.ui.set_account_switching(false);
         self.refresh_accounts();
         self.refresh_labels();
@@ -1901,7 +1973,9 @@ impl Bridge {
     // Indexes cold chats that have messages on disk but no index yet;
     // a handful per tick so the UI never notices.
     fn index_backfill(&mut self) {
-        let Some(vault) = self.vault.take() else { return };
+        let Some(vault) = self.vault.take() else {
+            return;
+        };
         let pending: Vec<String> = vault
             .keys("store:msgs:")
             .into_iter()
@@ -1928,7 +2002,8 @@ impl Bridge {
             }
             // Seed the sidebar with participating groups before any message.
             if !self.store.chats.contains_key(jid) {
-                self.store.upsert_chat(jid, Some(subject), 0, None, None, None);
+                self.store
+                    .upsert_chat(jid, Some(subject), 0, None, None, None);
             }
             self.store.set_name(jid, subject);
             if let Some(entry) = self.store.chats.get_mut(jid) {
@@ -1945,7 +2020,14 @@ impl Bridge {
             self.store.upsert_contact(jid, None, Some(name));
         }
         for c in &chunk.chats {
-            self.store.upsert_chat(&c.jid, c.name.as_deref(), c.timestamp, c.unread, c.pinned, c.archived);
+            self.store.upsert_chat(
+                &c.jid,
+                c.name.as_deref(),
+                c.timestamp,
+                c.unread,
+                c.pinned,
+                c.archived,
+            );
         }
         let mut added = 0usize;
         let mut added_to_current = false;
@@ -2032,7 +2114,14 @@ impl Bridge {
                 } else {
                     info.source.sender.to_non_ad_string()
                 };
-                let body = crate::wa_map::group_notice(&self.store, "ephemeral", Some(&actor), &[], "", secs);
+                let body = crate::wa_map::group_notice(
+                    &self.store,
+                    "ephemeral",
+                    Some(&actor),
+                    &[],
+                    "",
+                    secs,
+                );
                 self.add_system_message(&chat_jid, &info.id, info.timestamp.timestamp(), body);
                 if let Some(meta) = self.store.chats.get_mut(&chat_jid) {
                     meta.ephemeral = secs;
@@ -2079,10 +2168,18 @@ impl Bridge {
                 } else {
                     info.source.sender.to_non_ad_string()
                 };
-                self.apply_reaction(&chat, &target, &reactor, rm.text.as_deref().unwrap_or(""), info.source.is_from_me);
+                self.apply_reaction(
+                    &chat,
+                    &target,
+                    &reactor,
+                    rm.text.as_deref().unwrap_or(""),
+                    info.source.is_from_me,
+                );
                 continue;
             }
-            let Some(stored) = crate::wa_map::from_live(&mut self.store, inbound) else { continue };
+            let Some(stored) = crate::wa_map::from_live(&mut self.store, inbound) else {
+                continue;
+            };
             let jid = stored.jid.clone();
             let from_me = stored.from_me;
             let mentions_me = stored.mentions_me;
@@ -2139,10 +2236,14 @@ impl Bridge {
             let patches: Vec<(String, &'static str, bool)> = changed
                 .iter()
                 .filter_map(|id| {
-                    self.store.messages_for(&jid).iter().find(|m| &m.id == id).map(|m| {
-                        let (ticks, blue) = ticks_for(m);
-                        (id.clone(), ticks, blue)
-                    })
+                    self.store
+                        .messages_for(&jid)
+                        .iter()
+                        .find(|m| &m.id == id)
+                        .map(|m| {
+                            let (ticks, blue) = ticks_for(m);
+                            (id.clone(), ticks, blue)
+                        })
                 })
                 .collect();
             for (id, ticks, blue) in patches {
@@ -2164,8 +2265,11 @@ impl Bridge {
             self.clear_typing();
             return;
         }
-        let text =
-            if media.contains("Audio") { t("presence.recording") } else { t("presence.typing") };
+        let text = if media.contains("Audio") {
+            t("presence.recording")
+        } else {
+            t("presence.typing")
+        };
         self.ui.set_current_status(text.into());
         // A "composing" is only good for a while: the peer's client
         // refreshes it as long as they keep going, and the "paused" that
@@ -2184,9 +2288,11 @@ impl Bridge {
     // Back from typing/recording to what is known of the contact.
     fn clear_typing(&mut self) {
         self.typing_gen += 1;
-        self.ui.set_current_status(
-            if self.peer_online { t("presence.online").into() } else { "".into() },
-        );
+        self.ui.set_current_status(if self.peer_online {
+            t("presence.online").into()
+        } else {
+            "".into()
+        });
     }
 
     pub fn on_presence(&mut self, from: &str, available: bool) {
@@ -2205,7 +2311,8 @@ impl Bridge {
 
     pub fn on_chat_flag(&mut self, jid: &str, pinned: Option<i64>, archived: Option<bool>) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        self.store.upsert_chat(&jid, None, 0, None, pinned, archived);
+        self.store
+            .upsert_chat(&jid, None, 0, None, pinned, archived);
         self.schedule_refresh_chats();
     }
 
@@ -2231,7 +2338,8 @@ impl Bridge {
     }
 
     pub fn on_contact(&mut self, jid: &str, name: &str) {
-        self.store.upsert_contact(&normalize_jid(jid), Some(name), None);
+        self.store
+            .upsert_contact(&normalize_jid(jid), Some(name), None);
         self.schedule_refresh_chats();
     }
 
@@ -2269,7 +2377,11 @@ impl Bridge {
 
     fn set_pending(&mut self, pending: bool) {
         self.history_pending = pending;
-        self.ui.set_sync_banner(if pending { t("sync.older").into() } else { "".into() });
+        self.ui.set_sync_banner(if pending {
+            t("sync.older").into()
+        } else {
+            "".into()
+        });
         if self.ui.get_sync_open() {
             self.ui.set_sync_detail(self.sync_summary().into());
         }
@@ -2278,7 +2390,10 @@ impl Bridge {
     fn sync_summary(&self) -> String {
         let progress = ta(
             "sync.progress",
-            &[&self.sync_batches.to_string(), &self.sync_messages.to_string()],
+            &[
+                &self.sync_batches.to_string(),
+                &self.sync_messages.to_string(),
+            ],
         );
         if self.history_pending {
             format!("{}\n\n{progress}", t("sync.body"))
@@ -2315,8 +2430,12 @@ impl Bridge {
             self.once(30_000, |b| b.pull_older_history());
             return;
         };
-        let (jid, id, from_me, ts) =
-            (anchor.jid.clone(), anchor.id.clone(), anchor.from_me, anchor.timestamp);
+        let (jid, id, from_me, ts) = (
+            anchor.jid.clone(),
+            anchor.id.clone(),
+            anchor.from_me,
+            anchor.timestamp,
+        );
         self.set_pending(true);
         self.history_batches += 1;
         println!(
@@ -2324,11 +2443,18 @@ impl Bridge {
             self.history_batches,
             self.store.total_messages()
         );
-        self.wa.send(Cmd::FetchHistory { jid, oldest_id: id, from_me, ts_ms: ts * 1000 });
+        self.wa.send(Cmd::FetchHistory {
+            jid,
+            oldest_id: id,
+            from_me,
+            ts_ms: ts * 1000,
+        });
     }
 
     fn handle_scroll_up_load(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         // After a jump the list starts mid-conversation; the rows above it
         // are already in the store.
         if self.store.messages_for(&jid).len() > self.messages_model.row_count() {
@@ -2344,7 +2470,9 @@ impl Bridge {
             return;
         }
         let list = self.store.messages_for(&jid);
-        let Some(first) = list.first().filter(|m| m.raw.is_some()) else { return };
+        let Some(first) = list.first().filter(|m| m.raw.is_some()) else {
+            return;
+        };
         if list.len() < 5 {
             return;
         }
@@ -2352,12 +2480,24 @@ impl Bridge {
         self.last_scroll_load = Some(Instant::now());
         self.scroll_up_fetch = true;
         self.set_pending(true);
-        self.wa.send(Cmd::FetchHistory { jid, oldest_id: id, from_me, ts_ms: ts * 1000 });
+        self.wa.send(Cmd::FetchHistory {
+            jid,
+            oldest_id: id,
+            from_me,
+            ts_ms: ts * 1000,
+        });
     }
 
     // ---- reactions ----
 
-    fn apply_reaction(&mut self, remote_jid: &str, target: &str, reactor: &str, emoji: &str, from_me: bool) {
+    fn apply_reaction(
+        &mut self,
+        remote_jid: &str,
+        target: &str,
+        reactor: &str,
+        emoji: &str,
+        from_me: bool,
+    ) {
         let chat_jid = self.store.canon_owned(&normalize_jid(remote_jid));
         let updated = self.store.apply_reaction(&chat_jid, target, reactor, emoji);
         if updated && Some(&chat_jid) == self.current_jid.as_ref() {
@@ -2384,7 +2524,9 @@ impl Bridge {
                 .find(|m| m.id == target)
                 .map(preview_body)
                 .unwrap_or_default();
-            let name = self.store.chat_name(&self.store.canon_owned(&normalize_jid(reactor)));
+            let name = self
+                .store
+                .chat_name(&self.store.canon_owned(&normalize_jid(reactor)));
             let who = if from_me {
                 "✓ ".to_string()
             } else if is_group(&chat_jid) && !name.is_empty() {
@@ -2393,8 +2535,10 @@ impl Bridge {
                 String::new()
             };
             if let Some(meta) = self.store.chats.get_mut(&chat_jid) {
-                meta.preview =
-                    format!("{who}{}", ta("preview.reacted", &[&clean_text(emoji), &snippet]));
+                meta.preview = format!(
+                    "{who}{}",
+                    ta("preview.reacted", &[&clean_text(emoji), &snippet])
+                );
                 meta.timestamp = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs() as i64)
@@ -2407,7 +2551,14 @@ impl Bridge {
 
     // ---- chat list ----
 
-    fn to_chat_row(&self, jid: &str, preview: &str, timestamp: i64, unread: u32, mentioned: bool) -> ChatItem {
+    fn to_chat_row(
+        &self,
+        jid: &str,
+        preview: &str,
+        timestamp: i64,
+        unread: u32,
+        mentioned: bool,
+    ) -> ChatItem {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
         let meta = self.store.chats.get(jid);
@@ -2480,7 +2631,13 @@ impl Bridge {
                 true
             })
             .map(|meta| {
-                (meta.jid.clone(), meta.preview.clone(), meta.timestamp, meta.unread, meta.mentioned)
+                (
+                    meta.jid.clone(),
+                    meta.preview.clone(),
+                    meta.timestamp,
+                    meta.unread,
+                    meta.mentioned,
+                )
             })
             .collect()
     }
@@ -2499,12 +2656,19 @@ impl Bridge {
     // In-place diff: only changed rows are rewritten, which is what keeps
     // the ListView's scroll position stable.
     fn refresh_chats(&mut self) {
-        let archived_unread = self.store.chats.values()
+        let archived_unread = self
+            .store
+            .chats
+            .values()
             .filter(|chat| chat.archived && chat.unread > 0)
             .count();
-        let archived_mentioned = self.store.chats.values()
+        let archived_mentioned = self
+            .store
+            .chats
+            .values()
             .any(|chat| chat.archived && chat.unread > 0 && chat.mentioned);
-        self.ui.set_archived_unread_count(archived_unread.min(i32::MAX as usize) as i32);
+        self.ui
+            .set_archived_unread_count(archived_unread.min(i32::MAX as usize) as i32);
         self.ui.set_archived_mentioned(archived_mentioned);
         let rows: Vec<ChatItem> = self
             .visible_chats()
@@ -2556,7 +2720,10 @@ impl Bridge {
             }
             return;
         }
-        let hits = self.store.search.search(&self.search_text, None, SEARCH_LIMIT);
+        let hits = self
+            .store
+            .search
+            .search(&self.search_text, None, SEARCH_LIMIT);
         let rows: Vec<SearchHit> = hits.iter().map(|h| self.to_hit(h, true)).collect();
         for h in &hits {
             self.queue_avatar(&h.jid);
@@ -2587,7 +2754,11 @@ impl Bridge {
         };
         let avatar = self.avatar_for(&face);
         let who = if with_chat && is_group(&h.jid) {
-            if h.from_me { t("reactions.you") } else { h.sender.clone() }
+            if h.from_me {
+                t("reactions.you")
+            } else {
+                h.sender.clone()
+            }
         } else {
             String::new()
         };
@@ -2655,12 +2826,12 @@ impl Bridge {
         let avatar = self.avatar_for(jid);
         self.ui.set_current_jid(jid.into());
         // Calls are one-to-one: groups, channels and status cannot ring.
-        self.ui.set_current_callable(
-            !is_group(jid) && !is_channel(jid) && jid != "status@broadcast",
-        );
+        self.ui
+            .set_current_callable(!is_group(jid) && !is_channel(jid) && jid != "status@broadcast");
         self.ui.set_current_chat_name(name.clone().into());
         self.ui.set_current_avatar_has(avatar.is_some());
-        self.ui.set_current_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui
+            .set_current_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_current_initial(initial_of(&name).into());
         self.ui.set_current_color_idx(color_idx_of(jid));
     }
@@ -2669,7 +2840,9 @@ impl Bridge {
     // and by clicking a sender name inside a group.
     // Hydrates a chat and rotates the warm set, evicting the coldest.
     fn warm_chat(&mut self, jid: &str) {
-        let Some(vault) = self.vault.as_ref() else { return };
+        let Some(vault) = self.vault.as_ref() else {
+            return;
+        };
         let jid = self.store.canon_owned(jid);
         self.store.hydrate(vault, &jid);
         self.warm_order.retain(|j| j != &jid);
@@ -2723,7 +2896,8 @@ impl Bridge {
             if self.ui.get_stick_bottom() || self.truncated.contains(&current) {
                 self.scroll_pos.remove(&current);
             } else {
-                self.scroll_pos.insert(current.clone(), self.ui.get_conv_scroll());
+                self.scroll_pos
+                    .insert(current.clone(), self.ui.get_conv_scroll());
             }
             self.truncated.remove(&current);
             self.clear_reply();
@@ -2731,10 +2905,15 @@ impl Bridge {
         if self.current_jid.as_deref() != Some(jid) {
             let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
             self.unread_boundary = if unread > 0 {
-                let incoming: Vec<_> = self.store.messages_for(jid).iter()
+                let incoming: Vec<_> = self
+                    .store
+                    .messages_for(jid)
+                    .iter()
                     .filter(|m| !m.from_me && m.kind != MessageKind::System)
                     .collect();
-                incoming.len().checked_sub(unread)
+                incoming
+                    .len()
+                    .checked_sub(unread)
                     .and_then(|index| incoming.get(index))
                     .map(|m| m.id.clone())
             } else {
@@ -2792,7 +2971,11 @@ impl Bridge {
         self.apply_cached_stickers(jid);
         let anchored_top = at.is_some();
         self.ui.set_scroll_armed(!anchored_top);
-        let saved = if anchored_top { Some(0.0) } else { self.scroll_pos.get(jid).copied() };
+        let saved = if anchored_top {
+            Some(0.0)
+        } else {
+            self.scroll_pos.get(jid).copied()
+        };
         // Anchor across a few layout passes while hidden, then reveal.
         for delay in [0u64, 40, 90] {
             self.once(delay, move |b| match saved {
@@ -2847,7 +3030,9 @@ impl Bridge {
         let list = self.store.messages_for(jid);
         let first_shown = self.messages_model.row_data(0).map(|r| r.id.to_string());
         let cut = first_shown.and_then(|id| list.iter().position(|m| m.id == id));
-        let Some(cut) = cut.filter(|&c| c > 0) else { return };
+        let Some(cut) = cut.filter(|&c| c > 0) else {
+            return;
+        };
 
         let before_y = self.ui.get_conv_scroll();
         let before_h = self.ui.get_conv_viewport_h();
@@ -2882,8 +3067,9 @@ impl Bridge {
         let prev = list.len().checked_sub(2).and_then(|i| list.get(i));
         let row = self.to_row(stored, prev);
         let from_me = stored.from_me;
-        let needs_media =
-            stored.kind != MessageKind::Text || !stored.link_title.is_empty() || !stored.link_url.is_empty();
+        let needs_media = stored.kind != MessageKind::Text
+            || !stored.link_title.is_empty()
+            || !stored.link_url.is_empty();
         let stored = stored.clone();
         self.messages_model.push(row);
         // Don't yank the view down while the user is reading older rows.
@@ -2908,23 +3094,40 @@ impl Bridge {
     // text for the selectable overlay, and where the links are in those.
     fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool, String, Vec<LinkSpan>) {
         let body = if m.deleted { "" } else { m.text.as_str() };
-        let none = || (slint::StyledText::from_plain_text(""), false, String::new(), Vec::new());
+        let none = || {
+            (
+                slint::StyledText::from_plain_text(""),
+                false,
+                String::new(),
+                Vec::new(),
+            )
+        };
         // File names and durations are literal, underscores and all.
-        if matches!(m.kind, MessageKind::Doc | MessageKind::Audio | MessageKind::System) {
+        if matches!(
+            m.kind,
+            MessageKind::Doc | MessageKind::Audio | MessageKind::System
+        ) {
             return none();
         }
         if body.is_empty() || !has_markup(body) {
             return none();
         }
         let resolve = self.mention_resolver(m);
-        match slint::StyledText::from_markdown(&to_markdown(body, &resolve)) {
+        let md = format!("{}{META_PAD}", to_markdown(body, &resolve));
+        match slint::StyledText::from_markdown(&md) {
             Ok(styled) => {
-                let plain = render_plain(body, &resolve);
+                let mut plain = render_plain(body, &resolve);
                 let links = plain
                     .spans
                     .iter()
-                    .map(|(start, end, _)| LinkSpan { start: *start as i32, end: *end as i32 })
+                    .map(|(start, end, _)| LinkSpan {
+                        start: *start as i32,
+                        end: *end as i32,
+                    })
                     .collect();
+                // The overlay text must end with the same run as the styled
+                // text above, or the glyphs drift apart.
+                plain.text.push_str(META_PAD);
                 (styled, true, plain.text, links)
             }
             Err(_) => none(),
@@ -2937,7 +3140,10 @@ impl Bridge {
         move |num: &str| -> MentionTarget {
             // Tagging the whole group carries the group's own id.
             if m.jid.starts_with(num) && is_group(&m.jid) {
-                return MentionTarget { name: Some(t("mention.all")), jid: m.jid.clone() };
+                return MentionTarget {
+                    name: Some(t("mention.all")),
+                    jid: m.jid.clone(),
+                };
             }
             // The id is either a phone number or a LID; try both before
             // falling back on the shape of the number itself.
@@ -2946,21 +3152,39 @@ impl Bridge {
                 let name = store
                     .contacts
                     .get(&canon)
-                    .or_else(|| store.chats.get(&canon).filter(|c| !c.name.is_empty()).map(|c| &c.name))
+                    .or_else(|| {
+                        store
+                            .chats
+                            .get(&canon)
+                            .filter(|c| !c.name.is_empty())
+                            .map(|c| &c.name)
+                    })
                     .or_else(|| store.push_names.get(&canon));
                 if let Some(name) = name {
-                    return MentionTarget { name: Some(clean_text(name)), jid: canon };
+                    return MentionTarget {
+                        name: Some(clean_text(name)),
+                        jid: canon,
+                    };
                 }
             }
-            let guess = if num.len() > 13 { format!("{num}@lid") } else { format!("{num}@s.whatsapp.net") };
-            MentionTarget { name: None, jid: store.canon_owned(&guess) }
+            let guess = if num.len() > 13 {
+                format!("{num}@lid")
+            } else {
+                format!("{num}@s.whatsapp.net")
+            };
+            MentionTarget {
+                name: None,
+                jid: store.canon_owned(&guess),
+            }
         }
     }
 
     // A click (no drag) on the selectable overlay of a styled message:
     // opens whatever link or mention sits under that byte offset.
     fn open_link_at(&mut self, id: &str, offset: usize) {
-        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
         let target = target_at(&m.text, offset, &self.mention_resolver(&m));
         if let Some(target) = target {
             if target.starts_with("http://") || target.starts_with("https://") {
@@ -2983,11 +3207,18 @@ impl Bridge {
                     || m.timestamp - p.timestamp > RUN_GAP
             })
             .unwrap_or(true);
-        let sender_jid =
-            if m.sender_jid.is_empty() { m.jid.clone() } else { self.store.canon_owned(&m.sender_jid) };
+        let sender_jid = if m.sender_jid.is_empty() {
+            m.jid.clone()
+        } else {
+            self.store.canon_owned(&m.sender_jid)
+        };
         let group_indent = group && !m.from_me && m.kind != MessageKind::System;
         let voice_jid = if m.kind == MessageKind::Audio {
-            if m.from_me { self.self_jid.clone() } else { sender_jid.clone() }
+            if m.from_me {
+                self.self_jid.clone()
+            } else {
+                sender_jid.clone()
+            }
         } else {
             String::new()
         };
@@ -3018,7 +3249,11 @@ impl Bridge {
                 }
             })
             .into(),
-            text: if m.deleted { t("msg.deleted").into() } else { m.text.clone().into() },
+            text: if m.deleted {
+                t("msg.deleted").into()
+            } else {
+                m.text.clone().into()
+            },
             fromMe: m.from_me,
             sender: m.sender.clone().into(),
             showSender: group && !m.from_me && first_of_run && !system,
@@ -3026,12 +3261,19 @@ impl Bridge {
             selected: self.selected.iter().any(|s| s == &m.id),
             // The collapsed roster notice opens the group info on click;
             // an invite-link join offers to share the recent history.
-            clickable: system && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
+            clickable: system
+                && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
             // Saved contacts show their address-book name without the ~.
             senderLabel: if group && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid) {
                 format!("~ {}", self.store.chat_name(&sender_jid)).into()
             } else {
-                self.store.chat_name(if sender_jid.is_empty() { &m.jid } else { &sender_jid }).into()
+                self.store
+                    .chat_name(if sender_jid.is_empty() {
+                        &m.jid
+                    } else {
+                        &sender_jid
+                    })
+                    .into()
             },
             firstOfRun: first_of_run,
             time: format_clock(m.timestamp).into(),
@@ -3045,7 +3287,12 @@ impl Bridge {
                 .unwrap_or_else(empty_image),
             picW: self.decoded.get(&m.id).map(|&(_, w, _)| w).unwrap_or(pic_w),
             picH: self.decoded.get(&m.id).map(|&(_, _, h)| h).unwrap_or(pic_h),
-            mediaPath: self.media_path.get(&m.id).cloned().unwrap_or_default().into(),
+            mediaPath: self
+                .media_path
+                .get(&m.id)
+                .cloned()
+                .unwrap_or_default()
+                .into(),
             mediaReady: self.media_path.contains_key(&m.id),
             mediaLoading: self.media_inflight.contains(&m.id),
             reactions: reactions.into(),
@@ -3057,25 +3304,41 @@ impl Bridge {
             senderHasAvatar: self.avatar_for(&sender_jid).is_some(),
             senderAvatar: self.avatar_for(&sender_jid).unwrap_or_else(empty_image),
             senderInitial: initial_of(if m.sender.is_empty() { "?" } else { &m.sender }).into(),
-            senderColorIdx: color_idx_of(if sender_jid.is_empty() { &m.jid } else { &sender_jid }),
+            senderColorIdx: color_idx_of(if sender_jid.is_empty() {
+                &m.jid
+            } else {
+                &sender_jid
+            }),
             voiceJid: voice_jid.clone().into(),
             voiceHasAvatar: self.avatar_for(&voice_jid).is_some(),
             voiceAvatar: self.avatar_for(&voice_jid).unwrap_or_else(empty_image),
-            voiceInitial: initial_of(if m.from_me {
-                let name = self.store.chat_name(&self.self_jid);
-                if name.is_empty() { "?".to_string() } else { name }
-            } else if m.sender.is_empty() {
-                "?".to_string()
-            } else {
-                m.sender.clone()
-            }
-            .as_str())
+            voiceInitial: initial_of(
+                if m.from_me {
+                    let name = self.store.chat_name(&self.self_jid);
+                    if name.is_empty() {
+                        "?".to_string()
+                    } else {
+                        name
+                    }
+                } else if m.sender.is_empty() {
+                    "?".to_string()
+                } else {
+                    m.sender.clone()
+                }
+                .as_str(),
+            )
             .into(),
-            voiceColorIdx: color_idx_of(if voice_jid.is_empty() { &m.jid } else { &voice_jid }),
+            voiceColorIdx: color_idx_of(if voice_jid.is_empty() {
+                &m.jid
+            } else {
+                &voice_jid
+            }),
             groupIndent: group_indent,
             showAvatar: group_indent && first_of_run,
             // Unsaved senders show their number next to the push name.
-            senderNumber: if group_indent && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid)
+            senderNumber: if group_indent
+                && !sender_jid.is_empty()
+                && !self.store.is_saved(&sender_jid)
             {
                 format_number(&sender_jid).into()
             } else {
@@ -3120,7 +3383,11 @@ impl Bridge {
                 t("reactions.you").into()
             } else {
                 let name = self.store.chat_name(&m.quote_author);
-                if name.is_empty() { display_id(&m.quote_author).into() } else { name.into() }
+                if name.is_empty() {
+                    display_id(&m.quote_author).into()
+                } else {
+                    name.into()
+                }
             },
             quoteText: self.store.named_mentions(&m.quote_text).into(),
             quoteId: m.quote_id.clone().into(),
@@ -3148,11 +3415,19 @@ impl Bridge {
 
     fn handle_send_text(&mut self, text: &str) {
         let mut body = text.trim().to_string();
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if body.is_empty() {
             return;
         }
-        if !self.store.chats.get(&jid).map(|c| c.can_send()).unwrap_or(true) {
+        if !self
+            .store
+            .chats
+            .get(&jid)
+            .map(|c| c.can_send())
+            .unwrap_or(true)
+        {
             return;
         }
         let quote = self.reply_to.take().and_then(|id| {
@@ -3160,7 +3435,11 @@ impl Bridge {
             let raw = m.raw.clone()?;
             Some(QuoteRef {
                 id: m.id.clone(),
-                sender_jid: if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() },
+                sender_jid: if m.from_me {
+                    self.self_jid.clone()
+                } else {
+                    m.sender_jid.clone()
+                },
                 message: raw,
             })
         });
@@ -3188,7 +3467,13 @@ impl Bridge {
                 }
             }
         }
-        self.wa.send(Cmd::SendText { jid, body, quote, mentions, mention_all });
+        self.wa.send(Cmd::SendText {
+            jid,
+            body,
+            quote,
+            mentions,
+            mention_all,
+        });
     }
 
     // ---- mentions ----
@@ -3196,7 +3481,9 @@ impl Bridge {
     // Called on every composer edit with the cursor's byte offset: an
     // "@word" right before the cursor opens the member list.
     fn composer_changed(&mut self, text: &str, cursor: usize) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if !is_group(&jid) {
             return;
         }
@@ -3229,7 +3516,11 @@ impl Bridge {
                 continue;
             }
             let name = self.store.chat_name(&canon);
-            let number = if m.phone.is_empty() { format_number(&canon) } else { format_number(&m.phone) };
+            let number = if m.phone.is_empty() {
+                format_number(&canon)
+            } else {
+                format_number(&m.phone)
+            };
             if !query.is_empty()
                 && !crate::search::fold(&name).contains(&query)
                 && !number.replace(' ', "").contains(&query)
@@ -3255,14 +3546,22 @@ impl Bridge {
     }
 
     fn mention_pick(&mut self, idx: usize) {
-        let Some(row) = self.mention_model.row_data(idx) else { return };
-        let Some((at, end)) = self.mention_at.take() else { return };
+        let Some(row) = self.mention_model.row_data(idx) else {
+            return;
+        };
+        let Some((at, end)) = self.mention_at.take() else {
+            return;
+        };
         self.ui.set_mention_open(false);
         let text = self.ui.get_composer_text().to_string();
         if at > text.len() || end > text.len() {
             return;
         }
-        let label = if row.jid == "all" { t("mention.all") } else { row.name.to_string() };
+        let label = if row.jid == "all" {
+            t("mention.all")
+        } else {
+            row.name.to_string()
+        };
         let label = clean_text(&label).replace('@', "");
         let insert = format!("@{label} ");
         let next = format!("{}{}{}", &text[..at], insert, &text[end..]);
@@ -3272,7 +3571,14 @@ impl Bridge {
         self.ui.invoke_set_composer(next.into(), cursor);
     }
 
-    fn to_member_row(&self, jid: &str, name: &str, number: &str, admin: bool, checked: bool) -> MemberItem {
+    fn to_member_row(
+        &self,
+        jid: &str,
+        name: &str,
+        number: &str,
+        admin: bool,
+        checked: bool,
+    ) -> MemberItem {
         let avatar = self.avatar_for(jid);
         MemberItem {
             jid: jid.into(),
@@ -3288,7 +3594,9 @@ impl Bridge {
     }
 
     fn start_reply(&mut self, id: &str) {
-        let Some(m) = self.find_message(id) else { return };
+        let Some(m) = self.find_message(id) else {
+            return;
+        };
         if m.raw.is_none() {
             return;
         }
@@ -3417,7 +3725,11 @@ impl Bridge {
                 self.status_model.set_row_data(i, row);
             }
         }
-        for model in [&self.member_model, &self.info_member_model, &self.mention_model] {
+        for model in [
+            &self.member_model,
+            &self.info_member_model,
+            &self.mention_model,
+        ] {
             for i in 0..model.row_count() {
                 if let Some(mut row) = model.row_data(i)
                     && row.jid == jid
@@ -3444,7 +3756,9 @@ impl Bridge {
         }
         // Sender and voice-note avatars inside message rows.
         for i in 0..self.messages_model.row_count() {
-            let Some(mut row) = self.messages_model.row_data(i) else { continue };
+            let Some(mut row) = self.messages_model.row_data(i) else {
+                continue;
+            };
             let mut changed = false;
             if row.senderJid == jid && !row.senderHasAvatar {
                 row.senderAvatar = image.clone();
@@ -3483,11 +3797,21 @@ impl Bridge {
     // A row just reported where it is: if it shows media that is not
     // loaded (never was, or was released while off screen), ask for it.
     fn media_for_visible_row(&mut self, id: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if self.media_inflight.contains(id) || self.media_failed.contains(id) {
             return;
         }
-        let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id).cloned() else { return };
+        let Some(m) = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .find(|m| m.id == id)
+            .cloned()
+        else {
+            return;
+        };
         if !needs_media(&m) {
             return;
         }
@@ -3496,7 +3820,9 @@ impl Bridge {
             .find(|row| row.id == id)
             .map(|row| {
                 let visual = matches!(m.kind, MessageKind::Image | MessageKind::Video);
-                (visual && row.mediaReady && (row.picture.size().width > 0 || m.kind == MessageKind::Video))
+                (visual
+                    && row.mediaReady
+                    && (row.picture.size().width > 0 || m.kind == MessageKind::Video))
                     || (!visual && m.kind != MessageKind::Text && row.mediaReady)
                     || (m.kind == MessageKind::Text && row.hasLinkThumb)
             })
@@ -3523,7 +3849,9 @@ impl Bridge {
         let epoch = self.geom_epoch;
         let mut freed = 0usize;
         for i in 0..self.messages_model.row_count() {
-            let Some(mut row) = self.messages_model.row_data(i) else { continue };
+            let Some(mut row) = self.messages_model.row_data(i) else {
+                continue;
+            };
             let near = self
                 .row_geom
                 .get(row.id.as_str())
@@ -3558,7 +3886,10 @@ impl Bridge {
             }
         }
         if freed > 4 * 1024 * 1024 {
-            println!("[media] released {} MB of off-screen pictures", freed / (1024 * 1024));
+            println!(
+                "[media] released {} MB of off-screen pictures",
+                freed / (1024 * 1024)
+            );
         }
     }
 
@@ -3579,7 +3910,10 @@ impl Bridge {
         self.ui.set_lightbox_id(id.into());
         self.ui.set_lightbox_open(true);
         if let Some(path) = self.media_path.get(id) {
-            self.wa.send(Cmd::DecodeFull { id: id.to_string(), path: std::path::PathBuf::from(path) });
+            self.wa.send(Cmd::DecodeFull {
+                id: id.to_string(),
+                path: std::path::PathBuf::from(path),
+            });
         }
     }
 
@@ -3597,7 +3931,14 @@ impl Bridge {
         let avatar = self.avatar_for(member);
         self.queue_avatar(member);
         self.share_target = Some((group.to_string(), member.to_string()));
-        self.ui.set_share_name(if number.is_empty() || name == number { name.clone() } else { number.clone() }.into());
+        self.ui.set_share_name(
+            if number.is_empty() || name == number {
+                name.clone()
+            } else {
+                number.clone()
+            }
+            .into(),
+        );
         self.ui.set_share_has_avatar(avatar.is_some());
         self.ui.set_share_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_share_initial(initial_of(&name).into());
@@ -3607,7 +3948,9 @@ impl Bridge {
     }
 
     fn share_history_send(&mut self) {
-        let Some((group, member)) = self.share_target.clone() else { return };
+        let Some((group, member)) = self.share_target.clone() else {
+            return;
+        };
         self.warm_chat(&group);
         // The last few days of the group, newest 100 messages, as the
         // WebMessageInfo records a history payload is made of.
@@ -3626,11 +3969,19 @@ impl Bridge {
                         remote_jid: Some(group.clone()),
                         from_me: Some(m.from_me),
                         id: Some(m.id.clone()),
-                        participant: Some(if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() }),
+                        participant: Some(if m.from_me {
+                            self.self_jid.clone()
+                        } else {
+                            m.sender_jid.clone()
+                        }),
                     }),
                     message: MessageField::some(raw.clone()),
                     message_timestamp: Some(m.timestamp as u64),
-                    push_name: if m.sender.is_empty() { None } else { Some(m.sender.clone()) },
+                    push_name: if m.sender.is_empty() {
+                        None
+                    } else {
+                        Some(m.sender.clone())
+                    },
                     ..Default::default()
                 })
             })
@@ -3643,7 +3994,11 @@ impl Bridge {
             return;
         }
         self.ui.set_share_sending(true);
-        self.wa.send(Cmd::ShareHistory { group, member, messages });
+        self.wa.send(Cmd::ShareHistory {
+            group,
+            member,
+            messages,
+        });
     }
 
     pub fn on_share_result(&mut self, ok: bool) {
@@ -3654,7 +4009,12 @@ impl Bridge {
         {
             let who = crate::wa_map::notice_name(&self.store, &member);
             let body = ta("notice.historyShared", &[&who]);
-            self.add_system_message(&group, &format!("sys:shared:{}", now_secs()), now_secs(), body);
+            self.add_system_message(
+                &group,
+                &format!("sys:shared:{}", now_secs()),
+                now_secs(),
+                body,
+            );
         }
     }
 
@@ -3724,13 +4084,25 @@ impl Bridge {
         match m.kind {
             MessageKind::System => {}
             MessageKind::Text => {
-                let Some(ext) = inner.extended_text_message.as_option() else { return };
-                let inline = ext.jpeg_thumbnail.clone().filter(|t| !t.is_empty()).unwrap_or_default();
+                let Some(ext) = inner.extended_text_message.as_option() else {
+                    return;
+                };
+                let inline = ext
+                    .jpeg_thumbnail
+                    .clone()
+                    .filter(|t| !t.is_empty())
+                    .unwrap_or_default();
                 // The card's real picture lives on the CDN; the inline
                 // jpeg is a placeholder-sized copy, kept as the fallback.
-                let hi_res = ext.thumbnail_direct_path.clone().zip(ext.media_key.clone()).zip(
-                    ext.thumbnail_sha256.clone().zip(ext.thumbnail_enc_sha256.clone()),
-                );
+                let hi_res = ext
+                    .thumbnail_direct_path
+                    .clone()
+                    .zip(ext.media_key.clone())
+                    .zip(
+                        ext.thumbnail_sha256
+                            .clone()
+                            .zip(ext.thumbnail_enc_sha256.clone()),
+                    );
                 if let Some(((direct_path, media_key), (sha256, enc_sha256))) = hi_res
                     && !direct_path.is_empty()
                     && !media_key.is_empty()
@@ -3746,7 +4118,11 @@ impl Bridge {
                     });
                 } else if !inline.is_empty() {
                     self.media_inflight.insert(m.id.clone());
-                    self.wa.send(Cmd::DecodeThumb { id: m.id.clone(), bytes: inline, link: true });
+                    self.wa.send(Cmd::DecodeThumb {
+                        id: m.id.clone(),
+                        bytes: inline,
+                        link: true,
+                    });
                 }
                 return;
             }
@@ -3766,7 +4142,11 @@ impl Bridge {
                     id: m.id.clone(),
                     mimetype: m.mimetype.clone(),
                     message: raw,
-                    want: if m.sticker { MediaWant::Sticker } else { MediaWant::Image },
+                    want: if m.sticker {
+                        MediaWant::Sticker
+                    } else {
+                        MediaWant::Image
+                    },
                 });
             }
             MessageKind::Video => {
@@ -3831,7 +4211,9 @@ impl Bridge {
         while self.decoded_order.len() > DECODE_CACHE_MAX
             || (self.decoded_bytes > DECODE_CACHE_BYTES && self.decoded_order.len() > 1)
         {
-            let Some(evicted) = self.decoded_order.pop_front() else { break };
+            let Some(evicted) = self.decoded_order.pop_front() else {
+                break;
+            };
             if let Some((old, _, _)) = self.decoded.remove(&evicted) {
                 self.decoded_bytes = self.decoded_bytes.saturating_sub(image_bytes(&old));
             }
@@ -3884,14 +4266,20 @@ impl Bridge {
             .map(|m| m.kind == MessageKind::Audio)
             .unwrap_or(false);
         if is_audio && !self.waves.contains_key(id) {
-            self.wa.send(Cmd::Waveform { id: id.to_string(), path: path.to_path_buf() });
+            self.wa.send(Cmd::Waveform {
+                id: id.to_string(),
+                path: path.to_path_buf(),
+            });
         }
         // A video status waiting on its clip gets the poster frame now.
         if let Some((items, idx)) = &self.viewer
             && items[*idx].id == id
         {
             self.ui.set_sv_video_ready(true);
-            self.wa.send(Cmd::StatusPoster { id: id.to_string(), path: path.to_path_buf() });
+            self.wa.send(Cmd::StatusPoster {
+                id: id.to_string(),
+                path: path.to_path_buf(),
+            });
         }
         self.restick();
     }
@@ -3915,7 +4303,12 @@ impl Bridge {
         self.restick();
     }
 
-    pub fn on_media_sticker(&mut self, id: &str, path: &std::path::Path, frames: Vec<crate::media::Decoded>) {
+    pub fn on_media_sticker(
+        &mut self,
+        id: &str,
+        path: &std::path::Path,
+        frames: Vec<crate::media::Decoded>,
+    ) {
         self.media_inflight.remove(id);
         self.patch_row(id, |row| row.mediaLoading = false);
         if frames.is_empty() {
@@ -3932,7 +4325,14 @@ impl Bridge {
             .as_ref()
             .and_then(|jid| self.store.messages_for(jid).iter().find(|m| m.id == id))
             .and_then(sticker_key)
-            .or_else(|| self.store.messages.values().flatten().find(|m| m.id == id).and_then(sticker_key));
+            .or_else(|| {
+                self.store
+                    .messages
+                    .values()
+                    .flatten()
+                    .find(|m| m.id == id)
+                    .and_then(sticker_key)
+            });
         if let Some(key) = key {
             self.remember_sticker(&key, images.clone());
         }
@@ -3943,7 +4343,9 @@ impl Bridge {
     // Puts cached frames on a message's row (and the picker cell) and
     // starts the animation when there is more than one.
     fn show_sticker_frames(&mut self, id: &str, frames: &Rc<Vec<slint::Image>>) {
-        let Some(first) = frames.first().cloned() else { return };
+        let Some(first) = frames.first().cloned() else {
+            return;
+        };
         let size = first.size();
         let (w, h) = (size.width as i32, size.height as i32);
         self.remember_decoded(id, first.clone(), w, h);
@@ -3963,7 +4365,9 @@ impl Bridge {
 
     fn remember_sticker(&mut self, key: &str, frames: Rc<Vec<slint::Image>>) {
         if let Some(old) = self.stickers.remove(key) {
-            self.sticker_bytes = self.sticker_bytes.saturating_sub(old.iter().map(image_bytes).sum::<usize>());
+            self.sticker_bytes = self
+                .sticker_bytes
+                .saturating_sub(old.iter().map(image_bytes).sum::<usize>());
             self.sticker_order.retain(|k| k != key);
         }
         self.sticker_bytes += frames.iter().map(image_bytes).sum::<usize>();
@@ -3972,10 +4376,13 @@ impl Bridge {
         while self.sticker_order.len() > STICKER_CACHE_MAX
             || (self.sticker_bytes > STICKER_CACHE_BYTES && self.sticker_order.len() > 1)
         {
-            let Some(evicted) = self.sticker_order.pop_front() else { break };
+            let Some(evicted) = self.sticker_order.pop_front() else {
+                break;
+            };
             if let Some(old) = self.stickers.remove(&evicted) {
-                self.sticker_bytes =
-                    self.sticker_bytes.saturating_sub(old.iter().map(image_bytes).sum::<usize>());
+                self.sticker_bytes = self
+                    .sticker_bytes
+                    .saturating_sub(old.iter().map(image_bytes).sum::<usize>());
             }
         }
     }
@@ -4005,7 +4412,12 @@ impl Bridge {
         }
     }
 
-    pub fn on_media_gif(&mut self, id: &str, path: &std::path::Path, frames: Vec<crate::media::Decoded>) {
+    pub fn on_media_gif(
+        &mut self,
+        id: &str,
+        path: &std::path::Path,
+        frames: Vec<crate::media::Decoded>,
+    ) {
         self.media_inflight.remove(id);
         self.patch_row(id, |row| row.mediaLoading = false);
         if frames.is_empty() {
@@ -4066,7 +4478,9 @@ impl Bridge {
             if self.decoded.contains_key(id) {
                 return;
             }
-            let sized = self.find_message(id).is_some_and(|m| m.media_w > 0 && m.media_h > 0);
+            let sized = self
+                .find_message(id)
+                .is_some_and(|m| m.media_w > 0 && m.media_h > 0);
             let (pic_w, pic_h) = poster_box(w, h);
             self.patch_row(id, |row| {
                 row.picture = image.clone();
@@ -4084,13 +4498,22 @@ impl Bridge {
         self.drop_animation(id);
         self.anim_bytes += frames.iter().map(image_bytes).sum::<usize>();
         self.anim_order.push_back(id.to_string());
-        self.animated.insert(id.to_string(), Anim { frames, idx: 0, looping });
+        self.animated.insert(
+            id.to_string(),
+            Anim {
+                frames,
+                idx: 0,
+                looping,
+            },
+        );
         // A 320px GIF can be 45 frames of RGBA, so the count cap needs a
         // byte budget beside it.
         while self.anim_order.len() > MAX_ANIMATIONS
             || (self.anim_bytes > ANIM_CACHE_BYTES && self.anim_order.len() > 1)
         {
-            let Some(oldest) = self.anim_order.pop_front() else { break };
+            let Some(oldest) = self.anim_order.pop_front() else {
+                break;
+            };
             self.forget_animation(&oldest);
         }
         if !self.anim_timer.running() {
@@ -4110,7 +4533,9 @@ impl Bridge {
     }
 
     fn forget_animation(&mut self, id: &str) -> bool {
-        let Some(anim) = self.animated.remove(id) else { return false };
+        let Some(anim) = self.animated.remove(id) else {
+            return false;
+        };
         self.anim_bytes = self
             .anim_bytes
             .saturating_sub(anim.frames.iter().map(image_bytes).sum::<usize>());
@@ -4192,7 +4617,9 @@ impl Bridge {
     }
 
     fn open_status_viewer(&mut self, jid: &str) {
-        let Some(items) = self.store.statuses.get(jid).cloned() else { return };
+        let Some(items) = self.store.statuses.get(jid).cloned() else {
+            return;
+        };
         if items.is_empty() {
             return;
         }
@@ -4201,7 +4628,9 @@ impl Bridge {
     }
 
     fn step_status(&mut self, delta: i32) {
-        let Some((items, idx)) = &mut self.viewer else { return };
+        let Some((items, idx)) = &mut self.viewer else {
+            return;
+        };
         let next = *idx as i32 + delta;
         if next < 0 || next >= items.len() as i32 {
             self.viewer = None;
@@ -4213,7 +4642,9 @@ impl Bridge {
     }
 
     fn show_status(&mut self) {
-        let Some((items, idx)) = &self.viewer else { return };
+        let Some((items, idx)) = &self.viewer else {
+            return;
+        };
         let (count, idx_now) = (items.len(), *idx);
         let item = items[idx_now].clone();
         self.ui.set_sv_name(self.store.chat_name(&item.jid).into());
@@ -4232,7 +4663,8 @@ impl Bridge {
             })
             .unwrap_or(false);
         self.ui.set_sv_is_video(is_video);
-        self.ui.set_sv_video_ready(is_video && self.media_path.contains_key(&item.id));
+        self.ui
+            .set_sv_video_ready(is_video && self.media_path.contains_key(&item.id));
         if has_image {
             if let Some((img, _, _)) = self.decoded.get(&item.id) {
                 self.ui.set_sv_image(img.clone());
@@ -4246,7 +4678,10 @@ impl Bridge {
                     .as_option()
                     .and_then(|m| m.jpeg_thumbnail.as_ref())
                     .or_else(|| {
-                        inner.video_message.as_option().and_then(|m| m.jpeg_thumbnail.as_ref())
+                        inner
+                            .video_message
+                            .as_option()
+                            .and_then(|m| m.jpeg_thumbnail.as_ref())
                     })
                     .filter(|t| !t.is_empty());
                 if let Some(thumb) = thumb {
@@ -4276,7 +4711,11 @@ impl Bridge {
                             self.media_inflight.insert(item.id.clone());
                             self.wa.send(Cmd::Media {
                                 id: item.id.clone(),
-                                mimetype: if item.mimetype.is_empty() { "video/mp4".into() } else { item.mimetype.clone() },
+                                mimetype: if item.mimetype.is_empty() {
+                                    "video/mp4".into()
+                                } else {
+                                    item.mimetype.clone()
+                                },
                                 message: raw,
                                 want: MediaWant::File,
                             });
@@ -4295,9 +4734,13 @@ impl Bridge {
     }
 
     fn play_status_video(&mut self) {
-        let Some((items, idx)) = &self.viewer else { return };
+        let Some((items, idx)) = &self.viewer else {
+            return;
+        };
         let item = items[*idx].clone();
-        let Some(path) = self.media_path.get(&item.id).map(std::path::PathBuf::from) else { return };
+        let Some(path) = self.media_path.get(&item.id).map(std::path::PathBuf::from) else {
+            return;
+        };
         self.close_video();
         self.video_id = Some(item.id.clone());
         self.play_clip(path, item.media_w, item.media_h, item.duration_sec, None);
@@ -4328,13 +4771,21 @@ impl Bridge {
                     "accept" => "call.answered",
                     "reject" => "call.declined",
                     "timeout" => {
-                        if call.outgoing { "call.noAnswer" } else { "call.missed" }
+                        if call.outgoing {
+                            "call.noAnswer"
+                        } else {
+                            "call.missed"
+                        }
                     }
                     "offer" => "call.ringing",
                     "outgoing" => "call.calling",
                     _ => "call.ended",
                 });
-                let kind = t(if call.video { "call.video" } else { "call.voice" });
+                let kind = t(if call.video {
+                    "call.video"
+                } else {
+                    "call.voice"
+                });
                 let arrow = t(if call.outgoing { "call.out" } else { "call.in" });
                 CallItem {
                     id: call.id.clone().into(),
@@ -4351,7 +4802,13 @@ impl Bridge {
                 }
             })
             .collect();
-        let jids: Vec<String> = self.store.calls.iter().take(60).map(|c| c.jid.clone()).collect();
+        let jids: Vec<String> = self
+            .store
+            .calls
+            .iter()
+            .take(60)
+            .map(|c| c.jid.clone())
+            .collect();
         for jid in jids {
             self.queue_avatar(&jid);
         }
@@ -4391,7 +4848,9 @@ impl Bridge {
     // Pushes the current call onto the screen. Safe to call repeatedly;
     // every state change goes through here.
     fn paint_call(&mut self) {
-        let Some(call) = self.call.as_ref() else { return };
+        let Some(call) = self.call.as_ref() else {
+            return;
+        };
         let (jid, state, video) = (call.jid.clone(), call.state, call.video);
         let name = self.store.chat_name(&jid);
         let avatar = self.avatar_for(&jid);
@@ -4410,7 +4869,9 @@ impl Bridge {
         });
         self.queue_avatar(&jid);
         let dark = self.ui.get_dark_theme();
-        let Some(win) = self.call_window() else { return };
+        let Some(win) = self.call_window() else {
+            return;
+        };
         // The call window carries its own copy of the theme global.
         win.set_dark_theme(dark);
         win.set_state(state.into());
@@ -4420,7 +4881,9 @@ impl Bridge {
         win.set_avatar(avatar.unwrap_or_else(empty_image));
         win.set_initial(initial_of(&name).into());
         win.set_color_idx(color_idx_of(&jid));
-        let Some(call) = self.call.as_ref() else { return };
+        let Some(call) = self.call.as_ref() else {
+            return;
+        };
         // A voice call is a portrait card; video needs room for a
         // landscape picture, the way WhatsApp resizes its call window.
         let video = call.video || call.sending_video || call.peer_video;
@@ -4441,7 +4904,9 @@ impl Bridge {
     // ---- video ----
 
     fn toggle_call_video(&mut self) {
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if call.state != "active" {
             return;
         }
@@ -4454,7 +4919,9 @@ impl Bridge {
 
     // Our own camera came on or went off.
     pub fn on_call_video(&mut self, id: &str, on: bool) {
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if call.id != id {
             return;
         }
@@ -4467,7 +4934,9 @@ impl Bridge {
 
     // The peer's camera came on or went off.
     pub fn on_call_peer_video(&mut self, id: &str, on: bool) {
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if call.id != id {
             return;
         }
@@ -4481,7 +4950,9 @@ impl Bridge {
     // The peer asked to add video. The camera stays off until the user
     // agrees by pressing the button.
     pub fn on_call_video_requested(&mut self, id: &str) {
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if call.id != id {
             return;
         }
@@ -4531,7 +5002,9 @@ impl Bridge {
     }
 
     fn show_call_window(&mut self) {
-        let Some(win) = self.call_window() else { return };
+        let Some(win) = self.call_window() else {
+            return;
+        };
         win.set_muted(false);
         win.set_timer("".into());
         if let Err(e) = win.show() {
@@ -4568,7 +5041,9 @@ impl Bridge {
     // The peer picked up (or we did): start counting.
     fn mark_call_active(&mut self) {
         self.set_ring(None);
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if call.state == "active" {
             return;
         }
@@ -4576,9 +5051,10 @@ impl Bridge {
         call.started = Some(Instant::now());
         self.paint_call();
         self.tick_call();
-        self.call_timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
-            apply_now(|b| b.tick_call())
-        });
+        self.call_timer
+            .start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
+                apply_now(|b| b.tick_call())
+            });
     }
 
     // Leaves the reason on screen for a moment, the way the phone does,
@@ -4587,7 +5063,9 @@ impl Bridge {
         self.set_ring(None);
         self.call_timer.stop();
         let reason = t(reason);
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         call.state = "ended";
         call.started = None;
         if let Some(win) = self.call_ui.as_ref() {
@@ -4629,12 +5107,21 @@ impl Bridge {
             ModelRc::from(Rc::new(VecModel::from(rows)))
         };
         self.ui.set_mic_devices(listed(crate::call::input_names()));
-        self.ui.set_speaker_devices(listed(crate::call::output_names()));
         self.ui
-            .set_camera_devices(listed(crate::camera::cameras().into_iter().map(|c| c.name).collect()));
+            .set_speaker_devices(listed(crate::call::output_names()));
+        self.ui.set_camera_devices(listed(
+            crate::camera::cameras()
+                .into_iter()
+                .map(|c| c.name)
+                .collect(),
+        ));
         let chosen = crate::call::devices();
         let shown = |name: &str| {
-            if name.is_empty() { system.clone().into() } else { SharedString::from(name) }
+            if name.is_empty() {
+                system.clone().into()
+            } else {
+                SharedString::from(name)
+            }
         };
         self.ui.set_mic_device(shown(&chosen.mic));
         self.ui.set_speaker_device(shown(&chosen.speaker));
@@ -4706,7 +5193,9 @@ impl Bridge {
     }
 
     fn accept_call(&mut self) {
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if call.state != "incoming" {
             return;
         }
@@ -4731,7 +5220,10 @@ impl Bridge {
         match call.state {
             "incoming" => {
                 let (id, from) = (call.id.clone(), call.from.clone());
-                self.wa.send(Cmd::RejectCall { id: id.clone(), from: from.clone() });
+                self.wa.send(Cmd::RejectCall {
+                    id: id.clone(),
+                    from: from.clone(),
+                });
                 self.record_call(&id, &from, "reject", false);
                 self.end_call_ui("call.declined");
             }
@@ -4749,7 +5241,9 @@ impl Bridge {
     }
 
     fn toggle_call_mute(&mut self) {
-        let Some(win) = self.call_ui.as_ref() else { return };
+        let Some(win) = self.call_ui.as_ref() else {
+            return;
+        };
         let muted = !win.get_muted();
         win.set_muted(muted);
         self.wa.send(Cmd::SetCallMuted(muted));
@@ -4771,11 +5265,17 @@ impl Bridge {
         if known.as_ref().is_some_and(|entry| entry.status == "accept") && status == "terminate" {
             return;
         }
-        let from = known.map(|entry| entry.jid).unwrap_or_else(|| from.to_string());
+        let from = known
+            .map(|entry| entry.jid)
+            .unwrap_or_else(|| from.to_string());
         if from.is_empty() {
             return;
         }
-        if self.store.upsert_call(id, &from, status, video, group, 0, outgoing).is_some() {
+        if self
+            .store
+            .upsert_call(id, &from, status, video, group, 0, outgoing)
+            .is_some()
+        {
             self.refresh_calls();
             self.schedule_save();
         }
@@ -4793,7 +5293,11 @@ impl Bridge {
         group: bool,
         ts: i64,
     ) {
-        if self.store.upsert_call(id, from, status, video, group, ts, false).is_some() {
+        if self
+            .store
+            .upsert_call(id, from, status, video, group, ts, false)
+            .is_some()
+        {
             self.refresh_calls();
             self.schedule_save();
         }
@@ -4816,7 +5320,10 @@ impl Bridge {
         // Already on a call: turn this one down rather than take the
         // screen away from the call in progress.
         if self.call.as_ref().is_some_and(|call| call.state != "ended") {
-            self.wa.send(Cmd::RejectCall { id: id.to_string(), from: from.to_string() });
+            self.wa.send(Cmd::RejectCall {
+                id: id.to_string(),
+                from: from.to_string(),
+            });
             self.record_call(id, from, "reject", false);
             return;
         }
@@ -4837,7 +5344,11 @@ impl Bridge {
         self.show_call_window();
         self.set_ring(Some(crate::call::Ring::In));
         let name = self.store.chat_name(&jid);
-        let detail = t(if video { "call.incomingVideo" } else { "call.incomingVoice" });
+        let detail = t(if video {
+            "call.incomingVideo"
+        } else {
+            "call.incomingVoice"
+        });
         crate::platform::toast(&name, &detail, None);
         // Nobody home: stop ringing and file it as missed.
         let id = id.to_string();
@@ -4845,7 +5356,11 @@ impl Bridge {
     }
 
     fn ring_timeout(&mut self, id: &str) {
-        if !self.call.as_ref().is_some_and(|call| call.state == "incoming" && call.id == id) {
+        if !self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.state == "incoming" && call.id == id)
+        {
             return;
         }
         self.record_call(id, "", "timeout", false);
@@ -4871,7 +5386,9 @@ impl Bridge {
         self.record_call(id, "", status, false);
         // An outgoing call has no id until the server mints one, so an
         // empty id matches whatever is on screen.
-        let Some(call) = self.call.as_ref() else { return };
+        let Some(call) = self.call.as_ref() else {
+            return;
+        };
         if !call.id.is_empty() && call.id != id {
             return;
         }
@@ -4901,7 +5418,11 @@ impl Bridge {
             }
             _ => return,
         };
-        if self.store.upsert_call(id, &jid, "outgoing", false, false, 0, true).is_some() {
+        if self
+            .store
+            .upsert_call(id, &jid, "outgoing", false, false, 0, true)
+            .is_some()
+        {
             self.refresh_calls();
             self.schedule_save();
         }
@@ -4910,7 +5431,11 @@ impl Bridge {
     // The relay is up. For the callee that is the whole handshake done;
     // the caller still waits for the peer to pick up.
     pub fn on_call_media_ready(&mut self, id: &str) {
-        if self.call.as_ref().is_some_and(|call| call.id == id && call.state == "connecting") {
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.id == id && call.state == "connecting")
+        {
             self.mark_call_active();
         }
     }
@@ -4918,7 +5443,9 @@ impl Bridge {
     pub fn on_call_failed(&mut self, reason: &str) {
         self.set_ring(None);
         self.call_timer.stop();
-        let Some(call) = self.call.as_mut() else { return };
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         // A peer that declined, or a call already torn down, has its own
         // outcome on screen; a late failure must not rewrite it.
         if call.state == "ended" {
@@ -4952,7 +5479,12 @@ impl Bridge {
         }
     }
 
-    pub fn on_channel_meta(&mut self, jid: &str, name: &str, avatar: Option<crate::media::Decoded>) {
+    pub fn on_channel_meta(
+        &mut self,
+        jid: &str,
+        name: &str,
+        avatar: Option<crate::media::Decoded>,
+    ) {
         if !name.is_empty() {
             self.store.set_name(jid, name);
         }
@@ -4965,11 +5497,18 @@ impl Bridge {
     }
 
     fn open_contact_info(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let group = is_group(&jid);
         let name = self.store.chat_name(&jid);
         let avatar = self.avatar_for(&jid);
-        let archived = self.store.chats.get(&jid).map(|c| c.archived).unwrap_or(false);
+        let archived = self
+            .store
+            .chats
+            .get(&jid)
+            .map(|c| c.archived)
+            .unwrap_or(false);
         self.ui.set_info_name(name.clone().into());
         self.ui.set_info_id(display_id(&jid).into());
         self.ui.set_info_about("".into());
@@ -5022,23 +5561,36 @@ impl Bridge {
         self.ui.set_info_about(about.into());
         self.ui.set_info_desc(desc.into());
         if members > 0 {
-            self.ui.set_info_members(ta("info.members", &[&members.to_string()]).into());
+            self.ui
+                .set_info_members(ta("info.members", &[&members.to_string()]).into());
         }
     }
 
     fn toggle_archive(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
-        let next = !self.store.chats.get(&jid).map(|c| c.archived).unwrap_or(false);
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
+        let next = !self
+            .store
+            .chats
+            .get(&jid)
+            .map(|c| c.archived)
+            .unwrap_or(false);
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.archived = next;
         }
         self.ui.set_info_archived(next);
-        self.wa.send(Cmd::Archive { jid, archived: next });
+        self.wa.send(Cmd::Archive {
+            jid,
+            archived: next,
+        });
         self.schedule_refresh_chats();
     }
 
     fn clear_current_chat(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.clear_chat(&jid, true);
         self.ui.set_info_open(false);
     }
@@ -5087,23 +5639,34 @@ impl Bridge {
 
     // Pushes the open chat's flags to the header menu.
     fn apply_chat_settings_ui(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let meta = self.store.chats.get(&jid).cloned().unwrap_or_default();
         self.ui.set_current_is_group(is_group(&jid));
-        self.ui.set_current_can_send(meta.can_send() && !is_channel(&jid));
+        self.ui
+            .set_current_can_send(meta.can_send() && !is_channel(&jid));
         self.ui.set_current_left(meta.left);
         self.ui.set_current_muted(meta.is_muted());
-        self.ui.set_current_mute_label(if meta.muted == -1 {
-            t("mute.always")
-        } else if meta.is_muted() {
-            ta("mute.until", &[&format_stamp(meta.muted)])
-        } else {
-            String::new()
-        }.into());
+        self.ui.set_current_mute_label(
+            if meta.muted == -1 {
+                t("mute.always")
+            } else if meta.is_muted() {
+                ta("mute.until", &[&format_stamp(meta.muted)])
+            } else {
+                String::new()
+            }
+            .into(),
+        );
         self.ui.set_current_favorite(meta.favorite);
         self.ui.set_current_ephemeral(meta.ephemeral as i32);
         self.ui.set_current_ephemeral_label(
-            if meta.ephemeral > 0 { crate::wa_map::ephemeral_label(meta.ephemeral) } else { String::new() }.into(),
+            if meta.ephemeral > 0 {
+                crate::wa_map::ephemeral_label(meta.ephemeral)
+            } else {
+                String::new()
+            }
+            .into(),
         );
         self.ui.set_current_admin(meta.admin);
     }
@@ -5113,7 +5676,10 @@ impl Bridge {
         if !is_group(jid) {
             return;
         }
-        let fresh = self.group_meta_at.get(jid).is_some_and(|at| at.elapsed() < GROUP_META_TTL);
+        let fresh = self
+            .group_meta_at
+            .get(jid)
+            .is_some_and(|at| at.elapsed() < GROUP_META_TTL);
         if fresh {
             return;
         }
@@ -5139,7 +5705,9 @@ impl Bridge {
             // wrote here, so their mentions read as names.
             if !m.name.is_empty() {
                 let canon = self.store.canon_owned(&m.jid);
-                if !self.store.contacts.contains_key(&canon) && !self.store.push_names.contains_key(&canon) {
+                if !self.store.contacts.contains_key(&canon)
+                    && !self.store.push_names.contains_key(&canon)
+                {
                     self.store.push_names.insert(canon, m.name.clone());
                     learned = true;
                 }
@@ -5226,7 +5794,11 @@ impl Bridge {
             }
             _ => {}
         }
-        let kind = if change.kind == "add" && change.reason == "invite" { "invite" } else { change.kind };
+        let kind = if change.kind == "add" && change.reason == "invite" {
+            "invite"
+        } else {
+            change.kind
+        };
         let body = crate::wa_map::group_notice(
             &self.store,
             kind,
@@ -5236,7 +5808,8 @@ impl Bridge {
             change.number,
         );
         if !body.is_empty() {
-            let invite = change.kind == "invite" || (change.kind == "add" && change.reason == "invite");
+            let invite =
+                change.kind == "invite" || (change.kind == "add" && change.reason == "invite");
             let id = if invite && who.len() == 1 && !me_involved {
                 format!("sys:invite:{}:{}", change.ts, who[0])
             } else {
@@ -5292,7 +5865,9 @@ impl Bridge {
 
     // `hours`: 0 unmutes, -1 mutes for good, otherwise mutes that long.
     fn mute_current(&mut self, hours: i32) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.ui.set_chat_menu_open(false);
         let muted = match hours {
             0 => 0,
@@ -5305,40 +5880,70 @@ impl Bridge {
         match muted {
             0 => self.wa.send(Cmd::Unmute(jid)),
             -1 => self.wa.send(Cmd::Mute { jid, until_ms: 0 }),
-            until => self.wa.send(Cmd::Mute { jid, until_ms: until * 1000 }),
+            until => self.wa.send(Cmd::Mute {
+                jid,
+                until_ms: until * 1000,
+            }),
         }
         self.apply_chat_settings_ui();
         self.schedule_refresh_chats();
     }
 
     fn set_ephemeral_current(&mut self, secs: u32) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.ui.set_chat_menu_open(false);
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.ephemeral = secs;
         }
-        let body = crate::wa_map::group_notice(&self.store, "ephemeral", Some(&self.self_jid.clone()), &[], "", secs);
+        let body = crate::wa_map::group_notice(
+            &self.store,
+            "ephemeral",
+            Some(&self.self_jid.clone()),
+            &[],
+            "",
+            secs,
+        );
         self.add_system_message(&jid, &format!("sys:eph:{}", now_secs()), now_secs(), body);
-        self.wa.send(Cmd::SetEphemeral { jid, group: is_group(self.current_jid.as_deref().unwrap_or("")), secs });
+        self.wa.send(Cmd::SetEphemeral {
+            jid,
+            group: is_group(self.current_jid.as_deref().unwrap_or("")),
+            secs,
+        });
         self.apply_chat_settings_ui();
     }
 
     fn toggle_favorite(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.ui.set_chat_menu_open(false);
-        let next = !self.store.chats.get(&jid).map(|c| c.favorite).unwrap_or(false);
+        let next = !self
+            .store
+            .chats
+            .get(&jid)
+            .map(|c| c.favorite)
+            .unwrap_or(false);
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.favorite = next;
         }
-        let all: Vec<String> =
-            self.store.chats.values().filter(|c| c.favorite).map(|c| c.jid.clone()).collect();
+        let all: Vec<String> = self
+            .store
+            .chats
+            .values()
+            .filter(|c| c.favorite)
+            .map(|c| c.jid.clone())
+            .collect();
         self.wa.send(Cmd::Favorites(all));
         self.apply_chat_settings_ui();
         self.schedule_refresh_chats();
     }
 
     fn toggle_list(&mut self, id: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let on = !self
             .store
             .label_chats
@@ -5346,7 +5951,11 @@ impl Bridge {
             .map(|set| set.contains(&jid))
             .unwrap_or(false);
         if self.store.set_label_chat(id, &jid, on) {
-            self.wa.send(Cmd::LabelChat { label_id: id.to_string(), jid, on });
+            self.wa.send(Cmd::LabelChat {
+                label_id: id.to_string(),
+                jid,
+                on,
+            });
         }
         self.refresh_labels();
         self.schedule_refresh_chats();
@@ -5361,12 +5970,21 @@ impl Bridge {
         let order = self.store.labels.len() as i32;
         let label = Label { id: id.clone(), name: name.to_string(), color: order % 20, order, list_type: Some(5) };
         self.store.upsert_label(label);
-        self.wa.send(Cmd::LabelCreate { id: id.clone(), name: name.to_string(), color: order % 20, order });
+        self.wa.send(Cmd::LabelCreate {
+            id: id.clone(),
+            name: name.to_string(),
+            color: order % 20,
+            order,
+        });
         // A list made from a chat's menu starts with that chat in it.
         if let Some(jid) = self.current_jid.clone()
             && self.store.set_label_chat(&id, &jid, true)
         {
-            self.wa.send(Cmd::LabelChat { label_id: id, jid, on: true });
+            self.wa.send(Cmd::LabelChat {
+                label_id: id,
+                jid,
+                on: true,
+            });
         }
         self.refresh_labels();
         self.schedule_refresh_chats();
@@ -5415,7 +6033,9 @@ impl Bridge {
 
     fn confirm_accepted(&mut self) {
         self.ui.set_confirm_open(false);
-        let Some(action) = self.confirm_action.take() else { return };
+        let Some(action) = self.confirm_action.take() else {
+            return;
+        };
         match action {
             ConfirmAction::ExitGroup(jid) => {
                 self.wa.send(Cmd::LeaveGroup(jid));
@@ -5498,7 +6118,9 @@ impl Bridge {
 
     // Selected ids in conversation order, so a copy reads top to bottom.
     fn selected_in_order(&self) -> Vec<String> {
-        let Some(jid) = self.current_jid.as_ref() else { return Vec::new() };
+        let Some(jid) = self.current_jid.as_ref() else {
+            return Vec::new();
+        };
         self.store
             .messages_for(jid)
             .iter()
@@ -5510,7 +6132,9 @@ impl Bridge {
     // One message copies as its text; several copy the way WhatsApp
     // does, each on a line with its stamp and author.
     fn copy_messages(&mut self, ids: &[String]) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let lines: Vec<String> = ids
             .iter()
             .filter_map(|id| self.store.messages_for(&jid).iter().find(|m| &m.id == id))
@@ -5541,7 +6165,9 @@ impl Bridge {
     }
 
     fn request_forward_selected(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let ids = self.selected_in_order();
         if ids.is_empty() {
             return;
@@ -5550,14 +6176,21 @@ impl Bridge {
         self.pending_forward = ids.iter().map(|id| (jid.clone(), id.clone())).collect();
         self.fill_forward_rows("");
         let preview = if count == 1 {
-            self.find_message(&ids[0]).map(preview_body).unwrap_or_default()
+            self.find_message(&ids[0])
+                .map(preview_body)
+                .unwrap_or_default()
         } else {
             ta("forward.count", &[&count.to_string()])
         };
-        let image = if count == 1 { self.decoded.get(&ids[0]).map(|(img, _, _)| img.clone()) } else { None };
+        let image = if count == 1 {
+            self.decoded.get(&ids[0]).map(|(img, _, _)| img.clone())
+        } else {
+            None
+        };
         self.ui.set_forward_preview_text(preview.into());
         self.ui.set_forward_preview_has_image(image.is_some());
-        self.ui.set_forward_preview_image(image.unwrap_or_else(empty_image));
+        self.ui
+            .set_forward_preview_image(image.unwrap_or_else(empty_image));
         self.ui.set_forward_open(true);
         self.select_end();
     }
@@ -5565,7 +6198,9 @@ impl Bridge {
     fn star_selected(&mut self) {
         let ids = self.selected_in_order();
         // Starring the lot when any is unstarred; unstarring otherwise.
-        let any_unstarred = ids.iter().any(|id| self.find_message(id).is_some_and(|m| !m.starred));
+        let any_unstarred = ids
+            .iter()
+            .any(|id| self.find_message(id).is_some_and(|m| !m.starred));
         for id in ids {
             let starred = self.find_message(&id).map(|m| m.starred).unwrap_or(false);
             if starred != any_unstarred {
@@ -5580,20 +6215,39 @@ impl Bridge {
         if ids.is_empty() {
             return;
         }
-        let all_mine = ids.iter().all(|id| self.find_message(id).is_some_and(|m| m.from_me));
+        let all_mine = ids
+            .iter()
+            .all(|id| self.find_message(id).is_some_and(|m| m.from_me));
         let count = ids.len().to_string();
-        self.confirm_action = Some(ConfirmAction::DeleteSelected { for_everyone: all_mine });
-        self.ui.set_confirm_title(ta("confirm.deleteTitle", &[&count]).into());
+        self.confirm_action = Some(ConfirmAction::DeleteSelected {
+            for_everyone: all_mine,
+        });
+        self.ui
+            .set_confirm_title(ta("confirm.deleteTitle", &[&count]).into());
         self.ui.set_confirm_text(t("confirm.deleteBody").into());
         self.ui.set_confirm_action(
-            t(if all_mine { "confirm.deleteEveryone" } else { "confirm.deleteMe" }).into(),
+            t(if all_mine {
+                "confirm.deleteEveryone"
+            } else {
+                "confirm.deleteMe"
+            })
+            .into(),
         );
-        self.ui.set_confirm_secondary(if all_mine { t("confirm.deleteMe") } else { String::new() }.into());
+        self.ui.set_confirm_secondary(
+            if all_mine {
+                t("confirm.deleteMe")
+            } else {
+                String::new()
+            }
+            .into(),
+        );
         self.ui.set_confirm_open(true);
     }
 
     fn delete_selected(&mut self, for_everyone: bool) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let ids = self.selected_in_order();
         if for_everyone {
             for id in &ids {
@@ -5622,7 +6276,9 @@ impl Bridge {
     // ---- member picker (add to group) ----
 
     fn open_member_picker(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if !is_group(&jid) {
             return;
         }
@@ -5635,7 +6291,9 @@ impl Bridge {
 
     // Saved contacts not yet in the group, narrowed by the search box.
     fn fill_member_rows(&mut self, query: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let q = crate::search::fold(query.trim());
         let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
         let in_group: HashSet<String> = self
@@ -5666,7 +6324,13 @@ impl Bridge {
             .take(300)
             .map(|j| {
                 let name = self.store.chat_name(j);
-                self.to_member_row(j, &name, &format_number(j), false, self.member_picked.contains(j))
+                self.to_member_row(
+                    j,
+                    &name,
+                    &format_number(j),
+                    false,
+                    self.member_picked.contains(j),
+                )
             })
             .collect();
         for row in &rows {
@@ -5676,7 +6340,9 @@ impl Bridge {
     }
 
     fn confirm_add_members(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.ui.set_member_pick_open(false);
         let members: Vec<String> = self.member_picked.drain().collect();
         if members.is_empty() {
@@ -5691,7 +6357,8 @@ impl Bridge {
         self.ensure_group_meta(&jid);
         if !failed.is_empty() {
             let names: Vec<String> = failed.iter().map(|j| self.store.chat_name(j)).collect();
-            self.ui.set_status_text(ta("members.addFailed", &[&names.join(", ")]).into());
+            self.ui
+                .set_status_text(ta("members.addFailed", &[&names.join(", ")]).into());
         }
     }
 
@@ -5707,18 +6374,27 @@ impl Bridge {
                 } else {
                     self.store.chat_name(&canon)
                 };
-                let number = if m.phone.is_empty() { format_number(&canon) } else { format_number(&m.phone) };
+                let number = if m.phone.is_empty() {
+                    format_number(&canon)
+                } else {
+                    format_number(&m.phone)
+                };
                 self.to_member_row(&canon, &name, &number, m.admin, false)
             })
             .collect();
-        rows.sort_by(|a, b| b.admin.cmp(&a.admin).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        rows.sort_by(|a, b| {
+            b.admin
+                .cmp(&a.admin)
+                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
         for row in &rows {
             self.queue_avatar(row.jid.as_str());
         }
         let count = rows.len();
         self.info_member_model.set_vec(rows);
         if count > 0 {
-            self.ui.set_info_members(ta("info.members", &[&count.to_string()]).into());
+            self.ui
+                .set_info_members(ta("info.members", &[&count.to_string()]).into());
         }
     }
 
@@ -5726,7 +6402,9 @@ impl Bridge {
 
     // Writes the conversation as WhatsApp's "export chat" text file.
     fn export_chat(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.ui.set_chat_menu_open(false);
         self.warm_chat(&jid);
         let name = self.store.chat_name(&jid);
@@ -5747,13 +6425,18 @@ impl Bridge {
                 } else {
                     m.sender.clone()
                 };
-                format!("{stamp} - {who}: {}", self.store.named_mentions(&copy_body(m)))
+                format!(
+                    "{stamp} - {who}: {}",
+                    self.store.named_mentions(&copy_body(m))
+                )
             })
             .collect();
         let text = lines.join("\n");
         let file_name = format!(
             "WhatsApp Chat - {}.txt",
-            name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect::<String>()
+            name.chars()
+                .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+                .collect::<String>()
         );
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new()
@@ -5780,7 +6463,9 @@ impl Bridge {
     fn chat_search(&mut self, query: &str) {
         self.chat_search_query = query.to_string();
         self.chat_search_pos = 0;
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if query.trim().is_empty() {
             self.chat_search_model.set_vec(Vec::new());
             self.ui.set_chat_search_count("".into());
@@ -5807,7 +6492,12 @@ impl Bridge {
         }
         self.chat_search_model.set_vec(rows);
         self.ui.set_chat_search_count(
-            if count == 0 { t("search.none") } else { ta("search.results", &[&count.to_string()]) }.into(),
+            if count == 0 {
+                t("search.none")
+            } else {
+                ta("search.results", &[&count.to_string()])
+            }
+            .into(),
         );
     }
 
@@ -5854,7 +6544,10 @@ impl Bridge {
                 }
             })
             .collect();
-        cells.chunks(4).map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec())))).collect()
+        cells
+            .chunks(4)
+            .map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec()))))
+            .collect()
     }
 
     // A sticker's picker cell is filled from the frame cache the moment
@@ -5862,7 +6555,9 @@ impl Bridge {
     fn patch_sticker_cells(&self, id: &str, image: &slint::Image) {
         for model in [&self.sticker_model, &self.fav_model] {
             for r in 0..model.row_count() {
-                let Some(row) = model.row_data(r) else { continue };
+                let Some(row) = model.row_data(r) else {
+                    continue;
+                };
                 for c in 0..row.row_count() {
                     if let Some(mut cell) = row.row_data(c)
                         && cell.id == id
@@ -5892,10 +6587,16 @@ impl Bridge {
         }
         self.wa.send(Cmd::GifSearch(String::new()));
         let favs = self.store.starred_stickers(32);
-        self.ui
-            .set_fav_hint(if favs.is_empty() { t("fav.empty").into() } else { "".into() });
-        let fav_pending: Vec<StoredMessage> =
-            favs.iter().filter(|m| !self.decoded.contains_key(&m.id)).map(|m| (*m).clone()).collect();
+        self.ui.set_fav_hint(if favs.is_empty() {
+            t("fav.empty").into()
+        } else {
+            "".into()
+        });
+        let fav_pending: Vec<StoredMessage> = favs
+            .iter()
+            .filter(|m| !self.decoded.contains_key(&m.id))
+            .map(|m| (*m).clone())
+            .collect();
         let fav_grid = self.sticker_grid(favs);
         self.fav_model.set_vec(fav_grid);
         let recents = self.store.recent_stickers(32);
@@ -5919,7 +6620,9 @@ impl Bridge {
     }
 
     fn send_sticker_by_id(&mut self, id: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         // Panel stickers are past messages: reusing their CDN copy skips a
         // re-upload, but this is a fresh send, not a forward (WhatsApp
         // itself never tags a re-sent sticker as forwarded).
@@ -5947,17 +6650,25 @@ impl Bridge {
             .iter()
             .map(|(id, url, img)| {
                 self.gif_url_by_id.insert(id.clone(), url.clone());
-                StickerCell { id: id.clone().into(), pic: image_of(img), ready: true }
+                StickerCell {
+                    id: id.clone().into(),
+                    pic: image_of(img),
+                    ready: true,
+                }
             })
             .collect();
-        let grid: Vec<ModelRc<StickerCell>> =
-            cells.chunks(4).map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec())))).collect();
+        let grid: Vec<ModelRc<StickerCell>> = cells
+            .chunks(4)
+            .map(|c| ModelRc::from(Rc::new(VecModel::from(c.to_vec()))))
+            .collect();
         self.gif_model.set_vec(grid);
         self.ui.set_gif_hint("".into());
     }
 
     fn send_gif_by_id(&mut self, id: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         self.ui.set_picker_open(false);
         if let Some(url) = self.gif_url_by_id.get(id).cloned() {
             self.wa.send(Cmd::SendGifUrl { jid, url });
@@ -6007,7 +6718,9 @@ impl Bridge {
     }
 
     fn save_document(&mut self, id: &str) {
-        let Some((m, path)) = self.plain_document(id) else { return };
+        let Some((m, path)) = self.plain_document(id) else {
+            return;
+        };
         let name = sanitize_file_name(&m.text);
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
@@ -6038,7 +6751,10 @@ impl Bridge {
         self.ui.set_pdf_status(t("pdf.loading").into());
         self.ui.set_pdf_zoom_label("100%".into());
         self.ui.set_pdf_open(true);
-        self.pdf.send(crate::pdf::PdfReq::Open { path, generation: self.pdf_gen });
+        self.pdf.send(crate::pdf::PdfReq::Open {
+            path,
+            generation: self.pdf_gen,
+        });
     }
 
     fn close_pdf(&mut self) {
@@ -6070,7 +6786,9 @@ impl Bridge {
                     self.open_pdf(&id, &title, path);
                 }
             }
-            Err(e) => self.ui.set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
+            Err(e) => self
+                .ui
+                .set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
         }
     }
 
@@ -6125,7 +6843,8 @@ impl Bridge {
         self.ui.set_pdf_total_h(y);
         self.ui.set_pdf_total_w((page_w + 2.0 * MARGIN).max(view_w));
         self.pdf_model.set_vec(rows);
-        self.ui.set_pdf_zoom_label(format!("{}%", (self.pdf_zoom * 100.0).round() as i32).into());
+        self.ui
+            .set_pdf_zoom_label(format!("{}%", (self.pdf_zoom * 100.0).round() as i32).into());
         if keep_scroll && old_page_w > 0.0 {
             let ratio = page_w / old_page_w;
             let scroll = self.ui.get_pdf_scroll() * ratio;
@@ -6145,17 +6864,27 @@ impl Bridge {
         let width = self.pdf_page_w.round() as u32;
         let mut current = 0;
         for i in 0..self.pdf_model.row_count() {
-            let Some(row) = self.pdf_model.row_data(i) else { continue };
+            let Some(row) = self.pdf_model.row_data(i) else {
+                continue;
+            };
             if row.y <= scroll + view_h * 0.35 {
                 current = i;
             }
             let visible = row.y + row.h >= top && row.y <= bottom;
             if visible {
-                if self.pdf_rendered.get(&i) != Some(&width) && !self.pdf_pending.contains(&(i, width)) {
+                if self.pdf_rendered.get(&i) != Some(&width)
+                    && !self.pdf_pending.contains(&(i, width))
+                {
                     self.pdf_pending.insert((i, width));
-                    self.pdf.send(crate::pdf::PdfReq::Render { page: i, width, generation: self.pdf_gen });
+                    self.pdf.send(crate::pdf::PdfReq::Render {
+                        page: i,
+                        width,
+                        generation: self.pdf_gen,
+                    });
                 }
-            } else if row.ready && (row.y + row.h < top - view_h * 2.0 || row.y > bottom + view_h * 2.0) {
+            } else if row.ready
+                && (row.y + row.h < top - view_h * 2.0 || row.y > bottom + view_h * 2.0)
+            {
                 // Out of reach: drop the pixels, keep the slot.
                 let mut cleared = row;
                 cleared.pic = empty_image();
@@ -6180,7 +6909,8 @@ impl Bridge {
             row.ready = true;
             self.pdf_model.set_row_data(page, row);
         }
-        self.pdf_rendered.insert(page, if img.w == width { width } else { img.w });
+        self.pdf_rendered
+            .insert(page, if img.w == width { width } else { img.w });
     }
 
     fn pdf_zoom_step(&mut self, step: i32) {
@@ -6214,13 +6944,17 @@ impl Bridge {
     // The pointer moved while pressed on a row's background: every row
     // between the anchor and the pointer joins the selection.
     fn drag_move(&mut self, y: f32) {
-        let Some((anchor_id, anchor_y)) = self.drag_anchor.clone() else { return };
+        let Some((anchor_id, anchor_y)) = self.drag_anchor.clone() else {
+            return;
+        };
         if (y - anchor_y).abs() < 8.0 && !self.select_mode {
             return;
         }
         let (lo, hi) = (anchor_y.min(y), anchor_y.max(y));
         let epoch = self.geom_epoch;
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let mut wanted: Vec<String> = self
             .row_geom
             .iter()
@@ -6267,8 +7001,12 @@ impl Bridge {
     // ---- video overlay (GIF zoom and click-to-play) ----
 
     fn open_video(&mut self, id: &str) {
-        let Some(m) = self.find_message(id).cloned() else { return };
-        let Some(path) = self.media_path.get(id).map(std::path::PathBuf::from) else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
+        let Some(path) = self.media_path.get(id).map(std::path::PathBuf::from) else {
+            return;
+        };
         self.close_video();
         self.video_id = Some(id.to_string());
         // The bubble's frames show instantly while the sharper set loads.
@@ -6284,7 +7022,10 @@ impl Bridge {
             self.ui.set_video_w(m.media_w.max(320) as i32);
             self.ui.set_video_h(m.media_h.max(240) as i32);
             self.ui.set_video_open(true);
-            self.wa.send(Cmd::ZoomFrames { id: id.to_string(), path });
+            self.wa.send(Cmd::ZoomFrames {
+                id: id.to_string(),
+                path,
+            });
             return;
         }
         let poster = self.decoded.get(id).map(|(img, _, _)| img.clone());
@@ -6315,13 +7056,18 @@ impl Bridge {
         self.ui.set_video_ended(false);
         self.ui.set_video_progress(0.0);
         self.ui.set_video_pos_label("0:00".into());
-        self.ui.set_video_duration_label(crate::store::format_duration(seconds).into());
+        self.ui
+            .set_video_duration_label(crate::store::format_duration(seconds).into());
         self.ui.set_video_volume(self.video_volume);
         self.ui.set_video_muted(self.video_muted);
         self.ui.set_video_open(true);
-        self.video = Some(crate::video::Playback::start(self.media_key.clone(), path, move |event| {
-            ui_apply(move |b| b.on_video_event(generation, event));
-        }));
+        self.video = Some(crate::video::Playback::start(
+            self.media_key.clone(),
+            path,
+            move |event| {
+                ui_apply(move |b| b.on_video_event(generation, event));
+            },
+        ));
     }
 
     fn close_video(&mut self) {
@@ -6343,16 +7089,20 @@ impl Bridge {
         if self.zoom_frames.len() < 2 {
             return;
         }
-        self.zoom_timer.start(slint::TimerMode::Repeated, Duration::from_millis(66), || {
-            apply_now(|b| {
-                if b.zoom_frames.is_empty() {
-                    b.zoom_timer.stop();
-                    return;
-                }
-                b.zoom_idx = (b.zoom_idx + 1) % b.zoom_frames.len();
-                b.ui.set_video_frame(b.zoom_frames[b.zoom_idx].clone());
-            });
-        });
+        self.zoom_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(66),
+            || {
+                apply_now(|b| {
+                    if b.zoom_frames.is_empty() {
+                        b.zoom_timer.stop();
+                        return;
+                    }
+                    b.zoom_idx = (b.zoom_idx + 1) % b.zoom_frames.len();
+                    b.ui.set_video_frame(b.zoom_frames[b.zoom_idx].clone());
+                });
+            },
+        );
     }
 
     pub fn on_zoom_frames(&mut self, id: &str, frames: Vec<crate::media::Decoded>) {
@@ -6393,7 +7143,11 @@ impl Bridge {
                 // where the sound is lined up with the picture again.
                 if resync && let Some(audio) = &self.video_audio {
                     audio.seek(pos);
-                    if self.video_playing { audio.resume() } else { audio.pause() }
+                    if self.video_playing {
+                        audio.resume()
+                    } else {
+                        audio.pause()
+                    }
                 }
                 if let Some(video) = &self.video {
                     video.frame_shown();
@@ -6403,7 +7157,11 @@ impl Bridge {
                 // Decoded whole while the picture was already running.
                 let audio = crate::audio::Player::start(&buffer, self.video_pos);
                 if let Some(audio) = &audio {
-                    audio.set_gain(if self.video_muted { 0.0 } else { self.video_volume });
+                    audio.set_gain(if self.video_muted {
+                        0.0
+                    } else {
+                        self.video_volume
+                    });
                     if !self.video_playing {
                         audio.pause();
                     }
@@ -6422,7 +7180,11 @@ impl Bridge {
             // Not H.264 in an MP4 (HEVC from an iPhone sent as a file,
             // say): whatever the system plays videos with gets it.
             PlayerEvent::Failed => {
-                let cached = self.video_id.as_ref().and_then(|id| self.media_path.get(id)).cloned();
+                let cached = self
+                    .video_id
+                    .as_ref()
+                    .and_then(|id| self.media_path.get(id))
+                    .cloned();
                 self.close_video();
                 if let Some(cached) = cached
                     && let Some(plain) =
@@ -6437,8 +7199,10 @@ impl Bridge {
     fn set_video_pos(&mut self, pos: f64) {
         self.video_pos = pos;
         let total = self.video_duration.max(0.001);
-        self.ui.set_video_progress((pos / total).clamp(0.0, 1.0) as f32);
-        self.ui.set_video_pos_label(crate::store::format_duration(pos as u32).into());
+        self.ui
+            .set_video_progress((pos / total).clamp(0.0, 1.0) as f32);
+        self.ui
+            .set_video_pos_label(crate::store::format_duration(pos as u32).into());
     }
 
     fn video_toggle(&mut self) {
@@ -6483,9 +7247,15 @@ impl Bridge {
     }
 
     fn video_save(&mut self) {
-        let Some(id) = self.video_id.clone() else { return };
-        let Some(cached) = self.media_path.get(&id).map(std::path::PathBuf::from) else { return };
-        let Some(plain) = crate::media::temp_plain(&self.media_key, &cached) else { return };
+        let Some(id) = self.video_id.clone() else {
+            return;
+        };
+        let Some(cached) = self.media_path.get(&id).map(std::path::PathBuf::from) else {
+            return;
+        };
+        let Some(plain) = crate::media::temp_plain(&self.media_key, &cached) else {
+            return;
+        };
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let name = format!("VID-{stamp}.mp4");
         std::thread::spawn(move || {
@@ -6627,8 +7397,12 @@ impl Bridge {
         if !is_group(&m.jid) {
             return None;
         }
-        Some(if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() })
-            .filter(|p| !p.is_empty())
+        Some(if m.from_me {
+            self.self_jid.clone()
+        } else {
+            m.sender_jid.clone()
+        })
+        .filter(|p| !p.is_empty())
     }
 
     // "Send message viewed" (opt-in, off by default): read receipts for
@@ -6659,7 +7433,11 @@ impl Bridge {
         let mut acked = Vec::new();
         for (sender, ids) in by_sender {
             acked.extend(ids.iter().cloned());
-            self.wa.send(Cmd::MarkRead { jid: jid.to_string(), sender, ids });
+            self.wa.send(Cmd::MarkRead {
+                jid: jid.to_string(),
+                sender,
+                ids,
+            });
         }
         self.store.mark_read_sent(jid, &acked);
     }
@@ -6672,20 +7450,32 @@ impl Bridge {
         if !self.ui.get_send_receipts() {
             return;
         }
-        let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id) else { return };
+        let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id) else {
+            return;
+        };
         if m.from_me || m.read_sent {
             return;
         }
         let sender = self.key_participant(m);
-        self.wa.send(Cmd::MarkPlayed { jid: jid.to_string(), sender, id: id.to_string() });
+        self.wa.send(Cmd::MarkPlayed {
+            jid: jid.to_string(),
+            sender,
+            id: id.to_string(),
+        });
         self.store.mark_read_sent(jid, &[id.to_string()]);
     }
 
     fn send_reaction(&mut self, id: &str, emoji: &str) {
-        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
         // Reacting again with the same emoji removes it, like WhatsApp.
         let mine = m.reactions.get("me").cloned().unwrap_or_default();
-        let next = if clean_text(&mine) == clean_text(emoji) { "" } else { emoji };
+        let next = if clean_text(&mine) == clean_text(emoji) {
+            ""
+        } else {
+            emoji
+        };
         self.wa.send(Cmd::React {
             jid: m.jid.clone(),
             id: id.to_string(),
@@ -6711,7 +7501,9 @@ impl Bridge {
 
     // Lists who reacted to a message, like WhatsApp's reaction sheet.
     fn show_reactions(&mut self, id: &str) {
-        let Some(m) = self.find_message(id) else { return };
+        let Some(m) = self.find_message(id) else {
+            return;
+        };
         let entries: Vec<(String, String)> = m
             .reactions
             .iter()
@@ -6729,9 +7521,16 @@ impl Bridge {
                 } else {
                     self.store.canon_owned(&normalize_jid(reactor))
                 };
-                let name =
-                    if reactor == "me" { t("reactions.you") } else { self.store.chat_name(&who) };
-                let name = if name.is_empty() { display_id(&who) } else { name };
+                let name = if reactor == "me" {
+                    t("reactions.you")
+                } else {
+                    self.store.chat_name(&who)
+                };
+                let name = if name.is_empty() {
+                    display_id(&who)
+                } else {
+                    name
+                };
                 let avatar = self.avatar_for(&who);
                 ReactionItem {
                     jid: who.clone().into(),
@@ -6752,12 +7551,15 @@ impl Bridge {
         }
         let count = rows.len();
         self.reactions_model.set_vec(rows);
-        self.ui.set_reactions_title(ta("reactions.count", &[&count.to_string()]).into());
+        self.ui
+            .set_reactions_title(ta("reactions.count", &[&count.to_string()]).into());
         self.ui.set_reactions_open(true);
     }
 
     fn toggle_star(&mut self, id: &str) {
-        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
         let next = !m.starred;
         self.wa.send(Cmd::Star {
             jid: m.jid.clone(),
@@ -6772,7 +7574,9 @@ impl Bridge {
     }
 
     fn delete_message(&mut self, id: &str) {
-        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
         // Only our own messages can be taken back from everyone; the
         // rest go away here and on the phone.
         if !m.from_me {
@@ -6789,7 +7593,10 @@ impl Bridge {
             }
             return;
         }
-        self.wa.send(Cmd::Revoke { jid: m.jid.clone(), id: id.to_string() });
+        self.wa.send(Cmd::Revoke {
+            jid: m.jid.clone(),
+            id: id.to_string(),
+        });
         if self.store.mark_deleted(&m.jid, id) {
             self.patch_row(id, |row| {
                 row.deleted = true;
@@ -6801,8 +7608,12 @@ impl Bridge {
     }
 
     fn request_forward(&mut self, id: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
-        let Some(m) = self.find_message(id) else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
+        let Some(m) = self.find_message(id) else {
+            return;
+        };
         let preview = preview_body(m);
         let image = self.decoded.get(id).map(|(img, _, _)| img.clone());
         self.pending_forward = vec![(jid, id.to_string())];
@@ -6810,7 +7621,8 @@ impl Bridge {
         // Show what is being forwarded, like WhatsApp's bottom bar.
         self.ui.set_forward_preview_text(preview.into());
         self.ui.set_forward_preview_has_image(image.is_some());
-        self.ui.set_forward_preview_image(image.unwrap_or_else(empty_image));
+        self.ui
+            .set_forward_preview_image(image.unwrap_or_else(empty_image));
         self.ui.set_forward_open(true);
     }
 
@@ -6844,10 +7656,17 @@ impl Bridge {
         }
         for (source, id) in pending {
             self.warm_chat(&source);
-            let raw =
-                self.store.messages_for(&source).iter().find(|m| m.id == id).and_then(|m| m.raw.clone());
+            let raw = self
+                .store
+                .messages_for(&source)
+                .iter()
+                .find(|m| m.id == id)
+                .and_then(|m| m.raw.clone());
             if let Some(message) = raw {
-                self.wa.send(Cmd::Forward { jid: target.to_string(), message });
+                self.wa.send(Cmd::Forward {
+                    jid: target.to_string(),
+                    message,
+                });
             }
         }
     }
@@ -6861,10 +7680,13 @@ impl Bridge {
         std::thread::spawn(move || {
             let dialog = rfd::FileDialog::new();
             let dialog = match kind {
-                "image" => dialog
-                    .add_filter(t("picker.images"), &["jpg", "jpeg", "png", "webp", "bmp"]),
-                "audio" => dialog
-                    .add_filter(t("picker.audio"), &["mp3", "ogg", "opus", "m4a", "aac", "wav"]),
+                "image" => {
+                    dialog.add_filter(t("picker.images"), &["jpg", "jpeg", "png", "webp", "bmp"])
+                }
+                "audio" => dialog.add_filter(
+                    t("picker.audio"),
+                    &["mp3", "ogg", "opus", "m4a", "aac", "wav"],
+                ),
                 _ => dialog.add_filter(t("picker.all"), &["*"]),
             };
             if let Some(path) = dialog.pick_file() {
@@ -6874,7 +7696,9 @@ impl Bridge {
     }
 
     fn on_picked(&mut self, kind: &str, path: std::path::PathBuf) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         match kind {
             // WhatsApp-style confirmation: caption field before sending.
             "image" => self.wa.send(Cmd::PreviewImage { path }),
@@ -6892,7 +7716,9 @@ impl Bridge {
     fn confirm_send_image(&mut self, caption: &str) {
         let path = self.pending_image.take();
         self.ui.set_preview_open(false);
-        let (Some(jid), Some(path)) = (self.current_jid.clone(), path) else { return };
+        let (Some(jid), Some(path)) = (self.current_jid.clone(), path) else {
+            return;
+        };
         let caption = caption.trim();
         self.wa.send(Cmd::SendImage {
             jid,
@@ -6913,8 +7739,12 @@ impl Bridge {
             return;
         }
         self.last_paste = Some(Instant::now());
-        let Ok(mut clipboard) = arboard::Clipboard::new() else { return };
-        let Ok(img) = clipboard.get_image() else { return };
+        let Ok(mut clipboard) = arboard::Clipboard::new() else {
+            return;
+        };
+        let Ok(img) = clipboard.get_image() else {
+            return;
+        };
         let (w, h) = (img.width as u32, img.height as u32);
         let Some(buffer) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
             return;
@@ -6969,8 +7799,12 @@ impl Bridge {
     }
 
     fn start_audio(&mut self, id: &str, offset_secs: f64) {
-        let Some(jid) = self.current_jid.clone() else { return };
-        let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id) else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
+        let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id) else {
+            return;
+        };
         let duration = (m.duration_sec.max(1)) as f64;
         self.stop_audio();
         self.audio = Some(AudioState {
@@ -6999,7 +7833,11 @@ impl Bridge {
                 a.pending_offset = None;
             }
             self.ensure_audio_timer();
-            let jid = self.audio.as_ref().map(|a| a.jid.clone()).unwrap_or_default();
+            let jid = self
+                .audio
+                .as_ref()
+                .map(|a| a.jid.clone())
+                .unwrap_or_default();
             if Some(&jid) == self.current_jid.as_ref() {
                 self.patch_row(&id, |row| row.playing = true);
             }
@@ -7012,14 +7850,20 @@ impl Bridge {
             self.audio = None;
             return;
         };
-        self.wa.send(Cmd::AudioDecode { id, plain, rate_idx, rate });
+        self.wa.send(Cmd::AudioDecode {
+            id,
+            plain,
+            rate_idx,
+            rate,
+        });
     }
 
     pub fn on_audio_ready(&mut self, id: &str, rate_idx: usize, buffer: crate::audio::AudioBuffer) {
         if self.audio_buffers.len() > 8 {
             self.audio_buffers.clear();
         }
-        self.audio_buffers.insert((id.to_string(), rate_idx), buffer);
+        self.audio_buffers
+            .insert((id.to_string(), rate_idx), buffer);
         if let Some(a) = &self.audio
             && a.id == id
             && rate_idx == self.audio_rate_idx
@@ -7050,9 +7894,14 @@ impl Bridge {
         // output position times that rate; capture it before restarting.
         let prev_rate = RATES[self.audio_rate_idx];
         self.audio_rate_idx = (self.audio_rate_idx + 1) % RATES.len();
-        self.ui.set_audio_rate_label(RATE_LABELS[self.audio_rate_idx].into());
+        self.ui
+            .set_audio_rate_label(RATE_LABELS[self.audio_rate_idx].into());
         let offset = self.audio.as_mut().map(|a| {
-            let pos = a.player.as_ref().map(|p| p.position_secs() * prev_rate).unwrap_or(0.0);
+            let pos = a
+                .player
+                .as_ref()
+                .map(|p| p.position_secs() * prev_rate)
+                .unwrap_or(0.0);
             a.player = None;
             pos.min(a.duration)
         });
@@ -7066,9 +7915,13 @@ impl Bridge {
         if self.audio_timer.running() {
             return;
         }
-        self.audio_timer.start(slint::TimerMode::Repeated, Duration::from_millis(250), || {
-            apply_now(|b| b.tick_audio());
-        });
+        self.audio_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(250),
+            || {
+                apply_now(|b| b.tick_audio());
+            },
+        );
     }
 
     fn tick_audio(&mut self) {
@@ -7127,7 +7980,8 @@ impl Bridge {
         let avatar = self.avatar_for(&a.jid);
         self.ui.set_mini_audio_name(name.clone().into());
         self.ui.set_mini_audio_avatar_has(avatar.is_some());
-        self.ui.set_mini_audio_avatar(avatar.unwrap_or_else(empty_image));
+        self.ui
+            .set_mini_audio_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_mini_audio_initial(initial_of(&name).into());
         self.ui.set_mini_audio_color_idx(color_idx_of(&a.jid));
         self.ui.set_mini_audio_playing(!a.paused);
@@ -7160,9 +8014,7 @@ impl Bridge {
                         apply_now(|b| {
                             if let Some(started) = b.rec_started {
                                 let secs = started.elapsed().as_secs() as u32;
-                                b.ui.set_rec_elapsed(
-                                    crate::store::format_duration(secs).into(),
-                                );
+                                b.ui.set_rec_elapsed(crate::store::format_duration(secs).into());
                             }
                         });
                     },
@@ -7178,7 +8030,9 @@ impl Bridge {
         self.ui.set_rec_active(false);
         let view_once = self.ui.get_rec_view_once();
         self.ui.set_rec_view_once(false);
-        let Some(recorder) = self.recorder.take() else { return };
+        let Some(recorder) = self.recorder.take() else {
+            return;
+        };
         if !send {
             return;
         }
@@ -7187,8 +8041,15 @@ impl Bridge {
         if (samples.len() as f64) < in_rate as f64 / 2.0 {
             return;
         }
-        let Some(jid) = self.current_jid.clone() else { return };
-        self.wa.send(Cmd::SendVoice { jid, samples, in_rate, view_once });
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
+        self.wa.send(Cmd::SendVoice {
+            jid,
+            samples,
+            in_rate,
+            view_once,
+        });
     }
 
     // ---- helpers ----
@@ -7196,11 +8057,15 @@ impl Bridge {
     fn once(&mut self, ms: u64, f: impl FnOnce(&mut Bridge) + 'static) {
         let timer = slint::Timer::default();
         let cell = RefCell::new(Some(f));
-        timer.start(slint::TimerMode::SingleShot, Duration::from_millis(ms), move || {
-            if let Some(f) = cell.borrow_mut().take() {
-                apply_now(f);
-            }
-        });
+        timer.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(ms),
+            move || {
+                if let Some(f) = cell.borrow_mut().take() {
+                    apply_now(f);
+                }
+            },
+        );
         self.oneshots.retain(|timer| timer.running());
         self.oneshots.push(timer);
     }
@@ -7241,7 +8106,11 @@ fn notification_body(m: &StoredMessage) -> String {
         MessageKind::Audio => t("preview.audio"),
         MessageKind::Doc => ta("preview.document", &[&m.text]),
         MessageKind::Video => {
-            if m.gif { t("preview.gif") } else { t("preview.video") }
+            if m.gif {
+                t("preview.gif")
+            } else {
+                t("preview.video")
+            }
         }
         MessageKind::Text | MessageKind::System => m.text.clone(),
     }
@@ -7253,11 +8122,26 @@ fn media_box(m: &StoredMessage) -> (i32, i32) {
     if m.kind != MessageKind::Image && m.kind != MessageKind::Video {
         return (0, 0);
     }
-    let (max_w, max_h) = if m.sticker { (180.0, 180.0) } else { (330.0, 380.0) };
-    let w = if m.media_w > 0 { m.media_w as f64 } else { 260.0 };
-    let h = if m.media_h > 0 { m.media_h as f64 } else { 200.0 };
+    let (max_w, max_h) = if m.sticker {
+        (180.0, 180.0)
+    } else {
+        (330.0, 380.0)
+    };
+    let w = if m.media_w > 0 {
+        m.media_w as f64
+    } else {
+        260.0
+    };
+    let h = if m.media_h > 0 {
+        m.media_h as f64
+    } else {
+        200.0
+    };
     let scale = (max_w / w).min(max_h / h).min(1.0);
-    (((w * scale).round() as i32).max(1), ((h * scale).round() as i32).max(1))
+    (
+        ((w * scale).round() as i32).max(1),
+        ((h * scale).round() as i32).max(1),
+    )
 }
 
 // The content hash that identifies a sticker across messages.
@@ -7269,9 +8153,19 @@ fn sticker_key(m: &StoredMessage) -> Option<String> {
 fn sanitize_file_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    if cleaned.trim().is_empty() { "document".into() } else { cleaned.trim().to_string() }
+    if cleaned.trim().is_empty() {
+        "document".into()
+    } else {
+        cleaned.trim().to_string()
+    }
 }
 
 fn host_of(url: &str) -> String {
@@ -7280,7 +8174,10 @@ fn host_of(url: &str) -> String {
     }
     url::Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| h.trim_start_matches("www.").to_string())
+        })
         .unwrap_or_default()
 }
 

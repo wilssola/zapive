@@ -184,3 +184,10 @@ export struct MessageItem {
     // A notice that opens the group info when clicked.
     clickable: bool,
 }
+
+// One emoji picker row: either a translated section header (label) or a row
+// of up to 8 emoji cells.
+export struct EmojiRow {
+    label: string,
+    cells: [string],
+}
