@@ -75,6 +75,50 @@ fn decode_opus_ogg(path: &Path) -> Option<(Vec<f32>, u32)> {
     if pcm.is_empty() { None } else { Some((pcm, OUT_RATE)) }
 }
 
+pub fn probe_duration(path: &Path) -> Option<u32> {
+    use symphonia::core::{io::MediaSourceStream, probe::Hint};
+    let file = std::fs::File::open(path).ok()?;
+    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, stream, &Default::default(), &Default::default()).ok()?;
+    let params = &probed.format.default_track()?.codec_params;
+    let frames = params.n_frames?;
+    let time = params.time_base?.calc_time(frames);
+    Some((time.seconds as f64 + time.frac).round().clamp(0.0, u32::MAX as f64) as u32)
+}
+
+#[cfg(test)]
+mod duration_tests {
+    #[test]
+    fn audio_duration_probe_reads_wav_metadata() {
+        let path = std::env::temp_dir().join(format!("zapive-audio-duration-{}.wav", std::process::id()));
+        let data_size = 16_000u32;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_size).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&8_000u32.to_le_bytes());
+        wav.extend_from_slice(&16_000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_size.to_le_bytes());
+        wav.resize(44 + data_size as usize, 0);
+        std::fs::write(&path, wav).unwrap();
+        let duration = super::probe_duration(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(duration, Some(1));
+        assert_eq!(super::probe_duration(&path), None);
+    }
+}
+
 fn decode_symphonia(path: &Path) -> Option<(Vec<f32>, u32)> {
     use symphonia::core::audio::SampleBuffer;
     use symphonia::core::codecs::CODEC_TYPE_NULL;

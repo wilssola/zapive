@@ -89,6 +89,28 @@ pub struct StoredMessage {
     pub raw: Option<Arc<wa::Message>>,
 }
 
+impl StoredMessage {
+    pub fn is_voice_message(&self) -> bool {
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        self.kind == MessageKind::Audio && self.raw.as_ref()
+            .and_then(|raw| raw.get_base_message().audio_message.as_option())
+            .and_then(|audio| audio.ptt)
+            .unwrap_or(false)
+    }
+
+    pub fn audio_filename(&self, source: Option<&str>) -> String {
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        let original = source.and_then(|path| path.rsplit(['/', '\\']).next())
+            .filter(|name| !name.trim().is_empty());
+        let document = self.raw.as_ref()
+            .and_then(|raw| raw.get_base_message().document_message.as_option())
+            .filter(|doc| doc.mimetype.as_deref().unwrap_or(&self.mimetype).starts_with("audio/"))
+            .and_then(|doc| doc.file_name.as_deref())
+            .filter(|name| !name.trim().is_empty());
+        original.or(document).map(clean_text).unwrap_or_else(|| t("audio.fallbackName"))
+    }
+}
+
 fn is_zero(n: &u32) -> bool {
     *n == 0
 }
@@ -821,7 +843,7 @@ impl Store {
         }
         let Some(text) = vault.get(&format!("store:msgs:{jid}")) else { return };
         let Ok(mut disk) = serde_json::from_str::<Vec<StoredMessage>>(&text) else { return };
-        let live = self.messages.entry(jid).or_default();
+        let live = self.messages.entry(jid.clone()).or_default();
         if !live.is_empty() {
             let known: HashSet<String> = disk.iter().map(|m| m.id.clone()).collect();
             for m in live.drain(..) {
@@ -832,6 +854,7 @@ impl Store {
             disk.sort_by_key(|m| m.timestamp);
         }
         *live = disk;
+        self.refresh_audio_preview(&jid);
     }
 
     // Drops a hydrated chat back to metadata-only. Dirty chats stay: their
@@ -1179,12 +1202,33 @@ impl Store {
 
     // Indexes one cold chat straight from the vault (first-run backfill
     // for chats stored before the search index existed).
+    fn refresh_audio_preview(&mut self, jid: &str) {
+        let preview = self.messages.get(jid)
+            .and_then(|messages| messages.iter().max_by_key(|m| m.timestamp))
+            .filter(|m| m.kind == MessageKind::Audio
+                && self.chats.get(jid).is_some_and(|chat| chat.timestamp == m.timestamp))
+            .map(|m| compute_preview(m, self));
+        if let Some(preview) = preview {
+            if let Some(chat) = self.chats.get_mut(jid) {
+                chat.preview = preview;
+            }
+        }
+    }
+
     pub fn index_from_vault(&mut self, vault: &Vault, jid: &str) {
         if self.search.has_chat(jid) {
             return;
         }
         let Some(text) = vault.get(&format!("store:msgs:{jid}")) else { return };
         let Ok(disk) = serde_json::from_str::<Vec<StoredMessage>>(&text) else { return };
+        if let Some(message) = disk.iter().max_by_key(|m| m.timestamp) {
+            if message.kind == MessageKind::Audio
+                && self.chats.get(jid).is_some_and(|chat| chat.timestamp == message.timestamp)
+            {
+                let preview = compute_preview(message, self);
+                self.chats.get_mut(jid).unwrap().preview = preview;
+            }
+        }
         self.search.rebuild(jid, &disk);
     }
 
@@ -1269,8 +1313,8 @@ pub fn quoted_summary(quoted: &wa::Message) -> String {
     if inner.sticker_message.is_set() {
         return t("preview.sticker");
     }
-    if inner.audio_message.is_set() {
-        return t("preview.audio");
+    if let Some(audio) = inner.audio_message.as_option() {
+        return audio_preview(audio.ptt.unwrap_or(false), audio.seconds.unwrap_or(0));
     }
     if let Some(v) = inner.video_message.as_option() {
         return match v.caption.as_deref() {
@@ -1286,10 +1330,15 @@ pub fn quoted_summary(quoted: &wa::Message) -> String {
 }
 
 // What a message looks like in the chat list, without the sender prefix.
+fn audio_preview(voice: bool, seconds: u32) -> String {
+    let label = t(if voice { "preview.voice" } else { "preview.audio" });
+    if seconds > 0 { format!("{label} ({})", format_duration(seconds)) } else { label }
+}
+
 pub fn preview_body(stored: &StoredMessage) -> String {
     match stored.kind {
         MessageKind::Image => t("preview.photo"),
-        MessageKind::Audio => t("preview.audio"),
+        MessageKind::Audio => audio_preview(stored.is_voice_message(), stored.duration_sec),
         MessageKind::Video => {
             if stored.gif { t("preview.gif") } else { t("preview.video") }
         }
@@ -1318,6 +1367,69 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn audio_message(ptt: Option<bool>) -> StoredMessage {
+        let raw = wa::Message {
+            audio_message: wa::message::AudioMessage { ptt, seconds: Some(65), ..Default::default() }.into(),
+            ..Default::default()
+        };
+        let mut stored = crate::wa_map::system_message("123@s.whatsapp.net", "audio", 100, String::new());
+        stored.kind = MessageKind::Audio;
+        stored.duration_sec = 65;
+        stored.raw = Some(Arc::new(raw));
+        stored
+    }
+
+    #[test]
+    fn audio_preview_distinguishes_ptt_and_defaults_to_file() {
+        for ptt in [None, Some(false), Some(true)] {
+            let stored = audio_message(ptt);
+            assert_eq!(stored.is_voice_message(), ptt == Some(true));
+            let label = t(if ptt == Some(true) { "preview.voice" } else { "preview.audio" });
+            assert_eq!(preview_body(&stored), format!("{label} (1:05)"));
+            assert_eq!(quoted_summary(stored.raw.as_ref().unwrap()), preview_body(&stored));
+            let restored: StoredMessage = serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
+            assert_eq!(restored.is_voice_message(), stored.is_voice_message());
+        }
+        let mut stored = audio_message(Some(true));
+        stored.raw = None;
+        stored.duration_sec = 0;
+        assert!(!stored.is_voice_message());
+        assert_eq!(preview_body(&stored), t("preview.audio"));
+    }
+
+    #[test]
+    fn audio_filename_uses_only_original_sources_or_document_names() {
+        let mut stored = audio_message(Some(false));
+        assert_eq!(stored.audio_filename(Some(r"D:\Music\original song.mp3")), "original song.mp3");
+        assert_eq!(stored.audio_filename(Some("/music/original.flac")), "original.flac");
+        assert_eq!(stored.audio_filename(None), t("audio.fallbackName"));
+        stored.kind = MessageKind::Doc;
+        stored.raw = Some(Arc::new(wa::Message {
+            document_message: wa::message::DocumentMessage {
+                mimetype: Some("audio/mpeg".into()), file_name: Some("received.mp3".into()), ..Default::default()
+            }.into(),
+            ..Default::default()
+        }));
+        assert_eq!(stored.audio_filename(None), "received.mp3");
+        assert_eq!(stored.audio_filename(Some("")), "received.mp3");
+    }
+
+    #[test]
+    fn audio_preview_refresh_preserves_prefix_and_newer_chat_metadata() {
+        let mut store = Store::default();
+        let mut stored = audio_message(Some(true));
+        stored.from_me = true;
+        let jid = stored.jid.clone();
+        store.add_message(stored.clone());
+        store.chats.get_mut(&jid).unwrap().preview = "old preview".into();
+        store.refresh_audio_preview(&jid);
+        assert_eq!(store.chats[&jid].preview, format!("✓ {}", preview_body(&stored)));
+        store.chats.get_mut(&jid).unwrap().timestamp += 1;
+        store.chats.get_mut(&jid).unwrap().preview = "newer preview".into();
+        store.refresh_audio_preview(&jid);
+        assert_eq!(store.chats[&jid].preview, "newer preview");
+    }
 
     #[test]
     fn builtin_filters_use_protocol_type_not_names_or_label_ids() {

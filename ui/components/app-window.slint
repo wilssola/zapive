@@ -2283,7 +2283,91 @@ export component AppWindow inherits Window {
 
                                 // Voice-note player: waveform track, played
                                 // portion clipped over it, click to seek.
-                                if msg.kind == "audio": HorizontalLayout {
+                                if msg.kind == "audio" && !msg.voiceMessage: VerticalLayout {
+                                    spacing: 10px;
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        Rectangle {
+                                            width: 36px;
+                                            height: 36px;
+                                            border-radius: 10px;
+                                            background: #00000018;
+                                            Image {
+                                                source: @image-url("../icons/music.svg");
+                                                colorize: Theme.icon;
+                                                width: 20px;
+                                                height: 20px;
+                                                x: 8px;
+                                                y: 8px;
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 3px;
+                                            Text {
+                                                text: msg.audioFilename;
+                                                width: 230px;
+                                                overflow: elide;
+                                                color: Theme.bubble-text;
+                                                font-size: 13px;
+                                                font-weight: 600;
+                                            }
+                                            Text {
+                                                text: @tr("Audio") + " · " + msg.text;
+                                                color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                font-size: 11px;
+                                            }
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        IconButton {
+                                            width: 34px;
+                                            height: 34px;
+                                            icon-size: 20px;
+                                            icon: msg.playing ? @image-url("../icons/player-pause.svg") : @image-url("../icons/player-play.svg");
+                                            clicked => { root.audio-toggle(msg.id); }
+                                        }
+                                        audio-track := TouchArea {
+                                            width: 194px;
+                                            height: 34px;
+                                            mouse-cursor: pointer;
+                                            clicked => { root.audio-seek(msg.id, self.mouse-x / self.width); }
+                                            Rectangle {
+                                                width: parent.width;
+                                                height: 4px;
+                                                y: 15px;
+                                                border-radius: 2px;
+                                                background: #8696a060;
+                                                Rectangle {
+                                                    width: parent.width * msg.progress;
+                                                    height: parent.height;
+                                                    border-radius: 2px;
+                                                    background: #53bdeb;
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            text: msg.posLabel != "" ? msg.posLabel : "0:00";
+                                            width: 38px;
+                                            height: 34px;
+                                            horizontal-alignment: right;
+                                            vertical-alignment: center;
+                                            color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                            font-size: 11px;
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        alignment: end;
+                                        BubbleMeta {
+                                            time: msg.time;
+                                            ticks: msg.ticks;
+                                            blue: msg.ticksBlue;
+                                            fromMe: msg.fromMe;
+                                        }
+                                    }
+                                }
+                                if msg.kind == "audio" && msg.voiceMessage: HorizontalLayout {
                                     spacing: 10px;
                                     VerticalLayout {
                                         alignment: center;

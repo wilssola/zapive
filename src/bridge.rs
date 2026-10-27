@@ -3230,7 +3230,7 @@ impl Bridge {
             self.store.canon_owned(&m.sender_jid)
         };
         let group_indent = group && !m.from_me && m.kind != MessageKind::System;
-        let voice_jid = if m.kind == MessageKind::Audio {
+        let voice_jid = if m.is_voice_message() {
             if m.from_me {
                 self.self_jid.clone()
             } else {
@@ -3330,6 +3330,16 @@ impl Bridge {
             } else {
                 &sender_jid
             }),
+            voiceMessage: m.is_voice_message(),
+            audioFilename: if m.kind == MessageKind::Audio
+                || (m.kind == MessageKind::Doc && m.mimetype.starts_with("audio/"))
+            {
+                let source = self.vault.as_ref()
+                    .and_then(|vault| vault.setting_get(&format!("media-source:{}", m.id)));
+                m.audio_filename(source.as_deref()).into()
+            } else {
+                "".into()
+            },
             voiceJid: voice_jid.clone().into(),
             voiceHasAvatar: self.avatar_for(&voice_jid).is_some(),
             voiceAvatar: self.avatar_for(&voice_jid).unwrap_or_else(empty_image),

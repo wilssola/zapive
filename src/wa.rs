@@ -1266,10 +1266,13 @@ async fn executor(
                             return;
                         }
                     };
+                    let duration_seconds = tokio::task::spawn_blocking(move || crate::audio::probe_duration(&path))
+                        .await.ok().flatten();
                     let message = whatsapp_rust::media::audio_message(
                         upload,
                         whatsapp_rust::media::AudioOptions {
-                            ptt: Some(true),
+                            ptt: Some(false),
+                            duration_seconds,
                             mimetype: Some(mimetype.to_string()),
                             ..Default::default()
                         },
