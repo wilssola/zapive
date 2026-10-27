@@ -17,6 +17,30 @@ import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
 import { AccountRow } from "rows/account.slint";
 
+// Delivery ticks drawn as vectors in WhatsApp's Material shape
+// (done/done_all): the "✓" glyph comes from the emoji fallback font,
+// whose wide bitmap cell leaves the two checks far apart; paths sit
+// tight and render identically on every platform.
+// Outlines: Material Icons (Apache 2.0), Google LLC,
+// https://github.com/google/material-design-icons
+component Ticks {
+    in property <string> ticks;
+    in property <bool> blue;
+    property <length> mark-size: 14px;
+    width: mark-size;
+    height: mark-size;
+    if ticks != "": Path {
+        commands: ticks == "✓✓"
+            ? "M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"
+            : "M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z";
+        viewbox-width: 24;
+        viewbox-height: 24;
+        width: mark-size;
+        height: mark-size;
+        fill: blue ? #53bdeb : Theme.time-out;
+    }
+}
+
 // The time/ticks cluster that floats at the bottom-right of a bubble's
 // text block, on the space the trailing NBSP run reserves.
 component BubbleMeta {
@@ -33,13 +57,7 @@ component BubbleMeta {
             color: fromMe ? Theme.time-out : Theme.text-dim;
             vertical-alignment: center;
         }
-        if ticks != "": Text {
-            text: ticks;
-            font-size: 10px;
-            font-weight: 700;
-            color: blue ? #53bdeb : Theme.time-out;
-            vertical-alignment: center;
-        }
+        if ticks != "": Ticks { ticks: ticks; blue: blue; }
     }
 }
 
@@ -2227,13 +2245,7 @@ export component AppWindow inherits Window {
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 vertical-alignment: center;
                                             }
-                                            if msg.ticks != "": Text {
-                                                text: msg.ticks;
-                                                font-size: 10px;
-                                                font-weight: 700;
-                                                color: msg.ticksBlue ? #53bdeb : Theme.time-out;
-                                                vertical-alignment: center;
-                                            }
+                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
                                         }
                                     }
                                     VerticalLayout {
@@ -2515,13 +2527,7 @@ export component AppWindow inherits Window {
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 vertical-alignment: center;
                                             }
-                                            if msg.ticks != "": Text {
-                                                text: msg.ticks;
-                                                font-size: 10px;
-                                                font-weight: 700;
-                                                color: msg.ticksBlue ? #53bdeb : Theme.time-out;
-                                                vertical-alignment: center;
-                                            }
+                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
                                         }
                                     }
                                 }
