@@ -5,18 +5,22 @@ export component FilterChip inherits TouchArea {
     in property <bool> active: false;
     mouse-cursor: pointer;
     width: chip.preferred-width;
-    height: 30px;
+    height: 28px;
     chip := Rectangle {
         height: parent.height;
-        border-radius: 15px;
-        background: root.active ? Theme.chip-active-bg : Theme.chip-bg;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: root.active ? (Theme.dark ? #239b66 : Theme.accent) : Theme.border;
+        background: root.active ? (Theme.dark ? #164737 : Theme.chip-active-bg)
+            : root.has-hover ? Theme.selected : Theme.chip-bg;
         HorizontalLayout {
-            padding-left: 13px;
-            padding-right: 13px;
+            padding-left: 11px;
+            padding-right: 11px;
             Text {
                 text: root.label;
-                color: root.active ? Theme.accent : Theme.text-dim;
-                font-size: 13px;
+                color: root.active ? (Theme.dark ? #c5f1db : Theme.accent) : Theme.text-dim;
+                font-size: 11px;
+                font-weight: root.active ? 600 : 400;
                 vertical-alignment: center;
             }
         }

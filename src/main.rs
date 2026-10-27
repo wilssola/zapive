@@ -35,6 +35,11 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 fn main() {
     paths::ensure_dirs();
     logging::install();
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .renderer_name("skia".into())
+        .select()
+        .expect("failed to select the Skia backend");
     // The previous binary, left by an update that ran in the last session.
     update::sweep();
 
@@ -143,6 +148,15 @@ fn main() {
         "system" => platform::system_dark(),
         _ => true,
     });
+    #[cfg(windows)]
+    {
+        let handle = ui.as_weak();
+        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+            if let Some(ui) = handle.upgrade() {
+                platform::set_title_bar_theme(ui.get_dark_theme());
+            }
+        });
+    }
     let theme_poll = slint::Timer::default();
     {
         let handle = ui.as_weak();
@@ -154,6 +168,8 @@ fn main() {
                     && ui.get_theme_mode() == "system"
                 {
                     ui.set_dark_theme(platform::system_dark());
+                    #[cfg(windows)]
+                    platform::set_title_bar_theme(ui.get_dark_theme());
                 }
             },
         );

@@ -14,10 +14,40 @@ fn quiet(program: &str) -> std::process::Command {
     cmd
 }
 
-// Brings the running Zapive window to the foreground. Callers make the
-// window visible through Slint first: unhiding it behind Slint's back
-// leaves the toolkit believing it is still parked in the tray, and the
-// next click on X then hides nothing.
+pub fn set_title_bar_theme(dark: bool) {
+    use windows::Win32::Foundation::{BOOL, COLORREF};
+    use windows::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
+        DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+    };
+
+    unsafe {
+        let Ok(hwnd) = FindWindowW(None, w!("Zapive")) else { return };
+        let dark_mode = BOOL::from(dark);
+        let caption = COLORREF(if dark { 0x00352c1c } else { 0x00f5f2f0 });
+        let text = COLORREF(if dark { 0x00efede9 } else { 0x00211b11 });
+        let border = COLORREF(if dark { 0x003e3424 } else { 0x00e7e4e0 });
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &dark_mode as *const _ as _,
+            std::mem::size_of_val(&dark_mode) as u32,
+        );
+        for (attribute, color) in [
+            (DWMWA_CAPTION_COLOR, caption),
+            (DWMWA_TEXT_COLOR, text),
+            (DWMWA_BORDER_COLOR, border),
+        ] {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &color as *const _ as _,
+                std::mem::size_of_val(&color) as u32,
+            );
+        }
+    }
+}
+
 pub fn focus_window() {
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, w!("Zapive")) {

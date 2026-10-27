@@ -67,12 +67,7 @@ export component AppWindow inherits Window {
     preferred-width: 1100px;
     preferred-height: 700px;
     background: Theme.bg;
-    // femtovg's vector text rendering has no ClearType/subpixel hinting,
-    // so the system's regular (400) weight reads thinner here than in a
-    // natively-rendered app at the same size; nudging the default up a
-    // notch gets closer to WhatsApp's own look without every Text/
-    // TextInput needing its own font-weight override.
-    default-font-weight: 500;
+    default-font-weight: 400;
     init => {
         Palette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light;
         Theme.dark = root.dark-theme;
@@ -796,6 +791,10 @@ export component AppWindow inherits Window {
     capture-scope := FocusScope {
         visible: root.screen == "main";
         capture-key-pressed(event) => {
+            if (event.text == "f" && event.modifiers.control) {
+                search-box.focus();
+                return accept;
+            }
             if (event.text == "v" && event.modifiers.control && root.chat-open) {
                 root.paste-clipboard();
             }
@@ -821,7 +820,7 @@ export component AppWindow inherits Window {
         // Icon rail
         Rectangle {
             width: 60px;
-            background: Theme.header;
+            background: Theme.dark ? #1c2c35 : Theme.header;
             VerticalLayout {
                 width: 100%;
                 padding: 10px;
@@ -829,6 +828,8 @@ export component AppWindow inherits Window {
                 alignment: start;
                 IconButton {
                     icon: @image-url("../icons/message-circle.svg");
+                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
+                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
                     active: root.sidebar-view == "chats";
                     clicked => {
                         root.sidebar-view = "chats";
@@ -837,16 +838,22 @@ export component AppWindow inherits Window {
                 }
                 IconButton {
                     icon: @image-url("../icons/circle-dot.svg");
+                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
+                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
                     active: root.sidebar-view == "status";
                     clicked => { root.sidebar-view = "status"; }
                 }
                 IconButton {
                     icon: @image-url("../icons/phone.svg");
+                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
+                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
                     active: root.sidebar-view == "calls";
                     clicked => { root.sidebar-view = "calls"; }
                 }
                 IconButton {
                     icon: @image-url("../icons/speakerphone.svg");
+                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
+                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
                     active: root.sidebar-view == "channels";
                     clicked => {
                         root.sidebar-view = "channels";
@@ -855,6 +862,8 @@ export component AppWindow inherits Window {
                 }
                 IconButton {
                     icon: @image-url("../icons/users-group.svg");
+                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
+                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
                     active: root.sidebar-view == "communities";
                     clicked => {
                         root.sidebar-view = "communities";
@@ -899,6 +908,8 @@ export component AppWindow inherits Window {
         }
 
         Rectangle { width: 1px; background: Theme.border; }
+
+
 
         // Sidebar
         Rectangle {
@@ -1105,13 +1116,74 @@ export component AppWindow inherits Window {
 
                 Rectangle {
                     height: 46px;
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        padding-bottom: 8px;
-                        search-box := LineEdit {
-                            placeholder-text: @tr("Search chats");
-                            edited => { root.search-changed(self.text); }
+                    Rectangle {
+                        x: 14px;
+                        width: parent.width - 28px;
+                        height: 34px;
+                        border-radius: 10px;
+                        background: Theme.dark ? #1e2b34 : #ffffff;
+                        border-width: 1px;
+                        border-color: search-box.has-focus ? Theme.accent
+                            : Theme.dark ? #2b3b46 : Theme.border;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 6px;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 16px;
+                                Image {
+                                    source: @image-url("../icons/search.svg");
+                                    colorize: Theme.icon;
+                                    width: 16px;
+                                    height: 16px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                search-box := TextInput {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    color: Theme.text;
+                                    font-size: 12px;
+                                    single-line: true;
+                                    vertical-alignment: center;
+                                    selection-background-color: Theme.accent;
+                                    selection-foreground-color: white;
+                                    edited => { root.search-changed(self.text); }
+                                }
+                                if search-box.text == "": Text {
+                                    text: @tr("Search chats");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                            Rectangle {
+                                width: 52px;
+                                HorizontalLayout {
+                                    y: (parent.height - self.height) / 2;
+                                    height: 22px;
+                                    spacing: 4px;
+                                    for shortcut in ["Ctrl", "F"]: Rectangle {
+                                        width: shortcut == "Ctrl" ? 28px : 20px;
+                                        border-radius: 5px;
+                                        background: Theme.dark ? #293944 : Theme.header;
+                                        Text {
+                                            text: shortcut;
+                                            color: Theme.text-dim;
+                                            font-size: 10px;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1133,9 +1205,9 @@ export component AppWindow inherits Window {
                     viewport-height: self.height;
                     interactive: chips.preferred-width > self.width;
                     chips := HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 8px;
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 5px;
                         alignment: start;
                         FilterChip {
                             label: @tr("All");
@@ -1156,6 +1228,11 @@ export component AppWindow inherits Window {
                             label: @tr("Groups");
                             active: root.chat-tab == "groups";
                             clicked => { root.chat-tab = "groups"; root.tab-changed("groups"); }
+                        }
+                        FilterChip {
+                            label: @tr("Archived");
+                            active: root.chat-tab == "archived";
+                            clicked => { root.chat-tab = "archived"; root.tab-changed("archived"); }
                         }
                         for lb in root.label-chips: FilterChip {
                             label: lb.name;
@@ -1182,7 +1259,7 @@ export component AppWindow inherits Window {
                                 height: 20px;
                                 y: (parent.height - self.height) / 2;
                                 source: @image-url("../icons/archive.svg");
-                                colorize: Theme.accent;
+                                colorize: Theme.icon;
                             }
                         }
                         Text {
@@ -1232,10 +1309,20 @@ export component AppWindow inherits Window {
                 ListView {
                     vertical-stretch: root.search-hits.length > 0 ? 1 : 3;
                     for chat[i] in root.chats: Rectangle {
-                        height: 72px;
+                        height: 56px;
                         clip: true;
-                        background: chat.jid == root.selected-jid ? Theme.selected
-                            : touch.has-hover ? Theme.hover : transparent;
+                        Rectangle {
+                            x: 4px;
+                            y: 1px;
+                            width: parent.width - 8px;
+                            height: parent.height - 2px;
+                            border-radius: 10px;
+                            background: chat.jid == root.selected-jid
+                                ? (Theme.dark ? #182f30 : #e2f3e9)
+                                : touch.has-hover ? Theme.hover : transparent;
+                            border-width: chat.jid == root.selected-jid ? 1px : 0px;
+                            border-color: Theme.dark ? #255044 : #a6d8bf;
+                        }
                         touch := TouchArea {
                             clicked => { root.open-chat(chat.jid); }
                             changed has-hover => {
@@ -1243,15 +1330,15 @@ export component AppWindow inherits Window {
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 13px;
-                            padding-right: 15px;
+                            padding-left: 14px;
+                            padding-right: 18px;
                             spacing: 13px;
                             VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 0;
                                 Avatar {
-                                    width: 49px;
-                                    height: 49px;
+                                    width: 40px;
+                                    height: 40px;
                                     src: chat.avatar;
                                     has-image: chat.hasAvatar;
                                     initial: chat.initial;
@@ -1267,7 +1354,8 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: chat.name;
                                         color: Theme.text;
-                                        font-size: 15px;
+                                        font-size: 14px;
+                                        font-weight: chat.jid == root.selected-jid || chat.unread > 0 ? 600 : 400;
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
@@ -1351,14 +1439,15 @@ export component AppWindow inherits Window {
                             }
                         }
                         Rectangle {
-                            x: 75px;
+                            x: 67px;
                             y: parent.height - 1px;
-                            width: parent.width - 75px;
+                            width: parent.width - 85px;
                             height: 1px;
-                            background: Theme.border;
+                            background: chat.jid == root.selected-jid ? transparent : Theme.border;
                         }
                     }
                 }
+
                 if root.search-hits.length > 0: Rectangle {
                     height: 28px;
                     Text {
@@ -1486,7 +1575,7 @@ export component AppWindow inherits Window {
 
         // Conversation pane
         Rectangle {
-            background: Theme.conv-bg;
+            background: Theme.conv-background;
 
             VerticalBox {
                 visible: !root.chat-open;
@@ -1514,121 +1603,6 @@ export component AppWindow inherits Window {
                 height: 100%;
                 padding: 0;
                 spacing: 0;
-
-                Rectangle {
-                    height: 54px;
-                    background: Theme.header;
-                    HorizontalLayout {
-                        padding-left: 16px;
-                        padding-right: 16px;
-                        spacing: 12px;
-                        VerticalLayout {
-                            alignment: center;
-                            Avatar {
-                                width: 40px;
-                                height: 40px;
-                                src: root.current-avatar;
-                                has-image: root.current-avatar-has;
-                                initial: root.current-initial;
-                                color-idx: root.current-color-idx;
-                            }
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            head-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.open-info(); }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                width: parent.width;
-                                height: parent.height;
-                                spacing: 1px;
-                                Text {
-                                    text: root.current-chat-name;
-                                    color: Theme.text;
-                                    font-size: 16px;
-                                    font-weight: 700;
-                                    overflow: elide;
-                                }
-                                if root.current-status != "": Text {
-                                    text: root.current-status;
-                                    color: root.current-status == "online" ? Theme.text-dim : Theme.accent;
-                                    font-size: 12px;
-                                }
-                            }
-                        }
-                        if root.current-callable: VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                icon: @image-url("../icons/video.svg");
-                                clicked => { root.start-video-call(root.current-jid); }
-                            }
-                        }
-                        if root.current-callable: VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                icon: @image-url("../icons/phone.svg");
-                                clicked => { root.start-call(root.current-jid); }
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                icon: @image-url("../icons/search.svg");
-                                active: root.chat-search-open;
-                                clicked => { root.menu-search(); }
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                icon: @image-url("../icons/dots-vertical.svg");
-                                active: root.chat-menu-open;
-                                clicked => {
-                                    root.chat-menu-sub = "";
-                                    root.chat-menu-open = !root.chat-menu-open;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if root.sync-banner != "": Rectangle {
-                    height: 32px;
-                    HorizontalLayout {
-                        alignment: center;
-                        padding-top: 6px;
-                        Rectangle {
-                            width: banner-text.preferred-width + 44px;
-                            height: 24px;
-                            border-radius: 12px;
-                            background: banner-touch.has-hover ? Theme.selected : Theme.pill;
-                            banner-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.sync-clicked(); }
-                            }
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                spacing: 6px;
-                                Image {
-                                    source: @image-url("../icons/refresh.svg");
-                                    colorize: Theme.text-dim;
-                                    width: 13px;
-                                    height: 13px;
-                                    y: (parent.height - self.height) / 2;
-                                }
-                                banner-text := Text {
-                                    text: root.sync-banner;
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                    }
-                }
 
                 // The conversation and the day pill floating over it.
                 Rectangle {
@@ -1664,7 +1638,8 @@ export component AppWindow inherits Window {
                             root.conv-scrolled();
                         }
                     }
-                    for msg in root.messages: msg-row := Rectangle {
+                    for msg[i] in root.messages: msg-row := Rectangle {
+                        property <length> header-offset: i == 0 ? contact-header.height : 0px;
                         // The row crossing the top edge names the day in
                         // the floating pill. Rows sit in viewport
                         // coordinates; the ListView re-anchors every
@@ -1672,13 +1647,13 @@ export component AppWindow inherits Window {
                         // rides on y as well as on the visible offset.
                         property <length> vis-y: self.y + msg-list.viewport-y;
                         changed vis-y => {
-                            if (self.vis-y <= 6px && self.vis-y + self.height > 6px) {
+                            if (self.vis-y <= contact-header.height + 6px && self.vis-y + self.height > contact-header.height + 6px) {
                                 root.day-at-top(msg.dayFull);
                             }
                             root.row-geom(msg.id, self.vis-y / 1px, self.height / 1px);
                         }
                         changed y => {
-                            if (self.vis-y <= 6px && self.vis-y + self.height > 6px) {
+                            if (self.vis-y <= contact-header.height + 6px && self.vis-y + self.height > contact-header.height + 6px) {
                                 root.day-at-top(msg.dayFull);
                             }
                             root.row-geom(msg.id, self.vis-y / 1px, self.height / 1px);
@@ -1782,19 +1757,39 @@ export component AppWindow inherits Window {
                             (msg.hasStyled || msg.kind == "text"
                                 || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
                             && (msg.text != "" || msg.deleted);
-                        property <length> unread-offset: msg.unread-boundary ? 34px : 0;
-                        property <length> day-offset: (msg.dayLabel != "" ? 34px : 0) + unread-offset;
+                        property <length> unread-offset: msg.unread-boundary ? 28px : 0;
+                        property <length> day-offset: (msg.dayLabel != "" ? 40px : 0) + unread-offset + header-offset;
                         if msg.unread-boundary: Rectangle {
-                            y: msg.dayLabel != "" ? 34px : 0px;
+                            y: (msg.dayLabel != "" ? 40px : 0px) + msg-row.header-offset;
                             width: parent.width;
-                            height: 34px;
-                            background: Theme.pill;
-                            Text {
-                                text: @tr("Unread messages");
-                                color: Theme.text-dim;
-                                font-size: 12px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            height: 28px;
+                            HorizontalLayout {
+                                padding-left: 20px;
+                                padding-right: 20px;
+                                spacing: 12px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    Rectangle {
+                                        y: (parent.height - self.height) / 2;
+                                        height: 1px;
+                                        background: Theme.conversation-divider;
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Unread messages");
+                                    color: Theme.text-dim;
+                                    font-size: 11px;
+                                    horizontal-stretch: 0;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    Rectangle {
+                                        y: (parent.height - self.height) / 2;
+                                        height: 1px;
+                                        background: Theme.conversation-divider;
+                                    }
+                                }
                             }
                         }
                         height: msg.kind == "system"
@@ -1802,16 +1797,18 @@ export component AppWindow inherits Window {
                             : bubble.height + (msg.firstOfRun ? 16px : 6px)
                                 + (msg.reactions != "" ? 14px : 0) + self.day-offset;
                         if msg.dayLabel != "": Rectangle {
-                            y: 8px;
+                            y: 8px + msg-row.header-offset;
                             x: (parent.width - self.width) / 2;
                             width: day-text.preferred-width + 24px;
                             height: 24px;
-                            border-radius: 6px;
-                            background: Theme.pill;
+                            border-radius: 12px;
+                            background: Theme.day-bg;
+                            border-width: 1px;
+                            border-color: Theme.day-border;
                             day-text := Text {
                                 text: msg.dayLabel;
                                 color: Theme.text-dim;
-                                font-size: 12px;
+                                font-size: 11px;
                                 width: parent.width;
                                 height: parent.height;
                                 horizontal-alignment: center;
@@ -1839,7 +1836,7 @@ export component AppWindow inherits Window {
                             background: msg.sticker
                                 ? transparent
                                 : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
-                            border-radius: 7px;
+                            border-radius: 10px;
                             num-measure := Text {
                                 text: msg.senderNumber;
                                 font-size: 11px;
@@ -1862,9 +1859,9 @@ export component AppWindow inherits Window {
                                 }
                             }
                             content := VerticalLayout {
-                                padding: 6px;
-                                padding-left: 9px;
-                                padding-right: 9px;
+                                padding: 7px;
+                                padding-left: 12px;
+                                padding-right: 12px;
                                 spacing: 2px;
 
                                 if msg.showSender: HorizontalLayout {
@@ -2794,18 +2791,18 @@ export component AppWindow inherits Window {
                     // Floating day: the date of the row at the top edge,
                     // shown while the list moves.
                     if root.scrolling && root.floating-day != "" && root.conv-ready: Rectangle {
-                        y: 8px;
+                        y: contact-header.height + 8px;
                         x: (parent.width - self.width) / 2;
                         width: float-day.preferred-width + 24px;
                         height: 24px;
-                        border-radius: 6px;
-                        background: Theme.pill;
-                        drop-shadow-blur: 4px;
-                        drop-shadow-color: #00000040;
+                        border-radius: 12px;
+                        background: Theme.day-bg;
+                        border-width: 1px;
+                        border-color: Theme.day-border;
                         float-day := Text {
                             text: root.floating-day;
                             color: Theme.text-dim;
-                            font-size: 12px;
+                            font-size: 11px;
                             width: parent.width;
                             height: parent.height;
                             horizontal-alignment: center;
@@ -2940,172 +2937,356 @@ export component AppWindow inherits Window {
                 }
 
                 Rectangle {
-                    // The composer grows with its text, up to a few lines.
-                    // 42px is what the box's own padding (11px each side)
-                    // and the text's inset (10px each side) take off the
-                    // bar: anything less clips the last line.
                     height: root.select-mode || !root.current-can-send ? 0
-                        : max(62px, min(190px, message-input.preferred-height + 42px));
+                        : max(52px, min(190px, message-input.preferred-height + 32px));
                     visible: !root.select-mode && root.current-can-send;
-                    background: Theme.header;
+                    background: transparent;
 
-                    // Recording bar (replaces the composer while capturing)
-                    HorizontalBox {
-                        visible: root.rec-active;
-                        padding: 11px;
-                        spacing: 10px;
-                        IconButton {
-                            icon: @image-url("../icons/trash.svg");
-                            clicked => { root.rec-cancel(); }
+                    Rectangle {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        background: Theme.dark ? #111c22 : Theme.header;
+                        border-width: 1px;
+                        border-color: Theme.dark ? #1b2931 : Theme.border;
+                        border-top-left-radius: 16px;
+                        border-top-right-radius: 16px;
+                        border-bottom-left-radius: 0px;
+                        border-bottom-right-radius: 0px;
+
+                        // Recording bar (replaces the composer while capturing)
+                        HorizontalBox {
+                            visible: root.rec-active;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 10px;
+                            IconButton {
+                                icon: @image-url("../icons/trash.svg");
+                                clicked => { root.rec-cancel(); }
+                            }
+                            Rectangle {
+                                width: 10px;
+                                height: 10px;
+                                border-radius: 5px;
+                                background: #f05d4d;
+                                y: 26px;
+                            }
+                            Text {
+                                text: root.rec-elapsed;
+                                color: Theme.text;
+                                font-size: 15px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            vo-touch := TouchArea {
+                                width: 40px;
+                                height: 40px;
+                                mouse-cursor: pointer;
+                                clicked => { root.rec-view-once = !root.rec-view-once; }
+                                Rectangle {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 8px;
+                                    background: root.rec-view-once ? Theme.chip-active-bg
+                                        : vo-touch.has-hover ? Theme.hover : transparent;
+                                    Image {
+                                        source: @image-url("../icons/eye.svg");
+                                        colorize: root.rec-view-once ? Theme.accent : Theme.icon;
+                                        width: 22px;
+                                        height: 22px;
+                                        x: 9px;
+                                        y: 9px;
+                                    }
+                                }
+                            }
+                            IconButton {
+                                icon: @image-url("../icons/send-2.svg");
+                                clicked => { root.rec-stop(); }
+                            }
+                        }
+
+                        HorizontalBox {
+                            visible: !root.rec-active;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                radius: 10px;
+                                background: Theme.dark ? #17232b : Theme.pill;
+                                icon: @image-url("../icons/plus.svg");
+                                clicked => {
+                                    root.picker-open = false;
+                                    root.attach-open = !root.attach-open;
+                                }
+                            }
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                icon: @image-url("../icons/mood-smile.svg");
+                                clicked => {
+                                    root.attach-open = false;
+                                    root.picker-open = !root.picker-open;
+                                    if (root.picker-open) { root.picker-opened(); }
+                                }
+                            }
+                            // A TextInput rather than a LineEdit: it wraps,
+                            // takes Shift+Enter for a new line and tells the
+                            // host where the cursor is (for "@" mentions).
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 12px;
+                                background: Theme.dark ? #1e2b33 : Theme.pill;
+                                composer-scroll := Flickable {
+                                    x: 12px;
+                                    y: 8px;
+                                    width: parent.width - 24px;
+                                    height: parent.height - 16px;
+                                    viewport-height: max(self.height, message-input.preferred-height);
+                                    viewport-width: self.width;
+                                    // TextInput never scrolls itself into view
+                                    // (that's the enclosing widget's job, per
+                                    // Slint's own docs) -- interactive lets a
+                                    // mouse-wheel/drag also scroll a long
+                                    // composed message, and cursor-position-changed
+                                    // below keeps the caret itself always visible.
+                                    interactive: true;
+                                    message-input := TextInput {
+                                        width: parent.width;
+                                        height: max(parent.height, self.preferred-height);
+                                        color: Theme.text;
+                                        font-size: 15px;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        vertical-alignment: center;
+                                        selection-background-color: #3390ec;
+                                        selection-foreground-color: white;
+                                        edited => {
+                                            root.composer-changed(self.text, self.cursor-position-byte-offset);
+                                        }
+                                        cursor-position-changed(pos) => {
+                                            if (pos.y < -composer-scroll.viewport-y) {
+                                                composer-scroll.viewport-y = -pos.y;
+                                            } else if (pos.y + self.font-size * 1.3
+                                                    > -composer-scroll.viewport-y + composer-scroll.height) {
+                                                composer-scroll.viewport-y =
+                                                    composer-scroll.height - pos.y - self.font-size * 1.3;
+                                            }
+                                        }
+                                        key-pressed(event) => {
+                                            if (event.text == Key.Return && !event.modifiers.shift) {
+                                                if (root.mention-open) {
+                                                    root.mention-pick(0);
+                                                } else {
+                                                    root.send-message(self.text);
+                                                    self.text = "";
+                                                    composer-scroll.viewport-y = 0;
+                                                }
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Escape && root.mention-open) {
+                                                root.mention-close();
+                                                return accept;
+                                            }
+                                            reject
+                                        }
+                                    }
+                                }
+                                if message-input.text == "": Text {
+                                    text: @tr("Type a message");
+                                    color: Theme.text-dim;
+                                    font-size: 15px;
+                                    x: 12px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                icon: @image-url("../icons/microphone.svg");
+                                y: parent.height - self.height - 8px;
+                                clicked => { root.rec-start(); }
+                            }
+                            IconButton {
+                                width: 40px;
+                                height: 32px;
+                                icon-size: 20px;
+                                radius: 10px;
+                                background: #21885b;
+                                tint: #ffffff;
+                                icon: @image-url("../icons/send-2.svg");
+                                y: parent.height - self.height - 8px;
+                                clicked => {
+                                    root.send-message(message-input.text);
+                                    message-input.text = "";
+                                    composer-scroll.viewport-y = 0;
+                                }
+                            }
+
+                    }
+                    }
+                }
+            }
+
+            contact-header := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                visible: root.chat-open;
+                height: root.sync-banner != "" ? 112px : 80px;
+
+                background: Theme.dark ? #0b141a28 : #ffffff28;
+                backdrop-blur: 12px;
+                Rectangle {
+                    x: 12px;
+                    y: 8px;
+                    width: parent.width - 24px;
+                    height: 64px;
+                    border-radius: 18px;
+                    background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
+                    border-width: 1px;
+                    border-color: Theme.dark ? #24343e : Theme.border;
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-right: 14px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            Avatar {
+                                width: 40px;
+                                height: 40px;
+                                src: root.current-avatar;
+                                has-image: root.current-avatar-has;
+                                initial: root.current-initial;
+                                color-idx: root.current-color-idx;
+                            }
                         }
                         Rectangle {
-                            width: 10px;
-                            height: 10px;
-                            border-radius: 5px;
-                            background: #f05d4d;
-                            y: 26px;
-                        }
-                        Text {
-                            text: root.rec-elapsed;
-                            color: Theme.text;
-                            font-size: 15px;
-                            vertical-alignment: center;
                             horizontal-stretch: 1;
-                        }
-                        vo-touch := TouchArea {
-                            width: 40px;
-                            height: 40px;
-                            mouse-cursor: pointer;
-                            clicked => { root.rec-view-once = !root.rec-view-once; }
-                            Rectangle {
+                            head-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.open-info(); }
+                            }
+                            VerticalLayout {
+                                alignment: center;
                                 width: parent.width;
                                 height: parent.height;
-                                border-radius: 8px;
-                                background: root.rec-view-once ? Theme.chip-active-bg
-                                    : vo-touch.has-hover ? Theme.hover : transparent;
-                                Image {
-                                    source: @image-url("../icons/eye.svg");
-                                    colorize: root.rec-view-once ? Theme.accent : Theme.icon;
-                                    width: 22px;
-                                    height: 22px;
-                                    x: 9px;
-                                    y: 9px;
-                                }
-                            }
-                        }
-                        IconButton {
-                            icon: @image-url("../icons/send-2.svg");
-                            clicked => { root.rec-stop(); }
-                        }
-                    }
-
-                    HorizontalBox {
-                        visible: !root.rec-active;
-                        padding: 11px;
-                        spacing: 8px;
-                        IconButton {
-                            icon: @image-url("../icons/plus.svg");
-                            clicked => {
-                                root.picker-open = false;
-                                root.attach-open = !root.attach-open;
-                            }
-                        }
-                        IconButton {
-                            icon: @image-url("../icons/mood-smile.svg");
-                            clicked => {
-                                root.attach-open = false;
-                                root.picker-open = !root.picker-open;
-                                if (root.picker-open) { root.picker-opened(); }
-                            }
-                        }
-                        // A TextInput rather than a LineEdit: it wraps,
-                        // takes Shift+Enter for a new line and tells the
-                        // host where the cursor is (for "@" mentions).
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-radius: 8px;
-                            background: Theme.pill;
-                            composer-scroll := Flickable {
-                                x: 12px;
-                                y: 10px;
-                                width: parent.width - 24px;
-                                height: parent.height - 20px;
-                                viewport-height: max(self.height, message-input.preferred-height);
-                                viewport-width: self.width;
-                                // TextInput never scrolls itself into view
-                                // (that's the enclosing widget's job, per
-                                // Slint's own docs) -- interactive lets a
-                                // mouse-wheel/drag also scroll a long
-                                // composed message, and cursor-position-changed
-                                // below keeps the caret itself always visible.
-                                interactive: true;
-                                message-input := TextInput {
-                                    width: parent.width;
-                                    height: max(parent.height, self.preferred-height);
+                                spacing: 4px;
+                                Text {
+                                    text: root.current-chat-name;
                                     color: Theme.text;
                                     font-size: 15px;
-                                    single-line: false;
-                                    wrap: word-wrap;
-                                    vertical-alignment: center;
-                                    selection-background-color: #3390ec;
-                                    selection-foreground-color: white;
-                                    edited => {
-                                        root.composer-changed(self.text, self.cursor-position-byte-offset);
-                                    }
-                                    cursor-position-changed(pos) => {
-                                        if (pos.y < -composer-scroll.viewport-y) {
-                                            composer-scroll.viewport-y = -pos.y;
-                                        } else if (pos.y + self.font-size * 1.3
-                                                > -composer-scroll.viewport-y + composer-scroll.height) {
-                                            composer-scroll.viewport-y =
-                                                composer-scroll.height - pos.y - self.font-size * 1.3;
-                                        }
-                                    }
-                                    key-pressed(event) => {
-                                        if (event.text == Key.Return && !event.modifiers.shift) {
-                                            if (root.mention-open) {
-                                                root.mention-pick(0);
-                                            } else {
-                                                root.send-message(self.text);
-                                                self.text = "";
-                                                composer-scroll.viewport-y = 0;
-                                            }
-                                            return accept;
-                                        }
-                                        if (event.text == Key.Escape && root.mention-open) {
-                                            root.mention-close();
-                                            return accept;
-                                        }
-                                        reject
-                                    }
+                                    font-weight: 600;
+                                    overflow: elide;
+                                }
+                                if root.current-status != "": Text {
+                                    text: root.current-status;
+                                    color: Theme.text-dim;
+                                    font-size: 11px;
                                 }
                             }
-                            if message-input.text == "": Text {
-                                text: @tr("Type a message");
-                                color: Theme.text-dim;
-                                font-size: 15px;
-                                x: 12px;
-                                height: parent.height;
-                                vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                icon: @image-url("../icons/search.svg");
+                                active: root.chat-search-open;
+                                clicked => { root.menu-search(); }
                             }
                         }
-                        IconButton {
-                            icon: @image-url("../icons/microphone.svg");
-                            y: parent.height - self.height - 11px;
-                            clicked => { root.rec-start(); }
+                        if root.current-callable: VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                icon: @image-url("../icons/video.svg");
+                                clicked => { root.start-video-call(root.current-jid); }
+                            }
                         }
-                        IconButton {
-                            icon: @image-url("../icons/send-2.svg");
-                            y: parent.height - self.height - 11px;
-                            clicked => {
-                                root.send-message(message-input.text);
-                                message-input.text = "";
-                                composer-scroll.viewport-y = 0;
+                        if root.current-callable: VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                icon: @image-url("../icons/phone.svg");
+                                clicked => { root.start-call(root.current-jid); }
+                            }
+                        }
+                        Rectangle {
+                            width: 1px;
+                            height: 24px;
+                            y: (parent.height - self.height) / 2;
+                            background: Theme.dark ? #30414c : Theme.border;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon-size: 20px;
+                                icon: @image-url("../icons/dots-vertical.svg");
+                                active: root.chat-menu-open;
+                                clicked => {
+                                    root.chat-menu-sub = "";
+                                    root.chat-menu-open = !root.chat-menu-open;
+                                }
                             }
                         }
                     }
                 }
+                if root.sync-banner != "": Rectangle {
+                    y: 80px;
+                    height: 32px;
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: 6px;
+                        Rectangle {
+                            width: banner-text.preferred-width + 44px;
+                            height: 24px;
+                            border-radius: 12px;
+                            background: banner-touch.has-hover ? Theme.selected : Theme.pill;
+                            banner-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.sync-clicked(); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 6px;
+                                Image {
+                                    source: @image-url("../icons/refresh.svg");
+                                    colorize: Theme.text-dim;
+                                    width: 13px;
+                                    height: 13px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                banner-text := Text {
+                                    text: root.sync-banner;
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
             }
+
 
             // Floating "jump to latest" button
             if root.chat-open && !root.stick-bottom: Rectangle {

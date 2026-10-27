@@ -1427,6 +1427,8 @@ impl Bridge {
             "light" => self.ui.set_dark_theme(false),
             _ => self.ui.set_dark_theme(crate::platform::system_dark()),
         }
+        #[cfg(windows)]
+        crate::platform::set_title_bar_theme(self.ui.get_dark_theme());
     }
 
     // The OS is the only source of truth here (a Run entry, an autostart

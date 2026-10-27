@@ -10,8 +10,14 @@ export global Theme {
     out property <color> border: dark ? #222d34 : #e0e4e7;
     out property <color> hover: dark ? #202c33 : #f5f6f6;
     out property <color> selected: dark ? #2a3942 : #f0f2f5;
-    out property <color> conv-bg: dark ? #0b141a : #efeae2;
-    out property <color> bubble-in: dark ? #202c33 : #ffffff;
+    out property <color> conv-bg: dark ? #101c23 : #efeae2;
+    out property <brush> conv-background: dark
+        ? @linear-gradient(145deg, #15252e 0%, #101c23 55%, #0d181e 100%)
+        : conv-bg;
+    out property <color> day-bg: dark ? #1b2a33 : #ffffff;
+    out property <color> day-border: dark ? #263741 : #e0e4e7;
+    out property <color> conversation-divider: dark ? #293b45 : #d5dcd9;
+    out property <color> bubble-in: dark ? #1f2e37 : #ffffff;
     out property <color> bubble-out: dark ? #005c4b : #d9fdd3;
     out property <color> bubble-text: dark ? #e9edef : #111b21;
     out property <color> time-out: dark ? #99beb5 : #587a68;
@@ -20,5 +26,5 @@ export global Theme {
     out property <color> chip-active-bg: dark ? #0a332c : #d9fdd3;
     out property <color> icon: dark ? #aebac1 : #54656f;
     out property <color> pill: dark ? #233138 : #ffffff;
-    out property <color> sender: dark ? #53bdeb : #027eb5;
+    out property <color> sender: dark ? #39c8ed : #027eb5;
 }

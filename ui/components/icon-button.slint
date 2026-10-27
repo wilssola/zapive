@@ -5,14 +5,17 @@ export component IconButton inherits TouchArea {
     in property <bool> active: false;
     in property <length> icon-size: 22px;
     in property <color> tint: Theme.icon;
+    in property <brush> background: transparent;
+    in property <brush> active-background: Theme.selected;
+    in property <length> radius: 8px;
     width: 40px;
     height: 40px;
     mouse-cursor: pointer;
     Rectangle {
         width: parent.width;
         height: parent.height;
-        border-radius: 8px;
-        background: root.active ? Theme.selected : root.has-hover ? Theme.hover : transparent;
+        border-radius: root.radius;
+        background: root.active ? root.active-background : root.has-hover ? Theme.hover : root.background;
         Image {
             source: root.icon;
             colorize: root.tint;

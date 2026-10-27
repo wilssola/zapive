@@ -1,7 +1,5 @@
 use slint::fontique_011::fontique::{self, GenericFamily};
 
-// The CBDT (bitmap) build: FemtoVG draws glyphs through swash, which knows
-// color bitmaps and COLRv0 but not the COLRv1 build Google Fonts serves.
 static NOTO_EMOJI: &[u8] = include_bytes!("../ui/fonts/noto_color/NotoColorEmoji.ttf");
 
 // Color emoji everywhere text is drawn. The bundled Noto Color Emoji goes
