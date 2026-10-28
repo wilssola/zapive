@@ -795,9 +795,7 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_update_restart(|| {
         defer(|_| {
-            if let Ok(exe) = std::env::current_exe() {
-                let _ = std::process::Command::new(exe).spawn();
-            }
+            crate::update::request_restart();
             let _ = slint::quit_event_loop();
         });
     });

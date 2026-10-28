@@ -68,7 +68,7 @@ fn main() {
         return;
     }
 
-    let Some(_instance_guard) = single::claim_single_instance() else {
+    let Some(instance_guard) = single::claim_single_instance() else {
         return;
     };
 
@@ -332,6 +332,10 @@ fn main() {
         ui.run().expect("event loop failed");
     }
     wa.send(wa::Cmd::Shutdown);
+    // The lock goes first, or the relaunched instance sees this one still
+    // running and exits.
+    drop(instance_guard);
+    update::relaunch_if_requested();
 }
 
 // Asks the OS for a translucent backdrop behind the window. The UI only
