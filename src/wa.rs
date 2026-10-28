@@ -688,8 +688,8 @@ impl EventHandler for Pump {
             Event::Receipt(receipt) => {
                 let status = match receipt.r#type {
                     ReceiptType::Delivered => 3,
-                    ReceiptType::Read | ReceiptType::ReadSelf => 4,
-                    ReceiptType::Played | ReceiptType::PlayedSelf => 5,
+                    ReceiptType::Read => 4,
+                    ReceiptType::Played => 5,
                     _ => 0,
                 };
                 if status == 0 {
@@ -697,7 +697,10 @@ impl EventHandler for Pump {
                 }
                 let chat = receipt.source.chat.to_non_ad_string();
                 let ids: Vec<String> = receipt.message_ids.iter().map(|i| i.to_string()).collect();
-                ui_apply(move |b| b.on_receipt(&chat, &ids, status));
+                let participant = receipt.source.sender.to_non_ad_string();
+                let timestamp = receipt.timestamp.timestamp();
+                let alternate = receipt.source.sender_alt.as_ref().map(|jid| jid.to_non_ad_string());
+                ui_apply(move |b| b.on_receipt(&chat, &ids, &participant, alternate.as_deref(), status, timestamp));
             }
             Event::HistorySync(_lazy) => {
                 // Decoding inflates megabytes of protobuf: keep it off the
@@ -1107,7 +1110,7 @@ async fn executor(
                     let Some(chat) = parse_jid(&jid) else { return };
                     let message = wa::Message { conversation: Some(text), ..Default::default() };
                     match client.edit_message(chat, id.clone(), message.clone()).await {
-                        Ok(_) => ui_apply(move |b| b.on_message_edit(&jid, &id, &message)),
+                        Ok(_) => { let timestamp = crate::store::now_secs(); ui_apply(move |b| b.on_message_edit(&jid, &id, &message, timestamp)); }
                         Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
                     }
                 });

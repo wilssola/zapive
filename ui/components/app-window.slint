@@ -1,6 +1,6 @@
 import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
+import { DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
 import { Avatar } from "avatar.slint";
 import { GreenLink } from "green-link.slint";
 import { IconButton } from "icon-button.slint";
@@ -299,6 +299,12 @@ export component AppWindow inherits Window {
     callback delete-message(string);
     callback message-action(string, string);
     callback submit-edit(string, string);
+    in-out property <bool> details-open;
+    in-out property <string> details-id;
+    in-out property <string> details-text;
+    in-out property <image> details-image;
+    in-out property <bool> details-has-image;
+    in-out property <[DetailRow]> details-rows;
     in-out property <bool> message-dialog-open;
     in-out property <bool> message-dialog-edit;
     in-out property <string> message-dialog-title;
@@ -313,7 +319,7 @@ export component AppWindow inherits Window {
     property <length> message-menu-y;
     public function open-message-menu(x: float, y: float) -> bool {
         if (root.screen != "main" || !root.chat-open || !root.conv-ready || root.select-mode
-            || root.message-menu-open || root.message-dialog-open || root.confirm-open
+            || root.message-menu-open || root.message-dialog-open || root.details-open || root.confirm-open
             || root.settings-open || root.forward-open || root.share-open || root.preview-open
             || root.lightbox-open || root.video-open || root.pdf-open || root.sv-open
             || root.alert-open || root.member-pick-open || root.reactions-open
@@ -501,7 +507,7 @@ export component AppWindow inherits Window {
 
     public function focus-composer() {
         if (root.screen == "main" && root.chat-open && root.current-can-send && !root.select-mode
-            && !root.message-menu-open && !root.message-dialog-open && !root.confirm-open
+            && !root.message-menu-open && !root.message-dialog-open && !root.details-open && !root.confirm-open
             && !root.settings-open && !root.forward-open && !root.share-open && !root.preview-open
             && !root.lightbox-open && !root.video-open && !root.pdf-open && !root.sv-open
             && !root.alert-open && !root.member-pick-open && !root.reactions-open
@@ -903,6 +909,7 @@ export component AppWindow inherits Window {
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
                 else if (root.message-menu-open) { root.message-menu-open = false; }
+                else if (root.details-open) { root.details-open = false; }
                 else if (root.message-dialog-open) { root.message-dialog-open = false; }
                 else if (root.confirm-open) { root.confirm-open = false; }
                 else if (root.preview-open) { root.cancel-send-image(); }
@@ -4545,6 +4552,106 @@ export component AppWindow inherits Window {
                         label: @tr("Delete");
                         tint: #f47783;
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "delete"); }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.details-open: Rectangle {
+        background: #00000025;
+        TouchArea { clicked => { root.details-open = false; } }
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) { root.details-open = false; return accept; }
+                return reject;
+            }
+        }
+        Rectangle {
+            width: min(336px, root.width);
+            height: parent.height;
+            x: parent.width - self.width;
+            background: Theme.dark ? #1b252dee : Theme.panel;
+            border-width: 1px;
+            border-color: Theme.border;
+            TouchArea { }
+            VerticalLayout {
+                spacing: 0px;
+                Rectangle {
+                    height: 64px;
+                    background: Theme.header;
+                    HorizontalLayout {
+                        padding: 16px;
+                        Text { text: @tr("Detalhes da mensagem"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
+                        Rectangle {
+                            width: 28px;
+                            Text { text: "×"; color: Theme.text-dim; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.details-open = false; } }
+                        }
+                    }
+                }
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 12px;
+                        Rectangle {
+                            border-radius: 10px;
+                            background: Theme.bubble-in;
+                            height: details-preview.preferred-height;
+                            details-preview := VerticalLayout {
+                                padding: 12px;
+                                spacing: 8px;
+                                if root.details-has-image: Image {
+                                    source: root.details-image;
+                                    height: 154px;
+                                    image-fit: contain;
+                                }
+                                Text { text: root.details-text; color: Theme.text; wrap: word-wrap; }
+                            }
+                        }
+                        for row in root.details-rows: Rectangle {
+                            background: row.kind == "status" ? Theme.bubble-in : transparent;
+                            border-radius: 8px;
+                            height: row.kind == "person" ? 38px : row.kind == "participant-heading" ? 28px : detail-content.preferred-height;
+                            detail-content := HorizontalLayout {
+                                padding: row.kind == "heading" || row.kind == "person" || row.kind == "participant-heading" ? 0px : 10px;
+                                spacing: row.kind == "person" ? 8px : 10px;
+                                alignment: start;
+                                if row.kind == "person": Avatar {
+                                    width: 28px; height: 28px;
+                                    vertical-stretch: 0;
+                                    src: row.avatar; has-image: row.hasAvatar;
+                                    initial: row.initial; color-idx: row.colorIdx;
+                                }
+                                if row.kind == "status" || row.kind == "participant-heading": Ticks {
+                                    ticks: row.ticks; blue: row.blue;
+                                    vertical-stretch: 0;
+                                }
+                                if row.kind == "version": Rectangle {
+                                    width: 10px;
+                                    background: transparent;
+                                    Rectangle { x: 4px; width: 2px; height: parent.height; background: Theme.accent; }
+                                    Rectangle { y: 4px; width: 10px; height: 10px; border-radius: 5px; background: Theme.accent; }
+                                }
+                                VerticalLayout {
+                                    spacing: row.kind == "person" ? 1px : 5px;
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    Text {
+                                        text: row.title;
+                                        color: row.kind == "participant-heading" ? Theme.text-dim : row.kind == "heading" ? Theme.accent : Theme.text;
+                                        font-size: row.kind == "heading" ? 14px : row.kind == "person" ? 12px : 13px;
+                                        horizontal-alignment: left;
+                                        font-weight: row.kind == "heading" || row.kind == "version" || row.kind == "person" ? 600 : 400;
+                                        wrap: row.kind == "person" ? no-wrap : word-wrap;
+                                        overflow: elide;
+                                    }
+                                    if row.text != "": Text { text: row.text; color: Theme.text; wrap: word-wrap; font-size: 13px; }
+                                    if row.time != "": Text { text: row.time; color: Theme.text-dim; wrap: word-wrap; font-size: 11px; horizontal-alignment: left; }
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -13,7 +13,7 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
+    DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
     MessageItem, PdfPage, ReactionItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -1615,6 +1615,7 @@ impl Bridge {
 
     // Whatever is on screen belongs to a session that just ended.
     fn close_session_views(&mut self) {
+        self.ui.set_details_open(false);
         self.current_jid = None;
         self.unread_boundary = None;
         self.groups_fetched = false;
@@ -1628,6 +1629,7 @@ impl Bridge {
 
     // Drops the loaded account's conversations, in memory and on disk.
     fn wipe_conversations(&mut self) {
+        self.ui.set_details_open(false);
         self.current_jid = None;
         self.unread_boundary = None;
         self.ui.set_chat_open(false);
@@ -2152,11 +2154,12 @@ impl Bridge {
                 && let Some(edited) = pm.edited_message.as_option()
             {
                 let jid = self.store.canon_owned(&normalize_jid(&chat));
+                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
                 let sender = self.store.canon_owned(&info.source.sender.to_non_ad_string());
                 let valid = self.store.messages_for(&jid).iter().find(|m| m.id == id).is_some_and(|m| {
                     m.from_me == info.source.is_from_me && (m.from_me || self.store.canon(&m.sender_jid) == sender)
                 });
-                if valid { self.on_message_edit(&chat, id, edited); }
+                if valid { self.on_message_edit(&chat, id, edited, pm.timestamp_ms.map(|t| t / 1000).unwrap_or_else(|| info.timestamp.timestamp())); }
                 continue;
             }
             if let Some(pin) = content.pin_in_chat_message.as_option()
@@ -2289,11 +2292,16 @@ impl Bridge {
         self.schedule_refresh_chats();
     }
 
-    pub fn on_receipt(&mut self, chat: &str, ids: &[String], status: u32) {
+    pub fn on_receipt(&mut self, chat: &str, ids: &[String], participant: &str, alternate: Option<&str>, status: u32, timestamp: i64) {
+        if let Some(alternate) = alternate {
+            if participant.ends_with("@lid") { self.store.learn_alias(participant, alternate); }
+            else if alternate.ends_with("@lid") { self.store.learn_alias(alternate, participant); }
+        }
         let jid = self.store.canon_owned(&normalize_jid(chat));
+        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
         let mut changed = Vec::new();
         for id in ids {
-            if self.store.set_status(&jid, id, status) {
+            if self.store.apply_receipt(&jid, id, participant, status, timestamp) {
                 changed.push(id.clone());
             }
         }
@@ -2895,6 +2903,7 @@ impl Bridge {
     }
 
     fn schedule_save(&mut self) {
+        self.refresh_message_details();
         if self.save_queued || self.vault.is_none() {
             return;
         }
@@ -2982,6 +2991,7 @@ impl Bridge {
 
     fn open_jid(&mut self, jid: &str, jump_to: Option<&str>) {
         self.ui.set_message_menu_open(false);
+        self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
         if let Some(current) = self.current_jid.clone()
             && current != jid
@@ -3771,6 +3781,7 @@ impl Bridge {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
                 self.patch_avatar_everywhere(jid, &image);
+                self.refresh_message_details();
                 if jid == self.self_jid {
                     self.refresh_accounts();
                 }
@@ -4322,6 +4333,7 @@ impl Bridge {
         self.decoded_bytes += image_bytes(&image);
         self.decoded_order.push_back(id.to_string());
         self.decoded.insert(id.to_string(), (image, w, h));
+        self.refresh_message_details();
         // Evicting is cheap: the rows already on screen hold their own
         // reference to the image, so this only costs a re-decode the next
         // time the conversation is rebuilt.
@@ -5809,6 +5821,7 @@ impl Bridge {
 
     fn close_chat(&mut self) {
         self.ui.set_message_menu_open(false);
+        self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
         self.select_end();
         self.ui.set_chat_menu_open(false);
@@ -5908,6 +5921,8 @@ impl Bridge {
             snap.announce
         );
         self.store.set_members(&jid, snap.members);
+        self.refresh_message_details();
+        self.schedule_save();
         let admin = self.store.self_is_admin(&jid);
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.announce = snap.announce;
@@ -7750,17 +7765,23 @@ impl Bridge {
         self.ui.set_message_dialog_open(true);
     }
 
-    pub fn on_message_edit(&mut self, jid: &str, id: &str, content: &wa::Message) {
+    pub fn on_message_edit(&mut self, jid: &str, id: &str, content: &wa::Message, timestamp: i64) {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let jid = self.store.canon_owned(&normalize_jid(jid));
         let content = content.get_base_message();
-        let text = content.conversation.clone().or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()));
+        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+        let text = content.conversation.clone()
+            .or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()))
+            .or_else(|| content.image_message.as_option().and_then(|m| m.caption.clone()))
+            .or_else(|| content.video_message.as_option().and_then(|m| m.caption.clone()));
         let Some(text) = text else { return };
         let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return };
-        if m.deleted { return; }
-        m.text = text;
-        m.raw = Some(std::sync::Arc::new(content.clone()));
-        m.edited = true;
+        if !m.record_edit(text, timestamp) { return; }
+        let mut raw = m.raw.as_deref().cloned().unwrap_or_default();
+        if m.kind == MessageKind::Text { raw.conversation = Some(m.text.clone()); raw.extended_text_message = Default::default(); }
+        else if let Some(mut image) = raw.image_message.as_option().cloned() { image.caption = Some(m.text.clone()); raw.image_message = image.into(); }
+        else if let Some(mut video) = raw.video_message.as_option().cloned() { video.caption = Some(m.text.clone()); raw.video_message = video.into(); }
+        m.raw = Some(std::sync::Arc::new(raw));
         m.link_url.clear();
         m.link_title.clear();
         m.link_desc.clear();
@@ -7785,6 +7806,58 @@ impl Bridge {
             if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
             self.schedule_save();
         }
+    }
+
+    fn refresh_message_details(&mut self) {
+        if !self.ui.get_details_open() { return; }
+        let id = self.ui.get_details_id().to_string();
+        let Some(m) = self.find_message(&id).filter(|m| !m.deleted).cloned() else {
+            self.ui.set_details_open(false);
+            return;
+        };
+        self.ui.set_details_text(preview_body(&m).into());
+        let row = self.to_row(&m, None);
+        self.ui.set_details_image(row.picture.clone());
+        self.ui.set_details_has_image(self.decoded.contains_key(&m.id) || self.media_previews.contains_key(&m.id));
+        let mut rows = Vec::new();
+        let heading = |title: &str| DetailRow { kind: "heading".into(), title: title.into(), ..Default::default() };
+        let (known, participants) = self.store.receipt_participants(&m);
+        if m.from_me {
+            if is_group(&m.jid) && !known {
+                rows.push(DetailRow { kind: "note".into(), title: "Exibindo apenas confirmações disponíveis.".into(), ..Default::default() });
+            }
+            for (level, label) in [(4, "Lida por"), (3, "Entregue para"), (0, "Sem confirmação de entrega")] {
+                let group: Vec<_> = participants.iter().filter(|(_, r)| if level == 4 { r.status() >= 4 } else if level == 3 { r.status() == 3 } else { r.status() < 3 }).collect();
+                if group.is_empty() { continue; }
+                rows.push(DetailRow { kind: "participant-heading".into(), title: label.into(),
+                    ticks: if level >= 3 { "✓✓" } else { "✓" }.into(), blue: level == 4, ..Default::default() });
+                for (jid, receipt) in group {
+                    let name = self.store.members_of(&m.jid).iter().find(|member| self.store.canon(&member.jid) == jid)
+                        .filter(|member| !member.name.is_empty()).map(|member| member.name.clone()).unwrap_or_else(|| self.store.chat_name(jid));
+                    let avatar = self.avatar_for(jid);
+                    let timestamp = if level == 4 { receipt.read.or(receipt.played) } else { receipt.delivered };
+                    rows.push(DetailRow { kind: "person".into(), title: name.clone().into(),
+                        initial: initial_of(&name).into(), colorIdx: color_idx_of(jid), hasAvatar: avatar.is_some(),
+                        avatar: avatar.unwrap_or_default(), time: timestamp.map(format_stamp).unwrap_or_default().into(),
+                        ..Default::default() });
+                }
+            }
+        } else {
+            rows.push(DetailRow { kind: "note".into(), title: "Recibos dos demais destinatários não estão disponíveis para mensagens recebidas.".into(), ..Default::default() });
+        }
+        rows.push(heading("Histórico de edições"));
+        if m.edit_versions.is_empty() {
+            rows.push(DetailRow { kind: "version".into(), title: "Versão atual".into(), text: m.text.clone().into(),
+                time: if m.edited { "Edição anterior à observação; horário desconhecido".into() } else { format_stamp(m.timestamp).into() }, ..Default::default() });
+        } else {
+            for (index, version) in m.edit_versions.iter().enumerate().rev() {
+                rows.push(DetailRow { kind: "version".into(), title: if index + 1 == m.edit_versions.len() { "Versão atual".into() } else { format!("Versão {}", index + 1).into() },
+                    text: version.text.clone().into(), time: version.timestamp.map(format_stamp).unwrap_or_else(|| "Horário desconhecido".into()).into(), ..Default::default() });
+            }
+        }
+        rows.push(DetailRow { kind: "note".into(), title: format!("{} · {}", if m.from_me { t("reactions.you") } else { m.sender.clone() }, m.id).into(),
+            time: if m.pinned_until > now_secs() { format!("Fixada até {}", format_stamp(m.pinned_until)).into() } else { Default::default() }, ..Default::default() });
+        self.ui.set_details_rows(ModelRc::new(VecModel::from(rows)));
     }
 
     fn message_action(&mut self, id: &str, action: &str) {
@@ -7826,14 +7899,13 @@ impl Bridge {
             }
             "delete" => { self.select_start(id); self.confirm_delete_selected(); }
             "details" => {
-                self.ui.set_message_dialog_title("Message details".into());
-                self.ui.set_message_dialog_text(format!("{}\n{}\nID: {}\n{}: {}\n{}{}",
-                    if m.from_me { t("reactions.you") } else { m.sender.clone() },
-                    format_stamp(m.timestamp), m.id, "Delivery status", match m.status { 0 => "Incoming", 1 => "Pending", 2 => "Sent", 3 => "Delivered", 4 => "Read", 5 => "Played", _ => "Unknown" },
-                    if m.edited { "Edited\n" } else { "" },
-                    if m.pinned_until > now_secs() { format!("Pinned until {}", format_stamp(m.pinned_until)) } else { String::new() }).into());
-                self.ui.set_message_dialog_edit(false);
-                self.ui.set_message_dialog_open(true);
+                self.ui.set_details_id(m.id.clone().into());
+                self.ui.set_details_open(true);
+                self.refresh_message_details();
+                let (_, participants) = self.store.receipt_participants(&m);
+                for (jid, _) in participants { self.queue_avatar(&jid); }
+                self.request_automatic_media(&m);
+                if is_group(&m.jid) { self.ensure_group_meta(&m.jid); }
             }
             _ => {}
         }
