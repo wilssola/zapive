@@ -829,6 +829,10 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_view_changed(|view| {
         let view = view.to_string();
         defer(move |b| {
+            if view == "calls" {
+                b.store.mark_calls_seen();
+                b.refresh_calls();
+            }
             b.view = view;
             b.refresh_chats();
         });
@@ -1638,6 +1642,11 @@ impl Bridge {
         self.messages_model.set_vec(Vec::new());
         self.status_model.set_vec(Vec::new());
         self.calls_model.set_vec(Vec::new());
+        self.ui.set_chats_unread_count(0);
+        self.ui.set_channels_unread_count(0);
+        self.ui.set_communities_unread_count(0);
+        self.ui.set_calls_unseen_count(0);
+        self.ui.set_statuses_unseen(false);
         self.warm_order.clear();
         self.truncated.clear();
         self.scroll_pos.clear();
@@ -2699,6 +2708,10 @@ impl Bridge {
     // In-place diff: only changed rows are rewritten, which is what keeps
     // the ListView's scroll position stable.
     fn refresh_chats(&mut self) {
+        let (chats, channels, communities) = self.store.sidebar_unread_counts();
+        self.ui.set_chats_unread_count(chats);
+        self.ui.set_channels_unread_count(channels);
+        self.ui.set_communities_unread_count(communities);
         let archived_unread = self
             .store
             .chats
@@ -4655,6 +4668,8 @@ impl Bridge {
 
     fn refresh_statuses(&mut self) {
         let authors = self.store.status_authors();
+        self.ui.set_statuses_unseen(self.store.statuses.values().flatten()
+            .any(|item| !item.from_me && !item.read_sent));
         let rows: Vec<ChatItem> = authors
             .iter()
             .map(|(jid, latest, _count)| {
@@ -4704,6 +4719,15 @@ impl Bridge {
         };
         let (count, idx_now) = (items.len(), *idx);
         let item = items[idx_now].clone();
+        if let Some(stored) = self.store.statuses.get_mut(&item.jid)
+            .and_then(|items| items.iter_mut().find(|stored| stored.id == item.id))
+            && !stored.read_sent
+        {
+            stored.read_sent = true;
+            self.store.statuses_dirty = true;
+            self.refresh_statuses();
+            self.schedule_save();
+        }
         self.ui.set_sv_name(self.store.chat_name(&item.jid).into());
         self.ui.set_sv_time(format_time(item.timestamp).into());
         self.ui.set_sv_text(item.text.clone().into());
@@ -4816,6 +4840,11 @@ impl Bridge {
     // ---- calls ----
 
     fn refresh_calls(&mut self) {
+        if self.ui.get_sidebar_view() == "calls" {
+            self.store.mark_calls_seen();
+            self.schedule_save();
+        }
+        self.ui.set_calls_unseen_count(self.store.unseen_calls());
         let rows: Vec<CallItem> = self
             .store
             .calls

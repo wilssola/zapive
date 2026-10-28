@@ -8,6 +8,9 @@ export component IconButton inherits TouchArea {
     in property <brush> background: transparent;
     in property <brush> active-background: Theme.selected;
     in property <length> radius: 8px;
+    in property <int> badge-count: 0;
+    in property <bool> badge-dot: false;
+    in property <color> badge-border: Theme.sidebar;
     width: 40px;
     height: 40px;
     mouse-cursor: pointer;
@@ -23,6 +26,24 @@ export component IconButton inherits TouchArea {
             height: root.icon-size;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
+        }
+    }
+    if root.badge-count > 0 || root.badge-dot: Rectangle {
+        x: parent.width - self.width + 2px;
+        y: -2px;
+        width: root.badge-count > 0 ? max(20px, badge-label.preferred-width + 8px) : 10px;
+        height: root.badge-count > 0 ? 20px : 10px;
+        border-radius: self.height / 2;
+        border-width: 2px;
+        border-color: root.badge-border;
+        background: Theme.accent;
+        badge-label := Text {
+            text: root.badge-count > 99 ? "99+" : root.badge-count > 0 ? root.badge-count : "";
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 }

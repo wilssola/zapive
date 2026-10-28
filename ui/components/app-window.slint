@@ -155,6 +155,11 @@ export component AppWindow inherits Window {
     in-out property <[ChatItem]> chats;
     in-out property <[ChatItem]> statuses;
     in-out property <string> sidebar-view: "chats";
+    in-out property <int> chats-unread-count: 0;
+    in-out property <int> channels-unread-count: 0;
+    in-out property <int> communities-unread-count: 0;
+    in-out property <int> calls-unseen-count: 0;
+    in-out property <bool> statuses-unseen: false;
     callback status-open(string);
     callback view-changed(string);
     // Calls (the ringing/in-call UI lives in CallWindow)
@@ -902,6 +907,8 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/message-circle.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.chats-unread-count;
                     active: root.sidebar-view == "chats";
                     clicked => {
                         root.sidebar-view = "chats";
@@ -912,6 +919,8 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/circle-dot.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-dot: root.statuses-unseen;
                     active: root.sidebar-view == "status";
                     clicked => { root.sidebar-view = "status"; }
                 }
@@ -919,13 +928,17 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/phone.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.calls-unseen-count;
                     active: root.sidebar-view == "calls";
-                    clicked => { root.sidebar-view = "calls"; }
+                    clicked => { root.sidebar-view = "calls"; root.view-changed("calls"); }
                 }
                 IconButton {
                     icon: @image-url("../icons/speakerphone.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.channels-unread-count;
                     active: root.sidebar-view == "channels";
                     clicked => {
                         root.sidebar-view = "channels";
@@ -936,6 +949,8 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/users-group.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.communities-unread-count;
                     active: root.sidebar-view == "communities";
                     clicked => {
                         root.sidebar-view = "communities";
@@ -1289,6 +1304,7 @@ export component AppWindow inherits Window {
                         }
                         FilterChip {
                             label: @tr("Unread");
+                            count: root.chats-unread-count;
                             active: root.chat-tab == "unread";
                             clicked => { root.chat-tab = "unread"; root.tab-changed("unread"); }
                         }

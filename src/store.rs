@@ -186,6 +186,8 @@ pub struct CallEntry {
     // could be placed still load.
     #[serde(default)]
     pub outgoing: bool,
+    #[serde(default)]
+    pub seen: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -896,6 +898,7 @@ impl Store {
             status: status.to_string(),
             timestamp: if timestamp > 0 { timestamp } else { now_secs() },
             outgoing,
+            seen: outgoing,
         };
         self.calls.insert(0, entry.clone());
         self.calls.truncate(100);
@@ -924,6 +927,38 @@ impl Store {
             list.retain(|m| fresh(m.timestamp));
             !list.is_empty()
         });
+    }
+
+    pub fn sidebar_unread_counts(&self) -> (i32, i32, i32) {
+        let (mut chats, mut channels, mut communities) = (0i32, 0i32, 0i32);
+        for chat in self.chats.values() {
+            let unread = i32::from(chat.unread > 0);
+            if is_channel(&chat.jid) {
+                channels = channels.saturating_add(unread);
+            } else {
+                if !chat.is_community {
+                    chats = chats.saturating_add(unread);
+                }
+                if chat.is_community || !chat.community.is_empty() {
+                    communities = communities.saturating_add(unread);
+                }
+            }
+        }
+        (chats, channels, communities)
+    }
+
+    pub fn unseen_calls(&self) -> i32 {
+        self.calls.iter().filter(|call| !call.outgoing && !call.seen && call.status == "timeout")
+            .count().min(i32::MAX as usize) as i32
+    }
+
+    pub fn mark_calls_seen(&mut self) {
+        for call in &mut self.calls {
+            if !call.seen && call.status == "timeout" {
+                call.seen = true;
+                self.calls_dirty = true;
+            }
+        }
     }
 
     pub fn status_authors(&mut self) -> Vec<(String, StoredMessage, usize)> {
@@ -1367,6 +1402,47 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_counts_include_archived_and_community_groups() {
+        let mut store = Store::default();
+        for (jid, unread, community, shell) in [
+            ("a@s.whatsapp.net", 3, "", false),
+            ("b@g.us", 5, "community@g.us", false),
+            ("community@g.us", 2, "", true),
+            ("c@newsletter", 7, "", false),
+        ] {
+            store.chats.insert(jid.into(), ChatMeta {
+                jid: jid.into(), unread, community: community.into(), is_community: shell,
+                archived: true, ..Default::default()
+            });
+        }
+        assert_eq!(store.sidebar_unread_counts(), (2, 1, 2));
+        store.chats.get_mut("a@s.whatsapp.net").unwrap().unread = u32::MAX;
+        assert_eq!(store.sidebar_unread_counts(), (2, 1, 2));
+        store.chats.get_mut("b@g.us").unwrap().unread = 0;
+        assert_eq!(store.sidebar_unread_counts(), (1, 1, 1));
+        for chat in store.chats.values_mut() {
+            chat.unread = 0;
+        }
+        assert_eq!(store.sidebar_unread_counts(), (0, 0, 0));
+    }
+
+    #[test]
+    fn missed_call_badge_clears_and_persists_seen_state() {
+        let mut store = Store::default();
+        store.upsert_call("incoming", "a@s.whatsapp.net", "offer", false, false, 1, false);
+        assert_eq!(store.unseen_calls(), 0);
+        store.upsert_call("incoming", "a@s.whatsapp.net", "timeout", false, false, 1, false);
+        store.upsert_call("outgoing", "a@s.whatsapp.net", "timeout", false, false, 1, true);
+        assert_eq!(store.unseen_calls(), 1);
+        store.mark_calls_seen();
+        assert_eq!(store.unseen_calls(), 0);
+        let restored: Vec<CallEntry> = serde_json::from_str(&serde_json::to_string(&store.calls).unwrap()).unwrap();
+        assert!(restored.iter().all(|call| call.seen));
+        let legacy: CallEntry = serde_json::from_str(r#"{"id":"old","jid":"a@s.whatsapp.net","video":false,"group":false,"status":"timeout","timestamp":1}"#).unwrap();
+        assert!(!legacy.seen);
+    }
 
     fn audio_message(ptt: Option<bool>) -> StoredMessage {
         let raw = wa::Message {

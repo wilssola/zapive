@@ -2,6 +2,7 @@ import { Theme } from "theme.slint";
 
 export component FilterChip inherits TouchArea {
     in property <string> label;
+    in property <int> count: 0;
     in property <bool> active: false;
     mouse-cursor: pointer;
     width: chip.preferred-width;
@@ -16,11 +17,19 @@ export component FilterChip inherits TouchArea {
         HorizontalLayout {
             padding-left: 11px;
             padding-right: 11px;
+            spacing: 5px;
             Text {
                 text: root.label;
                 color: root.active ? (Theme.dark ? #c5f1db : Theme.accent) : Theme.text-dim;
                 font-size: 11px;
                 font-weight: root.active ? 600 : 400;
+                vertical-alignment: center;
+            }
+            if root.count > 0: Text {
+                text: root.count;
+                color: root.active ? (Theme.dark ? #c5f1db : Theme.accent) : Theme.text-dim;
+                font-size: 11px;
+                font-weight: 600;
                 vertical-alignment: center;
             }
         }
