@@ -698,6 +698,10 @@ fn wire_callbacks(ui: &AppWindow) {
         let mode = mode.to_string();
         defer(move |b| b.handle_theme(&mode));
     });
+    ui.on_style_changed(|style| {
+        let style = style.to_string();
+        defer(move |b| b.handle_style(&style));
+    });
     ui.on_autostart_changed(|on| {
         defer(move |b| b.handle_autostart(on));
     });
@@ -1419,6 +1423,13 @@ impl Bridge {
         self.vault = Some(vault);
         self.pending_registered = registered;
         self.ui.set_screen("locked".into());
+    }
+
+    fn handle_style(&mut self, style: &str) {
+        self.ui.set_theme_style(style.into());
+        if let Some(vault) = &self.vault {
+            vault.setting_set("theme_style", style);
+        }
     }
 
     fn handle_theme(&mut self, mode: &str) {
@@ -8034,8 +8045,8 @@ impl Bridge {
             self.stop_audio();
             return;
         }
-        let pos = (player.position_secs() * rate).min(a.duration);
-        let progress = (pos / a.duration).min(1.0) as f32;
+        let pos = (player.position_secs() * rate).clamp(0.0, a.duration);
+        let progress = (pos / a.duration).clamp(0.0, 1.0) as f32;
         let label = crate::store::format_duration(pos as u32);
         let (id, jid, paused) = (a.id.clone(), a.jid.clone(), a.paused);
         if Some(&jid) == self.current_jid.as_ref() {
