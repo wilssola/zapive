@@ -3341,7 +3341,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 visible: root.chat-open;
-                height: root.sync-banner != "" ? 112px : 80px;
+                height: 80px;
 
                 background: Theme.dark ? #0b141a28 : #ffffff28;
                 backdrop-blur: 12px;
@@ -3447,43 +3447,44 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.sync-banner != "": Rectangle {
-                    y: 80px;
-                    height: 32px;
-                    HorizontalLayout {
-                        alignment: center;
-                        padding-top: 6px;
-                        Rectangle {
-                            width: banner-text.preferred-width + 44px;
-                            height: 24px;
-                            border-radius: 12px;
-                            background: banner-touch.has-hover ? Theme.selected : Theme.pill;
-                            banner-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.sync-clicked(); }
+            }
+
+            if root.chat-open && root.sync-banner != "": Rectangle {
+                y: contact-header.height + 4px;
+                width: parent.width;
+                height: 32px;
+                HorizontalLayout {
+                    alignment: center;
+                    padding-top: 6px;
+                    Rectangle {
+                        width: banner-text.preferred-width + 44px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: banner-touch.has-hover ? Theme.selected : Theme.pill;
+                        banner-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.sync-clicked(); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            Image {
+                                source: @image-url("../icons/refresh.svg");
+                                colorize: Theme.text-dim;
+                                width: 13px;
+                                height: 13px;
+                                y: (parent.height - self.height) / 2;
                             }
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                spacing: 6px;
-                                Image {
-                                    source: @image-url("../icons/refresh.svg");
-                                    colorize: Theme.text-dim;
-                                    width: 13px;
-                                    height: 13px;
-                                    y: (parent.height - self.height) / 2;
-                                }
-                                banner-text := Text {
-                                    text: root.sync-banner;
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                }
+                            banner-text := Text {
+                                text: root.sync-banner;
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                vertical-alignment: center;
                             }
                         }
                     }
                 }
-
             }
 
 
@@ -5248,7 +5249,13 @@ export component AppWindow inherits Window {
                         }
                         SettingsCard {
                             title: @tr("Automatic downloads");
-                            Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; wrap: word-wrap; }
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                padding-top: 8px;
+                                padding-bottom: 4px;
+                                Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                            }
                             SettingsRow {
                                 label: @tr("Photos");
                                 Toggle {
