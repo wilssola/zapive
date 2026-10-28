@@ -62,6 +62,68 @@ component BubbleMeta {
     }
 }
 
+component MediaPlaceholder inherits TouchArea {
+    in property <image> preview;
+    in property <bool> sticker;
+    in property <bool> video;
+    in property <string> file-size;
+    in property <bool> loading;
+    in property <float> progress: -1;
+    mouse-cursor: root.loading ? default : pointer;
+    enabled: !root.loading;
+
+    Rectangle {
+        border-radius: 6px;
+        clip: true;
+        background: Theme.hover;
+        Image {
+            source: root.preview;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+        }
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            backdrop-blur: 12px;
+            background: #00000050;
+        }
+        Rectangle {
+            width: 50px;
+            height: 50px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 25px;
+            background: root.has-hover ? #ffffff28 : #ffffff18;
+            Image {
+                source: root.sticker ? @image-url("../icons/sticker-2.svg")
+                    : root.video ? @image-url("../icons/video.svg")
+                    : @image-url("../icons/photo.svg");
+                width: 28px;
+                height: 28px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                colorize: white;
+            }
+        }
+        if root.loading: Text {
+            text: root.progress < 0 ? @tr("Downloading…") : round(clamp(root.progress, 0, 100)) + "%";
+            color: white;
+            font-size: 11px;
+            width: parent.width;
+            horizontal-alignment: center;
+            y: parent.height / 2 + 30px;
+        }
+        if root.file-size != "": Text {
+            text: root.file-size;
+            color: white;
+            font-size: 11px;
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 6px;
+        }
+    }
+}
+
 component InfoAction inherits TouchArea {
     in property <image> icon;
     in property <string> label;
@@ -2154,60 +2216,16 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Still downloading: the thumbnail that came
-                                // with the message, dimmed, in the clip's box.
-                                if msg.kind == "video" && !msg.mediaReady && msg.picW > 0: TouchArea {
-                                    mouse-cursor: pointer;
-                                    enabled: !msg.mediaLoading;
-                                    clicked => { root.download-media(msg.id); }
+                                if (msg.kind == "image" || msg.kind == "video") && !msg.mediaReady: MediaPlaceholder {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
-
-                                    Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: Theme.hover; }
-
-                                    Image {
-                                        source: msg.picture;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: cover;
-                                        opacity: 0.55;
-                                    }
-                                    Rectangle {
-                                        width: 140px;
-                                        height: 36px;
-                                        border-radius: 18px;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2 + 22px;
-                                        background: #00000090;
-                                        Image {
-                                            source: msg.kind == "image" ? @image-url("../icons/photo.svg") : @image-url("../icons/video.svg");
-                                            width: 32px;
-                                            height: 32px;
-                                            x: (parent.width - self.width) / 2;
-                                            y: -44px;
-                                            colorize: white;
-                                        }
-                                        HorizontalLayout {
-                                            y: (parent.height - self.height) / 2;
-                                            height: 18px;
-                                            padding-left: 12px;
-                                            padding-right: 12px;
-                                            spacing: 6px;
-                                            alignment: center;
-                                            Image {
-                                                source: @image-url("../icons/download.svg");
-                                                width: 18px;
-                                                height: 18px;
-                                                colorize: white;
-                                            }
-                                            Text {
-                                                text: msg.mediaLoading ? (msg.mediaProgress < 0 ? @tr("Downloading…") : round(clamp(msg.mediaProgress, 0, 100)) + "%") : @tr("Download");
-                                                color: white;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
+                                    preview: msg.picture;
+                                    sticker: msg.sticker;
+                                    video: msg.kind == "video";
+                                    file-size: msg.mediaSize;
+                                    loading: msg.mediaLoading;
+                                    progress: msg.mediaProgress;
+                                    clicked => { root.download-media(msg.id); }
                                 }
                                 if msg.kind == "video" && msg.mediaReady && msg.picW > 0: TouchArea {
                                     width: msg.picW * 1px;
@@ -2296,59 +2314,6 @@ export component AppWindow inherits Window {
                                         source: msg.picture;
                                         width: parent.width;
                                         height: parent.height;
-                                    }
-                                }
-                                // Placeholder of the final size: the bubble
-                                // never changes height once the image lands.
-                                if msg.kind == "image" && !msg.mediaReady: TouchArea {
-                                    mouse-cursor: pointer;
-                                    enabled: !msg.mediaLoading;
-                                    clicked => { root.download-media(msg.id); }
-                                    width: msg.picW * 1px;
-                                    height: msg.picH * 1px;
-
-                                    Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: Theme.hover; }
-                                    Image {
-                                        source: msg.picture;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: cover;
-                                    }
-                                    Rectangle {
-                                        width: 140px;
-                                        height: 36px;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2 + 22px;
-                                        border-radius: 18px;
-                                        background: #000000a0;
-                                        Image {
-                                            source: msg.kind == "image" ? @image-url("../icons/photo.svg") : @image-url("../icons/video.svg");
-                                            width: 32px;
-                                            height: 32px;
-                                            x: (parent.width - self.width) / 2;
-                                            y: -44px;
-                                            colorize: white;
-                                        }
-                                        HorizontalLayout {
-                                            y: (parent.height - self.height) / 2;
-                                            height: 18px;
-                                            padding-left: 12px;
-                                            padding-right: 12px;
-                                            spacing: 6px;
-                                            alignment: center;
-                                            Image {
-                                                source: @image-url("../icons/download.svg");
-                                                width: 18px;
-                                                height: 18px;
-                                                colorize: white;
-                                            }
-                                            Text {
-                                                text: msg.mediaLoading ? (msg.mediaProgress < 0 ? @tr("Downloading…") : round(clamp(msg.mediaProgress, 0, 100)) + "%") : @tr("Download");
-                                                color: white;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
                                     }
                                 }
 

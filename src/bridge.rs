@@ -3399,7 +3399,12 @@ impl Bridge {
             mediaKind: "".into(),
             mediaOffer: false,
             mediaProgress: -1.0,
-            mediaSize: "".into(),
+            mediaSize: m.raw.as_ref()
+                .and_then(|raw| crate::media::expected_bytes(raw))
+                .filter(|&bytes| bytes > 0)
+                .map(crate::media::format_size)
+                .unwrap_or_default()
+                .into(),
             mediaReady: self.media_path.contains_key(&m.id),
             mediaLoading: self.media_inflight.contains(&m.id),
             reactions: reactions.into(),
