@@ -42,6 +42,8 @@ whatsapp-rust = { git = "https://github.com/jlucaso1/whatsapp-rust", rev = "a567
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 image = "0.25"
+fontdb = { version = "0.24.0", default-features = false, features = ["std", "fs"] }
+ab_glyph = "0.2.32"
 qrcode = "0.14"
 sys-locale = "0.3"
 # Must resolve to the same libsqlite3-sys (0.38) that whatsapp-rust's

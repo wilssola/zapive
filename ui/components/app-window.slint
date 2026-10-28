@@ -13,6 +13,7 @@ import { LinkHover } from "link-hover.slint";
 import { EmojiText } from "emoji.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { HomeScreen } from "home-screen.slint";
+import { ImagePreview } from "image-preview.slint";
 import { MenuRow } from "rows/menu.slint";
 import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
@@ -693,6 +694,15 @@ export component AppWindow inherits Window {
     in-out property <image> preview-image;
     callback confirm-send-image(string);
     callback cancel-send-image();
+    callback crop-preview(float, float, float, float);
+    callback text-preview(string, float, float);
+    callback draw-preview(string, color, float);
+    in-out property <bool> preview-busy: false;
+    callback reset-preview();
+    public function focus-preview-caption() { image-editor.focus-caption(); }
+    changed preview-open => {
+        if (!root.preview-open) { image-editor.clear(); }
+    }
 
     // ---------- Lock screen ----------
     if root.screen == "locked": VerticalBox {
@@ -3981,6 +3991,19 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+            image-editor := ImagePreview {
+                visible: root.preview-open && root.chat-open;
+                width: parent.width;
+                height: parent.height;
+                picture: root.preview-image;
+                busy: root.preview-busy;
+                cancel => { root.cancel-send-image(); }
+                send(caption) => { root.confirm-send-image(caption); }
+                crop(x, y, w, h) => { root.crop-preview(x, y, w, h); }
+                annotate(text, x, y) => { root.text-preview(text, x, y); }
+                draw(points, ink, thickness) => { root.draw-preview(points, ink, thickness); }
+                reset => { root.reset-preview(); }
+            }
         }
     }
 
@@ -5676,55 +5699,6 @@ export component AppWindow inherits Window {
         }
     }
 
-    // ---------- Send-image preview ----------
-    if root.preview-open: Rectangle {
-        background: #000000d9;
-        TouchArea { }
-        VerticalLayout {
-            padding: 28px;
-            spacing: 14px;
-            HorizontalLayout {
-                alignment: start;
-                IconButton {
-                    icon: @image-url("../icons/x.svg");
-                    clicked => { root.cancel-send-image(); }
-                }
-            }
-            Rectangle {
-                vertical-stretch: 1;
-                Image {
-                    source: root.preview-image;
-                    width: parent.width * 0.9;
-                    height: parent.height * 0.96;
-                    x: parent.width * 0.05;
-                    y: parent.height * 0.02;
-                    image-fit: contain;
-                }
-            }
-            HorizontalLayout {
-                alignment: center;
-                spacing: 10px;
-                preview-caption := LineEdit {
-                    width: 420px;
-                    placeholder-text: @tr("Add a caption");
-                    accepted => {
-                        root.confirm-send-image(self.text);
-                        self.text = "";
-                    }
-                }
-                Button {
-                    text: @tr("Send");
-                    primary: true;
-                    clicked => {
-                        root.confirm-send-image(preview-caption.text);
-                        preview-caption.text = "";
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------- PDF viewer ----------
     // Kept in the tree (hidden) so the Flickable's geometry is always
     // readable by the host; the pages are laid out by the host.
     Rectangle {

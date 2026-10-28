@@ -153,6 +153,33 @@ msgstr "Sair do WhatsApp"
 msgid "Add a caption"
 msgstr "Adicione uma legenda"
 
+msgid "Crop"
+msgstr "Cortar"
+
+msgid "Pencil"
+msgstr "Lápis"
+
+msgid "Reset image"
+msgstr "Restaurar imagem"
+
+msgid "Thin"
+msgstr "Fino"
+
+msgid "Thick"
+msgstr "Grosso"
+
+msgid "Text"
+msgstr "Texto"
+
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Drag over the image to select the crop"
+msgstr "Arraste sobre a imagem para selecionar o recorte"
+
+msgid "Write text, then click the image to position it"
+msgstr "Escreva e clique na imagem para posicionar o texto"
+
 msgid "Status"
 msgstr "Status"
 

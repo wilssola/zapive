@@ -181,6 +181,10 @@ pub struct Bridge {
     // Who a pending "share group history" dialog is about.
     share_target: Option<(String, String)>,
     pending_image: Option<std::path::PathBuf>,
+    original_image: Option<std::path::PathBuf>,
+    preview_jid: Option<String>,
+    preview_generation: u64,
+    preview_busy: bool,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String)>,
@@ -607,6 +611,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         row_gc_queued: false,
         share_target: None,
         pending_image: None,
+        original_image: None,
+        preview_jid: None,
+        preview_generation: 0,
+        preview_busy: false,
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
@@ -934,12 +942,20 @@ fn wire_callbacks(ui: &AppWindow) {
         let caption = caption.to_string();
         defer(move |b| b.confirm_send_image(&caption));
     });
-    ui.on_cancel_send_image(|| {
-        defer(|b| {
-            b.pending_image = None;
-            b.ui.set_preview_open(false);
-        });
+    ui.on_cancel_send_image(|| defer(|b| b.cancel_preview()));
+    ui.on_crop_preview(|x, y, w, h| {
+        defer(move |b| b.edit_preview(crate::media::PreviewEdit::Crop(x, y, w, h)));
     });
+    ui.on_text_preview(|text, x, y| {
+        let text = text.to_string();
+        defer(move |b| b.edit_preview(crate::media::PreviewEdit::Text(text, x, y)));
+    });
+    ui.on_draw_preview(|points, color, thickness| {
+        let points = points.to_string();
+        let rgba = [color.red(), color.green(), color.blue(), color.alpha()];
+        defer(move |b| b.edit_preview(crate::media::PreviewEdit::Draw(points, rgba, thickness)));
+    });
+    ui.on_reset_preview(|| defer(|b| b.reset_preview()));
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
     ui.on_picker_opened(|| defer(|b| b.load_sticker_panel()));
     ui.on_picker_closed(|| defer(|_| {}));
@@ -1614,6 +1630,7 @@ impl Bridge {
     // Whatever is on screen belongs to a session that just ended.
     fn close_session_views(&mut self) {
         self.ui.set_details_open(false);
+        self.cancel_preview();
         self.current_jid = None;
         self.unread_boundary = None;
         self.groups_fetched = false;
@@ -1628,6 +1645,7 @@ impl Bridge {
     // Drops the loaded account's conversations, in memory and on disk.
     fn wipe_conversations(&mut self) {
         self.ui.set_details_open(false);
+        self.cancel_preview();
         self.current_jid = None;
         self.unread_boundary = None;
         self.ui.set_chat_open(false);
@@ -3006,6 +3024,7 @@ impl Bridge {
             self.clear_reply();
         }
         if self.current_jid.as_deref() != Some(jid) {
+            self.cancel_preview();
             let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
             self.unread_boundary = if unread > 0 {
                 let incoming: Vec<_> = self
@@ -5833,6 +5852,7 @@ impl Bridge {
         self.ui.set_info_open(false);
         self.ui.set_chat_open(false);
         self.ui.set_selected_jid("".into());
+        self.cancel_preview();
         self.current_jid = None;
         self.unread_boundary = None;
         self.messages_model.set_vec(Vec::new());
@@ -8036,6 +8056,9 @@ impl Bridge {
         if self.current_jid.is_none() {
             return;
         }
+        let jid = self.current_jid.clone();
+        let epoch = self.epoch;
+        let generation = self.preview_generation;
         std::thread::spawn(move || {
             let dialog = rfd::FileDialog::new();
             let dialog = match kind {
@@ -8049,7 +8072,11 @@ impl Bridge {
                 _ => dialog.add_filter(t("picker.all"), &["*"]),
             };
             if let Some(path) = dialog.pick_file() {
-                ui_apply(move |b| b.on_picked(kind, path));
+                ui_apply(move |b| {
+                    if b.current_jid == jid && b.epoch == epoch && b.preview_generation == generation {
+                        b.on_picked(kind, path);
+                    }
+                });
             }
         });
     }
@@ -8060,28 +8087,119 @@ impl Bridge {
         };
         match kind {
             // WhatsApp-style confirmation: caption field before sending.
-            "image" => self.wa.send(Cmd::PreviewImage { path }),
+            "image" => self.start_preview(path),
             "audio" => self.wa.send(Cmd::SendAudioFile { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
             _ => self.wa.send(Cmd::SendDocument { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
         }
     }
 
+    fn cancel_preview(&mut self) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        if let Some(path) = self.pending_image.take() {
+            if self.original_image.as_ref() != Some(&path) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        self.original_image = None;
+        self.preview_jid = None;
+        self.preview_busy = false;
+        self.ui.set_preview_busy(false);
+        self.ui.set_preview_open(false);
+    }
+
+    fn start_preview(&mut self, path: std::path::PathBuf) {
+        self.cancel_preview();
+        self.preview_jid = self.current_jid.clone();
+        self.original_image = Some(path.clone());
+        self.load_preview(path);
+    }
+
+    fn load_preview(&mut self, path: std::path::PathBuf) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let generation = self.preview_generation;
+        let epoch = self.epoch;
+        self.preview_busy = true;
+        self.ui.set_preview_busy(true);
+        std::thread::spawn(move || {
+            let image = std::fs::read(&path).ok().and_then(|bytes| crate::media::decode_bytes(&bytes, 1280));
+            ui_apply(move |b| {
+                if b.preview_generation != generation || b.epoch != epoch || b.current_jid != b.preview_jid {
+                    return;
+                }
+                b.preview_busy = false;
+                b.ui.set_preview_busy(false);
+                if let Some(image) = image {
+                    b.on_preview_ready(&path, image);
+                }
+            });
+        });
+    }
+
     pub fn on_preview_ready(&mut self, path: &std::path::Path, img: crate::media::Decoded) {
+        if self.current_jid.is_none() || self.current_jid != self.preview_jid || self.original_image.as_deref() != Some(path) {
+            return;
+        }
         self.pending_image = Some(path.to_path_buf());
         self.ui.set_preview_image(image_of(&img));
         self.ui.set_preview_open(true);
+        self.ui.invoke_focus_preview_caption();
+    }
+
+    fn reset_preview(&mut self) {
+        let Some(path) = self.original_image.clone() else { return; };
+        if let Some(edited) = self.pending_image.take() {
+            if edited != path {
+                let _ = std::fs::remove_file(edited);
+            }
+        }
+        self.load_preview(path);
+    }
+
+    fn edit_preview(&mut self, edit: crate::media::PreviewEdit) {
+        if self.preview_busy || !self.ui.get_preview_open() || self.current_jid != self.preview_jid {
+            return;
+        }
+        let Some(path) = self.pending_image.clone() else { return; };
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let generation = self.preview_generation;
+        let epoch = self.epoch;
+        self.preview_busy = true;
+        self.ui.set_preview_busy(true);
+        std::thread::spawn(move || {
+            let result = crate::media::edit_preview(&path, edit);
+            ui_apply(move |b| {
+                if b.preview_generation != generation || b.epoch != epoch || b.current_jid != b.preview_jid {
+                    if let Some((path, _)) = result { let _ = std::fs::remove_file(path); }
+                    return;
+                }
+                b.preview_busy = false;
+                b.ui.set_preview_busy(false);
+                if let Some((path, image)) = result {
+                    if let Some(previous) = b.pending_image.replace(path) {
+                        if b.original_image.as_ref() != Some(&previous) {
+                            let _ = std::fs::remove_file(previous);
+                        }
+                    }
+                    b.ui.set_preview_image(image_of(&image));
+                }
+            });
+        });
     }
 
     fn confirm_send_image(&mut self, caption: &str) {
+        if self.preview_busy || self.current_jid != self.preview_jid {
+            return;
+        }
         let path = self.pending_image.take();
-        self.ui.set_preview_open(false);
+        let origin = self.original_image.as_ref().map(|path| path.to_string_lossy().into_owned());
+        self.cancel_preview();
         let (Some(jid), Some(path)) = (self.current_jid.clone(), path) else {
             return;
         };
         let caption = caption.trim();
         self.wa.send(Cmd::SendImage {
             jid,
-            origin: Some(path.to_string_lossy().into_owned()),
+            origin,
             path,
             caption: (!caption.is_empty()).then(|| caption.to_string()),
         });
@@ -8117,7 +8235,7 @@ impl Bridge {
                 .unwrap_or(0)
         ));
         if image::DynamicImage::ImageRgba8(buffer).save(&path).is_ok() {
-            self.wa.send(Cmd::PreviewImage { path });
+            self.start_preview(path);
         }
     }
 

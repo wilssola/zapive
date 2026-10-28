@@ -1,0 +1,301 @@
+import { LineEdit, Button } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { IconButton } from "icon-button.slint";
+
+component PreviewTool inherits TouchArea {
+    in property <string> label;
+    in property <string> glyph;
+    in property <bool> active: false;
+    accessible-role: button;
+    accessible-label: root.label;
+    width: 38px;
+    height: 38px;
+    mouse-cursor: pointer;
+    Rectangle {
+        border-radius: 13px;
+        border-width: 1px;
+        border-color: root.active ? Theme.accent : transparent;
+        background: root.active ? Theme.accent.with-alpha(0.12) : root.has-hover ? Theme.hover : transparent;
+        animate background, border-color { duration: 120ms; }
+        Path {
+            x: 9px;
+            y: 9px;
+            width: 20px;
+            height: 20px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: root.glyph;
+            fill: transparent;
+            stroke: root.active ? Theme.accent : Theme.icon;
+            stroke-width: 1.5px;
+            opacity: root.enabled ? 1 : 0.4;
+        }
+    }
+}
+
+export component ImagePreview inherits Rectangle {
+    in property <image> picture;
+    in property <bool> busy: false;
+    changed picture => {
+        root.selected = false;
+        root.stroke = "";
+        root.stroke-path = "";
+        if (root.tool != "pencil") { root.tool = ""; }
+    }
+    property <color> ink: #ff3b30;
+    property <float> thickness: 0.008;
+    property <string> stroke: "";
+    property <string> stroke-path: "";
+    property <int> point-count: 0;
+    property <bool> drawing: false;
+    callback draw(string, color, float);
+    property <string> tool: "";
+    property <float> start-x: 0;
+    property <float> start-y: 0;
+    property <float> end-x: 1;
+    property <float> end-y: 1;
+    property <float> text-x: 0.1;
+    property <float> text-y: 0.1;
+    property <bool> selected: false;
+    callback cancel();
+    callback send(string);
+    callback crop(float, float, float, float);
+    callback annotate(string, float, float);
+    callback reset();
+    public function focus-caption() {
+        root.tool = "";
+        root.selected = false;
+        caption.focus();
+    }
+    public function clear() {
+        caption.text = "";
+        annotation.text = "";
+        root.tool = "";
+        root.selected = false;
+        root.stroke = "";
+        root.stroke-path = "";
+        root.drawing = false;
+    }
+    background: Theme.dark ? #10191f : #f0f2f5;
+    TouchArea { }
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            IconButton {
+                icon: @image-url("../icons/x.svg");
+                clicked => { root.cancel(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 190px;
+                height: 46px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.dark ? #0b141a : #ffffff;
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 8px;
+                    PreviewTool {
+                        label: @tr("Crop");
+                        glyph: "M 6 3 L 6 18 L 21 18 M 3 6 L 18 6 L 18 21";
+                        active: root.tool == "crop";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.tool = root.tool == "crop" ? "" : "crop";
+                            root.selected = false;
+                        }
+                    }
+                    PreviewTool {
+                        label: @tr("Text");
+                        glyph: "M 5 6 L 5 4 L 19 4 L 19 6 M 12 4 L 12 20 M 8 20 L 16 20";
+                        active: root.tool == "text";
+                        enabled: !root.busy;
+                        clicked => { root.tool = root.tool == "text" ? "" : "text"; annotation.focus(); }
+                    }
+                    PreviewTool {
+                        label: @tr("Pencil");
+                        glyph: "M 4 16 L 15 5 Q 17 3 19 5 Q 21 7 19 9 L 8 20 L 3 21 Z M 14 6 L 18 10 M 3 21 L 21 21";
+                        active: root.tool == "pencil";
+                        enabled: !root.busy;
+                        clicked => { root.tool = root.tool == "pencil" ? "" : "pencil"; }
+                    }
+                    PreviewTool {
+                        label: @tr("Reset image");
+                        glyph: "M 9 5 L 4 10 L 9 15 M 4 10 L 15 10 Q 20 10 20 15 Q 20 20 15 20 L 11 20";
+                        enabled: !root.busy;
+                        clicked => { root.reset(); }
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; width: 40px; }
+        }
+        Rectangle {
+            height: 40px;
+            visible: root.tool != "";
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    visible: root.tool == "crop";
+                    text: @tr("Drag over the image to select the crop");
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                annotation := LineEdit {
+                    visible: root.tool == "text";
+                    placeholder-text: @tr("Write text, then click the image to position it");
+                    horizontal-stretch: 1;
+                    accepted => {
+                        if (self.text != "") { root.annotate(self.text, root.text-x, root.text-y); self.text = ""; }
+                    }
+                }
+                HorizontalLayout {
+                    visible: root.tool == "pencil";
+                    spacing: 6px;
+                    for ink-color in [#ff3b30, #ffcc00, #34c759, #007aff, #af52de, #ffffff, #000000]: Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: ink-color;
+                        border-width: root.ink == ink-color ? 3px : 1px;
+                        border-color: root.ink == ink-color ? Theme.accent : Theme.icon;
+                        TouchArea { enabled: !root.busy && !root.drawing; clicked => { root.ink = ink-color; } }
+                    }
+                    Button {
+                        text: @tr("Thin");
+                        primary: root.thickness == 0.008;
+                        clicked => { root.thickness = 0.008; }
+                    }
+                    Button {
+                        text: @tr("Thick");
+                        primary: root.thickness == 0.02;
+                        clicked => { root.thickness = 0.02; }
+                    }
+                }
+                Button {
+                    visible: root.tool != "pencil";
+                    text: @tr("Apply");
+                    enabled: !root.busy && (root.tool == "crop" ? root.selected : annotation.text != "");
+                    clicked => {
+                        if (root.tool == "crop") {
+                            root.crop(min(root.start-x, root.end-x), min(root.start-y, root.end-y),
+                                abs(root.end-x - root.start-x), abs(root.end-y - root.start-y));
+                        } else {
+                            root.annotate(annotation.text, root.text-x, root.text-y);
+                            annotation.text = "";
+                        }
+                    }
+                }
+            }
+        }
+        canvas := Rectangle {
+            vertical-stretch: 1;
+            min-height: 80px;
+            background: Theme.dark ? #0b1217 : #e4e7e9;
+            border-radius: 12px;
+            clip: true;
+            photo := Image {
+                source: root.picture;
+                property <float> aspect: root.picture.width / max(1, root.picture.height);
+                width: min(parent.width - 24px, (parent.height - 24px) * self.aspect);
+                height: self.width / max(0.001, self.aspect);
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                image-fit: contain;
+                if root.tool == "text" && annotation.text != "": Text {
+                    x: root.text-x * parent.width;
+                    y: root.text-y * parent.height;
+                    width: parent.width - self.x;
+                    text: annotation.text;
+                    color: white;
+                    font-size: max(16px, parent.height * 0.055);
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+                if root.tool == "crop" && root.selected: Rectangle {
+                    x: min(root.start-x, root.end-x) * parent.width;
+                    y: min(root.start-y, root.end-y) * parent.height;
+                    width: abs(root.end-x - root.start-x) * parent.width;
+                    height: abs(root.end-y - root.start-y) * parent.height;
+                    border-width: 2px;
+                    border-color: white;
+                    background: #ffffff18;
+                    Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: #ffffff80; }
+                    Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: #ffffff80; }
+                    Rectangle { y: parent.height / 3; height: 1px; width: parent.width; background: #ffffff80; }
+                    Rectangle { y: parent.height * 2 / 3; height: 1px; width: parent.width; background: #ffffff80; }
+                }
+                Path {
+                    width: parent.width;
+                    height: parent.height;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: root.stroke-path;
+                    fill: transparent;
+                    stroke: root.ink;
+                    stroke-width: max(1px, root.thickness * min(parent.width, parent.height));
+                }
+                TouchArea {
+                    enabled: root.tool != "" && !root.busy;
+                    mouse-cursor: crosshair;
+                    moved => {
+                        if (root.drawing && root.point-count < 20000) {
+                            root.stroke += clamp(self.mouse-x / self.width, 0, 1) + "," + clamp(self.mouse-y / self.height, 0, 1) + ";";
+                            root.stroke-path += " L " + clamp(self.mouse-x / 1px, 0, self.width / 1px) + " " + clamp(self.mouse-y / 1px, 0, self.height / 1px);
+                            root.point-count += 1;
+                        }
+                        if (self.pressed && root.tool == "crop") {
+                            root.end-x = clamp(self.mouse-x / self.width, 0, 1);
+                            root.end-y = clamp(self.mouse-y / self.height, 0, 1);
+                        }
+                    }
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                            if (root.tool == "crop") {
+                                root.start-x = clamp(self.mouse-x / self.width, 0, 1);
+                                root.start-y = clamp(self.mouse-y / self.height, 0, 1);
+                                root.end-x = root.start-x;
+                                root.end-y = root.start-y;
+                                root.selected = true;
+                            } else if (root.tool == "pencil") {
+                                root.drawing = true;
+                                root.point-count = 1;
+                                root.stroke = clamp(self.mouse-x / self.width, 0, 1) + "," + clamp(self.mouse-y / self.height, 0, 1) + ";";
+                                root.stroke-path = "M " + self.mouse-x / 1px + " " + self.mouse-y / 1px + " l 0.01 0";
+                            } else {
+                                root.text-x = clamp(self.mouse-x / self.width, 0, 0.95);
+                                root.text-y = clamp(self.mouse-y / self.height, 0, 0.95);
+                            }
+                        }
+                        if ((e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) && root.drawing) {
+                            root.drawing = false;
+                            root.draw(root.stroke, root.ink, root.thickness);
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            caption := LineEdit {
+                horizontal-stretch: 1;
+                placeholder-text: @tr("Add a caption");
+                accepted => { if (!root.busy) { root.send(self.text); } }
+            }
+            IconButton {
+                icon: @image-url("../icons/send-2.svg");
+                tint: white;
+                background: Theme.accent;
+                radius: 22px;
+                width: 44px;
+                height: 44px;
+                enabled: !root.busy;
+                clicked => { root.send(caption.text); }
+            }
+        }
+    }
+}

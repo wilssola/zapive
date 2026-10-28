@@ -161,8 +161,6 @@ pub enum Cmd {
     },
     SendDocument { jid: String, path: std::path::PathBuf, origin: Option<String> },
     SendAudioFile { jid: String, path: std::path::PathBuf, origin: Option<String> },
-    // Decode a local image for the send-preview overlay.
-    PreviewImage { path: std::path::PathBuf },
     // Stickers and GIFs (the video player runs its own threads).
     SendSticker { jid: String, path: std::path::PathBuf },
     GifSearch(String),
@@ -1221,6 +1219,7 @@ async fn executor(
 
             Cmd::SendImage { jid, path, origin, caption } => {
                 let client = session.client.clone();
+                let key = media_key.clone();
                 tokio::spawn(async move {
                     let Ok(bytes) = tokio::fs::read(&path).await else { return };
                     let thumb_src = bytes.clone();
@@ -1230,7 +1229,7 @@ async fn executor(
                         .flatten();
                     let Some(to) = parse_jid(&jid) else { return };
                     let upload = match client
-                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Image, Default::default())
+                        .upload(bytes.clone(), whatsapp_rust::wacore::download::MediaType::Image, Default::default())
                         .await
                     {
                         Ok(u) => u,
@@ -1250,7 +1249,27 @@ async fn executor(
                     match client.send_message(to, message.clone()).await {
                         Ok(sent) => {
                             let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
+                            let mimetype = message.image_message.as_option()
+                                .and_then(|image| image.mimetype.as_deref())
+                                .unwrap_or("image/jpeg");
+                            let cached = crate::media::cache_sent(&key, &id, mimetype, &message, &bytes).await;
+                            let decoded = if cached.is_some() {
+                                tokio::task::spawn_blocking(move || {
+                                    crate::media::decode_bytes(&bytes, crate::media::BUBBLE_PX)
+                                }).await.ok().flatten()
+                            } else {
+                                None
+                            };
+                            ui_apply(move |b| {
+                                if let Some(path) = cached {
+                                    if let Some(img) = decoded {
+                                        b.on_media_image(&id, &path, img);
+                                    } else {
+                                        b.on_media_file(&id, &path);
+                                    }
+                                }
+                                b.echo_sent_from(&jid, &id, message, origin);
+                            });
                         }
                         Err(e) => eprintln!("[wa] image send failed: {e}"),
                     }
@@ -1334,22 +1353,6 @@ async fn executor(
                 });
             }
 
-            Cmd::PreviewImage { path } => {
-                tokio::spawn(async move {
-                    let img = tokio::task::spawn_blocking(move || {
-                        std::fs::read(&path)
-                            .ok()
-                            .and_then(|d| crate::media::decode_bytes(&d, 1280))
-                            .map(|img| (path, img))
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    if let Some((path, img)) = img {
-                        ui_apply(move |b| b.on_preview_ready(&path, img));
-                    }
-                });
-            }
             Cmd::SendSticker { jid, path } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
