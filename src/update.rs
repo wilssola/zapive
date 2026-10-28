@@ -33,6 +33,38 @@ fn token() -> Option<String> {
     std::env::var("ZAPIVE_GH_TOKEN").ok().filter(|t| !t.is_empty())
 }
 
+// Set by the Restart button; main() relaunches once the instance lock is
+// released. Spawning from the button itself raced that lock: the new
+// process found the old one still holding it, raised it and exited, so
+// the app just closed.
+static RESTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn request_restart() {
+    RESTART.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+// Starts the updated app. Inside an AppImage current_exe() is the old
+// binary on the squashfs mount that goes away with this process; the
+// .AppImage file at $APPIMAGE is what apply() replaced.
+pub fn relaunch_if_requested() {
+    if !RESTART.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let exe = match std::env::var_os("APPIMAGE") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(e) => {
+                log::error!("[update] cannot find the executable to relaunch: {e}");
+                return;
+            }
+        },
+    };
+    if let Err(e) = std::process::Command::new(&exe).spawn() {
+        log::error!("[update] relaunch of {} failed: {e}", exe.display());
+    }
+}
+
 // Returns the newer version tag, if one is published.
 pub fn check() -> Option<String> {
     if std::env::var_os("FLATPAK_ID").is_some() {
