@@ -3396,6 +3396,7 @@ impl Bridge {
                 .cloned()
                 .unwrap_or_default()
                 .into(),
+            documentType: document_type(m).into(),
             mediaKind: "".into(),
             mediaOffer: false,
             mediaProgress: -1.0,
@@ -8441,6 +8442,32 @@ fn message_link(m: &StoredMessage) -> String {
     LINKS.find(&m.text).map(|v| v.as_str().trim_end_matches(['.', ',', ';', '!', ')', ']']).to_string()).unwrap_or_default()
 }
 
+fn document_type(m: &StoredMessage) -> String {
+    if m.kind != MessageKind::Doc {
+        return String::new();
+    }
+    if let Some((_, ext)) = m.text.trim().rsplit_once('.') {
+        if !ext.is_empty() && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return ext.to_ascii_uppercase();
+        }
+    }
+    match m.mimetype.split(';').next().unwrap_or_default().trim() {
+        "application/pdf" => "PDF",
+        "application/vnd.ms-excel" => "XLS",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "XLSX",
+        "application/msword" => "DOC",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "DOCX",
+        "application/vnd.ms-powerpoint" => "PPT",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "PPTX",
+        "text/plain" => "TXT",
+        "text/csv" => "CSV",
+        "application/zip" => "ZIP",
+        "application/x-7z-compressed" => "7Z",
+        "application/vnd.rar" | "application/x-rar-compressed" => "RAR",
+        _ => "FILE",
+    }.into()
+}
+
 fn message_editable(m: &StoredMessage) -> bool {
     m.from_me && !m.deleted && !m.revoked && m.kind == MessageKind::Text
         && !is_channel(&m.jid) && m.raw.is_some() && (0..900).contains(&(now_secs() - m.timestamp))
@@ -8449,6 +8476,22 @@ fn message_editable(m: &StoredMessage) -> bool {
 #[cfg(test)]
 mod message_action_tests {
     use super::*;
+
+    #[test]
+    fn document_types_use_extension_and_mime_fallback() {
+        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "id", 1, "report.Xlsx".into());
+        m.kind = MessageKind::Doc;
+        assert_eq!(document_type(&m), "XLSX");
+        m.text = "report".into();
+        m.mimetype = "application/pdf".into();
+        assert_eq!(document_type(&m), "PDF");
+        m.text = "report.invalid/ext".into();
+        assert_eq!(document_type(&m), "PDF");
+        m.mimetype.clear();
+        assert_eq!(document_type(&m), "FILE");
+        m.kind = MessageKind::Text;
+        assert!(document_type(&m).is_empty());
+    }
 
     #[test]
     fn quotes_navigate_to_explicit_chat_not_author() {
