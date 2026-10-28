@@ -10369,7 +10369,7 @@ dependencies = [
 
 [[package]]
 name = "zapive"
-version = "0.20.5"
+version = "0.20.6"
 dependencies = [
  "aes-gcm 0.10.3",
  "arboard",
