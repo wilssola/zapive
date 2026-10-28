@@ -1820,19 +1820,23 @@ export component AppWindow inherits Window {
                             }
                         }
                         if root.select-mode && msg.kind != "system": Rectangle {
-                            x: 10px;
-                            y: bubble.y + (bubble.height - self.height) / 2;
+                            x: 14px;
+                            // Centred on short bubbles, pinned near the top of tall ones.
+                            y: bubble.y + max(0px, min((bubble.height - self.height) / 2, 8px));
                             width: 20px;
                             height: 20px;
-                            border-radius: 4px;
+                            border-radius: 10px;
                             border-width: 2px;
                             border-color: msg.selected ? Theme.accent : Theme.text-dim;
                             background: msg.selected ? Theme.accent : transparent;
+                            animate background, border-color { duration: 120ms; easing: ease-out; }
                             if msg.selected: Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
                                 source: @image-url("../icons/check.svg");
                                 colorize: white;
-                                width: 14px;
-                                height: 14px;
+                                width: 13px;
+                                height: 13px;
                             }
                         }
                         // A link card drives the bubble width, so the text
@@ -1916,7 +1920,8 @@ export component AppWindow inherits Window {
                         if msg.showAvatar: Avatar {
                             width: 28px;
                             height: 28px;
-                            x: 12px;
+                            x: root.select-mode ? 42px : 12px;
+                            animate x { duration: 140ms; easing: ease-out; }
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
                             src: msg.senderAvatar;
                             has-image: msg.senderHasAvatar;
@@ -1928,7 +1933,8 @@ export component AppWindow inherits Window {
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
                             x: msg.fromMe
                                 ? parent.width - self.width - 30px
-                                : (msg.groupIndent ? 48px : 30px);
+                                : (msg.groupIndent ? 48px : 30px) + (root.select-mode ? 30px : 0px);
+                            animate x { duration: 140ms; easing: ease-out; }
                             width: msg.kind == "system" ? 0 : content.preferred-width;
                             height: msg.kind == "system" ? 0 : content.preferred-height;
                             background: msg.sticker
@@ -3061,10 +3067,21 @@ export component AppWindow inherits Window {
 
                 // Selection bar: what to do with the picked messages.
                 if root.select-mode: Rectangle {
-                    height: 62px;
-                    background: Theme.header;
+                    height: 56px;
+                    Rectangle {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
+                    border-width: 1px;
+                    border-color: Theme.dark ? #24343e : Theme.border;
+                    border-radius: 18px;
+                    drop-shadow-blur: 10px;
+                    drop-shadow-color: #00000040;
                     HorizontalBox {
-                        padding: 11px;
+                        padding: 8px;
+                        padding-left: 10px;
+                        padding-right: 10px;
                         spacing: 8px;
                         IconButton {
                             icon: @image-url("../icons/x.svg");
@@ -3097,6 +3114,7 @@ export component AppWindow inherits Window {
                             enabled: root.select-count > 0;
                             clicked => { root.select-delete(); }
                         }
+                    }
                     }
                 }
 
