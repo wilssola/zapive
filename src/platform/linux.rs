@@ -66,17 +66,39 @@ pub fn register_app_id(_icon_path: &str) {}
 // D-Bus notification tagged with our desktop entry, so the banner carries
 // the app icon and works inside the Flatpak sandbox (where notify-send may
 // not exist). notify-send stays as the fallback.
-pub fn toast(title: &str, body: &str, _jid: Option<String>) {
-    let sent = notify_rust::Notification::new()
+pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
+    let mut notification = notify_rust::Notification::new()
         .summary(title)
         .body(body)
         .appname("Zapive")
         .icon("io.github.wilssola.Zapive")
-        .hint(notify_rust::Hint::DesktopEntry("io.github.wilssola.Zapive".into()))
-        .show()
-        .is_ok();
-    if !sent {
-        let _ = std::process::Command::new("notify-send").args([title, body]).spawn();
+        .hint(notify_rust::Hint::DesktopEntry("io.github.wilssola.Zapive".into()));
+    if let Some(path) = payload.thumbnail.as_deref() {
+        notification = notification.image_path(path.to_string_lossy());
+    }
+    if let Some(token) = payload.token {
+        if payload.play {
+            notification = notification.action(&format!("play:{token}"), crate::i18n::t("notify.play"));
+        }
+        if payload.reply {
+            notification = notification.action(&format!("reply:{token}"), crate::i18n::t("notify.reply"));
+        }
+        std::thread::spawn(move || {
+            let Ok(handle) = notification.show() else { return };
+            if let Ok(notify_rust::NotificationResponse::Action(action)) = handle.wait_for_response() {
+                if let Some((action, token)) = action.split_once(':') {
+                    let token = token.to_string();
+                    if action == "play" {
+                        crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+                    }
+                }
+            }
+        });
+    } else {
+        let sent = notification.show().is_ok();
+        if !sent {
+            let _ = std::process::Command::new("notify-send").args([title, body]).spawn();
+        }
     }
 }
 

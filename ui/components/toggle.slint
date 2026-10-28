@@ -3,9 +3,12 @@ import { Theme } from "theme.slint";
 // A switch for the on/off settings.
 export component Toggle inherits TouchArea {
     in property <bool> on;
+    in property <string> label: "";
     width: 42px;
     height: 24px;
     mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.label;
     Rectangle {
         width: parent.width;
         height: parent.height;

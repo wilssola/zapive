@@ -3,6 +3,8 @@ export component Avatar inherits Rectangle {
     in property <bool> has-image;
     in property <string> initial;
     in property <int> color-idx;
+    in property <bool> privacy-blurred: false;
+    in property <bool> privacy-reveal: false;
     property <[color]> avatar-colors: [#6bcbef, #e17ab0, #91ab01, #f05d4d, #ffbc38, #8b7add, #02a698, #ee6e51];
 
     border-radius: self.width / 2;
@@ -14,6 +16,8 @@ export component Avatar inherits Rectangle {
         width: parent.width;
         height: parent.height;
         image-fit: cover;
+        opacity: root.privacy-blurred && !root.privacy-reveal ? 0.08 : 1;
+        animate opacity { duration: 120ms; easing: ease-out; }
     }
     if !self.has-image: Text {
         text: root.initial;
@@ -23,5 +27,7 @@ export component Avatar inherits Rectangle {
         height: parent.height;
         horizontal-alignment: center;
         vertical-alignment: center;
+        opacity: root.privacy-blurred && !root.privacy-reveal ? 0.08 : 1;
+        animate opacity { duration: 120ms; easing: ease-out; }
     }
 }

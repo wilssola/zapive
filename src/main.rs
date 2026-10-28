@@ -34,6 +34,7 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn main() {
     paths::ensure_dirs();
+    media::clean_notification_thumbnails();
     logging::install();
     slint::BackendSelector::new()
         .backend_name("winit".into())
@@ -147,6 +148,10 @@ fn main() {
     ui.set_theme_mode(theme.as_str().into());
     let style = app_vault.setting_get("theme_style").unwrap_or_else(|| "glass".into());
     ui.set_theme_style(if style == "opaque" { "opaque" } else { "glass" }.into());
+    ui.set_blur_names(app_vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
+    ui.set_blur_photos(app_vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
+    ui.set_blur_messages(app_vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
+    ui.set_blur_media(app_vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
     {
         use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::{WindowEvent, ElementState, MouseButton}};
         let handle = ui.as_weak();
@@ -174,6 +179,8 @@ fn main() {
             if let WindowEvent::Focused(focused) = event {
                 if let Some(ui) = handle.upgrade() {
                     ui.set_window_active(*focused);
+                    #[cfg(windows)]
+                    platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
                 }
             }
             EventResult::Propagate
@@ -189,7 +196,7 @@ fn main() {
         let handle = ui.as_weak();
         slint::Timer::single_shot(std::time::Duration::ZERO, move || {
             if let Some(ui) = handle.upgrade() {
-                platform::set_title_bar_theme(ui.get_dark_theme());
+                platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
             }
         });
     }
@@ -200,12 +207,12 @@ fn main() {
             slint::TimerMode::Repeated,
             std::time::Duration::from_secs(15),
             move || {
-                if let Some(ui) = handle.upgrade()
-                    && ui.get_theme_mode() == "system"
-                {
-                    ui.set_dark_theme(platform::system_dark());
+                if let Some(ui) = handle.upgrade() {
+                    if ui.get_theme_mode() == "system" {
+                        ui.set_dark_theme(platform::system_dark());
+                    }
                     #[cfg(windows)]
-                    platform::set_title_bar_theme(ui.get_dark_theme());
+                    platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
                 }
             },
         );
@@ -294,6 +301,7 @@ fn main() {
                     if event.id() == &open_id {
                         raise_window(&handle);
                     } else if event.id() == &exit_id {
+                        media::clean_notification_thumbnails();
                         slint::quit_event_loop().ok();
                     }
                 }
@@ -390,6 +398,8 @@ fn apply_native_backdrop(ui: &AppWindow) {
             if let Ok(window) = ui.window().winit_window().await {
                 window.set_system_backdrop(BackdropType::TransientWindow);
                 ui.set_native_backdrop(true);
+                #[cfg(windows)]
+                platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
             }
         });
     }

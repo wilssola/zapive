@@ -14,17 +14,17 @@ fn quiet(program: &str) -> std::process::Command {
     cmd
 }
 
-pub fn set_title_bar_theme(dark: bool) {
+pub fn set_title_bar_theme(dark: bool, glass: bool) {
     use windows::Win32::Foundation::{BOOL, COLORREF};
     use windows::Win32::Graphics::Dwm::{
         DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
-        DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+        DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_COLOR_DEFAULT, DwmSetWindowAttribute,
     };
 
     unsafe {
         let Ok(hwnd) = FindWindowW(None, w!("Zapive")) else { return };
         let dark_mode = BOOL::from(dark);
-        let caption = COLORREF(if dark { 0x00352c1c } else { 0x00f5f2f0 });
+        let caption = COLORREF(if glass { DWMWA_COLOR_DEFAULT } else if dark { 0x00211b11 } else { 0x00f5f2f0 });
         let text = COLORREF(if dark { 0x00efede9 } else { 0x00211b11 });
         let border = COLORREF(if dark { 0x003e3424 } else { 0x00e7e4e0 });
         let _ = DwmSetWindowAttribute(
@@ -81,82 +81,113 @@ pub fn allow_foreground(pid: u32) {
         let _ = AllowSetForegroundWindow(pid);
     }
 }
+// Opens a file or URL with whatever the system associates with it.
+pub fn open_path(target: &str) {
+    let _ = quiet("cmd").args(["/c", "start", "", &target.replace('&', "^&")]).spawn();
+}
 
 // ---- start with Windows: a per-user Run entry, no elevation needed ----
-
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
 pub fn autostart_enabled() -> bool {
-    quiet("reg")
-        .args(["query", RUN_KEY, "/v", "Zapive"])
-        .output()
-        .is_ok_and(|out| out.status.success())
+    quiet("reg").args(["query", RUN_KEY, "/v", "Zapive"]).output().is_ok_and(|out| out.status.success())
 }
 
 pub fn autostart_set(on: bool) -> Result<(), String> {
-    if !on && !autostart_enabled() {
-        return Ok(());
-    }
+    if !on && !autostart_enabled() { return Ok(()); }
     let out = if on {
-        // Rewritten on every enable so a moved or updated install keeps a
-        // valid path. --autostart is what makes the login launch land in
-        // the tray instead of popping the window open.
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let command = format!("\"{}\" --autostart", exe.display());
-        quiet("reg")
-            .args(["add", RUN_KEY, "/v", "Zapive", "/t", "REG_SZ", "/d", &command, "/f"])
-            .output()
+        quiet("reg").args(["add", RUN_KEY, "/v", "Zapive", "/t", "REG_SZ", "/d", &command, "/f"]).output()
     } else {
         quiet("reg").args(["delete", RUN_KEY, "/v", "Zapive", "/f"]).output()
-    };
-    let out = out.map_err(|e| e.to_string())?;
-    if out.status.success() {
-        return Ok(());
-    }
-    Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }.map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
 }
 
-// Opens a file or URL with whatever the system associates with it.
-pub fn open_path(target: &str) {
-    let _ = quiet("cmd")
-        .args(["/c", "start", "", &target.replace('&', "^&")])
-        .spawn();
-}
-
-// Toast identity: the header name/icon come from the AppUserModelID
-// registration, not the toast payload. Re-registered every launch.
 pub fn register_app_id(icon_path: &str) {
-    unsafe {
-        use windows::core::w;
-        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("Zapive"));
-    }
+    unsafe { let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("Zapive")); }
     let key = r"HKCU\Software\Classes\AppUserModelId\Zapive";
     for (name, value) in [("DisplayName", "Zapive"), ("IconUri", icon_path)] {
-        let _ = quiet("reg")
-            .args(["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"])
-            .output();
+        let _ = quiet("reg").args(["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"]).output();
     }
 }
 
-// A native toast; clicking it reopens the conversation.
-pub fn toast(title: &str, body: &str, jid: Option<String>) {
-    use tauri_winrt_notification::Toast;
-    let toast = Toast::new("Zapive")
-        .title(title)
-        .text1(if body.is_empty() { " " } else { body });
-    let result = match jid {
-        Some(jid) => toast
-            .on_activated(move |_| {
-                let jid = jid.clone();
-                crate::bridge::ui_apply(move |b| b.on_notification_activated(&jid));
-                Ok(())
-            })
-            .show(),
-        None => toast.show(),
+
+pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
+    use windows::UI::Notifications::{
+        ToastNotification, ToastNotificationManager,
     };
-    if let Err(e) = result {
-        eprintln!("[notify] toast failed: {e}");
+    use windows::{Data::Xml::Dom::XmlDocument, core::{HSTRING, Interface as _}};
+
+    let title = xml_escape(title);
+    let body = xml_escape(body);
+    let mut actions = String::new();
+    let mut inputs = String::new();
+    let mut image = String::new();
+    if let Some(token) = payload.token.as_deref() {
+        actions.push_str(&format!(
+            "<action content=\"Reply\" arguments=\"reply:{token}\" activationType=\"foreground\" hint-inputId=\"reply-input\"/>"
+        ));
+        if payload.play {
+            actions.push_str(&format!(
+                "<action content=\"Play\" arguments=\"play:{token}\" activationType=\"background\"/>"
+            ));
+        }
+        inputs.push_str(&format!(
+            "<input id=\"reply-input\" type=\"text\" placeHolderContent=\"Reply\"/>"
+        ));
     }
+    if let Some(path) = payload.thumbnail.as_deref() {
+        if let Ok(uri) = url::Url::from_file_path(path) {
+            image = format!("<image placement=\"appLogoOverride\" src=\"{}\"/>", xml_escape(uri.as_str()));
+        }
+    }
+    let xml = format!(
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{title}</text><text>{body}</text>{image}</binding></visual>{}<actions>{inputs}{actions}</actions></toast>",
+        if payload.token.is_some() { "<header id=\"zapive\" title=\"Zapive\" arguments=\"default\"/>" } else { "" }
+    );
+    let result = (|| -> windows::core::Result<()> {
+        let document = XmlDocument::new()?;
+        document.LoadXml(&HSTRING::from(xml))?;
+        let notification = ToastNotification::CreateToastNotification(&document)?;
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from("Zapive"))?;
+        let activation_token = payload.token.clone();
+        let _registration = notification.Activated(&windows::Foundation::TypedEventHandler::<
+            ToastNotification,
+            windows::core::IInspectable,
+        >::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let Ok(args) = args.cast::<windows::UI::Notifications::ToastActivatedEventArgs>() else { return Ok(()) };
+                let arguments = args.Arguments().map(|value| value.to_string()).unwrap_or_default();
+                let Some(token) = activation_token.as_deref() else { return Ok(()) };
+                if arguments == "default" {
+                    let token = token.to_string();
+                    crate::bridge::ui_apply(move |bridge| bridge.on_notification_activated(&token));
+                } else if arguments == format!("play:{token}") {
+                    let token = token.to_string();
+                    crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+                } else if arguments == format!("reply:{token}") {
+                    let input = args.UserInput().ok()
+                        .and_then(|values| values.Lookup(&HSTRING::from("reply-input")).ok())
+                        .and_then(|value| value.cast::<windows::Foundation::IPropertyValue>().ok())
+                        .and_then(|value| value.GetString().ok())
+                        .map(|value| value.to_string()).unwrap_or_default();
+                    let token = token.to_string();
+                    crate::bridge::ui_apply(move |bridge| bridge.on_notification_reply(&token, &input));
+                }
+                Ok(())
+        }))?;
+        notifier.Show(&notification)
+    })();
+    if let Err(error) = result {
+        eprintln!("[notify] toast failed: {error}");
+    }
+}
+
+fn xml_escape(value: &str) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        .replace('\"', "&quot;").replace('\'', "&apos;")
 }
 
 // Whether Windows apps are set to dark mode (defaults dark on error).
@@ -227,4 +258,33 @@ pub fn unwrap_secret(stored: &str) -> Result<String, String> {
         return String::from_utf8(plain).map_err(|e| e.to_string());
     }
     Err("unknown key wrapping format".into())
+}
+
+
+#[cfg(test)]
+mod notification_tests {
+    use super::xml_escape;
+
+    #[test]
+    fn escapes_all_xml_metacharacters_in_action_arguments() {
+        assert_eq!(xml_escape("reply:a&b<c>d\"e'f"), "reply:a&amp;b&lt;c&gt;d&quot;e&apos;f");
+    }
+
+    #[test]
+    fn escapes_attribute_delimiters_in_image_paths() {
+        assert_eq!(xml_escape(r#"file:///C:/A&B/<photo>"' image.jpg"#),
+            "file:///C:/A&amp;B/&lt;photo&gt;&quot;&apos; image.jpg");
+    }
+
+    #[test]
+    fn preserves_empty_plain_and_unicode_text() {
+        for value in ["", "reply:0123456789abcdef", "Olá 世界"] {
+            assert_eq!(xml_escape(value), value);
+        }
+    }
+
+    #[test]
+    fn escapes_existing_entities_as_literal_text() {
+        assert_eq!(xml_escape("&amp; &#34;"), "&amp;amp; &amp;#34;");
+    }
 }

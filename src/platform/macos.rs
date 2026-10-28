@@ -75,7 +75,7 @@ pub fn register_app_id(_icon_path: &str) {}
 // Banner through the user notification center under our own bundle id, so
 // launches from Zapive.app show the app icon instead of the script icon.
 // osascript stays as the fallback for bare-binary dev runs.
-pub fn toast(title: &str, body: &str, _jid: Option<String>) {
+pub fn toast(title: &str, body: &str, _payload: super::ToastPayload) {
     static BUNDLE: std::sync::Once = std::sync::Once::new();
     BUNDLE.call_once(|| {
         let _ = notify_rust::set_application("io.github.wilssola.Zapive");

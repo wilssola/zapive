@@ -10408,7 +10408,6 @@ dependencies = [
  "symphonia",
  "sys-locale",
  "tar",
- "tauri-winrt-notification",
  "tokio",
  "tray-icon",
  "ureq",

@@ -405,6 +405,56 @@ pub fn temp_plain(key: &KeyHandle, path: &PathBuf) -> Option<PathBuf> {
 
 pub fn clean_tmp() {
     let _ = std::fs::remove_dir_all(media_cache().join(".tmp"));
+    clean_notification_thumbnails();
+}
+
+pub fn clean_notification_thumbnails() {
+    let _ = std::fs::remove_dir_all(crate::paths::cache_dir().join(".toast"));
+}
+
+pub fn notification_thumbnail(bytes: &[u8]) -> Option<PathBuf> {
+    const MAX_INPUT: usize = 64 * 1024;
+    const MAX_DIMENSION: u32 = 1024;
+    if bytes.is_empty() || bytes.len() > MAX_INPUT {
+        return None;
+    }
+    let image = image::load_from_memory(bytes).ok()?;
+    if image.width() > MAX_DIMENSION || image.height() > MAX_DIMENSION {
+        return None;
+    }
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut encoded, image::ImageFormat::Jpeg).ok()?;
+    if encoded.get_ref().len() > MAX_INPUT {
+        return None;
+    }
+    let dir = crate::paths::cache_dir().join(".toast");
+    std::fs::create_dir_all(&dir).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+    }
+    use rand::RngCore as _;
+    let mut random = [0u8; 16];
+    rand::rng().fill_bytes(&mut random);
+    let name = random.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let path = dir.join(format!("{name}.jpg"));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    use std::io::Write as _;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(0x100000);
+    }
+    let mut file = options.open(&path).ok()?;
+    file.write_all(encoded.get_ref()).ok()?;
+    Some(path)
 }
 
 pub enum PreviewEdit {
@@ -812,5 +862,33 @@ mod tests {
             b"image bytes",
         ).await;
         assert!(path.is_none());
+    }
+}
+
+
+#[cfg(test)]
+mod notification_tests {
+    use super::notification_thumbnail;
+
+    #[test]
+    fn rejects_empty_thumbnail() {
+        assert!(notification_thumbnail(&[]).is_none());
+    }
+
+    #[test]
+    fn rejects_thumbnail_above_input_limit() {
+        assert!(notification_thumbnail(&vec![0; 64 * 1024 + 1]).is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_image_at_input_limit() {
+        assert!(notification_thumbnail(&vec![0; 64 * 1024]).is_none());
+    }
+
+    #[test]
+    fn rejects_corrupt_image_headers() {
+        for bytes in [&b"\xff\xd8\xff"[..], &b"\x89PNG\r\n\x1a\n"[..], &b"not an image"[..]] {
+            assert!(notification_thumbnail(bytes).is_none());
+        }
     }
 }

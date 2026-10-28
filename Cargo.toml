@@ -93,14 +93,25 @@ self_update = { version = "1.3.0", default-features = false, features = ["rustls
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.19"
-tauri-winrt-notification = "0.7"
 windows = { version = "0.58", features = [
-    "Win32_Foundation",
+    "Win32_Graphics",
     "Win32_Graphics_Dwm",
-    "Win32_Security_Cryptography",
-    "Win32_System_Memory",
-    "Win32_System_SystemInformation",
+    "Win32_System",
+    "Wdk",
     "Wdk_System_SystemServices",
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_SystemInformation",
+    "Win32_System_WinRT",
+    "Win32_UI",
+    "Win32_UI_Notifications",
+    "UI_Notifications",
+    "UI",
+    "Data_Xml_Dom",
+    "Foundation",
+    "Foundation_Collections",
+    "ApplicationModel",
+    "ApplicationModel_Core",
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",

@@ -65,6 +65,7 @@ component BubbleMeta {
 
 component MediaPlaceholder inherits TouchArea {
     in property <image> preview;
+    in property <bool> privacy-blurred: false;
     in property <bool> sticker;
     in property <bool> video;
     in property <string> file-size;
@@ -82,11 +83,21 @@ component MediaPlaceholder inherits TouchArea {
             width: parent.width;
             height: parent.height;
             image-fit: cover;
+            opacity: root.privacy-blurred && !root.has-hover ? 0.05 : 1;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            visible: root.privacy-blurred && !root.has-hover;
+            background: Theme.dark ? #172126 : #dfe5e8;
+            animate background { duration: 120ms; easing: ease-out; }
         }
         Rectangle {
             width: parent.width;
             height: parent.height;
             backdrop-blur: 12px;
+            visible: !root.privacy-blurred || root.has-hover;
             background: #00000050;
         }
         Rectangle {
@@ -167,8 +178,15 @@ export component AppWindow inherits Window {
     preferred-height: 700px;
     in property <bool> native-backdrop: false;
     in-out property <string> theme-style: "glass";
+    in-out property <bool> notify-previews: false;
+    in-out property <bool> blur-names: false;
+    in-out property <bool> blur-photos: false;
+    in-out property <bool> blur-messages: false;
+    in-out property <bool> blur-media: false;
     in property <bool> window-active: true;
     callback style-changed(string);
+    callback notify-previews-changed(bool);
+    callback privacy-blur-changed(string, bool);
     // Glass only while the OS backdrop is live and the window has focus;
     // an unfocused backdrop turns grey, so fall back to the opaque theme.
     out property <bool> glass: native-backdrop && theme-style == "glass" && window-active;
@@ -1557,6 +1575,8 @@ export component AppWindow inherits Window {
                                     has-image: chat.hasAvatar;
                                     initial: chat.initial;
                                     color-idx: chat.colorIdx;
+                                    privacy-blurred: root.blur-photos;
+                                    privacy-reveal: touch.has-hover;
                                 }
                             }
                             VerticalLayout {
@@ -1568,6 +1588,8 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: chat.name;
                                         color: Theme.text;
+                                        opacity: root.blur-names && !touch.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 14px;
                                         font-weight: chat.jid == root.selected-jid || chat.unread > 0 ? 600 : 400;
                                         overflow: elide;
@@ -1591,6 +1613,8 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: chat.preview;
                                         color: Theme.text-dim;
+                                        opacity: root.blur-messages && !touch.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
@@ -1962,6 +1986,8 @@ export component AppWindow inherits Window {
                             }
                             sys-text := Text {
                                 text: sys-pill.is-system ? msg.text : "";
+                                opacity: root.blur-messages && !sys-touch.has-hover ? 0.08 : 1;
+                                animate opacity { duration: 120ms; easing: ease-out; }
                                 color: msg.clickable ? Theme.accent : Theme.text-dim;
                                 font-size: 12px;
                                 wrap: word-wrap;
@@ -2072,6 +2098,8 @@ export component AppWindow inherits Window {
                         if msg.showAvatar: Avatar {
                             width: 28px;
                             height: 28px;
+                            privacy-blurred: root.blur-photos;
+                            privacy-reveal: row-hover.has-hover;
                             x: root.select-mode ? 42px : 12px;
                             animate x { duration: 140ms; easing: ease-out; }
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
@@ -2129,6 +2157,8 @@ export component AppWindow inherits Window {
                                         clicked => { root.open-dm(msg.senderJid); }
                                         sender-text := Text {
                                             text: msg.senderLabel;
+                                            opacity: root.blur-names && !sender-touch.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
                                             font-size: 12px;
                                             font-weight: 700;
                                             color: Theme.sender;
@@ -2169,6 +2199,8 @@ export component AppWindow inherits Window {
                                         spacing: 2px;
                                         Text {
                                             text: msg.quoteName;
+                                            opacity: root.blur-names && !row-hover.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
                                             color: Theme.accent;
                                             font-size: 12px;
                                             font-weight: 700;
@@ -2178,6 +2210,8 @@ export component AppWindow inherits Window {
                                         }
                                         Text {
                                             text: msg.quoteText;
+                                            opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
                                             color: Theme.text-dim;
                                             font-size: 12.5px;
                                             overflow: elide;
@@ -2230,6 +2264,7 @@ export component AppWindow inherits Window {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     preview: msg.picture;
+                                    privacy-blurred: root.blur-media;
                                     sticker: msg.sticker;
                                     video: msg.kind == "video";
                                     file-size: msg.mediaSize;
@@ -2238,6 +2273,7 @@ export component AppWindow inherits Window {
                                     clicked => { root.download-media(msg.id); }
                                 }
                                 if msg.kind == "video" && msg.mediaReady && msg.picW > 0: TouchArea {
+                                    property <bool> media-hover: self.has-hover;
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
@@ -2251,6 +2287,13 @@ export component AppWindow inherits Window {
                                             width: parent.width;
                                             height: parent.height;
                                             image-fit: cover;
+                                            opacity: root.blur-media && !media-hover ? 0.05 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
+                                        }
+                                        if root.blur-media && !media-hover: Rectangle {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            background: Theme.dark ? #172126 : #dfe5e8;
                                         }
                                     }
                                     if msg.videoLen != "": Rectangle {
@@ -2316,6 +2359,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 if msg.kind == "image" && msg.mediaReady: TouchArea {
+                                    property <bool> media-hover: self.has-hover;
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
@@ -2324,6 +2368,13 @@ export component AppWindow inherits Window {
                                         source: msg.picture;
                                         width: parent.width;
                                         height: parent.height;
+                                        opacity: root.blur-media && !media-hover ? 0.05 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
+                                    }
+                                    if root.blur-media && !media-hover: Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        background: Theme.dark ? #172126 : #dfe5e8;
                                     }
                                 }
 
@@ -2372,6 +2423,8 @@ export component AppWindow inherits Window {
                                                 spacing: 4px;
                                                 Text {
                                                     text: msg.text;
+                                                    opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                                    animate opacity { duration: 120ms; easing: ease-out; }
                                                     color: Theme.bubble-text;
                                                     font-size: 13px;
                                                     overflow: elide;
@@ -2728,6 +2781,8 @@ export component AppWindow inherits Window {
                                     height: styled-body.preferred-height;
                                     styled-body := StyledText {
                                         text: msg.styled;
+                                        opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         default-color: Theme.bubble-text;
                                         default-font-size: 14px;
                                         link-color: Theme.accent;
@@ -2819,6 +2874,8 @@ export component AppWindow inherits Window {
                                     plain-text := TextInput {
                                         text: (msg.deleted ? "🚫 " + msg.text : msg.text)
                                             + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
+                                        opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         read-only: true;
                                         single-line: false;
                                         wrap: word-wrap;
@@ -3432,6 +3489,12 @@ export component AppWindow inherits Window {
                                 has-image: root.current-avatar-has;
                                 initial: root.current-initial;
                                 color-idx: root.current-color-idx;
+                                privacy-blurred: root.blur-photos;
+                                privacy-reveal: header-avatar-touch.has-hover;
+                            }
+                            header-avatar-touch := TouchArea {
+                                width: 40px;
+                                height: 40px;
                             }
                         }
                         Rectangle {
@@ -3448,6 +3511,8 @@ export component AppWindow inherits Window {
                                 Text {
                                     text: root.current-chat-name;
                                     color: Theme.text;
+                                    opacity: root.blur-names && !head-touch.has-hover ? 0.08 : 1;
+                                    animate opacity { duration: 120ms; easing: ease-out; }
                                     font-size: 15px;
                                     font-weight: 600;
                                     overflow: elide;
@@ -5546,6 +5611,63 @@ export component AppWindow inherits Window {
                                     on: root.apply-deletions;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.apply-deletions-changed(!root.apply-deletions); }
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                Text {
+                                    text: @tr("settings.privacyBlurHint");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurNames");
+                                Toggle {
+                                    label: @tr("settings.blurNames");
+                                    on: root.blur-names;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("names", !root.blur-names); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurPhotos");
+                                Toggle {
+                                    label: @tr("settings.blurPhotos");
+                                    on: root.blur-photos;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurMessages");
+                                Toggle {
+                                    label: @tr("settings.blurMessages");
+                                    on: root.blur-messages;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurMedia");
+                                Toggle {
+                                    label: @tr("settings.blurMedia");
+                                    on: root.blur-media;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("media", !root.blur-media); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.notifyPreviews");
+                                detail: @tr("settings.notifyPreviewsHint");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.notifyPreviews");
+                                    on: root.notify-previews;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.notify-previews-changed(!root.notify-previews); }
                                 }
                             }
                         }

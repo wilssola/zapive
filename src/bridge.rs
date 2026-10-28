@@ -20,8 +20,9 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use whatsapp_rust::types::events::MessageBatch;
+use whatsapp_rust::proto_helpers::MessageExt as _;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 const MAX_HISTORY_BATCHES: u32 = 20;
@@ -38,6 +39,15 @@ const CALL_LINGER_MS: u64 = 2_000;
 // plain overlay) so the text engine wraps the last line early and
 // leaves the bottom-right corner free for the floating time/ticks.
 const META_PAD: &str = "\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}";
+const NOTIFICATION_TOKEN_TTL: Duration = Duration::from_secs(60);
+const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
+
+#[derive(Clone)]
+struct NotificationToken {
+    jid: String,
+    msg_id: String,
+    expires: SystemTime,
+}
 
 pub struct Bridge {
     ui: AppWindow,
@@ -187,8 +197,11 @@ pub struct Bridge {
     preview_busy: bool,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
-    notify_queue: Vec<(String, String, String)>,
+    notify_queue: Vec<(String, String, String, String)>,
     notify_queued: bool,
+    notify_previews: bool,
+    notify_tokens: HashMap<String, NotificationToken>,
+    notification_thumbnails: HashMap<String, std::path::PathBuf>,
     // A check the user asked for from Settings: it also reports "nothing
     // new", where the periodic one stays quiet.
     update_manual: bool,
@@ -618,6 +631,9 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        notify_previews: false,
+        notify_tokens: HashMap::new(),
+        notification_thumbnails: HashMap::new(),
         update_manual: false,
         status_model,
         calls_model,
@@ -709,6 +725,11 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_style_changed(|style| {
         let style = style.to_string();
         defer(move |b| b.handle_style(&style));
+    });
+    ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
+    ui.on_privacy_blur_changed(|category, enabled| {
+        let category = category.to_string();
+        defer(move |b| b.handle_privacy_blur(&category, enabled));
     });
     ui.on_autostart_changed(|on| {
         defer(move |b| b.handle_autostart(on));
@@ -1408,7 +1429,14 @@ impl Bridge {
             self.video_volume = volume.clamp(0.0, 1.0);
         }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
+        self.notify_previews = vault.setting_get("notify_previews").as_deref() == Some("1");
+        self.ui.set_notify_previews(self.notify_previews);
+        self.ui.set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
+        self.ui.set_blur_photos(vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
+        self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
+        self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
+        self.expire_notification_tokens();
         println!(
             "[store] loaded chats={} msgChats={} total={}",
             self.store.chats.len(),
@@ -1452,6 +1480,7 @@ impl Bridge {
 
     // Vault handed over before unlock; boot happens in handle_unlock.
     pub fn park_locked_vault(&mut self, vault: Vault, registered: bool) {
+        self.clear_notification_sensitive_state();
         self.vault = Some(vault);
         self.pending_registered = registered;
         self.ui.set_screen("locked".into());
@@ -1461,6 +1490,30 @@ impl Bridge {
         self.ui.set_theme_style(style.into());
         if let Some(vault) = &self.vault {
             vault.setting_set("theme_style", style);
+        }
+        #[cfg(windows)]
+        crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
+    }
+
+    fn handle_notify_previews(&mut self, enabled: bool) {
+        self.notify_previews = enabled;
+        self.ui.set_notify_previews(enabled);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("notify_previews", if enabled { "1" } else { "0" });
+        }
+    }
+
+    fn handle_privacy_blur(&mut self, category: &str, enabled: bool) {
+        let (key, current) = match category {
+            "names" => ("privacy_blur_names", self.ui.get_blur_names()),
+            "photos" => ("privacy_blur_photos", self.ui.get_blur_photos()),
+            "messages" => ("privacy_blur_messages", self.ui.get_blur_messages()),
+            "media" => ("privacy_blur_media", self.ui.get_blur_media()),
+            _ => return,
+        };
+        if current != enabled { return; }
+        if let Some(vault) = &self.vault {
+            vault.setting_set(key, if enabled { "1" } else { "0" });
         }
     }
 
@@ -1475,7 +1528,7 @@ impl Bridge {
             _ => self.ui.set_dark_theme(crate::platform::system_dark()),
         }
         #[cfg(windows)]
-        crate::platform::set_title_bar_theme(self.ui.get_dark_theme());
+        crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
     }
 
     // The OS is the only source of truth here (a Run entry, an autostart
@@ -1668,6 +1721,7 @@ impl Bridge {
     // disk is untouched: this is also how the bridge lets go of an
     // account it is switching away from.
     fn clear_store_state(&mut self) {
+        self.clear_notification_sensitive_state();
         self.store = Store::default();
         self.self_jid.clear();
         self.chats_model.set_vec(Vec::new());
@@ -1688,7 +1742,7 @@ impl Bridge {
         self.sync_messages = 0;
         self.requested_channels.clear();
         self.pending_forward.clear();
-        self.notify_queue.clear();
+        self.clear_notification_sensitive_state();
         self.audio_buffers.clear();
         self.waves.clear();
         self.avatars.clear();
@@ -2301,7 +2355,7 @@ impl Bridge {
                     } else {
                         body
                     };
-                    self.push_notification(title, text, jid.clone());
+                    self.push_notification(title, text, jid.clone(), m.id.clone());
                 }
             }
         }
@@ -5517,7 +5571,7 @@ impl Bridge {
         } else {
             "call.incomingVoice"
         });
-        crate::platform::toast(&name, &detail, None);
+        crate::platform::toast(&name, &detail, crate::platform::ToastPayload::default());
         // Nobody home: stop ringing and file it as missed.
         let id = id.to_string();
         self.once(RING_TIMEOUT_MS, move |b| b.ring_timeout(&id));
@@ -7539,8 +7593,8 @@ impl Bridge {
 
     // ---- notifications ----
 
-    fn push_notification(&mut self, title: String, text: String, jid: String) {
-        self.notify_queue.push((title, text, jid));
+    fn push_notification(&mut self, title: String, text: String, jid: String, msg_id: String) {
+        self.notify_queue.push((title, text, jid, msg_id));
         if !self.notify_queued {
             self.notify_queued = true;
             self.once(1200, |b| b.flush_notifications());
@@ -7553,40 +7607,212 @@ impl Bridge {
         match queue.len() {
             0 => {}
             1 => {
-                let (title, text, jid) = queue.into_iter().next().expect("one entry");
-                crate::platform::toast(&title, &text, Some(jid));
+                let (title, text, jid, msg_id) = queue.into_iter().next().expect("one entry");
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    self.clear_notification_sensitive_state();
+                    return;
+                }
+                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                let Some(chat) = self.store.chats.get(&jid) else { return };
+                if chat.is_muted() { return; }
+                let message = self.store.messages_for(&jid).iter().find(|message| message.id == msg_id).cloned();
+                let Some(message) = message else { return };
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    self.clear_notification_sensitive_state();
+                    return;
+                }
+                let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
+                let toast_title = if self.notify_previews { title.clone() } else { t("notify.appName") };
+                let mut payload = crate::platform::ToastPayload {
+                    token: Some(token.clone()),
+                    reply: true,
+                    ..Default::default()
+                };
+                let toast_body = if self.notify_previews {
+                    if let Some(raw) = message.raw.as_ref() {
+                        let inner = raw.get_base_message();
+                        let view_once = raw.is_view_once();
+                        let thumbnail = if view_once {
+                            None
+                        } else {
+                            inner.image_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref())
+                                .or_else(|| inner.video_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref()))
+                                .or_else(|| inner.sticker_message.as_option().and_then(|v| v.context_info.quoted_message.image_message.as_option().and_then(|image| image.jpeg_thumbnail.as_deref())))
+                        };
+                        payload.thumbnail = thumbnail.and_then(crate::media::notification_thumbnail);
+                        payload.play = !view_once
+                            && inner.audio_message.as_option().is_some()
+                            && self.media_path.contains_key(&message.id);
+                    }
+                    text
+                } else {
+                    t("notify.newMessage")
+                };
+                if let Some(path) = &payload.thumbnail {
+                    self.notification_thumbnails.insert(token.clone(), path.clone());
+                }
+                crate::platform::toast(&toast_title, &toast_body, payload);
+                let expired_token = token.clone();
+                self.once(60_000, move |bridge| {
+                    bridge.notify_tokens.remove(&expired_token);
+                    if let Some(path) = bridge.notification_thumbnails.remove(&expired_token) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                });
             }
             n => {
-                // A burst becomes one summary, targeting the latest chat.
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) { return; }
                 let mut names: Vec<&str> = Vec::new();
-                for (title, _, _) in &queue {
-                    if !names.contains(&title.as_str()) {
-                        names.push(title);
-                        if names.len() == 3 {
-                            break;
+                if self.notify_previews {
+                    for (title, _, jid, _) in &queue {
+                        if self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted()) && !names.contains(&title.as_str()) {
+                            names.push(title);
+                            if names.len() == 3 { break; }
                         }
                     }
                 }
-                let text = if names.len() == 1 {
-                    ta("notify.fromOne", &[&n.to_string(), names[0]])
+                let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
+                if count == 0 || (self.notify_previews && names.is_empty()) { return; }
+                let text = if !self.notify_previews {
+                    ta("notify.newMessages", &[&count.to_string(), ""])
+                } else if names.len() == 1 {
+                    ta("notify.fromOne", &[&count.to_string(), names[0]])
                 } else {
-                    ta("notify.newMessages", &[&n.to_string(), &names.join(", ")])
+                    ta("notify.newMessages", &[&count.to_string(), &names.join(", ")])
                 };
-                let jid = queue.last().map(|(_, _, jid)| jid.clone());
-                crate::platform::toast(&t("notify.appName"), &text, jid);
+                crate::platform::toast(&t("notify.appName"), &text, crate::platform::ToastPayload::default());
             }
         }
     }
 
-    pub fn on_notification_activated(&mut self, jid: &str) {
-        let _ = self.ui.show();
-        crate::platform::focus_window();
-        // Locked: just surface the PIN screen; opening a chat would touch
-        // the (still empty) store.
-        if self.vault.as_ref().is_none_or(|v| v.locked()) {
+    fn clear_notification_sensitive_state(&mut self) {
+        self.notify_queue.clear();
+        self.notify_queued = false;
+        self.notify_tokens.clear();
+        for (_, path) in self.notification_thumbnails.drain() {
+            let _ = std::fs::remove_file(path);
+        }
+        crate::media::clean_notification_thumbnails();
+    }
+
+    fn register_notification_token(&mut self, jid: &str, msg_id: &str) -> Option<String> {
+        use rand::TryRngCore as _;
+        let mut bytes = [0u8; 16];
+        rand::rngs::OsRng.try_fill_bytes(&mut bytes).ok()?;
+        let token = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        self.expire_notification_tokens();
+        self.notify_tokens.insert(token.clone(), NotificationToken {
+            jid: jid.to_string(),
+            msg_id: msg_id.to_string(),
+            expires: SystemTime::now() + NOTIFICATION_TOKEN_TTL,
+        });
+        Some(token)
+    }
+
+    fn expire_notification_tokens(&mut self) {
+        let now = SystemTime::now();
+        self.notify_tokens.retain(|_, token| token.expires > now);
+        let expired: Vec<String> = self.notification_thumbnails.keys()
+            .filter(|token| !self.notify_tokens.contains_key(*token))
+            .cloned().collect();
+        for token in expired {
+            if let Some(path) = self.notification_thumbnails.remove(&token) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
+    fn take_notification_token(&mut self, token: &str) -> Option<NotificationToken> {
+        if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+            self.clear_notification_sensitive_state();
+            return None;
+        }
+        self.expire_notification_tokens();
+        let item = self.notify_tokens.remove(token)?;
+        if let Some(path) = self.notification_thumbnails.remove(token) {
+            let _ = std::fs::remove_file(path);
+        }
+        if item.expires <= SystemTime::now()
+            || !self.store.chats.contains_key(&item.jid)
+            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+        {
+            return None;
+        }
+        Some(item)
+    }
+
+    pub fn on_notification_activated(&mut self, token: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        self.open_dm(&item.jid, None);
+    }
+
+    pub fn on_notification_play(&mut self, token: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        let valid_audio = self.store.messages_for(&item.jid).iter()
+            .find(|message| message.id == item.msg_id)
+            .and_then(|message| message.raw.as_ref())
+            .is_some_and(|raw| !raw.is_view_once() && raw.get_base_message().audio_message.as_option().is_some());
+        if valid_audio && self.media_path.contains_key(&item.msg_id) {
+            self.toggle_audio_background(&item.jid, &item.msg_id);
+        }
+    }
+
+    pub fn on_notification_reply(&mut self, token: &str, text: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        let mut body: String = text.chars().filter(|ch| !ch.is_control() || *ch == '\n').collect();
+        body = body.trim_matches(|ch: char| ch != '\n' && ch.is_whitespace()).to_string();
+        if body.is_empty() { return; }
+        if body.len() > NOTIFICATION_REPLY_MAX_BYTES {
+            let mut end = NOTIFICATION_REPLY_MAX_BYTES;
+            while !body.is_char_boundary(end) { end -= 1; }
+            body.truncate(end);
+        }
+        if body.is_empty()
+            || !self.store.chats.contains_key(&item.jid)
+            || !self.store.chats.get(&item.jid).is_some_and(|chat| chat.can_send())
+            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+        {
             return;
         }
-        self.open_dm(jid, None);
+        self.wa.send(Cmd::SendText {
+            jid: item.jid.clone(), body, quote: None, mentions: Vec::new(), mention_all: None,
+        });
+        if self.ui.get_send_receipts() {
+            let message = self.store.messages_for(&item.jid).iter().find(|m| m.id == item.msg_id).cloned();
+            if let Some(message) = message {
+                self.wa.send(Cmd::MarkRead {
+                    jid: item.jid.clone(), sender: self.key_participant(&message), ids: vec![item.msg_id.clone()],
+                });
+                self.store.mark_read_sent(&item.jid, &[item.msg_id.clone()]);
+            }
+        }
+        self.schedule_save();
+    }
+
+    fn toggle_audio_background(&mut self, jid: &str, id: &str) {
+        if self.vault.as_ref().is_none_or(|vault| vault.locked())
+            || !self.media_path.contains_key(id)
+            || !self.store.messages_for(jid).iter().any(|message| message.id == id)
+        {
+            return;
+        }
+        if self.audio.as_ref().is_some_and(|audio| audio.id == id) {
+            self.toggle_audio(id);
+        } else {
+            self.start_audio_for_notification(jid, id);
+        }
+    }
+
+    fn start_audio_for_notification(&mut self, jid: &str, id: &str) {
+        let Some(message) = self.store.messages_for(jid).iter().find(|message| message.id == id) else { return };
+        let duration = message.duration_sec.max(1) as f64;
+        self.stop_audio();
+        self.audio = Some(AudioState {
+            id: id.to_string(), jid: jid.to_string(), duration,
+            paused: false, pending_offset: Some(0.0), player: None,
+        });
+        self.spin_audio_at(0.0);
+        self.sync_mini_player();
     }
 
     // ---- PIN ----
