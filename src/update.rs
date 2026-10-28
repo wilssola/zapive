@@ -78,7 +78,8 @@ pub fn check() -> Option<String> {
     let releases = match list.build().and_then(|l| l.fetch()) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[update] check failed: {e}");
+            // To the log file: a release build has no console.
+            log::warn!("[update] check failed: {e}");
             return None;
         }
     };
