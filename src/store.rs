@@ -49,6 +49,10 @@ pub struct StoredMessage {
     pub gif: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starred: bool,
+    #[serde(default)]
+    pub pinned_until: i64,
+    #[serde(default)]
+    pub edited: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sticker: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -58,6 +62,8 @@ pub struct StoredMessage {
     // The message this one replies to, as WhatsApp sends it inline.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quote_jid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote_author: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]

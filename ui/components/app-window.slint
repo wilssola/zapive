@@ -294,9 +294,40 @@ export component AppWindow inherits Window {
     in-out property <bool> reactions-open;
     callback show-reactions(string);
     callback request-reply(string);
-    callback open-quote(string);
+    callback open-quote(string, string);
     callback toggle-star(string);
     callback delete-message(string);
+    callback message-action(string, string);
+    callback submit-edit(string, string);
+    in-out property <bool> message-dialog-open;
+    in-out property <bool> message-dialog-edit;
+    in-out property <string> message-dialog-title;
+    in-out property <string> message-dialog-text;
+    in-out property <string> message-dialog-id;
+    property <int> message-menu-request;
+    property <length> message-menu-request-x;
+    property <length> message-menu-request-y;
+    property <MessageItem> menu-message;
+    in-out property <bool> message-menu-open;
+    property <length> message-menu-x;
+    property <length> message-menu-y;
+    public function open-message-menu(x: float, y: float) -> bool {
+        if (root.screen != "main" || !root.chat-open || !root.conv-ready || root.select-mode
+            || root.message-menu-open || root.message-dialog-open || root.confirm-open
+            || root.settings-open || root.forward-open || root.share-open || root.preview-open
+            || root.lightbox-open || root.video-open || root.pdf-open || root.sv-open
+            || root.alert-open || root.member-pick-open || root.reactions-open
+            || root.picker-open || root.attach-open || root.chat-menu-open || root.account-menu-open
+            || x * 1px < msg-list.absolute-position.x || x * 1px >= msg-list.absolute-position.x + msg-list.width
+            || y * 1px < contact-header.absolute-position.y + contact-header.height
+            || y * 1px >= composer-dock.absolute-position.y) {
+            return false;
+        }
+        root.message-menu-request-x = x * 1px;
+        root.message-menu-request-y = y * 1px;
+        root.message-menu-request += 1;
+        return true;
+    }
     callback react-to(string, string);
     callback react-pick(string);
     // Quick reaction bar: the message it belongs to, empty when hidden.
@@ -468,6 +499,17 @@ export component AppWindow inherits Window {
     in-out property <bool> sv-video-ready: false;
     callback status-play();
 
+    public function focus-composer() {
+        if (root.screen == "main" && root.chat-open && root.current-can-send && !root.select-mode
+            && !root.message-menu-open && !root.message-dialog-open && !root.confirm-open
+            && !root.settings-open && !root.forward-open && !root.share-open && !root.preview-open
+            && !root.lightbox-open && !root.video-open && !root.pdf-open && !root.sv-open
+            && !root.alert-open && !root.member-pick-open && !root.reactions-open
+            && !root.picker-open && !root.attach-open && !root.chat-menu-open && !root.account-menu-open
+            && !root.chat-search-open && !root.sync-open && !root.new-list-open && !root.info-open) {
+            message-input.focus();
+        }
+    }
     public function append-composer(t: string) {
         message-input.text = message-input.text + t;
     }
@@ -860,6 +902,8 @@ export component AppWindow inherits Window {
                 if (root.video-open) { root.close-video(); }
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
+                else if (root.message-menu-open) { root.message-menu-open = false; }
+                else if (root.message-dialog-open) { root.message-dialog-open = false; }
                 else if (root.confirm-open) { root.confirm-open = false; }
                 else if (root.preview-open) { root.cancel-send-image(); }
                 else if (root.share-open) { root.share-cancel(); }
@@ -1750,6 +1794,19 @@ export component AppWindow inherits Window {
                         }
                     }
                     for msg[i] in root.messages: msg-row := Rectangle {
+                        property <int> menu-request: root.message-menu-request;
+                        changed menu-request => {
+                            if (self.menu-request > 0 && !msg.deleted && msg.kind != "system"
+                                && root.message-menu-request-x >= self.absolute-position.x
+                                && root.message-menu-request-x < self.absolute-position.x + self.width
+                                && root.message-menu-request-y >= self.absolute-position.y + bubble.y
+                                && root.message-menu-request-y < self.absolute-position.y + bubble.y + bubble.height) {
+                                root.menu-message = msg;
+                                root.message-menu-x = root.message-menu-request-x;
+                                root.message-menu-y = root.message-menu-request-y;
+                                root.message-menu-open = true;
+                            }
+                        }
                         property <length> header-offset: i == 0 ? contact-header.height : 0px;
                         // The row crossing the top edge names the day in
                         // the floating pill. Rows sit in viewport
@@ -1793,7 +1850,7 @@ export component AppWindow inherits Window {
                             double-clicked => {
                                 if (!root.select-mode && !msg.deleted) {
                                     root.request-reply(msg.id);
-                                    message-input.focus();
+                                    root.focus-composer();
                                 }
                             }
                         }
@@ -1975,7 +2032,7 @@ export component AppWindow inherits Window {
                                 enabled: !root.select-mode && !msg.deleted;
                                 double-clicked => {
                                     root.request-reply(msg.id);
-                                    message-input.focus();
+                                    root.focus-composer();
                                 }
                             }
                             content := VerticalLayout {
@@ -2019,7 +2076,7 @@ export component AppWindow inherits Window {
                                     clip: true;
                                     quote-touch := TouchArea {
                                         mouse-cursor: pointer;
-                                        clicked => { root.open-quote(msg.quoteId); }
+                                        clicked => { root.open-quote(msg.quoteJid, msg.quoteId); }
                                     }
                                     Rectangle {
                                         x: 0;
@@ -2811,44 +2868,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            // One menu for the whole bubble, whatever it
-                            // holds. Left clicks pass through to the text
-                            // (selection) and the links underneath.
-                            msg-menu := ContextMenuArea {
-                                enabled: !root.select-mode && !msg.deleted;
-                                Menu {
-                                    MenuItem {
-                                        title: @tr("Copy image");
-                                        enabled: msg.kind == "image" && msg.mediaReady;
-                                        activated => { root.copy-image(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Reply");
-                                        activated => { root.request-reply(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Copy");
-                                        enabled: msg.kind == "text" || msg.text != "";
-                                        activated => { root.copy-text(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Forward");
-                                        activated => { root.request-forward(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Select");
-                                        activated => { root.select-start(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: msg.starred ? @tr("Unstar") : @tr("Star");
-                                        activated => { root.toggle-star(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Delete");
-                                        activated => { root.delete-message(msg.id); }
-                                    }
-                                }
-                            }
                         }
                         // Hover actions, mirroring WhatsApp: react, forward
                         // and the message menu.
@@ -2878,7 +2897,12 @@ export component AppWindow inherits Window {
                                 IconButton {
                                     icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
-                                    clicked => { msg-menu.show({ x: 0px, y: bubble.height }); }
+                                    clicked => {
+                                        root.menu-message = msg;
+                                        root.message-menu-x = self.absolute-position.x;
+                                        root.message-menu-y = self.absolute-position.y + self.height;
+                                        root.message-menu-open = true;
+                                    }
                                 }
                             }
                         }
@@ -4407,6 +4431,175 @@ export component AppWindow inherits Window {
             height: parent.height;
             horizontal-alignment: center;
             vertical-alignment: center;
+        }
+    }
+
+    if root.message-menu-open: Rectangle {
+        TouchArea { clicked => { root.message-menu-open = false; } }
+        Rectangle {
+            x: max(8px, min(root.message-menu-x, root.width - self.width - 8px));
+            y: max(8px, min(root.message-menu-y, root.height - self.height - 8px));
+            width: 264px;
+            height: min(root.height - 16px, message-menu-items.preferred-height + 12px);
+            border-radius: 12px;
+            background: Theme.dark ? (root.theme-style == "glass" ? #222c32f5 : #222c32) : Theme.panel;
+            border-width: 1px;
+            border-color: Theme.dark ? #ffffff18 : Theme.border;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            TouchArea { }
+            ScrollView {
+                x: 6px; y: 6px;
+                width: parent.width - 12px;
+                height: parent.height - 12px;
+                message-menu-items := VerticalLayout {
+                    spacing: 1px;
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/message-circle.svg");
+                        label: @tr("Reply");
+                        clicked => { root.message-menu-open = false; root.request-reply(root.menu-message.id); }
+                    }
+                    if root.menu-message.privateReply: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/users.svg");
+                        label: @tr("Reply privately");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "private"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/corner-up-right.svg");
+                        label: @tr("Forward");
+                        clicked => { root.message-menu-open = false; root.request-forward(root.menu-message.id); }
+                    }
+                    if root.menu-message.text != "" && (root.menu-message.kind == "text" || root.menu-message.kind == "image" || root.menu-message.kind == "video"): MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/copy.svg");
+                        label: @tr("Copy text");
+                        clicked => { root.message-menu-open = false; root.copy-text(root.menu-message.id); }
+                    }
+                    if root.menu-message.kind == "image" && root.menu-message.mediaReady: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/photo.svg");
+                        label: @tr("Copy image");
+                        clicked => { root.message-menu-open = false; root.copy-image(root.menu-message.id); }
+                    }
+                    if root.menu-message.linkUrl != "": MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/copy.svg");
+                        label: @tr("Copy link");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "link"); }
+                    }
+                    if root.menu-message.kind != "text" && root.menu-message.mediaReady: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/download.svg");
+                        label: @tr("Save as…");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "save"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/mood-smile.svg");
+                        label: @tr("React");
+                        clicked => { root.message-menu-open = false; root.react-pick(root.menu-message.id); }
+                    }
+                    if root.menu-message.editable: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/file-text.svg");
+                        label: @tr("Edit");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "edit"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/pin.svg");
+                        label: root.menu-message.pinned ? @tr("Unpin") : @tr("Pin for 7 days");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "pin"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/message-circle.svg");
+                        label: @tr("Mark conversation unread");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "unread"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/star.svg");
+                        label: root.menu-message.starred ? @tr("Unstar") : @tr("Star");
+                        clicked => { root.message-menu-open = false; root.toggle-star(root.menu-message.id); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/checkbox.svg");
+                        label: @tr("Select");
+                        clicked => { root.message-menu-open = false; root.select-start(root.menu-message.id); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/info-circle.svg");
+                        label: @tr("Details");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "details"); }
+                    }
+                    Rectangle { height: 1px; background: Theme.dark ? #ffffff18 : Theme.border; }
+                    MenuRow {
+                        height: 34px;
+                        icon: @image-url("../icons/trash.svg");
+                        label: @tr("Delete");
+                        tint: #f47783;
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "delete"); }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.message-dialog-open: Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.message-dialog-open = false; } }
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) { root.message-dialog-open = false; return accept; }
+                return reject;
+            }
+        }
+        Rectangle {
+            width: min(480px, root.width - 32px);
+            height: message-dialog-col.preferred-height + 40px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            background: Theme.panel;
+            TouchArea { }
+            message-dialog-col := VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                Text { text: root.message-dialog-title; color: Theme.text; font-size: 18px; }
+                if !root.message-dialog-edit: Text {
+                    text: root.message-dialog-text;
+                    color: Theme.text-dim;
+                    wrap: word-wrap;
+                }
+                if root.message-dialog-edit: TextInput {
+                    text <=> root.message-dialog-text;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    height: 120px;
+                    init => { self.focus(); }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    DialogButton {
+                        label: @tr("Close");
+                        clicked => { root.message-dialog-open = false; }
+                    }
+                    if root.message-dialog-edit: DialogButton {
+                        label: @tr("Save");
+                        primary: true;
+                        enabled: root.message-dialog-text != "";
+                        clicked => { root.submit-edit(root.message-dialog-id, root.message-dialog-text); }
+                    }
+                }
+            }
         }
     }
 

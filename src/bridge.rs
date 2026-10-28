@@ -54,7 +54,7 @@ pub struct Bridge {
     view: String,
     groups_fetched: bool,
     // Message id being replied to.
-    reply_to: Option<String>,
+    reply_to: Option<(String, String)>,
     // Chats whose list currently starts mid-conversation (after a jump).
     truncated: HashSet<String>,
     scroll_pos: HashMap<String, f32>,
@@ -855,13 +855,26 @@ fn wire_callbacks(ui: &AppWindow) {
         let id = id.to_string();
         defer(move |b| b.start_reply(&id));
     });
-    ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
-    ui.on_open_quote(|id| {
-        let id = id.to_string();
+    ui.on_message_action(|id, action| {
+        let (id, action) = (id.to_string(), action.to_string());
+        defer(move |b| b.message_action(&id, &action));
+    });
+    ui.on_submit_edit(|id, text| {
+        let (id, text) = (id.to_string(), text.to_string());
         defer(move |b| {
-            if let Some(jid) = b.current_jid.clone()
-                && !id.is_empty()
-            {
+            if b.find_message(&id).is_some_and(message_editable) && !text.trim().is_empty() {
+                if let Some(jid) = b.current_jid.clone() {
+                    b.wa.send(Cmd::Edit { jid, id, text: text.trim().to_string() });
+                    b.ui.set_message_dialog_open(false);
+                }
+            }
+        });
+    });
+    ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
+    ui.on_open_quote(|jid, id| {
+        let (jid, id) = (jid.to_string(), id.to_string());
+        defer(move |b| {
+            if !jid.is_empty() && !id.is_empty() {
                 b.open_dm(&jid, Some(&id));
             }
         });
@@ -1170,7 +1183,8 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_copy_image(|id| {
         let id = id.to_string();
         defer(move |b| {
-            let Some(path) = b.media_path.get(&id).cloned() else { return };
+            let Some(cached) = b.media_path.get(&id) else { return };
+            let Some(path) = crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached)) else { return };
             std::thread::spawn(move || {
                 let Ok(image) = image::open(path) else { return };
                 let image = image.to_rgba8();
@@ -2129,7 +2143,30 @@ impl Bridge {
                 }
                 continue;
             }
-            let content: &wa::Message = &inbound.message;
+            use whatsapp_rust::proto_helpers::MessageExt as _;
+            let content = inbound.message.get_base_message();
+            if let Some(pm) = content.protocol_message.as_option()
+                && pm.r#type == Some(wa::message::protocol_message::Type::MESSAGE_EDIT)
+                && let Some(key) = pm.key.as_option()
+                && let Some(id) = key.id.as_deref()
+                && let Some(edited) = pm.edited_message.as_option()
+            {
+                let jid = self.store.canon_owned(&normalize_jid(&chat));
+                let sender = self.store.canon_owned(&info.source.sender.to_non_ad_string());
+                let valid = self.store.messages_for(&jid).iter().find(|m| m.id == id).is_some_and(|m| {
+                    m.from_me == info.source.is_from_me && (m.from_me || self.store.canon(&m.sender_jid) == sender)
+                });
+                if valid { self.on_message_edit(&chat, id, edited); }
+                continue;
+            }
+            if let Some(pin) = content.pin_in_chat_message.as_option()
+                && let Some(id) = pin.key.as_option().and_then(|k| k.id.as_deref())
+            {
+                let duration = content.message_context_info.as_option().and_then(|c| c.message_add_on_duration_in_secs).unwrap_or(604800);
+                let until = if pin.r#type == Some(wa::message::pin_in_chat_message::Type::PinForAll) { info.timestamp.timestamp() + i64::from(duration) } else { 0 };
+                self.on_message_pin(&chat, id, until);
+                continue;
+            }
             // A disappearing-messages change in a one-to-one chat comes as
             // a protocol message; it shows as a notice, like on the phone.
             if let Some(pm) = content.protocol_message.as_option()
@@ -2944,6 +2981,8 @@ impl Bridge {
     }
 
     fn open_jid(&mut self, jid: &str, jump_to: Option<&str>) {
+        self.ui.set_message_menu_open(false);
+        self.ui.set_message_dialog_open(false);
         if let Some(current) = self.current_jid.clone()
             && current != jid
         {
@@ -3003,8 +3042,7 @@ impl Bridge {
         // lands at the top exactly, instead of chasing a pixel offset
         // inside a virtualized list that estimates unmeasured heights.
         let at = jump_to
-            .and_then(|target| list.iter().position(|m| m.id == target))
-            .filter(|&i| i > 0);
+            .and_then(|target| list.iter().position(|m| m.id == target));
         let from = at.unwrap_or(0);
         if at.is_some() {
             self.truncated.insert(jid.to_string());
@@ -3019,6 +3057,7 @@ impl Bridge {
             .collect();
         self.messages_model.set_vec(rows);
         self.ui.set_chat_open(true);
+        self.ui.invoke_focus_composer();
         self.ui.set_conv_ready(false);
         if at.is_some() {
             self.ui.set_stick_bottom(false);
@@ -3332,7 +3371,7 @@ impl Bridge {
                     .into()
             },
             firstOfRun: first_of_run,
-            time: format_clock(m.timestamp).into(),
+            time: format!("{}{}{}", if m.pinned_until > now_secs() { "⌖ " } else { "" }, format_clock(m.timestamp), if m.edited { " · edited" } else { "" }).into(),
             // Rebuilt rows keep already-decoded media so scrollback and
             // re-opens draw instantly.
             picture: self
@@ -3428,7 +3467,7 @@ impl Bridge {
             linkTitle: m.link_title.trim().into(),
             linkDesc: m.link_desc.trim().into(),
             linkHost: link_host.into(),
-            linkUrl: m.link_url.clone().into(),
+            linkUrl: message_link(m).into(),
             hasLink: !m.link_title.is_empty() || !m.link_url.is_empty(),
             linkThumb: empty_image(),
             hasLinkThumb: false,
@@ -3448,8 +3487,13 @@ impl Bridge {
             deleted: m.deleted,
             revoked: m.revoked,
             starred: m.starred,
+            pinned: m.pinned_until > now_secs(),
+            editable: message_editable(m),
+            privateReply: is_group(&m.jid) && !m.from_me && !m.sender_jid.is_empty(),
             hasQuote: !m.quote_text.is_empty() || !m.quote_id.is_empty(),
-            quoteName: if m.quote_author.is_empty() {
+            quoteName: if is_group(&m.quote_jid) && m.quote_jid != m.jid {
+                self.store.chat_name(&m.quote_jid).into()
+            } else if m.quote_author.is_empty() {
                 t("reactions.you").into()
             } else {
                 let name = self.store.chat_name(&m.quote_author);
@@ -3461,6 +3505,7 @@ impl Bridge {
             },
             quoteText: self.store.named_mentions(&m.quote_text).into(),
             quoteId: m.quote_id.clone().into(),
+            quoteJid: quote_chat(m).into(),
         }
     }
 
@@ -3500,11 +3545,12 @@ impl Bridge {
         {
             return;
         }
-        let quote = self.reply_to.take().and_then(|id| {
-            let m = self.find_message(&id)?;
+        let quote = self.reply_to.take().and_then(|(chat, id)| {
+            let m = self.store.messages_for(&chat).iter().find(|m| m.id == id)?;
             let raw = m.raw.clone()?;
             Some(QuoteRef {
                 id: m.id.clone(),
+                chat_jid: m.jid.clone(),
                 sender_jid: if m.from_me {
                     self.self_jid.clone()
                 } else {
@@ -3678,10 +3724,11 @@ impl Bridge {
             m.sender.clone()
         };
         let preview = preview_body(m);
-        self.reply_to = Some(id.to_string());
+        self.reply_to = Some((m.jid.clone(), id.to_string()));
         self.ui.set_reply_open(true);
         self.ui.set_reply_name(name.into());
         self.ui.set_reply_text(preview.into());
+        self.ui.invoke_focus_composer();
     }
 
     fn clear_reply(&mut self) {
@@ -5761,6 +5808,8 @@ impl Bridge {
     }
 
     fn close_chat(&mut self) {
+        self.ui.set_message_menu_open(false);
+        self.ui.set_message_dialog_open(false);
         self.select_end();
         self.ui.set_chat_menu_open(false);
         self.ui.set_chat_search_open(false);
@@ -7694,6 +7743,102 @@ impl Bridge {
         self.ui.set_reactions_open(true);
     }
 
+    pub fn message_action_failed(&mut self, error: &str) {
+        self.ui.set_message_dialog_title("Message action failed".into());
+        self.ui.set_message_dialog_text(error.into());
+        self.ui.set_message_dialog_edit(false);
+        self.ui.set_message_dialog_open(true);
+    }
+
+    pub fn on_message_edit(&mut self, jid: &str, id: &str, content: &wa::Message) {
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        let content = content.get_base_message();
+        let text = content.conversation.clone().or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()));
+        let Some(text) = text else { return };
+        let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return };
+        if m.deleted { return; }
+        m.text = text;
+        m.raw = Some(std::sync::Arc::new(content.clone()));
+        m.edited = true;
+        m.link_url.clear();
+        m.link_title.clear();
+        m.link_desc.clear();
+        let updated = m.clone();
+        self.store.search.remove(&jid, id);
+        self.store.search.add(&jid, &updated);
+        if self.store.messages_for(&jid).last().is_some_and(|m| m.id == id) {
+            let preview = crate::store::compute_preview(&updated, &self.store);
+            if let Some(meta) = self.store.chats.get_mut(&jid) { meta.preview = preview; }
+        }
+        self.store.dirty_jids.insert(jid.clone());
+        if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+        self.schedule_save();
+        self.schedule_refresh_chats();
+    }
+
+    pub fn on_message_pin(&mut self, jid: &str, id: &str, until: i64) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
+            m.pinned_until = until;
+            self.store.dirty_jids.insert(jid.clone());
+            if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+            self.schedule_save();
+        }
+    }
+
+    fn message_action(&mut self, id: &str, action: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        if m.deleted || m.kind == MessageKind::System { return; }
+        match action {
+            "private" if is_group(&m.jid) && !m.from_me && !m.sender_jid.is_empty() => {
+                self.open_dm(&m.sender_jid, None);
+                self.reply_to = Some((m.jid.clone(), m.id.clone()));
+                self.ui.set_reply_open(true);
+                self.ui.set_reply_name(self.store.chat_name(&m.jid).into());
+                self.ui.set_reply_text(preview_body(&m).into());
+                self.ui.invoke_focus_composer();
+            }
+            "link" => {
+                let link = message_link(&m);
+                if !link.is_empty() {
+                    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(link)) { self.message_action_failed(&e.to_string()); }
+                }
+            }
+            "save" => {
+                let Some(cached) = self.media_path.get(id) else { self.request_manual_media(id); return };
+                let Some(path) = crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached)) else { return };
+                let name = if m.kind == MessageKind::Doc { sanitize_file_name(&m.text) } else { path.file_name().unwrap_or_default().to_string_lossy().into_owned() };
+                std::thread::spawn(move || {
+                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file() {
+                        if let Err(e) = std::fs::copy(path, target) { ui_apply(move |b| b.message_action_failed(&e.to_string())); }
+                    }
+                });
+            }
+            "pin" => self.wa.send(Cmd::PinMessage { jid: m.jid.clone(), id: m.id.clone(), from_me: m.from_me, participant: self.key_participant(&m), pin: m.pinned_until <= now_secs() }),
+            "unread" => { self.close_chat(); self.wa.send(Cmd::MarkUnread(m.jid)); }
+            "edit" if message_editable(&m) => {
+                self.ui.set_message_dialog_id(m.id.into());
+                self.ui.set_message_dialog_title("Edit message".into());
+                self.ui.set_message_dialog_text(m.text.into());
+                self.ui.set_message_dialog_edit(true);
+                self.ui.set_message_dialog_open(true);
+            }
+            "delete" => { self.select_start(id); self.confirm_delete_selected(); }
+            "details" => {
+                self.ui.set_message_dialog_title("Message details".into());
+                self.ui.set_message_dialog_text(format!("{}\n{}\nID: {}\n{}: {}\n{}{}",
+                    if m.from_me { t("reactions.you") } else { m.sender.clone() },
+                    format_stamp(m.timestamp), m.id, "Delivery status", match m.status { 0 => "Incoming", 1 => "Pending", 2 => "Sent", 3 => "Delivered", 4 => "Read", 5 => "Played", _ => "Unknown" },
+                    if m.edited { "Edited\n" } else { "" },
+                    if m.pinned_until > now_secs() { format!("Pinned until {}", format_stamp(m.pinned_until)) } else { String::new() }).into());
+                self.ui.set_message_dialog_edit(false);
+                self.ui.set_message_dialog_open(true);
+            }
+            _ => {}
+        }
+    }
+
     fn toggle_star(&mut self, id: &str) {
         let Some(m) = self.find_message(id).cloned() else {
             return;
@@ -8211,6 +8356,95 @@ impl Bridge {
 }
 
 // Whether a message has something to download or decode for its bubble.
+fn quote_chat(m: &StoredMessage) -> &str {
+    if m.quote_jid.is_empty() { &m.jid } else { &m.quote_jid }
+}
+
+fn message_link(m: &StoredMessage) -> String {
+    if !m.link_url.is_empty() { return m.link_url.clone(); }
+    static LINKS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r#"https?://[^\s<>\"]+"#).unwrap());
+    LINKS.find(&m.text).map(|v| v.as_str().trim_end_matches(['.', ',', ';', '!', ')', ']']).to_string()).unwrap_or_default()
+}
+
+fn message_editable(m: &StoredMessage) -> bool {
+    m.from_me && !m.deleted && !m.revoked && m.kind == MessageKind::Text
+        && !is_channel(&m.jid) && m.raw.is_some() && (0..900).contains(&(now_secs() - m.timestamp))
+}
+
+#[cfg(test)]
+mod message_action_tests {
+    use super::*;
+
+    #[test]
+    fn quotes_navigate_to_explicit_chat_not_author() {
+        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "id", 1, String::new());
+        m.quote_author = "author@s.whatsapp.net".into();
+        assert_eq!(quote_chat(&m), "peer@s.whatsapp.net");
+        m.quote_jid = "source@g.us".into();
+        assert_eq!(quote_chat(&m), "source@g.us");
+        m.quote_jid = m.jid.clone();
+        assert_eq!(quote_chat(&m), "peer@s.whatsapp.net");
+    }
+
+    #[test]
+    fn quote_context_round_trips_source_and_ordinary_replies() {
+        use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
+        let mut store = Store::default();
+        let sender = "author@s.whatsapp.net".parse().unwrap();
+        let target = "peer@s.whatsapp.net".parse().unwrap();
+        let meta = crate::wa_map::LiveMeta {
+            chat: "peer@s.whatsapp.net".into(), sender: "author@s.whatsapp.net".into(),
+            sender_alt: None, recipient_alt: None, id: "reply", from_me: false,
+            is_group: false, push_name: "", timestamp: 1,
+        };
+        for source in ["source@g.us", "peer@s.whatsapp.net"] {
+            let ctx = whatsapp_rust::proto_helpers::build_quote_context_with_info(
+                "original", &sender, &source.parse().unwrap(), &target,
+                &wa::Message::text("quoted"),
+            );
+            assert_eq!(ctx.remote_jid.as_deref(), (source != meta.chat).then_some(source));
+            let message = wa::Message::text_with_context("reply", ctx);
+            let stored = crate::wa_map::normalize(&mut store, &meta, &message, &HashMap::new(), 0).unwrap();
+            assert_eq!(stored.quote_id, "original");
+            assert_eq!(stored.quote_text, "quoted");
+            assert_eq!(stored.quote_author, "author@s.whatsapp.net");
+            assert_eq!(quote_chat(&stored), source);
+            let mut json = serde_json::to_value(&stored).unwrap();
+            let restored: StoredMessage = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(restored.quote_jid, stored.quote_jid);
+            json.as_object_mut().unwrap().remove("quote_jid");
+            let legacy: StoredMessage = serde_json::from_value(json).unwrap();
+            assert!(legacy.quote_jid.is_empty());
+            assert_eq!(quote_chat(&legacy), meta.chat);
+        }
+    }
+
+    #[test]
+    fn edit_requires_own_recent_live_text() {
+        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", "id", now_secs(), "hello".into());
+        m.kind = MessageKind::Text;
+        m.from_me = true;
+        m.raw = Some(std::sync::Arc::new(wa::Message::default()));
+        assert!(message_editable(&m));
+        m.timestamp -= 901;
+        assert!(!message_editable(&m));
+        m.timestamp = now_secs();
+        m.from_me = false;
+        assert!(!message_editable(&m));
+        m.from_me = true;
+        m.revoked = true;
+        assert!(!message_editable(&m));
+    }
+
+    #[test]
+    fn links_can_be_copied_without_a_preview() {
+        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", "id", 1, "See https://example.com/page.".into());
+        assert_eq!(message_link(&m), "https://example.com/page");
+        m.text = "no link".into();
+        assert!(message_link(&m).is_empty());
+    }
+}
+
 fn needs_media(m: &StoredMessage) -> bool {
     !m.deleted
         && (m.kind != MessageKind::Text && m.kind != MessageKind::System

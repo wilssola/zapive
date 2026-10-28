@@ -36,6 +36,7 @@ pub static SESSION_EPOCH: AtomicU64 = AtomicU64::new(0);
 pub struct QuoteRef {
     pub id: String,
     pub sender_jid: String,
+    pub chat_jid: String,
     pub message: Arc<wa::Message>,
 }
 
@@ -133,6 +134,9 @@ pub enum Cmd {
     // Message actions.
     React { jid: String, id: String, from_me: bool, participant: Option<String>, emoji: String },
     Revoke { jid: String, id: String },
+    Edit { jid: String, id: String, text: String },
+    PinMessage { jid: String, id: String, from_me: bool, participant: Option<String>, pin: bool },
+    MarkUnread(String),
     Star { jid: String, id: String, from_me: bool, participant: Option<String>, starred: bool },
     // "Send message viewed" (opt-in, off by default): blue ticks and the
     // blue mic. `sender` is the group participant a receipt is addressed
@@ -1094,6 +1098,46 @@ async fn executor(
                         .await
                     {
                         eprintln!("[wa] revoke failed: {e}");
+                    }
+                });
+            }
+            Cmd::Edit { jid, id, text } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let message = wa::Message { conversation: Some(text), ..Default::default() };
+                    match client.edit_message(chat, id.clone(), message.clone()).await {
+                        Ok(_) => ui_apply(move |b| b.on_message_edit(&jid, &id, &message)),
+                        Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    }
+                });
+            }
+            Cmd::PinMessage { jid, id, from_me, participant, pin } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let key = wa::MessageKey {
+                        remote_jid: Some(jid.clone()), id: Some(id.clone()),
+                        from_me: Some(from_me), participant, ..Default::default()
+                    };
+                    let result = if pin {
+                        client.pin_message(chat, key, whatsapp_rust::send::PinDuration::Days7).await
+                    } else {
+                        client.unpin_message(chat, key).await
+                    };
+                    match result {
+                        Ok(_) => ui_apply(move |b| b.on_message_pin(&jid, &id, if pin { crate::store::now_secs() + 604800 } else { 0 })),
+                        Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    }
+                });
+            }
+            Cmd::MarkUnread(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    match client.chat_actions().mark_chat_as_read(&chat, false, None).await {
+                        Ok(_) => ui_apply(move |b| b.on_mark_read(&jid, false)),
+                        Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
                     }
                 });
             }
@@ -2353,10 +2397,11 @@ async fn executor(
                     let mut ctx = match &quote {
                         Some(q) => {
                             let Some(sender) = parse_jid(&q.sender_jid) else { return };
+                            let Some(source) = parse_jid(&q.chat_jid) else { return };
                             Some(whatsapp_rust::proto_helpers::build_quote_context_with_info(
                                 q.id.clone(),
                                 &sender,
-                                &to,
+                                &source,
                                 &to,
                                 &q.message,
                             ))

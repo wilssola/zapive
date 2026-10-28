@@ -148,9 +148,29 @@ fn main() {
     let style = app_vault.setting_get("theme_style").unwrap_or_else(|| "glass".into());
     ui.set_theme_style(if style == "opaque" { "opaque" } else { "glass" }.into());
     {
-        use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
+        use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::{WindowEvent, ElementState, MouseButton}};
         let handle = ui.as_weak();
-        ui.window().on_winit_window_event(move |_, event| {
+        let mut cursor = None;
+        let mut right_press_consumed = false;
+        ui.window().on_winit_window_event(move |window, event| {
+            match event {
+                WindowEvent::CursorMoved { position, .. } => cursor = Some(*position),
+                WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => cursor = None,
+                WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
+                    if *state == ElementState::Released {
+                        if std::mem::take(&mut right_press_consumed) {
+                            return EventResult::PreventDefault;
+                        }
+                    } else if let (Some(ui), Some(position)) = (handle.upgrade(), cursor) {
+                        let p = position.to_logical::<f32>(f64::from(window.scale_factor()));
+                        right_press_consumed = ui.invoke_open_message_menu(p.x, p.y);
+                        if right_press_consumed {
+                            return EventResult::PreventDefault;
+                        }
+                    }
+                }
+                _ => {}
+            }
             if let WindowEvent::Focused(focused) = event {
                 if let Some(ui) = handle.upgrade() {
                     ui.set_window_active(*focused);
