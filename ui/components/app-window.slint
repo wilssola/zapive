@@ -17,6 +17,7 @@ import { MenuRow } from "rows/menu.slint";
 import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
 import { AccountRow } from "rows/account.slint";
+import { ModalLayer } from "modal.slint";
 
 // Delivery ticks drawn as vectors in WhatsApp's Material shape
 // (done/done_all): the "✓" glyph comes from the emoji fallback font,
@@ -1643,7 +1644,7 @@ export component AppWindow inherits Window {
         Rectangle { width: 1px; background: Theme.border; }
 
         // Conversation pane
-        Rectangle {
+        conv-pane := Rectangle {
             background: Theme.conv-background;
 
             HomeScreen {
@@ -2624,7 +2625,7 @@ export component AppWindow inherits Window {
                                         default-color: Theme.bubble-text;
                                         default-font-size: 14px;
                                         link-color: Theme.accent;
-                                        width: min(self.preferred-width, msg-row.max-text-w);
+                                        width: min(self.preferred-width, msg-row.content-w);
                                     }
                                     stamp-in := Rectangle {
                                         width: stamp-lay.preferred-width;
@@ -3476,205 +3477,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Emoji / sticker picker above the composer
-            if root.picker-open && root.chat-open: Rectangle {
-                x: 12px;
-                y: parent.height - self.height - 74px;
-                width: 380px;
-                height: 320px;
-                background: Theme.panel;
-                border-radius: 10px;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: #00000055;
-                VerticalLayout {
-                    padding: 10px;
-                    spacing: 8px;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: start;
-                        FilterChip {
-                            label: @tr("Emoji");
-                            active: root.picker-tab == "emoji";
-                            clicked => { root.picker-tab = "emoji"; }
-                        }
-                        FilterChip {
-                            label: @tr("Stickers");
-                            active: root.picker-tab == "sticker";
-                            clicked => { root.picker-tab = "sticker"; }
-                        }
-                        FilterChip {
-                            label: @tr("Favorites");
-                            active: root.picker-tab == "fav";
-                            clicked => { root.picker-tab = "fav"; }
-                        }
-                        FilterChip {
-                            label: "GIF";
-                            active: root.picker-tab == "gif";
-                            clicked => { root.picker-tab = "gif"; }
-                        }
-                    }
-                    if root.picker-tab == "emoji": ListView {
-                        for row in root.emoji-rows: Rectangle {
-                            height: row.label != "" ? 28px : 44px;
-                            if row.label != "": Text {
-                                text: row.label;
-                                font-size: 12px;
-                                color: Theme.text-dim;
-                                x: 6px;
-                                width: parent.width - 6px;
-                                height: parent.height;
-                                vertical-alignment: center;
-                            }
-                            if row.label == "": HorizontalLayout {
-                                spacing: 2px;
-                                alignment: start;
-                                for e in row.cells: em-touch := TouchArea {
-                                    width: 42px;
-                                    height: 42px;
-                                    mouse-cursor: pointer;
-                                    Rectangle {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        border-radius: 6px;
-                                        background: em-touch.has-hover ? Theme.hover : transparent;
-                                        EmojiText {
-                                            text: e;
-                                            font-size: 24px;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    clicked => { root.emoji-pick(e); }
-                                }
-                            }
-                        }
-                    }
-                    if root.picker-tab == "gif": VerticalLayout {
-                        spacing: 6px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            gif-input := LineEdit {
-                                placeholder-text: @tr("Search GIFs");
-                                accepted => { root.gif-search(self.text); }
-                            }
-                            IconButton {
-                                icon: @image-url("../icons/search.svg");
-                                clicked => { root.gif-search(gif-input.text); }
-                            }
-                        }
-                        if root.gif-hint != "": Text {
-                            text: root.gif-hint;
-                            color: Theme.text-dim;
-                            font-size: 11px;
-                            wrap: word-wrap;
-                        }
-                        ListView {
-                        for row in root.gif-rows: Rectangle {
-                            height: 92px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                alignment: start;
-                                for cell in row: gif-touch := TouchArea {
-                                    width: 84px;
-                                    height: 84px;
-                                    mouse-cursor: pointer;
-                                    Rectangle {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        border-radius: 8px;
-                                        clip: true;
-                                        background: gif-touch.has-hover ? Theme.hover : transparent;
-                                        if cell.ready: Image {
-                                            source: cell.pic;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            image-fit: cover;
-                                        }
-                                    }
-                                    clicked => {
-                                        root.gif-send(cell.id);
-                                        root.picker-open = false;
-                                    }
-                                }
-                            }
-                        }
-                        }
-                    }
-                    if root.picker-tab == "fav" && root.fav-hint != "": Text {
-                        text: root.fav-hint;
-                        color: Theme.text-dim;
-                        font-size: 12px;
-                        wrap: word-wrap;
-                    }
-                    if root.picker-tab == "fav": ListView {
-                        for row in root.fav-rows: Rectangle {
-                            height: 92px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                alignment: start;
-                                for cell in row: fav-touch := TouchArea {
-                                    width: 84px;
-                                    height: 84px;
-                                    mouse-cursor: pointer;
-                                    Rectangle {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        border-radius: 8px;
-                                        background: fav-touch.has-hover ? Theme.hover : transparent;
-                                        if cell.ready: Image {
-                                            source: cell.pic;
-                                            width: 76px;
-                                            height: 76px;
-                                            x: 4px;
-                                            y: 4px;
-                                            image-fit: contain;
-                                        }
-                                    }
-                                    clicked => {
-                                        root.sticker-send(cell.id);
-                                        root.picker-open = false;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if root.picker-tab == "sticker": ListView {
-                        for row in root.sticker-rows: Rectangle {
-                            height: 92px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                alignment: start;
-                                for cell in row: sk-touch := TouchArea {
-                                    width: 84px;
-                                    height: 84px;
-                                    mouse-cursor: pointer;
-                                    Rectangle {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        border-radius: 8px;
-                                        background: sk-touch.has-hover ? Theme.hover : transparent;
-                                        if cell.ready: Image {
-                                            source: cell.pic;
-                                            width: 76px;
-                                            height: 76px;
-                                            x: 4px;
-                                            y: 4px;
-                                            image-fit: contain;
-                                        }
-                                    }
-                                    clicked => {
-                                        root.sticker-send(cell.id);
-                                        root.picker-open = false;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // "@" mention list above the composer.
             if root.mention-open && root.chat-open && !root.select-mode: Rectangle {
                 x: 12px;
@@ -3696,211 +3498,434 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Chat header menu, dropping from the "⋮" button.
-            if root.chat-menu-open && root.chat-open: Rectangle {
-                x: parent.width - self.width - 8px;
-                y: 50px;
-                width: 260px;
-                height: chat-menu-col.preferred-height + 12px;
-                background: Theme.panel;
-                border-radius: 10px;
-                drop-shadow-blur: 10px;
-                drop-shadow-color: #00000066;
-                chat-menu-col := VerticalLayout {
-                    padding: 6px;
-                    spacing: 1px;
-                    if root.chat-menu-sub == "": VerticalLayout {
-                        spacing: 1px;
-                        if root.current-is-group && !root.current-left: MenuRow {
-                            icon: @image-url("../icons/user-plus.svg");
-                            label: @tr("Add member");
-                            clicked => { root.menu-add-member(); }
+        }
+    }
+
+    // Emoji / sticker picker above the composer
+    picker-layer := ModalLayer {
+        open: root.picker-open && root.chat-open;
+        scrim: transparent;
+        dismiss => { root.picker-open = false; }
+        if picker-layer.mounted: Rectangle {
+            x: conv-pane.absolute-position.x - picker-layer.absolute-position.x + 12px;
+            y: conv-pane.absolute-position.y - picker-layer.absolute-position.y + conv-pane.height - self.height - 74px + (1 - picker-layer.progress) * 8px;
+            width: 380px;
+            height: 320px;
+            opacity: picker-layer.progress;
+            background: Theme.panel;
+            border-radius: 10px;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000055;
+            TouchArea { }
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    FilterChip {
+                        label: @tr("Emoji");
+                        active: root.picker-tab == "emoji";
+                        clicked => { root.picker-tab = "emoji"; }
+                    }
+                    FilterChip {
+                        label: @tr("Stickers");
+                        active: root.picker-tab == "sticker";
+                        clicked => { root.picker-tab = "sticker"; }
+                    }
+                    FilterChip {
+                        label: @tr("Favorites");
+                        active: root.picker-tab == "fav";
+                        clicked => { root.picker-tab = "fav"; }
+                    }
+                    FilterChip {
+                        label: "GIF";
+                        active: root.picker-tab == "gif";
+                        clicked => { root.picker-tab = "gif"; }
+                    }
+                }
+                if root.picker-tab == "emoji": ListView {
+                    for row in root.emoji-rows: Rectangle {
+                        height: row.label != "" ? 28px : 44px;
+                        if row.label != "": Text {
+                            text: row.label;
+                            font-size: 12px;
+                            color: Theme.text-dim;
+                            x: 6px;
+                            width: parent.width - 6px;
+                            height: parent.height;
+                            vertical-alignment: center;
                         }
-                        MenuRow {
-                            icon: @image-url("../icons/info-circle.svg");
-                            label: root.current-is-group ? @tr("Group info") : @tr("Contact info");
-                            clicked => { root.chat-menu-open = false; root.open-info(); }
-                        }
-                        MenuRow {
-                            icon: @image-url("../icons/search.svg");
-                            label: @tr("Search");
-                            clicked => { root.menu-search(); }
-                        }
-                        MenuRow {
-                            icon: @image-url("../icons/checkbox.svg");
-                            label: @tr("Select messages");
-                            clicked => { root.select-start(""); }
-                        }
-                        MenuRow {
-                            icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
-                            label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
-                            detail: root.current-mute-label;
-                            submenu: !root.current-muted;
-                            clicked => {
-                                if (root.current-muted) { root.menu-mute(0); }
-                                else { root.chat-menu-sub = "mute"; }
+                        if row.label == "": HorizontalLayout {
+                            spacing: 2px;
+                            alignment: start;
+                            for e in row.cells: em-touch := TouchArea {
+                                width: 42px;
+                                height: 42px;
+                                mouse-cursor: pointer;
+                                Rectangle {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 6px;
+                                    background: em-touch.has-hover ? Theme.hover : transparent;
+                                    EmojiText {
+                                        text: e;
+                                        font-size: 24px;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                clicked => { root.emoji-pick(e); }
                             }
-                        }
-                        if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
-                            icon: @image-url("../icons/clock-pause.svg");
-                            label: @tr("Disappearing messages");
-                            detail: root.current-ephemeral-label;
-                            submenu: true;
-                            clicked => { root.chat-menu-sub = "ephemeral"; }
-                        }
-                        MenuRow {
-                            icon: root.current-favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
-                            label: root.current-favorite ? @tr("Remove from Favorites") : @tr("Add to Favorites");
-                            clicked => { root.menu-favorite(); }
-                        }
-                        MenuRow {
-                            icon: @image-url("../icons/list-details.svg");
-                            label: @tr("Add to list");
-                            submenu: true;
-                            clicked => { root.chat-menu-sub = "lists"; }
-                        }
-                        MenuRow {
-                            icon: @image-url("../icons/download.svg");
-                            label: @tr("Export chat");
-                            clicked => { root.menu-export(); }
-                        }
-                        MenuRow {
-                            icon: @image-url("../icons/circle-x.svg");
-                            label: @tr("Close chat");
-                            clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
-                        }
-                        Rectangle { height: 1px; background: Theme.border; }
-                        MenuRow {
-                            icon: @image-url("../icons/circle-minus.svg");
-                            label: @tr("Clear chat");
-                            clicked => { root.menu-clear(); }
-                        }
-                        if root.current-is-group && !root.current-left: MenuRow {
-                            icon: @image-url("../icons/logout.svg");
-                            label: @tr("Exit group");
-                            tint: #f05d4d;
-                            clicked => { root.menu-exit-group(); }
-                        }
-                        if !root.current-is-group || root.current-left: MenuRow {
-                            icon: @image-url("../icons/trash.svg");
-                            label: @tr("Delete chat");
-                            tint: #f05d4d;
-                            clicked => { root.menu-delete-chat(); }
-                        }
-                    }
-                    if root.chat-menu-sub == "mute": VerticalLayout {
-                        spacing: 1px;
-                        MenuRow {
-                            icon: @image-url("../icons/arrow-left.svg");
-                            label: @tr("Mute notifications");
-                            clicked => { root.chat-menu-sub = ""; }
-                        }
-                        Rectangle { height: 1px; background: Theme.border; }
-                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("8 hours"); clicked => { root.menu-mute(8); } }
-                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("1 week"); clicked => { root.menu-mute(168); } }
-                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("Always"); clicked => { root.menu-mute(-1); } }
-                    }
-                    if root.chat-menu-sub == "ephemeral": VerticalLayout {
-                        spacing: 1px;
-                        MenuRow {
-                            icon: @image-url("../icons/arrow-left.svg");
-                            label: @tr("Disappearing messages");
-                            clicked => { root.chat-menu-sub = ""; }
-                        }
-                        Rectangle { height: 1px; background: Theme.border; }
-                        MenuRow {
-                            icon: root.current-ephemeral == 86400 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                            label: @tr("24 hours");
-                            clicked => { root.menu-ephemeral(86400); }
-                        }
-                        MenuRow {
-                            icon: root.current-ephemeral == 604800 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                            label: @tr("7 days");
-                            clicked => { root.menu-ephemeral(604800); }
-                        }
-                        MenuRow {
-                            icon: root.current-ephemeral == 7776000 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                            label: @tr("90 days");
-                            clicked => { root.menu-ephemeral(7776000); }
-                        }
-                        MenuRow {
-                            icon: root.current-ephemeral == 0 ? @image-url("../icons/check.svg") : @image-url("../icons/circle-x.svg");
-                            label: @tr("Off");
-                            clicked => { root.menu-ephemeral(0); }
-                        }
-                    }
-                    if root.chat-menu-sub == "lists": VerticalLayout {
-                        spacing: 1px;
-                        MenuRow {
-                            icon: @image-url("../icons/arrow-left.svg");
-                            label: @tr("Add to list");
-                            clicked => { root.chat-menu-sub = ""; }
-                        }
-                        Rectangle { height: 1px; background: Theme.border; }
-                        for lb in root.labels: MenuRow {
-                            icon: lb.active ? @image-url("../icons/check.svg") : @image-url("../icons/list-details.svg");
-                            label: lb.name;
-                            tint: lb.active ? Theme.accent : Theme.text;
-                            clicked => { root.menu-list(lb.id); }
-                        }
-                        MenuRow {
-                            icon: @image-url("../icons/plus.svg");
-                            label: @tr("New list");
-                            clicked => { root.chat-menu-open = false; root.new-list-open = true; }
                         }
                     }
                 }
-            }
-
-            // WhatsApp-style attach menu popping above the composer
-            if root.attach-open && root.chat-open: Rectangle {
-                x: 12px;
-                y: parent.height - self.height - 74px;
-                width: 220px;
-                height: menu-col.preferred-height + 16px;
-                background: Theme.panel;
-                border-radius: 10px;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: #00000055;
-                menu-col := VerticalLayout {
-                    padding: 8px;
-                    spacing: 2px;
-                    MenuRow {
-                        icon: @image-url("../icons/file-text.svg");
-                        label: @tr("Document");
-                        clicked => { root.attach-open = false; root.attach-doc(); }
+                if root.picker-tab == "gif": VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        gif-input := LineEdit {
+                            placeholder-text: @tr("Search GIFs");
+                            accepted => { root.gif-search(self.text); }
+                        }
+                        IconButton {
+                            icon: @image-url("../icons/search.svg");
+                            clicked => { root.gif-search(gif-input.text); }
+                        }
                     }
-                    MenuRow {
-                        icon: @image-url("../icons/photo.svg");
-                        label: @tr("Photos");
-                        clicked => { root.attach-open = false; root.attach-image(); }
+                    if root.gif-hint != "": Text {
+                        text: root.gif-hint;
+                        color: Theme.text-dim;
+                        font-size: 11px;
+                        wrap: word-wrap;
                     }
-                    MenuRow {
-                        icon: @image-url("../icons/music.svg");
-                        label: @tr("Audio");
-                        clicked => { root.attach-open = false; root.attach-audio(); }
+                    ListView {
+                    for row in root.gif-rows: Rectangle {
+                        height: 92px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            for cell in row: gif-touch := TouchArea {
+                                width: 84px;
+                                height: 84px;
+                                mouse-cursor: pointer;
+                                Rectangle {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 8px;
+                                    clip: true;
+                                    background: gif-touch.has-hover ? Theme.hover : transparent;
+                                    if cell.ready: Image {
+                                        source: cell.pic;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        image-fit: cover;
+                                    }
+                                }
+                                clicked => {
+                                    root.gif-send(cell.id);
+                                    root.picker-open = false;
+                                }
+                            }
+                        }
                     }
-                    MenuRow {
-                        icon: @image-url("../icons/sticker-2.svg");
-                        label: @tr("Sticker");
-                        clicked => { root.attach-open = false; root.attach-sticker(); }
+                    }
+                }
+                if root.picker-tab == "fav" && root.fav-hint != "": Text {
+                    text: root.fav-hint;
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                if root.picker-tab == "fav": ListView {
+                    for row in root.fav-rows: Rectangle {
+                        height: 92px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            for cell in row: fav-touch := TouchArea {
+                                width: 84px;
+                                height: 84px;
+                                mouse-cursor: pointer;
+                                Rectangle {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 8px;
+                                    background: fav-touch.has-hover ? Theme.hover : transparent;
+                                    if cell.ready: Image {
+                                        source: cell.pic;
+                                        width: 76px;
+                                        height: 76px;
+                                        x: 4px;
+                                        y: 4px;
+                                        image-fit: contain;
+                                    }
+                                }
+                                clicked => {
+                                    root.sticker-send(cell.id);
+                                    root.picker-open = false;
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.picker-tab == "sticker": ListView {
+                    for row in root.sticker-rows: Rectangle {
+                        height: 92px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            for cell in row: sk-touch := TouchArea {
+                                width: 84px;
+                                height: 84px;
+                                mouse-cursor: pointer;
+                                Rectangle {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 8px;
+                                    background: sk-touch.has-hover ? Theme.hover : transparent;
+                                    if cell.ready: Image {
+                                        source: cell.pic;
+                                        width: 76px;
+                                        height: 76px;
+                                        x: 4px;
+                                        y: 4px;
+                                        image-fit: contain;
+                                    }
+                                }
+                                clicked => {
+                                    root.sticker-send(cell.id);
+                                    root.picker-open = false;
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
+    // Chat header menu, dropping from the "⋮" button.
+    chat-menu-layer := ModalLayer {
+        open: root.chat-menu-open && root.chat-open;
+        scrim: transparent;
+        dismiss => { root.chat-menu-open = false; root.chat-menu-sub = ""; }
+        if chat-menu-layer.mounted: Rectangle {
+            x: conv-pane.absolute-position.x - chat-menu-layer.absolute-position.x + conv-pane.width - self.width - 8px;
+            y: conv-pane.absolute-position.y - chat-menu-layer.absolute-position.y + 50px - (1 - chat-menu-layer.progress) * 8px;
+            width: 260px;
+            height: chat-menu-col.preferred-height + 12px;
+            opacity: chat-menu-layer.progress;
+            background: Theme.panel;
+            border-radius: 10px;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000066;
+            TouchArea { }
+            chat-menu-col := VerticalLayout {
+                padding: 6px;
+                spacing: 1px;
+                if root.chat-menu-sub == "": VerticalLayout {
+                    spacing: 1px;
+                    if root.current-is-group && !root.current-left: MenuRow {
+                        icon: @image-url("../icons/user-plus.svg");
+                        label: @tr("Add member");
+                        clicked => { root.menu-add-member(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/info-circle.svg");
+                        label: root.current-is-group ? @tr("Group info") : @tr("Contact info");
+                        clicked => { root.chat-menu-open = false; root.open-info(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/search.svg");
+                        label: @tr("Search");
+                        clicked => { root.menu-search(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/checkbox.svg");
+                        label: @tr("Select messages");
+                        clicked => { root.select-start(""); }
+                    }
+                    MenuRow {
+                        icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
+                        label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
+                        detail: root.current-mute-label;
+                        submenu: !root.current-muted;
+                        clicked => {
+                            if (root.current-muted) { root.menu-mute(0); }
+                            else { root.chat-menu-sub = "mute"; }
+                        }
+                    }
+                    if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
+                        icon: @image-url("../icons/clock-pause.svg");
+                        label: @tr("Disappearing messages");
+                        detail: root.current-ephemeral-label;
+                        submenu: true;
+                        clicked => { root.chat-menu-sub = "ephemeral"; }
+                    }
+                    MenuRow {
+                        icon: root.current-favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
+                        label: root.current-favorite ? @tr("Remove from Favorites") : @tr("Add to Favorites");
+                        clicked => { root.menu-favorite(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/list-details.svg");
+                        label: @tr("Add to list");
+                        submenu: true;
+                        clicked => { root.chat-menu-sub = "lists"; }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/download.svg");
+                        label: @tr("Export chat");
+                        clicked => { root.menu-export(); }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/circle-x.svg");
+                        label: @tr("Close chat");
+                        clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+                    MenuRow {
+                        icon: @image-url("../icons/circle-minus.svg");
+                        label: @tr("Clear chat");
+                        clicked => { root.menu-clear(); }
+                    }
+                    if root.current-is-group && !root.current-left: MenuRow {
+                        icon: @image-url("../icons/logout.svg");
+                        label: @tr("Exit group");
+                        tint: #f05d4d;
+                        clicked => { root.menu-exit-group(); }
+                    }
+                    if !root.current-is-group || root.current-left: MenuRow {
+                        icon: @image-url("../icons/trash.svg");
+                        label: @tr("Delete chat");
+                        tint: #f05d4d;
+                        clicked => { root.menu-delete-chat(); }
+                    }
+                }
+                if root.chat-menu-sub == "mute": VerticalLayout {
+                    spacing: 1px;
+                    MenuRow {
+                        icon: @image-url("../icons/arrow-left.svg");
+                        label: @tr("Mute notifications");
+                        clicked => { root.chat-menu-sub = ""; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+                    MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("8 hours"); clicked => { root.menu-mute(8); } }
+                    MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("1 week"); clicked => { root.menu-mute(168); } }
+                    MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("Always"); clicked => { root.menu-mute(-1); } }
+                }
+                if root.chat-menu-sub == "ephemeral": VerticalLayout {
+                    spacing: 1px;
+                    MenuRow {
+                        icon: @image-url("../icons/arrow-left.svg");
+                        label: @tr("Disappearing messages");
+                        clicked => { root.chat-menu-sub = ""; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+                    MenuRow {
+                        icon: root.current-ephemeral == 86400 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
+                        label: @tr("24 hours");
+                        clicked => { root.menu-ephemeral(86400); }
+                    }
+                    MenuRow {
+                        icon: root.current-ephemeral == 604800 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
+                        label: @tr("7 days");
+                        clicked => { root.menu-ephemeral(604800); }
+                    }
+                    MenuRow {
+                        icon: root.current-ephemeral == 7776000 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
+                        label: @tr("90 days");
+                        clicked => { root.menu-ephemeral(7776000); }
+                    }
+                    MenuRow {
+                        icon: root.current-ephemeral == 0 ? @image-url("../icons/check.svg") : @image-url("../icons/circle-x.svg");
+                        label: @tr("Off");
+                        clicked => { root.menu-ephemeral(0); }
+                    }
+                }
+                if root.chat-menu-sub == "lists": VerticalLayout {
+                    spacing: 1px;
+                    MenuRow {
+                        icon: @image-url("../icons/arrow-left.svg");
+                        label: @tr("Add to list");
+                        clicked => { root.chat-menu-sub = ""; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+                    for lb in root.labels: MenuRow {
+                        icon: lb.active ? @image-url("../icons/check.svg") : @image-url("../icons/list-details.svg");
+                        label: lb.name;
+                        tint: lb.active ? Theme.accent : Theme.text;
+                        clicked => { root.menu-list(lb.id); }
+                    }
+                    MenuRow {
+                        icon: @image-url("../icons/plus.svg");
+                        label: @tr("New list");
+                        clicked => { root.chat-menu-open = false; root.new-list-open = true; }
+                    }
+                }
+            }
+        }
+    }
+
+    // WhatsApp-style attach menu popping above the composer
+    attach-layer := ModalLayer {
+        open: root.attach-open && root.chat-open;
+        scrim: transparent;
+        dismiss => { root.attach-open = false; }
+        if attach-layer.mounted: Rectangle {
+            x: conv-pane.absolute-position.x - attach-layer.absolute-position.x + 12px;
+            y: conv-pane.absolute-position.y - attach-layer.absolute-position.y + conv-pane.height - self.height - 74px + (1 - attach-layer.progress) * 8px;
+            width: 220px;
+            height: menu-col.preferred-height + 16px;
+            opacity: attach-layer.progress;
+            background: Theme.panel;
+            border-radius: 10px;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000055;
+            TouchArea { }
+            menu-col := VerticalLayout {
+                padding: 8px;
+                spacing: 2px;
+                MenuRow {
+                    icon: @image-url("../icons/file-text.svg");
+                    label: @tr("Document");
+                    clicked => { root.attach-open = false; root.attach-doc(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/photo.svg");
+                    label: @tr("Photos");
+                    clicked => { root.attach-open = false; root.attach-image(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/music.svg");
+                    label: @tr("Audio");
+                    clicked => { root.attach-open = false; root.attach-audio(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/sticker-2.svg");
+                    label: @tr("Sticker");
+                    clicked => { root.attach-open = false; root.attach-sticker(); }
+                }
+            }
+        }
+    }
+
     // ---------- Contact / group info ----------
-    if root.info-open: Rectangle {
-        background: #00000030;
-        TouchArea { clicked => { root.close-info(); } }
-        info-panel := Rectangle {
+    info-layer := ModalLayer {
+        open: root.info-open;
+        scrim: #00000030;
+        dismiss => { root.close-info(); }
+        if info-layer.mounted: info-panel := Rectangle {
             property <bool> media-expanded: false;
             property <bool> actions-expanded: false;
             width: min(360px, parent.width - 16px);
             height: parent.height - 16px;
-            x: parent.width - self.width - 8px;
+            x: parent.width - self.width - 8px + (1 - info-layer.progress) * self.width;
             y: 8px;
+            opacity: info-layer.progress;
             border-radius: 18px;
             border-width: 1px;
             border-color: Theme.dark ? #1c3038 : Theme.border;
@@ -4155,90 +4180,99 @@ export component AppWindow inherits Window {
     }
 
     // ---------- In-chat search panel ----------
-    if root.chat-search-open && root.chat-open: Rectangle {
-        width: 380px;
-        height: parent.height;
-        x: parent.width - self.width;
-        background: Theme.panel;
-        TouchArea { }
-        VerticalBox {
-            padding: 0;
-            spacing: 0;
-            Rectangle {
-                height: 54px;
-                background: Theme.header;
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 10px;
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        clicked => { root.chat-search-close(); }
-                    }
-                    Text {
-                        text: @tr("Search messages");
-                        color: Theme.text;
-                        font-size: 16px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/chevron-up.svg");
-                        enabled: root.chat-search-rows.length > 0;
-                        clicked => { root.chat-search-step(1); }
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/chevron-down.svg");
-                        enabled: root.chat-search-rows.length > 0;
-                        clicked => { root.chat-search-step(-1); }
-                    }
-                }
-            }
-            Rectangle {
-                height: 58px;
-                HorizontalLayout {
-                    padding: 10px;
-                    chat-search-input := LineEdit {
-                        placeholder-text: @tr("Search");
-                        init => { self.focus(); }
-                        edited => { root.chat-search-changed(self.text); }
-                        accepted => { root.chat-search-step(0); }
+    chat-search-layer := ModalLayer {
+        open: root.chat-search-open && root.chat-open;
+        scrim: transparent;
+        dismiss => { root.chat-search-close(); }
+        if chat-search-layer.mounted: Rectangle {
+            width: 380px;
+            height: parent.height;
+            x: parent.width - self.width + (1 - chat-search-layer.progress) * self.width;
+            opacity: chat-search-layer.progress;
+            background: Theme.panel;
+            TouchArea { }
+            VerticalBox {
+                padding: 0;
+                spacing: 0;
+                Rectangle {
+                    height: 54px;
+                    background: Theme.header;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        IconButton {
+                            icon: @image-url("../icons/x.svg");
+                            clicked => { root.chat-search-close(); }
+                        }
+                        Text {
+                            text: @tr("Search messages");
+                            color: Theme.text;
+                            font-size: 16px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            icon: @image-url("../icons/chevron-up.svg");
+                            enabled: root.chat-search-rows.length > 0;
+                            clicked => { root.chat-search-step(1); }
+                        }
+                        IconButton {
+                            icon: @image-url("../icons/chevron-down.svg");
+                            enabled: root.chat-search-rows.length > 0;
+                            clicked => { root.chat-search-step(-1); }
+                        }
                     }
                 }
-            }
-            if root.chat-search-count != "": Text {
-                text: root.chat-search-count;
-                color: Theme.text-dim;
-                font-size: 12px;
-                horizontal-alignment: center;
-            }
-            if chat-search-input.text == "": Text {
-                text: @tr("Search for messages in this chat");
-                color: Theme.text-dim;
-                font-size: 13px;
-                horizontal-alignment: center;
-            }
-            ListView {
-                for hit in root.chat-search-rows: HitRow {
-                    hit: hit;
-                    clicked => { root.open-hit(hit.jid, hit.id); }
+                Rectangle {
+                    height: 58px;
+                    HorizontalLayout {
+                        padding: 10px;
+                        chat-search-input := LineEdit {
+                            placeholder-text: @tr("Search");
+                            init => { self.focus(); }
+                            edited => { root.chat-search-changed(self.text); }
+                            accepted => { root.chat-search-step(0); }
+                        }
+                    }
+                }
+                if root.chat-search-count != "": Text {
+                    text: root.chat-search-count;
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+                if chat-search-input.text == "": Text {
+                    text: @tr("Search for messages in this chat");
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+                ListView {
+                    for hit in root.chat-search-rows: HitRow {
+                        hit: hit;
+                        clicked => { root.open-hit(hit.jid, hit.id); }
+                    }
                 }
             }
         }
     }
 
     // ---------- Sync progress ----------
-    if root.sync-open: Rectangle {
-        background: #00000088;
-        TouchArea { clicked => { root.sync-open = false; } }
-        Rectangle {
+    sync-layer := ModalLayer {
+        open: root.sync-open;
+        scrim: #00000088;
+        dismiss => { root.sync-open = false; }
+        if sync-layer.mounted: Rectangle {
             width: 400px;
             height: sync-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: sync-layer.progress;
+            transform-scale: 0.96 + 0.04 * sync-layer.progress;
             TouchArea { }
             sync-col := VerticalLayout {
                 padding: 22px;
@@ -4271,17 +4305,20 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Account switcher ----------
-    if root.account-menu-open && root.screen == "main": Rectangle {
-        TouchArea { clicked => { root.account-menu-open = false; } }
-        Rectangle {
+    account-layer := ModalLayer {
+        open: root.account-menu-open && root.screen == "main";
+        scrim: transparent;
+        dismiss => { root.account-menu-open = false; }
+        if account-layer.mounted: Rectangle {
             x: 64px;
-            y: parent.height - self.height - 10px;
+            y: parent.height - self.height - 10px + (1 - account-layer.progress) * 8px;
             width: 300px;
             height: account-col.preferred-height;
             background: Theme.panel;
             border-radius: 10px;
             drop-shadow-blur: 10px;
             drop-shadow-color: #00000066;
+            opacity: account-layer.progress;
             TouchArea { }
             account-col := VerticalLayout {
                 padding: 6px;
@@ -4338,16 +4375,19 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Confirm dialog ----------
-    if root.confirm-open: Rectangle {
-        background: #00000088;
-        TouchArea { clicked => { root.confirm-open = false; } }
-        Rectangle {
+    confirm-layer := ModalLayer {
+        open: root.confirm-open;
+        scrim: #00000088;
+        dismiss => { root.confirm-open = false; }
+        if confirm-layer.mounted: Rectangle {
             width: 400px;
             height: confirm-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: confirm-layer.progress;
+            transform-scale: 0.96 + 0.04 * confirm-layer.progress;
             TouchArea { }
             confirm-col := VerticalLayout {
                 padding: 22px;
@@ -4391,16 +4431,19 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Share group history ----------
-    if root.share-open: Rectangle {
-        background: #00000088;
-        TouchArea { clicked => { root.share-cancel(); } }
-        Rectangle {
+    share-layer := ModalLayer {
+        open: root.share-open;
+        scrim: #00000088;
+        dismiss => { root.share-cancel(); }
+        if share-layer.mounted: Rectangle {
             width: 500px;
             height: share-col.preferred-height + 48px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: share-layer.progress;
+            transform-scale: 0.96 + 0.04 * share-layer.progress;
             TouchArea { }
             share-col := VerticalLayout {
                 padding: 24px;
@@ -4468,16 +4511,19 @@ export component AppWindow inherits Window {
     }
 
     // ---------- New list ----------
-    if root.new-list-open: Rectangle {
-        background: #00000088;
-        TouchArea { clicked => { root.new-list-open = false; } }
-        Rectangle {
+    new-list-layer := ModalLayer {
+        open: root.new-list-open;
+        scrim: #00000088;
+        dismiss => { root.new-list-open = false; }
+        if new-list-layer.mounted: Rectangle {
             width: 380px;
             height: list-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: new-list-layer.progress;
+            transform-scale: 0.96 + 0.04 * new-list-layer.progress;
             TouchArea { }
             list-col := VerticalLayout {
                 padding: 22px;
@@ -4526,16 +4572,19 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Add member ----------
-    if root.member-pick-open: Rectangle {
-        background: #000000aa;
-        TouchArea { clicked => { root.member-pick-open = false; } }
-        Rectangle {
+    member-pick-layer := ModalLayer {
+        open: root.member-pick-open;
+        scrim: #000000aa;
+        dismiss => { root.member-pick-open = false; }
+        if member-pick-layer.mounted: Rectangle {
             width: 420px;
             height: 560px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: member-pick-layer.progress;
+            transform-scale: 0.96 + 0.04 * member-pick-layer.progress;
             TouchArea { }
             VerticalBox {
                 padding: 18px;
@@ -4587,117 +4636,127 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Status viewer ----------
-    if root.sv-open: Rectangle {
-        background: #000000f0;
-        TouchArea { clicked => { root.status-next(); } }
-        VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
-            HorizontalLayout {
-                spacing: 10px;
-                Text {
-                    text: root.sv-name;
-                    color: white;
-                    font-size: 16px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: root.sv-time + "  ·  " + root.sv-index + "/" + root.sv-count;
-                    color: #b0b8bd;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                IconButton {
-                    icon: @image-url("../icons/x.svg");
-                    clicked => { root.status-close(); }
-                }
-            }
-            Rectangle {
-                vertical-stretch: 1;
-                if root.sv-has-image: Image {
-                    source: root.sv-image;
-                    width: parent.width * 0.9;
-                    height: parent.height * 0.94;
-                    x: parent.width * 0.05;
-                    y: parent.height * 0.03;
-                    image-fit: contain;
-                }
-                if root.sv-is-video: Rectangle {
-                    width: 72px;
-                    height: 72px;
-                    border-radius: 36px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    background: root.sv-video-ready ? #000000a0 : #00000050;
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        enabled: root.sv-video-ready;
-                        clicked => { root.status-play(); }
-                    }
-                    Image {
-                        source: @image-url("../icons/player-play.svg");
-                        colorize: white;
-                        width: 34px;
-                        height: 34px;
-                        x: 21px;
-                        y: 19px;
-                    }
-                }
-                if !root.sv-has-image: Rectangle {
-                    width: parent.width * 0.7;
-                    height: parent.height * 0.7;
-                    x: parent.width * 0.15;
-                    y: parent.height * 0.15;
-                    background: Theme.accent;
-                    border-radius: 14px;
+    sv-layer := ModalLayer {
+        open: root.sv-open;
+        scrim: #000000f0;
+        dismissible: false;
+        if sv-layer.mounted: Rectangle {
+            width: 100%;
+            height: 100%;
+            opacity: sv-layer.progress;
+            TouchArea { clicked => { root.status-next(); } }
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 10px;
                     Text {
-                        text: root.sv-text;
+                        text: root.sv-name;
                         color: white;
-                        font-size: 24px;
-                        wrap: word-wrap;
-                        width: parent.width - 60px;
-                        x: 30px;
-                        height: parent.height;
-                        horizontal-alignment: center;
+                        font-size: 16px;
+                        font-weight: 700;
                         vertical-alignment: center;
                     }
+                    Text {
+                        text: root.sv-time + "  ·  " + root.sv-index + "/" + root.sv-count;
+                        color: #b0b8bd;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/x.svg");
+                        clicked => { root.status-close(); }
+                    }
                 }
-                IconButton {
-                    icon: @image-url("../icons/chevron-left.svg");
-                    x: 4px;
-                    y: (parent.height - self.height) / 2;
-                    clicked => { root.status-prev(); }
+                Rectangle {
+                    vertical-stretch: 1;
+                    if root.sv-has-image: Image {
+                        source: root.sv-image;
+                        width: parent.width * 0.9;
+                        height: parent.height * 0.94;
+                        x: parent.width * 0.05;
+                        y: parent.height * 0.03;
+                        image-fit: contain;
+                    }
+                    if root.sv-is-video: Rectangle {
+                        width: 72px;
+                        height: 72px;
+                        border-radius: 36px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        background: root.sv-video-ready ? #000000a0 : #00000050;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            enabled: root.sv-video-ready;
+                            clicked => { root.status-play(); }
+                        }
+                        Image {
+                            source: @image-url("../icons/player-play.svg");
+                            colorize: white;
+                            width: 34px;
+                            height: 34px;
+                            x: 21px;
+                            y: 19px;
+                        }
+                    }
+                    if !root.sv-has-image: Rectangle {
+                        width: parent.width * 0.7;
+                        height: parent.height * 0.7;
+                        x: parent.width * 0.15;
+                        y: parent.height * 0.15;
+                        background: Theme.accent;
+                        border-radius: 14px;
+                        Text {
+                            text: root.sv-text;
+                            color: white;
+                            font-size: 24px;
+                            wrap: word-wrap;
+                            width: parent.width - 60px;
+                            x: 30px;
+                            height: parent.height;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/chevron-left.svg");
+                        x: 4px;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.status-prev(); }
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/chevron-right.svg");
+                        x: parent.width - self.width - 4px;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.status-next(); }
+                    }
                 }
-                IconButton {
-                    icon: @image-url("../icons/chevron-right.svg");
-                    x: parent.width - self.width - 4px;
-                    y: (parent.height - self.height) / 2;
-                    clicked => { root.status-next(); }
+                if root.sv-has-image && root.sv-text != "": Text {
+                    text: root.sv-text;
+                    color: white;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
-            }
-            if root.sv-has-image && root.sv-text != "": Text {
-                text: root.sv-text;
-                color: white;
-                font-size: 14px;
-                horizontal-alignment: center;
-                wrap: word-wrap;
             }
         }
     }
 
-    // ---------- Forward picker ----------
-    if root.alert-open: Rectangle {
-        background: #000000aa;
-        TouchArea { }
-        Rectangle {
+    // ---------- Blocking alert ----------
+    alert-layer := ModalLayer {
+        open: root.alert-open;
+        scrim: #000000aa;
+        dismissible: false;
+        if alert-layer.mounted: Rectangle {
             width: 380px;
             height: alert-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: alert-layer.progress;
+            transform-scale: 0.96 + 0.04 * alert-layer.progress;
             alert-col := VerticalLayout {
                 padding: 22px;
                 spacing: 12px;
@@ -4764,16 +4823,19 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.reactions-open: Rectangle {
-        background: #00000066;
-        TouchArea { clicked => { root.reactions-open = false; } }
-        Rectangle {
+    reactions-layer := ModalLayer {
+        open: root.reactions-open;
+        scrim: #00000066;
+        dismiss => { root.reactions-open = false; }
+        if reactions-layer.mounted: Rectangle {
             width: 380px;
             height: min(440px, 108px + root.reaction-rows.length * 56px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: reactions-layer.progress;
+            transform-scale: 0.96 + 0.04 * reactions-layer.progress;
             TouchArea { }
             VerticalBox {
                 padding: 18px;
@@ -4843,16 +4905,20 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.forward-open: Rectangle {
-        background: #000000aa;
-        TouchArea { clicked => { root.forward-open = false; } }
-        Rectangle {
+    // ---------- Forward picker ----------
+    forward-layer := ModalLayer {
+        open: root.forward-open;
+        scrim: #000000aa;
+        dismiss => { root.forward-open = false; }
+        if forward-layer.mounted: Rectangle {
             width: 420px;
             height: 540px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
+            opacity: forward-layer.progress;
+            transform-scale: 0.96 + 0.04 * forward-layer.progress;
             TouchArea { }
             VerticalBox {
                 padding: 18px;
@@ -4969,10 +5035,11 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Settings overlay ----------
-    if root.settings-open: Rectangle {
-        background: #000000aa;
-        TouchArea { clicked => { root.settings-open = false; } }
-        Rectangle {
+    settings-layer := ModalLayer {
+        open: root.settings-open;
+        scrim: #000000aa;
+        dismiss => { root.settings-open = false; }
+        if settings-layer.mounted: Rectangle {
             width: min(500px, parent.width - 32px);
             // Never taller than the window: the body scrolls instead, so
             // the sections can keep growing.
@@ -4984,6 +5051,8 @@ export component AppWindow inherits Window {
             drop-shadow-blur: 24px;
             drop-shadow-color: #00000066;
             clip: true;
+            opacity: settings-layer.progress;
+            transform-scale: 0.96 + 0.04 * settings-layer.progress;
             TouchArea { }
             VerticalLayout {
                 padding: 0;
@@ -5290,47 +5359,53 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Send-image preview ----------
-    if root.preview-open: Rectangle {
-        background: #000000d9;
-        TouchArea { }
-        VerticalLayout {
-            padding: 28px;
-            spacing: 14px;
-            HorizontalLayout {
-                alignment: start;
-                IconButton {
-                    icon: @image-url("../icons/x.svg");
-                    clicked => { root.cancel-send-image(); }
-                }
-            }
-            Rectangle {
-                vertical-stretch: 1;
-                Image {
-                    source: root.preview-image;
-                    width: parent.width * 0.9;
-                    height: parent.height * 0.96;
-                    x: parent.width * 0.05;
-                    y: parent.height * 0.02;
-                    image-fit: contain;
-                }
-            }
-            HorizontalLayout {
-                alignment: center;
-                spacing: 10px;
-                preview-caption := LineEdit {
-                    width: 420px;
-                    placeholder-text: @tr("Add a caption");
-                    accepted => {
-                        root.confirm-send-image(self.text);
-                        self.text = "";
+    preview-layer := ModalLayer {
+        open: root.preview-open;
+        scrim: #000000d9;
+        dismissible: false;
+        if preview-layer.mounted: Rectangle {
+            width: 100%;
+            height: 100%;
+            opacity: preview-layer.progress;
+            VerticalLayout {
+                padding: 28px;
+                spacing: 14px;
+                HorizontalLayout {
+                    alignment: start;
+                    IconButton {
+                        icon: @image-url("../icons/x.svg");
+                        clicked => { root.cancel-send-image(); }
                     }
                 }
-                Button {
-                    text: @tr("Send");
-                    primary: true;
-                    clicked => {
-                        root.confirm-send-image(preview-caption.text);
-                        preview-caption.text = "";
+                Rectangle {
+                    vertical-stretch: 1;
+                    Image {
+                        source: root.preview-image;
+                        width: parent.width * 0.9;
+                        height: parent.height * 0.96;
+                        x: parent.width * 0.05;
+                        y: parent.height * 0.02;
+                        image-fit: contain;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 10px;
+                    preview-caption := LineEdit {
+                        width: 420px;
+                        placeholder-text: @tr("Add a caption");
+                        accepted => {
+                            root.confirm-send-image(self.text);
+                            self.text = "";
+                        }
+                    }
+                    Button {
+                        text: @tr("Send");
+                        primary: true;
+                        clicked => {
+                            root.confirm-send-image(preview-caption.text);
+                            preview-caption.text = "";
+                        }
                     }
                 }
             }
@@ -5492,251 +5567,264 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Video player ----------
-    if root.video-open: Rectangle {
-        background: #000000f2;
-        // The bar, the close button and the pointer fade out while a clip
-        // plays untouched, and any movement brings them back.
-        property <bool> chrome: true;
-        property <bool> show-chrome: !root.video-is-clip || !root.video-playing
-            || self.chrome || bar-hover.has-hover || top-hover.has-hover || seek-area.pressed
-            || vol-area.pressed;
-        idle := Timer {
-            interval: 2.6s;
-            running: root.video-is-clip && root.video-playing;
-            triggered => { parent.chrome = false; }
-        }
-        stage := TouchArea {
-            mouse-cursor: parent.show-chrome ? MouseCursor.default : MouseCursor.none;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.move) {
-                    parent.chrome = true;
-                    idle.running = false;
-                    idle.running = root.video-is-clip && root.video-playing;
-                }
+    video-layer := ModalLayer {
+        open: root.video-open;
+        scrim: #000000f2;
+        dismissible: false;
+        if video-layer.mounted: Rectangle {
+            width: 100%;
+            height: 100%;
+            opacity: video-layer.progress;
+            // The bar, the close button and the pointer fade out while a clip
+            // plays untouched, and any movement brings them back.
+            property <bool> chrome: true;
+            property <bool> show-chrome: !root.video-is-clip || !root.video-playing
+                || self.chrome || bar-hover.has-hover || top-hover.has-hover || seek-area.pressed
+                || vol-area.pressed;
+            idle := Timer {
+                interval: 2.6s;
+                running: root.video-is-clip && root.video-playing;
+                triggered => { parent.chrome = false; }
             }
-            clicked => {
-                if (root.video-is-clip) { root.video-toggle(); }
-                else { root.close-video(); }
-            }
-        }
-        keys := FocusScope {
-            init => { self.focus(); }
-            key-pressed(event) => {
-                if (event.text == Key.Escape) { root.close-video(); return accept; }
-                if (!root.video-is-clip) { return reject; }
-                if (event.text == " " || event.text == "k") { root.video-toggle(); return accept; }
-                if (event.text == Key.LeftArrow) { root.video-seek-by(-5); return accept; }
-                if (event.text == Key.RightArrow) { root.video-seek-by(5); return accept; }
-                if (event.text == Key.UpArrow) { root.video-set-volume(min(1, root.video-volume + 0.1)); return accept; }
-                if (event.text == Key.DownArrow) { root.video-set-volume(max(0, root.video-volume - 0.1)); return accept; }
-                if (event.text == "m") { root.video-mute-toggle(); return accept; }
-                reject
-            }
-        }
-        // Fit inside the window both ways (a tall clip used to run off
-        // the bottom), and never blow a small one up past 3x.
-        property <float> ratio: root.video-w / max(root.video-h, 1);
-        property <length> fit-w: min(self.width - 32px, (self.height - 32px) * self.ratio,
-            root.video-w * 3px);
-        Image {
-            source: root.video-frame;
-            width: parent.fit-w;
-            height: self.width / max(parent.ratio, 0.01);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            image-fit: contain;
-        }
-        if root.video-is-clip && root.video-loading: Rectangle {
-            width: loading-text.preferred-width + 28px;
-            height: 34px;
-            border-radius: 17px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: #000000b0;
-            loading-text := Text {
-                text: @tr("Loading…");
-                color: white;
-                font-size: 13px;
-                width: parent.width;
-                height: parent.height;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-        if root.video-is-clip && !root.video-playing && !root.video-loading: Rectangle {
-            width: 76px;
-            height: 76px;
-            border-radius: 38px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: #000000a8;
-            Image {
-                source: root.video-ended
-                    ? @image-url("../icons/rotate-clockwise.svg")
-                    : @image-url("../icons/player-play.svg");
-                colorize: white;
-                width: 36px;
-                height: 36px;
-                x: (parent.width - self.width) / 2 + (root.video-ended ? 0 : 2px);
-                y: (parent.height - self.height) / 2;
-            }
-        }
-
-        // Top: save and close.
-        top-hover := TouchArea {
-            visible: parent.show-chrome;
-            height: 64px;
-            y: 0;
-            clicked => { if (root.video-is-clip) { root.video-toggle(); } }
-            Rectangle {
-                background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
-            }
-            HorizontalLayout {
-                padding: 12px;
-                spacing: 6px;
-                alignment: end;
-                if root.video-is-clip: IconButton {
-                    icon: @image-url("../icons/download.svg");
-                    tint: white;
-                    clicked => { root.video-save(); }
-                }
-                IconButton {
-                    icon: @image-url("../icons/x.svg");
-                    tint: white;
-                    clicked => { root.close-video(); }
-                }
-            }
-        }
-
-        // Bottom: transport.
-        bar-hover := TouchArea {
-            visible: root.video-is-clip && parent.show-chrome;
-            height: 84px;
-            y: parent.height - self.height;
-            Rectangle {
-                background: @linear-gradient(180deg, #00000000 0%, #000000d0 100%);
-            }
-            // Seek bar: a press jumps, a drag scrubs.
-            seek-area := TouchArea {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                height: 20px;
-                mouse-cursor: pointer;
-                property <float> at: 0;
-                function pick() {
-                    self.at = max(0, min(1, self.mouse-x / self.width));
-                    root.video-seek(self.at);
-                }
+            stage := TouchArea {
+                mouse-cursor: parent.show-chrome ? MouseCursor.default : MouseCursor.none;
                 pointer-event(e) => {
-                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
-                }
-                moved => { if (self.pressed) { self.pick(); } }
-                property <float> shown: self.pressed ? self.at : root.video-progress;
-                Rectangle {
-                    y: (parent.height - self.height) / 2;
-                    height: seek-area.has-hover || seek-area.pressed ? 6px : 4px;
-                    border-radius: self.height / 2;
-                    background: #ffffff40;
-                    Rectangle {
-                        x: 0;
-                        width: parent.width * seek-area.shown;
-                        border-radius: parent.border-radius;
-                        background: Theme.accent;
+                    if (e.kind == PointerEventKind.move) {
+                        parent.chrome = true;
+                        idle.running = false;
+                        idle.running = root.video-is-clip && root.video-playing;
                     }
                 }
-                Rectangle {
-                    visible: seek-area.has-hover || seek-area.pressed;
-                    width: 14px;
-                    height: 14px;
-                    border-radius: 7px;
-                    background: white;
-                    x: parent.width * seek-area.shown - self.width / 2;
+                clicked => {
+                    if (root.video-is-clip) { root.video-toggle(); }
+                    else { root.close-video(); }
+                }
+            }
+            keys := FocusScope {
+                init => { self.focus(); }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) { root.close-video(); return accept; }
+                    if (!root.video-is-clip) { return reject; }
+                    if (event.text == " " || event.text == "k") { root.video-toggle(); return accept; }
+                    if (event.text == Key.LeftArrow) { root.video-seek-by(-5); return accept; }
+                    if (event.text == Key.RightArrow) { root.video-seek-by(5); return accept; }
+                    if (event.text == Key.UpArrow) { root.video-set-volume(min(1, root.video-volume + 0.1)); return accept; }
+                    if (event.text == Key.DownArrow) { root.video-set-volume(max(0, root.video-volume - 0.1)); return accept; }
+                    if (event.text == "m") { root.video-mute-toggle(); return accept; }
+                    reject
+                }
+            }
+            // Fit inside the window both ways (a tall clip used to run off
+            // the bottom), and never blow a small one up past 3x.
+            property <float> ratio: root.video-w / max(root.video-h, 1);
+            property <length> fit-w: min(self.width - 32px, (self.height - 32px) * self.ratio,
+                root.video-w * 3px);
+            Image {
+                source: root.video-frame;
+                width: parent.fit-w;
+                height: self.width / max(parent.ratio, 0.01);
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                image-fit: contain;
+            }
+            if root.video-is-clip && root.video-loading: Rectangle {
+                width: loading-text.preferred-width + 28px;
+                height: 34px;
+                border-radius: 17px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: #000000b0;
+                loading-text := Text {
+                    text: @tr("Loading…");
+                    color: white;
+                    font-size: 13px;
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            if root.video-is-clip && !root.video-playing && !root.video-loading: Rectangle {
+                width: 76px;
+                height: 76px;
+                border-radius: 38px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: #000000a8;
+                Image {
+                    source: root.video-ended
+                        ? @image-url("../icons/rotate-clockwise.svg")
+                        : @image-url("../icons/player-play.svg");
+                    colorize: white;
+                    width: 36px;
+                    height: 36px;
+                    x: (parent.width - self.width) / 2 + (root.video-ended ? 0 : 2px);
                     y: (parent.height - self.height) / 2;
                 }
             }
-            HorizontalLayout {
-                x: 12px;
-                y: 40px;
-                width: parent.width - 24px;
-                height: 36px;
-                spacing: 10px;
-                IconButton {
-                    icon: root.video-ended
-                        ? @image-url("../icons/rotate-clockwise.svg")
-                        : (root.video-playing
-                            ? @image-url("../icons/player-pause.svg")
-                            : @image-url("../icons/player-play.svg"));
-                    tint: white;
-                    clicked => { root.video-toggle(); }
+
+            // Top: save and close.
+            top-hover := TouchArea {
+                visible: parent.show-chrome;
+                height: 64px;
+                y: 0;
+                clicked => { if (root.video-is-clip) { root.video-toggle(); } }
+                Rectangle {
+                    background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
                 }
-                Text {
-                    text: root.video-pos-label + " / " + root.video-duration-label;
-                    color: white;
-                    font-size: 13px;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    padding: 12px;
+                    spacing: 6px;
+                    alignment: end;
+                    if root.video-is-clip: IconButton {
+                        icon: @image-url("../icons/download.svg");
+                        tint: white;
+                        clicked => { root.video-save(); }
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/x.svg");
+                        tint: white;
+                        clicked => { root.close-video(); }
+                    }
                 }
-                Rectangle { horizontal-stretch: 1; }
-                IconButton {
-                    icon: root.video-muted || root.video-volume <= 0
-                        ? @image-url("../icons/volume-off.svg")
-                        : @image-url("../icons/volume.svg");
-                    tint: white;
-                    clicked => { root.video-mute-toggle(); }
+            }
+
+            // Bottom: transport.
+            bar-hover := TouchArea {
+                visible: root.video-is-clip && parent.show-chrome;
+                height: 84px;
+                y: parent.height - self.height;
+                Rectangle {
+                    background: @linear-gradient(180deg, #00000000 0%, #000000d0 100%);
                 }
-                vol-area := TouchArea {
-                    width: 90px;
+                // Seek bar: a press jumps, a drag scrubs.
+                seek-area := TouchArea {
+                    x: 20px;
+                    y: 18px;
+                    width: parent.width - 40px;
+                    height: 20px;
                     mouse-cursor: pointer;
+                    property <float> at: 0;
                     function pick() {
-                        root.video-set-volume(max(0, min(1, self.mouse-x / self.width)));
+                        self.at = max(0, min(1, self.mouse-x / self.width));
+                        root.video-seek(self.at);
                     }
                     pointer-event(e) => {
                         if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
                     }
                     moved => { if (self.pressed) { self.pick(); } }
+                    property <float> shown: self.pressed ? self.at : root.video-progress;
                     Rectangle {
                         y: (parent.height - self.height) / 2;
-                        height: 4px;
-                        border-radius: 2px;
+                        height: seek-area.has-hover || seek-area.pressed ? 6px : 4px;
+                        border-radius: self.height / 2;
                         background: #ffffff40;
                         Rectangle {
                             x: 0;
-                            width: parent.width * (root.video-muted ? 0 : root.video-volume);
-                            border-radius: 2px;
-                            background: white;
+                            width: parent.width * seek-area.shown;
+                            border-radius: parent.border-radius;
+                            background: Theme.accent;
                         }
                     }
                     Rectangle {
-                        width: 12px;
-                        height: 12px;
-                        border-radius: 6px;
+                        visible: seek-area.has-hover || seek-area.pressed;
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 7px;
                         background: white;
-                        x: parent.width * (root.video-muted ? 0 : root.video-volume) - self.width / 2;
+                        x: parent.width * seek-area.shown - self.width / 2;
                         y: (parent.height - self.height) / 2;
                     }
                 }
-                Rectangle { width: 4px; }
+                HorizontalLayout {
+                    x: 12px;
+                    y: 40px;
+                    width: parent.width - 24px;
+                    height: 36px;
+                    spacing: 10px;
+                    IconButton {
+                        icon: root.video-ended
+                            ? @image-url("../icons/rotate-clockwise.svg")
+                            : (root.video-playing
+                                ? @image-url("../icons/player-pause.svg")
+                                : @image-url("../icons/player-play.svg"));
+                        tint: white;
+                        clicked => { root.video-toggle(); }
+                    }
+                    Text {
+                        text: root.video-pos-label + " / " + root.video-duration-label;
+                        color: white;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    IconButton {
+                        icon: root.video-muted || root.video-volume <= 0
+                            ? @image-url("../icons/volume-off.svg")
+                            : @image-url("../icons/volume.svg");
+                        tint: white;
+                        clicked => { root.video-mute-toggle(); }
+                    }
+                    vol-area := TouchArea {
+                        width: 90px;
+                        mouse-cursor: pointer;
+                        function pick() {
+                            root.video-set-volume(max(0, min(1, self.mouse-x / self.width)));
+                        }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
+                        }
+                        moved => { if (self.pressed) { self.pick(); } }
+                        Rectangle {
+                            y: (parent.height - self.height) / 2;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: #ffffff40;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * (root.video-muted ? 0 : root.video-volume);
+                                border-radius: 2px;
+                                background: white;
+                            }
+                        }
+                        Rectangle {
+                            width: 12px;
+                            height: 12px;
+                            border-radius: 6px;
+                            background: white;
+                            x: parent.width * (root.video-muted ? 0 : root.video-volume) - self.width / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                    Rectangle { width: 4px; }
+                }
             }
         }
     }
 
     // ---------- Lightbox ----------
-    if root.lightbox-open: Rectangle {
-        background: #000000e6;
-        TouchArea { clicked => { root.lightbox-open = false; } }
-        Image {
-            source: root.lightbox-image;
-            width: parent.width * 0.92;
-            height: parent.height * 0.92;
-            x: parent.width * 0.04;
-            y: parent.height * 0.04;
-            image-fit: contain;
-        }
-        IconButton {
-            icon: @image-url("../icons/x.svg");
-            x: parent.width - self.width - 16px;
-            y: 16px;
-            clicked => { root.lightbox-open = false; }
+    lightbox-layer := ModalLayer {
+        open: root.lightbox-open;
+        scrim: #000000e6;
+        dismiss => { root.lightbox-open = false; }
+        if lightbox-layer.mounted: Rectangle {
+            width: 100%;
+            height: 100%;
+            opacity: lightbox-layer.progress;
+            Image {
+                source: root.lightbox-image;
+                width: parent.width * 0.92;
+                height: parent.height * 0.92;
+                x: parent.width * 0.04;
+                y: parent.height * 0.04;
+                image-fit: contain;
+            }
+            IconButton {
+                icon: @image-url("../icons/x.svg");
+                x: parent.width - self.width - 16px;
+                y: 16px;
+                clicked => { root.lightbox-open = false; }
+            }
         }
     }
     }
