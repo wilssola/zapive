@@ -67,32 +67,35 @@ pub fn register_app_id(_icon_path: &str) {}
 // the app icon and works inside the Flatpak sandbox (where notify-send may
 // not exist). notify-send stays as the fallback.
 pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
-    let mut notification = notify_rust::Notification::new()
+    let mut notification = notify_rust::Notification::new();
+    notification
         .summary(title)
         .body(body)
         .appname("Zapive")
         .icon("io.github.wilssola.Zapive")
         .hint(notify_rust::Hint::DesktopEntry("io.github.wilssola.Zapive".into()));
     if let Some(path) = payload.thumbnail.as_deref() {
-        notification = notification.image_path(path.to_string_lossy());
+        notification.image_path(&path.to_string_lossy());
     }
     if let Some(token) = payload.token {
         if payload.play {
-            notification = notification.action(&format!("play:{token}"), crate::i18n::t("notify.play"));
+            notification.action(&format!("play:{token}"), &crate::i18n::t("notify.play"));
         }
         if payload.reply {
-            notification = notification.action(&format!("reply:{token}"), crate::i18n::t("notify.reply"));
+            notification.action(&format!("reply:{token}"), &crate::i18n::t("notify.reply"));
         }
         std::thread::spawn(move || {
             let Ok(handle) = notification.show() else { return };
-            if let Ok(notify_rust::NotificationResponse::Action(action)) = handle.wait_for_response() {
-                if let Some((action, token)) = action.split_once(':') {
-                    let token = token.to_string();
-                    if action == "play" {
-                        crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+            let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
+                if let notify_rust::NotificationResponse::Action(action) = response {
+                    if let Some((action, token)) = action.split_once(':') {
+                        let token = token.to_string();
+                        if action == "play" {
+                            crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+                        }
                     }
                 }
-            }
+            });
         });
     } else {
         let sent = notification.show().is_ok();
