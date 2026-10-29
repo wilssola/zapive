@@ -9788,7 +9788,7 @@ dependencies = [
 
 [[package]]
 name = "zapive"
-version = "0.22.1"
+version = "0.22.2"
 dependencies = [
  "ab_glyph",
  "aes-gcm 0.10.3",
