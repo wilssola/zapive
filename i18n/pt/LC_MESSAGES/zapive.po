@@ -351,6 +351,12 @@ msgstr "Play"
 msgid "notify.newMessage"
 msgstr "New message"
 
+msgid "Show notifications"
+msgstr "Mostrar notificações"
+
+msgid "When turned off, no banners appear for messages or calls. Unread counts still update."
+msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
+
 msgid "settings.notifyPreviews"
 msgstr "Show message previews in notifications"
 

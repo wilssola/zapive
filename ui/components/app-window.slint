@@ -178,6 +178,7 @@ export component AppWindow inherits Window {
     preferred-height: 700px;
     in property <bool> native-backdrop: false;
     in-out property <string> theme-style: "glass";
+    in-out property <bool> notifications: true;
     in-out property <bool> notify-previews: false;
     in-out property <bool> blur-names: false;
     in-out property <bool> blur-photos: false;
@@ -185,6 +186,7 @@ export component AppWindow inherits Window {
     in-out property <bool> blur-media: false;
     in property <bool> window-active: true;
     callback style-changed(string);
+    callback notifications-changed(bool);
     callback notify-previews-changed(bool);
     callback privacy-blur-changed(string, bool);
     // Glass only while the OS backdrop is live and the window has focus;
@@ -5657,6 +5659,17 @@ export component AppWindow inherits Window {
                                     on: root.blur-media;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.privacy-blur-changed("media", !root.blur-media); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Show notifications");
+                                detail: @tr("When turned off, no banners appear for messages or calls. Unread counts still update.");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("Show notifications");
+                                    on: root.notifications;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.notifications-changed(!root.notifications); }
                                 }
                             }
                             SettingsRow {

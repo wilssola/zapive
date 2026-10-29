@@ -199,6 +199,7 @@ pub struct Bridge {
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String, String)>,
     notify_queued: bool,
+    notifications: bool,
     notify_previews: bool,
     notify_tokens: HashMap<String, NotificationToken>,
     notification_thumbnails: HashMap<String, std::path::PathBuf>,
@@ -631,6 +632,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        notifications: true,
         notify_previews: false,
         notify_tokens: HashMap::new(),
         notification_thumbnails: HashMap::new(),
@@ -726,6 +728,7 @@ fn wire_callbacks(ui: &AppWindow) {
         let style = style.to_string();
         defer(move |b| b.handle_style(&style));
     });
+    ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
     ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
     ui.on_privacy_blur_changed(|category, enabled| {
         let category = category.to_string();
@@ -1429,6 +1432,9 @@ impl Bridge {
             self.video_volume = volume.clamp(0.0, 1.0);
         }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
+        // On unless turned off, so existing installs keep their banners.
+        self.notifications = vault.setting_get("notifications").as_deref() != Some("0");
+        self.ui.set_notifications(self.notifications);
         self.notify_previews = vault.setting_get("notify_previews").as_deref() == Some("1");
         self.ui.set_notify_previews(self.notify_previews);
         self.ui.set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
@@ -1493,6 +1499,18 @@ impl Bridge {
         }
         #[cfg(windows)]
         crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
+    }
+
+    fn handle_notifications(&mut self, enabled: bool) {
+        self.notifications = enabled;
+        self.ui.set_notifications(enabled);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("notifications", if enabled { "1" } else { "0" });
+        }
+        // Drop whatever is still waiting to flush.
+        if !enabled {
+            self.clear_notification_sensitive_state();
+        }
     }
 
     fn handle_notify_previews(&mut self, enabled: bool) {
@@ -5571,7 +5589,10 @@ impl Bridge {
         } else {
             "call.incomingVoice"
         });
-        crate::platform::toast(&name, &detail, crate::platform::ToastPayload::default());
+        // The ring and the call window stay; only the banner obeys the setting.
+        if self.notifications {
+            crate::platform::toast(&name, &detail, crate::platform::ToastPayload::default());
+        }
         // Nobody home: stop ringing and file it as missed.
         let id = id.to_string();
         self.once(RING_TIMEOUT_MS, move |b| b.ring_timeout(&id));
@@ -7594,6 +7615,9 @@ impl Bridge {
     // ---- notifications ----
 
     fn push_notification(&mut self, title: String, text: String, jid: String, msg_id: String) {
+        if !self.notifications {
+            return;
+        }
         self.notify_queue.push((title, text, jid, msg_id));
         if !self.notify_queued {
             self.notify_queued = true;
