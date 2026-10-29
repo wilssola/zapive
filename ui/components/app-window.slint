@@ -171,6 +171,86 @@ component InfoAction inherits TouchArea {
     }
 }
 
+component TypingBubbles inherits Rectangle {
+    in property <[MemberItem]> members;
+    in property <int> extra;
+    in property <bool> privacy-blurred;
+    property <int> avatar-count: min(root.members.length, 5) + (root.extra > 0 ? 1 : 0);
+    property <int> bounce-phase: 0;
+    width: root.avatar-count * 22px + 54px;
+    height: 32px;
+    Timer {
+        interval: 160ms;
+        running: root.members.length > 0;
+        triggered => { root.bounce-phase = mod(root.bounce-phase + 1, 8); }
+    }
+    for member[index] in root.members: Rectangle {
+        visible: index < 5;
+        x: index * 22px;
+        y: 1px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.conv-bg;
+        typing-hover := TouchArea { enabled: false; }
+        Avatar {
+            x: 2px;
+            y: 2px;
+            width: 26px;
+            height: 26px;
+            src: member.avatar;
+            has-image: member.hasAvatar;
+            initial: member.initial;
+            color-idx: member.colorIdx;
+            privacy-blurred: root.privacy-blurred;
+            privacy-reveal: typing-hover.has-hover;
+        }
+    }
+    if root.extra > 0: Rectangle {
+        x: min(root.members.length, 5) * 22px;
+        y: 1px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        border-width: 2px;
+        border-color: Theme.conv-bg;
+        background: Theme.chip-bg;
+        Text {
+            text: "+" + root.extra;
+            color: Theme.text;
+            font-size: 10px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle {
+        x: root.avatar-count * 22px + 12px;
+        y: 1px;
+        width: 42px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.bubble-in;
+        Rectangle {
+            x: 1px;
+            y: 21px;
+            width: 8px;
+            height: 7px;
+            border-bottom-right-radius: 7px;
+            background: Theme.bubble-in;
+        }
+        for index in 3: Rectangle {
+            x: 11px + index * 8px;
+            y: root.bounce-phase == index + 1 || root.bounce-phase == index + 2 ? 9px : 14px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.dark ? #ad93ff : #7654d6;
+            animate y { duration: 240ms; easing: ease-in-out; }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Zapive";
     icon: @image-url("../zapive.png");
@@ -306,6 +386,8 @@ export component AppWindow inherits Window {
     in-out property <string> current-initial: "";
     in-out property <int> current-color-idx: 0;
     in-out property <[MessageItem]> messages;
+    in-out property <[MemberItem]> typing-members;
+    in-out property <int> typing-extra: 0;
     in-out property <bool> attach-open: false;
     in-out property <bool> stick-bottom: true;
     // Kept invisible until the host anchors it, so opening a chat never
@@ -1614,7 +1696,7 @@ export component AppWindow inherits Window {
                                     }
                                     Text {
                                         text: chat.preview;
-                                        color: Theme.text-dim;
+                                        color: chat.draft ? #d99028 : chat.typing ? Theme.accent : Theme.text-dim;
                                         opacity: root.blur-messages && !touch.has-hover ? 0.08 : 1;
                                         animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 13px;
@@ -1868,6 +1950,23 @@ export component AppWindow inherits Window {
                         running: false;
                         triggered => { root.scrolling = false; self.running = false; }
                     }
+                    typing-restick := Timer {
+                        interval: 1ms;
+                        running: false;
+                        triggered => {
+                            self.running = false;
+                            if (root.conv-ready && root.stick-bottom) {
+                                root.scroll-conversation-end();
+                            }
+                        }
+                    }
+                    if root.messages.length == 0 && msg-list.typing-space > 0px && root.conv-ready: TypingBubbles {
+                        x: 48px + (root.select-mode ? 30px : 0px);
+                        y: contact-header.height + 4px;
+                        members: root.typing-members;
+                        extra: root.typing-extra;
+                        privacy-blurred: root.blur-photos;
+                    }
                 msg-list := ListView {
                     width: parent.width;
                     height: parent.height;
@@ -1876,6 +1975,10 @@ export component AppWindow inherits Window {
                         duration: 160ms;
                         easing: ease-out;
                         enabled: root.conv-ready;
+                    }
+                    property <length> typing-space: root.current-is-group && root.typing-members.length > 0 ? 40px : 0px;
+                    changed typing-space => {
+                        typing-restick.running = root.conv-ready && root.stick-bottom;
                     }
                     changed viewport-height => {
                         root.conv-viewport-h = self.viewport-height;
@@ -2071,13 +2174,19 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        height: (msg.kind == "system"
+                        property <length> message-height: msg.kind == "system"
                             ? sys-pill.height + 12px + self.day-offset
-                                + (i == root.messages.length - 1 ? root.composer-tail-space : 0px)
                             : bubble.height + (msg.firstOfRun ? 16px : 6px)
-                                + (msg.reactions != "" ? 14px : 0) + self.day-offset)
-                                + (i == root.messages.length - 1 && msg.kind != "system"
-                                    ? root.composer-tail-space : 0px);
+                                + (msg.reactions != "" ? 14px : 0) + self.day-offset;
+                        height: self.message-height + (i == root.messages.length - 1
+                            ? msg-list.typing-space + root.composer-tail-space : 0px);
+                        if i == root.messages.length - 1 && msg-list.typing-space > 0px: TypingBubbles {
+                            x: 48px + (root.select-mode ? 30px : 0px);
+                            y: msg-row.message-height + 4px;
+                            members: root.typing-members;
+                            extra: root.typing-extra;
+                            privacy-blurred: root.blur-photos;
+                        }
                         if msg.dayLabel != "": Rectangle {
                             y: 8px + msg-row.header-offset;
                             x: (parent.width - self.width) / 2;
@@ -3482,9 +3591,10 @@ export component AppWindow inherits Window {
                         padding-left: 18px;
                         padding-right: 14px;
                         spacing: 12px;
-                        VerticalLayout {
-                            alignment: center;
+                        Rectangle {
+                            width: 40px;
                             Avatar {
+                                y: (parent.height - self.height) / 2;
                                 width: 40px;
                                 height: 40px;
                                 src: root.current-avatar;
@@ -3495,8 +3605,8 @@ export component AppWindow inherits Window {
                                 privacy-reveal: header-avatar-touch.has-hover;
                             }
                             header-avatar-touch := TouchArea {
-                                width: 40px;
-                                height: 40px;
+                                mouse-cursor: pointer;
+                                clicked => { root.open-info(); }
                             }
                         }
                         Rectangle {
@@ -3523,6 +3633,10 @@ export component AppWindow inherits Window {
                                     text: root.current-status;
                                     color: Theme.text-dim;
                                     font-size: 11px;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                    opacity: root.blur-names && !head-touch.has-hover ? 0.08 : 1;
+                                    animate opacity { duration: 120ms; easing: ease-out; }
                                 }
                             }
                         }

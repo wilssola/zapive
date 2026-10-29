@@ -811,9 +811,10 @@ impl EventHandler for Pump {
             }
             Event::ChatPresence(update) => {
                 let chat = update.source.chat.to_non_ad_string();
+                let sender = update.source.sender.to_non_ad_string();
                 let state = format!("{:?}", update.state);
                 let media = format!("{:?}", update.media);
-                ui_apply(move |b| b.on_chat_presence(&chat, &state, &media));
+                ui_apply(move |b| b.on_chat_presence(&chat, &sender, &state, &media));
             }
             Event::Presence(update) => {
                 let from = update.from.to_non_ad_string();
