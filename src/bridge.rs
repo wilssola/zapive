@@ -2861,14 +2861,10 @@ impl Bridge {
                     // in their own tabs.
                     return false;
                 }
-                if self.tab == "archived" {
-                    if !meta.archived {
-                        return false;
-                    }
-                } else {
-                    if meta.archived {
-                        return false;
-                    }
+                if !chat_matches_archive(meta.archived, &self.tab, !search.is_empty()) {
+                    return false;
+                }
+                if self.tab != "archived" {
                     match self.tab.as_str() {
                         "unread" if meta.unread == 0 => return false,
                         "favorites" if !meta.favorite => return false,
@@ -3163,6 +3159,11 @@ impl Bridge {
     }
 
     fn open_jid(&mut self, jid: &str, jump_to: Option<&str>) {
+        self.ui.invoke_clear_sidebar_search();
+        if !self.search_text.is_empty() {
+            self.search_text.clear();
+            self.refresh_chats();
+        }
         self.ui.set_message_menu_open(false);
         self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
@@ -8934,6 +8935,14 @@ impl Bridge {
 }
 
 // Whether a message has something to download or decode for its bubble.
+fn chat_matches_archive(archived: bool, tab: &str, searching: bool) -> bool {
+    if tab == "archived" {
+        archived
+    } else {
+        !archived || searching
+    }
+}
+
 fn group_typing_status(names: &[String], overflow: bool) -> String {
     if overflow { return t("presence.groupMany"); }
     let first_names = names.iter().take(5)
@@ -8993,6 +9002,20 @@ fn message_editable(m: &StoredMessage) -> bool {
 #[cfg(test)]
 mod message_action_tests {
     use super::*;
+
+    #[test]
+    fn sidebar_search_includes_archived_chats_without_changing_archive_filter() {
+        for tab in ["all", "unread", "favorites", "groups", "label:work"] {
+            assert!(chat_matches_archive(false, tab, false));
+            assert!(!chat_matches_archive(true, tab, false));
+            assert!(chat_matches_archive(false, tab, true));
+            assert!(chat_matches_archive(true, tab, true));
+        }
+        for searching in [false, true] {
+            assert!(chat_matches_archive(true, "archived", searching));
+            assert!(!chat_matches_archive(false, "archived", searching));
+        }
+    }
 
     #[test]
     fn group_header_typing_uses_first_names_and_plural_forms() {

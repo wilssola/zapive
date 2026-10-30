@@ -378,12 +378,24 @@ pub fn format_time(timestamp: i64) -> String {
     if timestamp == 0 {
         return String::new();
     }
-    let d = local_date(timestamp);
-    let today = chrono::Local::now().date_naive();
-    if d.date_naive() == today {
-        d.format("%H:%M").to_string()
-    } else {
-        d.format("%d/%m").to_string()
+    format_time_at(local_date(timestamp).naive_local(), chrono::Local::now().date_naive())
+}
+
+fn format_time_at(d: chrono::NaiveDateTime, today: chrono::NaiveDate) -> String {
+    use chrono::Datelike as _;
+    match today.signed_duration_since(d.date()).num_days() {
+        0 => d.format("%H:%M").to_string(),
+        1 => t("day.yesterday"),
+        2..=6 => t(match d.weekday() {
+            chrono::Weekday::Mon => "day.monday",
+            chrono::Weekday::Tue => "day.tuesday",
+            chrono::Weekday::Wed => "day.wednesday",
+            chrono::Weekday::Thu => "day.thursday",
+            chrono::Weekday::Fri => "day.friday",
+            chrono::Weekday::Sat => "day.saturday",
+            chrono::Weekday::Sun => "day.sunday",
+        }),
+        _ => d.format("%d/%m").to_string(),
     }
 }
 
@@ -1536,6 +1548,40 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_time_uses_calendar_day_boundaries() {
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
+        let at = |year, month, day, hour, minute| {
+            chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap()
+                .and_hms_opt(hour, minute, 0).unwrap()
+        };
+        assert_eq!(format_time(0), "");
+        assert_eq!(format_time_at(at(2026, 1, 2, 9, 5), now), "09:05");
+        assert_eq!(format_time_at(at(2026, 1, 1, 23, 59), now), t("day.yesterday"));
+        for (day, key) in [(31, "day.wednesday"), (30, "day.tuesday"),
+            (29, "day.monday"), (28, "day.sunday"), (27, "day.saturday")] {
+            assert_eq!(format_time_at(at(2025, 12, day, 23, 59), now), t(key));
+        }
+        assert_eq!(format_time_at(at(2025, 12, 26, 23, 59), now), "26/12");
+        assert_eq!(format_time_at(at(2025, 1, 2, 9, 5), now), "02/01");
+        assert_eq!(format_time_at(at(2026, 1, 3, 9, 5), now), "03/01");
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 4).unwrap();
+        assert_eq!(format_time_at(at(2026, 1, 2, 0, 0), now), t("day.friday"));
+        assert_eq!(format_time_at(at(2026, 1, 1, 0, 0), now), t("day.thursday"));
+    }
+
+    #[test]
+    fn sidebar_time_uses_local_dates_across_offset_changes() {
+        for (message, now, key) in [
+            ("2026-03-07T23:30:00-05:00", "2026-03-09T00:15:00-04:00", "day.saturday"),
+            ("2026-10-31T00:15:00-04:00", "2026-11-01T23:30:00-05:00", "day.yesterday"),
+        ] {
+            let message = chrono::DateTime::parse_from_rfc3339(message).unwrap();
+            let now = chrono::DateTime::parse_from_rfc3339(now).unwrap();
+            assert_eq!(format_time_at(message.naive_local(), now.date_naive()), t(key));
+        }
+    }
 
     #[test]
     fn draft_sorting_preserves_pinned_precedence() {

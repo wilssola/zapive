@@ -670,6 +670,10 @@ export component AppWindow inherits Window {
     in-out property <bool> sv-video-ready: false;
     callback status-play();
 
+    public function clear-sidebar-search() {
+        search-box.text = "";
+    }
+
     public function focus-composer() {
         if (root.screen == "main" && root.chat-open && root.current-can-send && !root.select-mode
             && !root.message-menu-open && !root.message-dialog-open && !root.details-open && !root.confirm-open
@@ -1119,6 +1123,12 @@ export component AppWindow inherits Window {
                 else if (root.select-mode) { root.select-cancel(); }
                 else if (root.info-open) { root.close-info(); }
                 else if (root.chat-search-open) { root.chat-search-close(); }
+                else if (root.chat-tab == "archived") {
+                    root.chat-tab = "all";
+                    root.tab-changed("all");
+                    search-box.text = "";
+                    root.search-changed("");
+                }
                 else {
                     root.menu-close-chat();
                     root.settings-open = false; root.sidebar-view = "chats";
