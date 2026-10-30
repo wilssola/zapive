@@ -6,6 +6,8 @@ target/
 # Packaging outputs (release workflow scratch space).
 build/
 dist/
+__pycache__/
+*.pyc
 # Generated from Cargo.lock by the flatpak workflow.
 packaging/flatpak/cargo-sources.json
 # Signing certificates: private keys, never committed.

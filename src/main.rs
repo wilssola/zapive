@@ -23,6 +23,7 @@ mod qr;
 mod search;
 mod single;
 mod store;
+mod translation;
 mod update;
 mod vault;
 mod wa;
