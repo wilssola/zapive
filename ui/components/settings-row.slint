@@ -5,6 +5,7 @@ import { Theme } from "theme.slint";
 export component SettingsRow inherits Rectangle {
     in property <string> label;
     in property <string> detail;
+    in property <image> icon;
     height: max(46px, row.preferred-height);
     row := HorizontalLayout {
         padding-left: 14px;
@@ -12,6 +13,19 @@ export component SettingsRow inherits Rectangle {
         padding-top: 8px;
         padding-bottom: 8px;
         spacing: 12px;
+        if root.icon != @image-url(""): Rectangle {
+            width: 32px;
+            height: 32px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 8px;
+            background: Theme.hover;
+            Image {
+                x: 7px; y: 7px;
+                width: 18px; height: 18px;
+                source: root.icon;
+                colorize: Theme.icon;
+            }
+        }
         VerticalLayout {
             alignment: center;
             spacing: 2px;

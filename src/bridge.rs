@@ -1070,6 +1070,9 @@ fn wire_callbacks(ui: &AppWindow) {
     // Enumerating devices touches the audio and camera stacks, so it waits
     // until the user actually opens Settings.
     ui.on_settings_opened(|| defer(|b| b.refresh_devices()));
+    ui.on_settings_search(|text, query| {
+        text.to_lowercase().contains(&query.to_lowercase())
+    });
     ui.on_start_video_call(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.start_video_call(&jid));

@@ -322,22 +322,22 @@ msgid "Privacy"
 msgstr "Privacidade"
 
 msgid "settings.privacyBlur"
-msgstr "Blur private content"
+msgstr "Desfocar conteúdo privado"
 
 msgid "settings.privacyBlurHint"
-msgstr "Choose which content to hide. Hover or keyboard focus reveals only that item."
+msgstr "Escolha o conteúdo a desfocar. Passe o mouse ou use o foco do teclado para revelar cada item."
 
 msgid "settings.blurNames"
-msgstr "Names"
+msgstr "Nomes"
 
 msgid "settings.blurPhotos"
-msgstr "Photos"
+msgstr "Fotos"
 
 msgid "settings.blurMessages"
-msgstr "Messages"
+msgstr "Mensagens"
 
 msgid "settings.blurMedia"
-msgstr "Media"
+msgstr "Mídias"
 
 msgid "notify.reply"
 msgstr "Reply"
@@ -358,10 +358,10 @@ msgid "When turned off, no banners appear for messages or calls. Unread counts s
 msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
 
 msgid "settings.notifyPreviews"
-msgstr "Show message previews in notifications"
+msgstr "Mostrar prévias das mensagens nas notificações"
 
 msgid "settings.notifyPreviewsHint"
-msgstr "When turned off, notifications hide message content and media."
+msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
 
 msgid "Send read receipts"
 msgstr "Enviar confirmação de leitura"
@@ -593,3 +593,111 @@ msgstr "Vídeos"
 
 msgid "Documents"
 msgstr "Documentos"
+
+msgid "Manage your accounts"
+msgstr "Gerencie suas contas"
+
+msgid "Application and behavior"
+msgstr "Aplicativo e comportamento"
+
+msgid "Theme, language and visual style"
+msgstr "Tema, idioma e estilo visual"
+
+msgid "Messages and calls"
+msgstr "Mensagens e chamadas"
+
+msgid "Read receipts, visibility and data"
+msgstr "Leitura, visibilidade e dados"
+
+msgid "Audio, video and devices"
+msgstr "Áudio, vídeo e dispositivos"
+
+msgid "Media and files"
+msgstr "Mídias e arquivos"
+
+msgid "PIN and app protection"
+msgstr "PIN e proteção do app"
+
+msgid "Updates"
+msgstr "Atualizações"
+
+msgid "Version and updates"
+msgstr "Versão e novas atualizações"
+
+msgid "Search settings…"
+msgstr "Buscar nas configurações…"
+
+msgid "Search results"
+msgstr "Resultados da busca"
+
+msgid "Settings matching your search"
+msgstr "Configurações que correspondem à sua busca"
+
+msgid "Customize your Zapive experience"
+msgstr "Personalize sua experiência no Zapive"
+
+msgid "Choose which content to blur. Hover or keyboard focus reveals only that item."
+msgstr "Escolha o conteúdo a desfocar. Passe o mouse ou use o foco do teclado para revelar cada item."
+
+msgid "Blur contact names"
+msgstr "Desfocar nomes dos contatos"
+
+msgid "Blur profile photos"
+msgstr "Desfocar fotos de perfil"
+
+msgid "Blur message text"
+msgstr "Desfocar texto das mensagens"
+
+msgid "Blur media previews"
+msgstr "Desfocar prévias de mídia"
+
+msgid "Show message previews"
+msgstr "Mostrar prévias das mensagens"
+
+msgid "Turn off to hide message content and media in notifications."
+msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
+
+msgid "Start the app automatically when you sign in."
+msgstr "Inicia o aplicativo automaticamente ao entrar no sistema."
+
+msgid "Choose a light, dark or system theme."
+msgstr "Escolha o tema claro, escuro ou acompanhe o sistema."
+
+msgid "Choose a translucent or opaque interface."
+msgstr "Escolha uma interface translúcida ou opaca."
+
+msgid "Choose the language used by the app."
+msgstr "Escolha o idioma do aplicativo."
+
+msgid "Let others know when you read messages or play voice notes."
+msgstr "Avise outras pessoas quando você ler mensagens ou ouvir mensagens de voz."
+
+msgid "Remove messages here when the sender deletes them for everyone."
+msgstr "Remova mensagens daqui quando o remetente apagá-las para todos."
+
+msgid "Hide contact and group names until revealed."
+msgstr "Oculte nomes de contatos e grupos até revelá-los."
+
+msgid "Hide profile photos until revealed."
+msgstr "Oculte fotos de perfil até revelá-las."
+
+msgid "Hide message text until revealed."
+msgstr "Oculte o texto das mensagens até revelá-lo."
+
+msgid "Hide photos, videos and other media previews until revealed."
+msgstr "Oculte prévias de fotos, vídeos e outras mídias até revelá-las."
+
+msgid "Download photos automatically."
+msgstr "Baixa fotos automaticamente."
+
+msgid "Download audio files automatically."
+msgstr "Baixa arquivos de áudio automaticamente."
+
+msgid "Download videos automatically."
+msgstr "Baixa vídeos automaticamente."
+
+msgid "Download documents automatically."
+msgstr "Baixa documentos automaticamente."
+
+msgid "Download stickers automatically."
+msgstr "Baixa figurinhas automaticamente."
