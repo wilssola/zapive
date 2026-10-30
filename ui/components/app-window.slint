@@ -3877,7 +3877,7 @@ export component AppWindow inherits Window {
         open: root.picker-open && root.chat-open;
         scrim: transparent;
         dismiss => { root.picker-open = false; }
-        if picker-layer.mounted: Rectangle {
+        Rectangle {
             x: conv-pane.absolute-position.x - picker-layer.absolute-position.x + 12px;
             y: conv-pane.absolute-position.y - picker-layer.absolute-position.y + conv-pane.height - self.height - composer-dock.height - 8px + (1 - picker-layer.progress) * 8px;
             width: 380px;
