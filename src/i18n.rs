@@ -162,9 +162,32 @@ fn en(key: &str) -> &'static str {
         "picker.all" => "All files",
         "lang.restart" => "Language saved. Restart Zapive to apply.",
         "changelog.failed" => "Could not load release history. Check your connection and repository access, then try again. Previously loaded notes remain available.",
+        "outbox.storageFailed" => "Could not save the message. Your text has been preserved. Check available disk space and try again.",
+        "outbox.preparing" => "Preparing attachment",
+        "outbox.queued" => "Waiting for connection",
+        "outbox.sending" => "Sending — waiting for confirmation",
+        "outbox.uncertain" => "Delivery not confirmed. Retrying reuses the same message ID.",
+        "outbox.failed" => "Sending failed. Try again.",
+        "outbox.cannotCancel" => "This message may already have been transmitted and cannot be safely cancelled.",
+        "history.unavailable" => "This message is not available in the local history.",
         "update.checking" => "Checking for updates…",
         "update.latest" => "You are on the latest version.",
         "autostart.failed" => "Could not change the startup setting: {0}",
+        "card.contacts" => "Contacts",
+        "card.liveLocation" => "Live location",
+        "card.liveLocationDetail" => "Last shared position only. Live updates are not available here.",
+        "card.viewOnce" => "View-once message",
+        "card.viewOnceBody" => "Open this message on your phone.",
+        "card.unsupported" => "Unsupported message",
+        "card.unsupportedBody" => "This message type cannot be displayed here. View it on your phone.",
+        "compat.contact" => "Contact",
+        "compat.location" => "Location",
+        "compat.liveLocation" => "Live location — last position only; not updated here",
+        "compat.invalidLocation" => "Coordinates unavailable or invalid",
+        "compat.poll" => "Poll",
+        "compat.pollPhone" => "View results and vote on your phone. Encrypted voting is not integrated here yet.",
+        "compat.viewOnce" => "View-once message — open on your phone",
+        "compat.unsupported" => "Unsupported message — view on your phone",
         "msg.deleted" => "This message was deleted",
         "msg.forwarded" => "Forwarded",
         "tray.open" => "Open Zapive",
@@ -364,9 +387,32 @@ fn pt(key: &str) -> &'static str {
         "picker.all" => "Todos os arquivos",
         "lang.restart" => "Idioma salvo. Reinicie o Zapive para aplicar.",
         "changelog.failed" => "Não foi possível carregar o histórico. Verifique a conexão e o acesso ao repositório e tente novamente. As notas carregadas anteriormente continuam disponíveis.",
+        "outbox.storageFailed" => "Não foi possível salvar a mensagem. Seu texto foi preservado. Verifique o espaço em disco e tente novamente.",
+        "outbox.preparing" => "Preparando anexo",
+        "outbox.queued" => "Aguardando conexão",
+        "outbox.sending" => "Enviando — aguardando confirmação",
+        "outbox.uncertain" => "Envio não confirmado. Tentar novamente usa o mesmo identificador.",
+        "outbox.failed" => "Falha ao enviar. Tente novamente.",
+        "outbox.cannotCancel" => "Esta mensagem pode já ter sido transmitida e não pode ser cancelada com segurança.",
+        "history.unavailable" => "Esta mensagem não está disponível no histórico local.",
         "update.checking" => "Verificando atualizações…",
         "update.latest" => "Você já está na versão mais recente.",
         "autostart.failed" => "Não foi possível alterar a inicialização automática: {0}",
+        "card.contacts" => "Contatos",
+        "card.liveLocation" => "Localização em tempo real",
+        "card.liveLocationDetail" => "Apenas a última posição compartilhada. Atualizações em tempo real não estão disponíveis aqui.",
+        "card.viewOnce" => "Mensagem de visualização única",
+        "card.viewOnceBody" => "Abra esta mensagem no celular.",
+        "card.unsupported" => "Mensagem não suportada",
+        "card.unsupportedBody" => "Este tipo de mensagem não pode ser exibido aqui. Consulte no celular.",
+        "compat.contact" => "Contato",
+        "compat.location" => "Localização",
+        "compat.liveLocation" => "Localização em tempo real — apenas última posição; sem atualização aqui",
+        "compat.invalidLocation" => "Coordenadas indisponíveis ou inválidas",
+        "compat.poll" => "Enquete",
+        "compat.pollPhone" => "Consulte os resultados e vote pelo celular. A votação criptografada ainda não está integrada aqui.",
+        "compat.viewOnce" => "Mensagem de visualização única — abra no celular",
+        "compat.unsupported" => "Mensagem não suportada — consulte no celular",
         "msg.deleted" => "Essa mensagem foi apagada",
         "msg.forwarded" => "Encaminhada",
         "tray.open" => "Abrir Zapive",
@@ -433,6 +479,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compatibility_labels_are_localized() {
+        for key in ["compat.contact", "compat.location", "compat.liveLocation",
+            "compat.invalidLocation", "compat.poll", "compat.pollPhone",
+            "compat.viewOnce", "compat.unsupported", "card.contacts", "card.liveLocation",
+            "card.liveLocationDetail", "card.viewOnce", "card.viewOnceBody",
+            "card.unsupported", "card.unsupportedBody"] {
+            assert!(!en(key).is_empty());
+            assert!(!pt(key).is_empty());
+            assert_ne!(en(key), pt(key));
+        }
+    }
+
+    #[test]
     fn recent_day_labels_are_localized() {
         for (key, english, portuguese) in [
             ("day.yesterday", "Yesterday", "Ontem"),
@@ -448,6 +507,10 @@ mod tests {
             assert_eq!(pt(key), portuguese);
         }
     }
+}
+
+pub fn is_translation(key: &str, value: &str) -> bool {
+    value == en(key) || value == pt(key)
 }
 
 pub fn t(key: &str) -> String {

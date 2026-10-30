@@ -3,6 +3,7 @@
 
 slint::include_modules!();
 
+mod outbox;
 mod audio;
 mod bridge;
 mod call;

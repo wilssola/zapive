@@ -14,7 +14,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use hmac::{Hmac, Mac};
 use rand::RngCore as _;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, params};
 use sha2::Sha256;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -138,7 +138,9 @@ impl Vault {
         conn.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS history (account TEXT NOT NULL, jid TEXT NOT NULL, id TEXT NOT NULL, timestamp INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(account,jid,id));
+             CREATE INDEX IF NOT EXISTS history_page ON history(account,jid,timestamp,id);",
         )
         .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -335,6 +337,7 @@ impl Vault {
 
     // Every row of one account, whichever account is active.
     pub fn wipe_account(&self, id: &str) {
+        let _ = self.conn.execute("DELETE FROM history WHERE account=?1", [id]);
         let scope = if id.is_empty() { "store:".to_string() } else { format!("acct:{id}:") };
         let _ = self.conn.execute("DELETE FROM kv WHERE k LIKE ?1", [format!("{scope}%")]);
     }
@@ -348,6 +351,34 @@ impl Vault {
             .query_row("SELECT v FROM kv WHERE k = ?1", [k], |row| row.get::<_, String>(0))
             .ok()?;
         self.key.with(|key| decrypt_str(&stored, key?).ok())
+    }
+
+    pub fn set_checked(&self, k: &str, v: &str) -> Result<(), String> {
+        let encoded = self.key.with(|key| key.map(|key| encrypt_str(v, key))).ok_or("vault is locked")?;
+        self.conn.execute(
+            "INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+            params![format!("{}{k}", self.scope()), encoded],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn batch_checked(&self, writes: &[(&str, &str)], deletes: &[&str]) -> Result<(), String> {
+        self.key.with(|key| {
+            let key = key.ok_or("vault is locked")?;
+            let scope = self.scope();
+            let tx = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            for (k, v) in writes {
+                let encoded = encrypt_str(v, key);
+                tx.execute(
+                    "INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                    params![format!("{scope}{k}"), encoded],
+                ).map_err(|e| e.to_string())?;
+            }
+            for k in deletes {
+                tx.execute("DELETE FROM kv WHERE k=?1", [format!("{scope}{k}")]).map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())
+        })
     }
 
     pub fn set(&self, k: &str, v: &str) {
@@ -370,9 +401,112 @@ impl Vault {
     }
 
     pub fn del_prefix(&self, prefix: &str) {
+        if prefix == "store:" || prefix == "store:msgs:" {
+            let _ = self.conn.execute("DELETE FROM history WHERE account=?1", [self.account()]);
+        } else if let Some(jid) = prefix.strip_prefix("store:msgs:") {
+            let _ = self.conn.execute("DELETE FROM history WHERE account=?1 AND substr(jid,1,length(?2))=?2", params![self.account(), jid]);
+        }
         let _ = self
             .conn
             .execute("DELETE FROM kv WHERE k LIKE ?1", [format!("{}{prefix}%", self.scope())]);
+    }
+
+    fn history_import(&self, conn: &Connection, jid: &str) -> Result<(), String> {
+        let k = format!("{}store:msgs:{jid}", self.scope());
+        let raw: Option<String> = conn.query_row("SELECT v FROM kv WHERE k=?1", [&k], |r| r.get(0))
+            .optional().map_err(|e| e.to_string())?;
+        if let Some(raw) = raw {
+            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
+            let messages: Vec<crate::store::StoredMessage> = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
+            for mut message in messages {
+                message.jid = jid.to_string();
+                self.history_put(conn, &message, false)?;
+            }
+            conn.execute("DELETE FROM kv WHERE k=?1", [&k]).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn history_put(&self, conn: &Connection, message: &crate::store::StoredMessage, replace: bool) -> Result<(), String> {
+        let plain = serde_json::to_string(message).map_err(|e| e.to_string())?;
+        let payload = self.key.with(|key| key.map(|key| encrypt_str(&plain, key))).ok_or("vault is locked")?;
+        let sql = if replace {
+            "INSERT INTO history(account,jid,id,timestamp,payload) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(account,jid,id) DO UPDATE SET timestamp=excluded.timestamp,payload=excluded.payload"
+        } else {
+            "INSERT OR IGNORE INTO history(account,jid,id,timestamp,payload) VALUES(?1,?2,?3,?4,?5)"
+        };
+        conn.execute(sql, params![self.account(), message.jid, message.id, message.timestamp, payload]).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn history_commit(&self, messages: &[crate::store::StoredMessage], clears: &[String], removals: &[(String, String)], merges: &[(String, String)]) -> Result<(), String> {
+        if self.locked() { return Err("vault is locked".into()); }
+        let tx = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        for jid in messages.iter().map(|m| m.jid.as_str())
+            .chain(clears.iter().map(String::as_str))
+            .chain(removals.iter().map(|(jid, _)| jid.as_str()))
+            .chain(merges.iter().flat_map(|(a, b)| [a.as_str(), b.as_str()])) {
+            self.history_import(&tx, jid)?;
+        }
+        for jid in clears {
+            tx.execute("DELETE FROM history WHERE account=?1 AND jid=?2", params![self.account(), jid]).map_err(|e| e.to_string())?;
+        }
+        for (from, into) in merges {
+            let mut stmt = tx.prepare("SELECT payload FROM history WHERE account=?1 AND jid=?2").map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![self.account(), from], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+            for row in rows {
+                let raw = row.map_err(|e| e.to_string())?;
+                let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
+                let mut message: crate::store::StoredMessage = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
+                message.jid = into.clone();
+                self.history_put(&tx, &message, false)?;
+            }
+            tx.execute("DELETE FROM history WHERE account=?1 AND jid=?2", params![self.account(), from]).map_err(|e| e.to_string())?;
+        }
+        for message in messages { self.history_put(&tx, message, true)?; }
+        for (jid, id) in removals {
+            tx.execute("DELETE FROM history WHERE account=?1 AND jid=?2 AND id=?3", params![self.account(), jid, id]).map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    pub fn history_page(&self, jid: &str, before: Option<(i64, &str)>, limit: usize) -> Result<Vec<crate::store::StoredMessage>, String> {
+        if self.locked() { return Err("vault is locked".into()); }
+        let tx = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        self.history_import(&tx, jid)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        let mut stmt = self.conn.prepare("SELECT payload FROM history WHERE account=?1 AND jid=?2 AND (?3 IS NULL OR (timestamp,id)<(?3,?4)) ORDER BY timestamp DESC,id DESC LIMIT ?5").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![self.account(), jid, before.map(|v| v.0), before.map(|v| v.1), limit as i64], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let mut messages = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|e| e.to_string())?;
+            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
+            messages.push(serde_json::from_str(&plain).map_err(|e| e.to_string())?);
+        }
+        messages.reverse();
+        Ok(messages)
+    }
+
+    pub fn history_after(&self, jid: &str, timestamp: i64, id: &str, limit: usize) -> Result<Vec<crate::store::StoredMessage>, String> {
+        self.history_page(jid, None, 0)?;
+        let mut stmt = self.conn.prepare("SELECT payload FROM history WHERE account=?1 AND jid=?2 AND (timestamp,id)>(?3,?4) ORDER BY timestamp,id LIMIT ?5").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![self.account(), jid, timestamp, id, limit as i64], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let mut messages = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|e| e.to_string())?;
+            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
+            messages.push(serde_json::from_str(&plain).map_err(|e| e.to_string())?);
+        }
+        Ok(messages)
+    }
+
+    pub fn history_id(&self, jid: &str, id: &str) -> Result<Option<crate::store::StoredMessage>, String> {
+        self.history_page(jid, None, 0)?;
+        let raw: Option<String> = self.conn.query_row("SELECT payload FROM history WHERE account=?1 AND jid=?2 AND id=?3", params![self.account(), jid, id], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+        raw.map(|raw| {
+            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
+            serde_json::from_str(&plain).map_err(|e| e.to_string())
+        }).transpose()
     }
 
     // Keys come back the way the caller wrote them, without the scope.
@@ -386,6 +520,15 @@ impl Vault {
             for k in rows.flatten() {
                 out.push(k[scope.len()..].to_string());
             }
+        }
+        if prefix == "store:msgs:" {
+            if let Ok(mut stmt) = self.conn.prepare("SELECT DISTINCT jid FROM history WHERE account=?1") {
+                if let Ok(rows) = stmt.query_map([self.account()], |row| row.get::<_, String>(0)) {
+                    for jid in rows.flatten() { out.push(format!("store:msgs:{jid}")); }
+                }
+            }
+            out.sort();
+            out.dedup();
         }
         out
     }
@@ -495,6 +638,87 @@ mod tests {
         v.wipe_account("1a2b3c4d");
         v.set_account("1a2b3c4d");
         assert_eq!(v.get("store:chats"), None);
+    }
+
+    #[test]
+    fn batch_promotes_outbox_with_encrypted_values() {
+        let t = temp_vault("batch_promotion");
+        let v = &t.vault;
+        v.set_checked("store:preparation:id", "prepared").unwrap();
+        v.batch_checked(&[("store:outbox", "queued")], &["store:preparation:id"]).unwrap();
+        assert_eq!(v.get("store:outbox").as_deref(), Some("queued"));
+        assert_eq!(v.get("store:preparation:id"), None);
+        let stored: String = v.conn.query_row("SELECT v FROM kv WHERE k=?1", ["store:outbox"], |row| row.get(0)).unwrap();
+        assert_ne!(stored, "queued");
+        assert_eq!(v.key.with(|key| decrypt_str(&stored, key.unwrap())).unwrap(), "queued");
+    }
+
+    #[test]
+    fn batch_rolls_back_when_second_write_fails() {
+        let t = temp_vault("batch_rollback");
+        let v = &t.vault;
+        v.set_checked("store:outbox", "previous").unwrap();
+        v.set_checked("store:preparation:id", "prepared").unwrap();
+        v.conn.execute_batch(
+            "CREATE TRIGGER fail_batch_write BEFORE INSERT ON kv WHEN NEW.k='store:fail'
+             BEGIN SELECT RAISE(ABORT, 'second write failed'); END;",
+        ).unwrap();
+        assert!(v.batch_checked(
+            &[("store:outbox", "queued"), ("store:fail", "fail")],
+            &["store:preparation:id"],
+        ).is_err());
+        assert_eq!(v.get("store:outbox").as_deref(), Some("previous"));
+        assert_eq!(v.get("store:fail"), None);
+        assert_eq!(v.get("store:preparation:id").as_deref(), Some("prepared"));
+    }
+
+    #[test]
+    fn batch_rolls_back_when_delete_fails() {
+        let t = temp_vault("batch_delete_rollback");
+        let v = &t.vault;
+        v.set_checked("store:outbox", "previous").unwrap();
+        v.set_checked("store:preparation:id", "prepared").unwrap();
+        v.conn.execute_batch(
+            "CREATE TRIGGER fail_batch_delete BEFORE DELETE ON kv WHEN OLD.k='store:preparation:id'
+             BEGIN SELECT RAISE(ABORT, 'delete failed'); END;",
+        ).unwrap();
+        assert!(v.batch_checked(&[("store:outbox", "queued")], &["store:preparation:id"]).is_err());
+        assert_eq!(v.get("store:outbox").as_deref(), Some("previous"));
+        assert_eq!(v.get("store:preparation:id").as_deref(), Some("prepared"));
+    }
+
+    #[test]
+    fn batch_scopes_writes_and_deletes_to_the_active_account() {
+        let t = temp_vault("batch_scope");
+        let v = &t.vault;
+        for account in ["", "other", "active"] {
+            v.set_account(account);
+            v.set_checked("store:outbox", "previous").unwrap();
+            v.set_checked("store:preparation:id", "prepared").unwrap();
+        }
+        v.batch_checked(&[("store:outbox", "queued")], &["store:preparation:id"]).unwrap();
+        assert_eq!(v.get("store:outbox").as_deref(), Some("queued"));
+        assert_eq!(v.get("store:preparation:id"), None);
+        for account in ["", "other"] {
+            v.set_account(account);
+            assert_eq!(v.get("store:outbox").as_deref(), Some("previous"));
+            assert_eq!(v.get("store:preparation:id").as_deref(), Some("prepared"));
+        }
+    }
+
+    #[test]
+    fn batch_rejects_locked_writes_and_deletes() {
+        let mut t = temp_vault("batch_locked");
+        t.vault.set_checked("store:outbox", "previous").unwrap();
+        t.vault.set_checked("store:preparation:id", "prepared").unwrap();
+        t.vault.lock();
+        let v = &t.vault;
+        assert_eq!(v.batch_checked(&[("store:outbox", "queued")], &["store:preparation:id"]), Err("vault is locked".into()));
+        assert_eq!(v.batch_checked(&[], &["store:preparation:id"]), Err("vault is locked".into()));
+        assert_eq!(v.batch_checked(&[], &[]), Err("vault is locked".into()));
+        t.vault.open().unwrap();
+        assert_eq!(t.vault.get("store:outbox").as_deref(), Some("previous"));
+        assert_eq!(t.vault.get("store:preparation:id").as_deref(), Some("prepared"));
     }
 
     #[test]

@@ -3,6 +3,9 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: pt_BR\n"
 
+msgid "View details"
+msgstr "Ver detalhes"
+
 msgid "Connecting..."
 msgstr "Conectando..."
 
@@ -751,3 +754,7 @@ msgstr "As notas da versão {} ainda não estão disponíveis."
 
 msgid "New in {}"
 msgstr "Novidades da {}"
+
+
+msgid "Copy to composer"
+msgstr "Copiar para o campo de mensagem"

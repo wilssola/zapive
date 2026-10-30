@@ -208,6 +208,10 @@ pub struct Bridge {
     notification_thumbnails: HashMap<String, std::path::PathBuf>,
     // A check the user asked for from Settings: it also reports "nothing
     // new", where the periodic one stays quiet.
+    preparation_states: HashMap<String, bool>,
+    preparations_active: HashSet<String>,
+    outbox: Vec<crate::outbox::Entry>,
+    outbox_connected: bool,
     update_manual: bool,
     // Status/stories, calls, channels and the info panel.
     status_model: Rc<VecModel<ChatItem>>,
@@ -321,8 +325,19 @@ fn image_of(d: &crate::media::Decoded) -> slint::Image {
     slint::Image::from_rgba8(buf)
 }
 
-// What an image costs in memory: Slint keeps decoded RGBA, so it is the
-// pixel count times four regardless of the size it is drawn at.
+fn card_thumbnail(bytes: &[u8]) -> Option<slint::Image> {
+    if bytes.len() > 2 * 1024 * 1024 { return None; }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(2048);
+    limits.max_image_height = Some(2048);
+    limits.max_alloc = Some(16 * 1024 * 1024);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.thumbnail(480, 320).to_rgba8();
+    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
+    Some(slint::Image::from_rgba8(buffer))
+}
+
 fn image_bytes(image: &slint::Image) -> usize {
     let size = image.size();
     size.width as usize * size.height as usize * 4
@@ -642,6 +657,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         notify_previews: false,
         notify_tokens: HashMap::new(),
         notification_thumbnails: HashMap::new(),
+        preparation_states: HashMap::new(),
+        preparations_active: HashSet::new(),
+        outbox: Vec::new(),
+        outbox_connected: false,
         update_manual: false,
         status_model,
         calls_model,
@@ -878,14 +897,37 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_send_message(|text| {
         let text = text.to_string();
-        defer(move |b| b.handle_send_text(&text));
+        let context = BRIDGE.with(|cell| cell.borrow().as_ref().map(|b| (b.account.clone(), b.current_jid.clone(), b.reply_to.clone(), b.mentions.clone())));
+        defer(move |b| {
+            if let Some((account, jid, reply, mentions)) = context {
+                if b.account != account || b.current_jid != jid { return; }
+                if b.reply_to != reply || b.mentions != mentions || b.ui.get_composer_text().as_str() != text { return; }
+                b.handle_send_text(&text);
+            }
+        });
     });
     ui.on_load_older(|| defer(|b| b.handle_scroll_up_load()));
     ui.on_jump_latest(|| {
         defer(|b| {
-            if let Some(jid) = &b.current_jid {
-                let jid = jid.clone();
+            if let Some(jid) = b.current_jid.clone() {
+                if let Some(vault) = &b.vault {
+                    if let Err(error) = b.store.save_checked(vault) {
+                        eprintln!("[history] jump latest save failed: {error}");
+                        b.message_action_failed(&t("history.unavailable"));
+                        return;
+                    }
+                    b.store.evict(&jid);
+                    b.store.hydrate(vault, &jid);
+                    if !b.store.hydrated.contains(&jid) {
+                        b.message_action_failed(&t("history.unavailable"));
+                        return;
+                    }
+                }
                 b.scroll_pos.remove(&jid);
+                b.truncated.remove(&jid);
+                b.rebuild_conversation(&jid);
+                b.load_media_for_chat(&jid);
+                b.queue_row_avatars(&jid);
             }
             b.scroll_to_end();
         });
@@ -1455,6 +1497,7 @@ impl Bridge {
         self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
         self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
+        self.restore_outbox();
         self.expire_notification_tokens();
         println!(
             "[store] loaded chats={} msgChats={} total={}",
@@ -1603,6 +1646,7 @@ impl Bridge {
 
     pub fn on_status(&mut self, text: &str) {
         self.ui.set_status_text(text.into());
+        self.outbox_connected = false;
     }
 
     pub fn on_open(&mut self, pn: &str, lid: &str, name: &str) {
@@ -1643,6 +1687,9 @@ impl Bridge {
         // pairing history payload arrives thin).
         self.once(8000, |b| b.pull_older_history());
         self.schedule_refresh_chats();
+        self.outbox_connected = true;
+        self.resume_preparations();
+        self.dispatch_outbox();
     }
 
     // Errors the user must act on get a modal instead of a silent retry
@@ -1762,6 +1809,10 @@ impl Bridge {
     // account it is switching away from.
     fn clear_store_state(&mut self) {
         self.clear_notification_sensitive_state();
+        self.preparation_states.clear();
+        self.preparations_active.clear();
+        self.outbox.clear();
+        self.outbox_connected = false;
         self.store = Store::default();
         self.chat_typing.clear();
         self.presence_subscribed.clear();
@@ -2098,6 +2149,7 @@ impl Bridge {
             self.store.load_from(&vault);
             self.vault = Some(vault);
         }
+        self.restore_outbox();
         // "Add account" backed out of before pairing: the empty slot
         // would otherwise sit in the switcher forever.
         if abandoned {
@@ -2134,11 +2186,12 @@ impl Bridge {
         let Some(vault) = self.vault.take() else {
             return;
         };
-        let pending: Vec<String> = vault
-            .keys("store:msgs:")
-            .into_iter()
-            .map(|k| k["store:msgs:".len()..].to_string())
-            .filter(|jid| !self.store.search.has_chat(jid))
+        let mut seen = HashSet::new();
+        let pending: Vec<String> = self.store.chats.keys().cloned()
+            .chain(vault.keys("store:msgs:").into_iter()
+                .map(|k| k["store:msgs:".len()..].to_string()))
+            .map(|jid| self.store.canon_owned(&jid))
+            .filter(|jid| seen.insert(jid.clone()) && !self.store.search.has_chat(jid))
             .take(6)
             .collect();
         for jid in &pending {
@@ -2192,6 +2245,8 @@ impl Bridge {
         for web in &chunk.messages {
             if let Some(stored) = crate::wa_map::from_history(&mut self.store, web) {
                 let jid = stored.jid.clone();
+                if stored.from_me && stored.status >= 1 { self.on_outbox_ack(&stored.id, None); }
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
                 if self.store.add_message(stored) {
                     added += 1;
                     if Some(&jid) == self.current_jid.as_ref() {
@@ -2268,7 +2323,7 @@ impl Bridge {
                 && let Some(edited) = pm.edited_message.as_option()
             {
                 let jid = self.store.canon_owned(&normalize_jid(&chat));
-                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
                 let sender = self.store.canon_owned(&info.source.sender.to_non_ad_string());
                 let valid = self.store.messages_for(&jid).iter().find(|m| m.id == id).is_some_and(|m| {
                     m.from_me == info.source.is_from_me && (m.from_me || self.store.canon(&m.sender_jid) == sender)
@@ -2323,6 +2378,7 @@ impl Bridge {
                 && let Some(target) = pm.key.as_option().and_then(|k| k.id.clone())
             {
                 let chat_jid = self.store.canon_owned(&normalize_jid(&chat));
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, &target); }
                 let destructive = self.ui.get_apply_deletions() || info.source.is_from_me;
                 let changed = if destructive {
                     self.store.mark_deleted(&chat_jid, &target)
@@ -2364,6 +2420,8 @@ impl Bridge {
             };
             let jid = stored.jid.clone();
             let from_me = stored.from_me;
+            if from_me { self.on_outbox_ack(&stored.id, None); }
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
             let mentions_me = stored.mentions_me;
             let sender = stored.sender_jid.clone();
             if !self.store.add_message(stored) {
@@ -2410,9 +2468,10 @@ impl Bridge {
             else if alternate.ends_with("@lid") { self.store.learn_alias(alternate, participant); }
         }
         let jid = self.store.canon_owned(&normalize_jid(chat));
-        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
         let mut changed = Vec::new();
         for id in ids {
+            if status >= 3 { self.on_outbox_ack(id, None); }
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
             if self.store.apply_receipt(&jid, id, participant, status, timestamp) {
                 changed.push(id.clone());
             }
@@ -2551,6 +2610,7 @@ impl Bridge {
 
     pub fn on_star(&mut self, jid: &str, id: &str, starred: bool) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         if self.store.set_starred(&jid, id, starred) && Some(&jid) == self.current_jid.as_ref() {
             self.patch_row(id, |row| row.starred = starred);
         }
@@ -2579,6 +2639,190 @@ impl Bridge {
 
     // The just-sent message flows through the normal pipeline; the later
     // echo from the server is deduplicated by id in the store.
+    pub fn stage_attachment(&mut self, preparation: crate::outbox::Preparation) -> bool {
+        let key = format!("store:preparation:{}", preparation.id);
+        let result = serde_json::to_string(&preparation).map_err(|e| e.to_string()).and_then(|json| {
+            self.vault.as_ref().ok_or("vault unavailable".to_string())?.set_checked(&key, &json)
+        });
+        if result.is_err() { self.message_action_failed(&t("outbox.storageFailed")); return false; }
+        self.show_preparation(&preparation, "outbox.preparing");
+        if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+        true
+    }
+
+    fn show_preparation(&mut self, preparation: &crate::outbox::Preparation, state: &str) {
+        use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
+        self.preparation_states.insert(preparation.id.clone(), state == "outbox.failed");
+        self.echo_sent(&preparation.jid, &preparation.id, wa::Message::text(format!("{}: {}", t(state), preparation.filename)));
+        self.patch_row(&preparation.id, |row| {
+            row.sendPending = true;
+            row.sendRetry = state == "outbox.failed";
+            row.sendState = t(state).into();
+            row.ticks = "pending".into();
+        });
+    }
+
+    fn resume_preparations(&mut self) {
+        let preparations: Vec<_> = self.vault.as_ref().map(|vault| vault.keys("store:preparation:").into_iter()
+            .filter_map(|key| vault.get(&key)).filter_map(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok()).collect()).unwrap_or_default();
+        for preparation in preparations {
+            self.show_preparation(&preparation, "outbox.preparing");
+            if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+        }
+    }
+
+    pub fn on_attachment_prepared(&mut self, id: &str, result: Result<wa::Message, String>) {
+        self.preparations_active.remove(id);
+        let key = format!("store:preparation:{id}");
+        let preparation = self.vault.as_ref().and_then(|vault| vault.get(&key))
+            .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
+        let Some(preparation) = preparation else { return; };
+        let message = match result {
+            Ok(message) => message,
+            Err(_) => { self.show_preparation(&preparation, "outbox.failed"); return; }
+        };
+        let mut entries = self.outbox.clone();
+        entries.push(crate::outbox::Entry::new(id.to_string(), preparation.jid.clone(), std::sync::Arc::new(message.clone()), now_secs()));
+        let json = match serde_json::to_string(&entries) { Ok(json) => json, Err(_) => return };
+        let saved = self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[("store:outbox", &json)], &[&key]).is_ok());
+        if !saved { self.message_action_failed(&t("outbox.storageFailed")); return; }
+        self.outbox = entries;
+        self.preparation_states.remove(id);
+        if let Some(messages) = self.store.messages.get_mut(&preparation.jid) { messages.retain(|message| message.id != id); }
+        self.echo_sent_from(&preparation.jid, id, message, preparation.origin);
+        if self.current_jid.as_deref() == Some(&preparation.jid) { self.rebuild_conversation(&preparation.jid); }
+        self.dispatch_outbox();
+    }
+
+    fn persist_outbox(&self, entries: &[crate::outbox::Entry]) -> Result<(), String> {
+        let vault = self.vault.as_ref().ok_or("vault unavailable")?;
+        let json = serde_json::to_string(entries).map_err(|e| e.to_string())?;
+        vault.set_checked("store:outbox", &json)
+    }
+
+    fn restore_outbox(&mut self) {
+        self.outbox_connected = false;
+        self.resume_preparations();
+        let cached = self.vault.as_ref().and_then(|v| v.get("store:outbox"));
+        self.outbox = cached.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
+        for entry in &mut self.outbox { entry.recover_interrupted(); }
+        let _ = self.persist_outbox(&self.outbox);
+        for entry in self.outbox.clone() {
+            let found = self.vault.as_ref().is_some_and(|v| self.store.hydrate_id(v, &entry.jid, &entry.id));
+            if found && self.store.messages_for(&entry.jid).iter().any(|message| message.id == entry.id && message.status >= 1) {
+                self.on_outbox_ack(&entry.id, None);
+                continue;
+            }
+            if !found {
+                self.echo_sent(&entry.jid, &entry.id, (*entry.message).clone());
+                if let Some(message) = self.store.messages.get_mut(&entry.jid).and_then(|messages| messages.iter_mut().find(|m| m.id == entry.id)) {
+                    message.timestamp = entry.created;
+                }
+            }
+        }
+    }
+
+    pub fn enqueue_prepared(&mut self, jid: &str, message: wa::Message, origin: Option<String>) -> bool {
+        use rand::RngCore as _;
+        let mut bytes = [0u8; 16];
+        rand::rng().fill_bytes(&mut bytes);
+        let id = format!("3EB0{}", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>());
+        let jid = self.store.canon_owned(jid);
+        let entry = crate::outbox::Entry::new(id.clone(), jid.clone(), std::sync::Arc::new(message.clone()), now_secs());
+        let mut entries = self.outbox.clone();
+        entries.push(entry);
+        if self.persist_outbox(&entries).is_err() {
+            self.message_action_failed(&t("outbox.storageFailed"));
+            return false;
+        }
+        self.outbox = entries;
+        self.echo_sent_from(&jid, &id, message, origin);
+        self.dispatch_outbox();
+        true
+    }
+
+    fn dispatch_outbox(&mut self) {
+        use crate::outbox::State;
+        if !self.outbox_connected || self.switching { return; }
+        if self.outbox.iter().any(|entry| entry.state == State::Sending) { return; }
+        let Some(index) = self.outbox.iter().position(|entry| entry.state == State::Queued) else { return };
+        let mut entries = self.outbox.clone();
+        entries[index].state = State::Sending;
+        if self.persist_outbox(&entries).is_err() {
+            self.message_action_failed(&t("outbox.storageFailed"));
+            return;
+        }
+        self.outbox = entries;
+        let entry = self.outbox[index].clone();
+        self.refresh_outbox_row(&entry.id);
+        self.wa.send(Cmd::SendQueued { id: entry.id.clone(), jid: entry.jid, message: entry.message });
+        let epoch = self.epoch;
+        self.once(45_000, move |b| {
+            if b.epoch != epoch { return; }
+            if let Some(pending) = b.outbox.iter_mut().find(|e| e.id == entry.id && e.state == State::Sending) {
+                pending.state = State::Uncertain;
+                let _ = b.persist_outbox(&b.outbox);
+                b.refresh_outbox_row(&entry.id);
+                b.dispatch_outbox();
+            }
+        });
+    }
+
+    fn refresh_outbox_row(&self, id: &str) {
+        let state = self.outbox.iter().find(|entry| entry.id == id).map(|entry| entry.state);
+        let label = match state {
+            Some(crate::outbox::State::Queued) => t("outbox.queued"),
+            Some(crate::outbox::State::Sending) => t("outbox.sending"),
+            Some(crate::outbox::State::Uncertain) => t("outbox.uncertain"),
+            Some(crate::outbox::State::Failed) => t("outbox.failed"),
+            None => String::new(),
+        };
+        self.patch_row(id, |row| {
+            row.sendState = label.into();
+            row.sendRetry = matches!(state, Some(crate::outbox::State::Failed | crate::outbox::State::Uncertain));
+            row.sendPending = state.is_some();
+            if state.is_some() { row.ticks = "pending".into(); }
+        });
+    }
+
+    pub fn on_outbox_result(&mut self, _jid: &str, id: &str, result: Result<(), String>) {
+        if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id) {
+            if result.is_err() {
+                entry.state = crate::outbox::State::Uncertain;
+                entry.error = t("outbox.uncertain");
+                let _ = self.persist_outbox(&self.outbox);
+                self.refresh_outbox_row(id);
+                self.dispatch_outbox();
+            }
+        }
+    }
+
+    pub fn on_outbox_ack(&mut self, id: &str, error: Option<String>) {
+        if !self.outbox.iter().any(|entry| entry.id == id) { return; }
+        if let Some(error) = error {
+            if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id) {
+                entry.state = crate::outbox::State::Failed;
+                entry.error = error;
+            }
+        } else {
+            let entry = self.outbox.iter().find(|entry| entry.id == id).cloned().unwrap();
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &entry.jid, id); }
+            self.store.set_status(&entry.jid, id, 1);
+            if let Some(vault) = &self.vault {
+                if self.store.save_checked(vault).is_err() { return; }
+            }
+            let remaining: Vec<_> = self.outbox.iter().filter(|entry| entry.id != id).cloned().collect();
+            if self.persist_outbox(&remaining).is_err() { return; }
+            self.outbox = remaining;
+        }
+        let _ = self.persist_outbox(&self.outbox);
+        self.refresh_outbox_row(id);
+        if !self.outbox.iter().any(|entry| entry.id == id) {
+            self.patch_row(id, |row| row.ticks = "✓".into());
+        }
+        self.dispatch_outbox();
+    }
+
     pub fn echo_sent_from(&mut self, jid: &str, id: &str, message: wa::Message, origin: Option<String>) {
         if let Some(origin) = origin {
             if let Some(vault) = &self.vault {
@@ -2698,6 +2942,12 @@ impl Bridge {
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
+        if let Some(vault) = &self.vault {
+            if self.store.load_older(vault, &jid) {
+                self.prepend_older_rows(&jid);
+                return;
+            }
+        }
         // After a jump the list starts mid-conversation; the rows above it
         // are already in the store.
         if self.store.messages_for(&jid).len() > self.messages_model.row_count() {
@@ -2742,6 +2992,7 @@ impl Bridge {
         from_me: bool,
     ) {
         let chat_jid = self.store.canon_owned(&normalize_jid(remote_jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, target); }
         let updated = self.store.apply_reaction(&chat_jid, target, reactor, emoji);
         if updated && Some(&chat_jid) == self.current_jid.as_ref() {
             let summary = self
@@ -3232,12 +3483,17 @@ impl Bridge {
         self.apply_chat_settings_ui();
         self.refresh_labels();
         self.ensure_group_meta(jid);
+        let jump_loaded = jump_to.map(|target| {
+            self.vault.as_ref().is_some_and(|vault| self.store.load_around(vault, jid, target))
+        });
+        let at = jump_to.and_then(|target| self.store.messages_for(jid).iter().position(|m| m.id == target));
+        if jump_to.is_some() && (jump_loaded == Some(false) || at.is_none()) {
+            self.message_action_failed(&t("history.unavailable"));
+        }
         let list = self.store.messages_for(jid);
         // Jumping to a message means starting the list there: the row
         // lands at the top exactly, instead of chasing a pixel offset
         // inside a virtualized list that estimates unmeasured heights.
-        let at = jump_to
-            .and_then(|target| list.iter().position(|m| m.id == target));
         let from = at.unwrap_or(0);
         if at.is_some() {
             self.truncated.insert(jid.to_string());
@@ -3263,6 +3519,8 @@ impl Bridge {
         self.ui.set_scroll_armed(!anchored_top);
         let saved = if anchored_top {
             Some(0.0)
+        } else if jump_to.is_some() {
+            None
         } else {
             self.scroll_pos.get(jid).copied()
         };
@@ -3521,10 +3779,30 @@ impl Bridge {
         } else {
             String::new()
         };
+        let card = crate::wa_map::special_card(m);
+        let card_picture = card.thumbnail.and_then(card_thumbnail);
         let (styled, has_styled, plain, links) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
         let system = m.kind == MessageKind::System;
+        let outgoing = self.outbox.iter().find(|entry| entry.id == m.id);
+        let preparing = self.preparation_states.get(&m.id).copied();
         MessageItem {
+            sendPending: outgoing.is_some() || preparing.is_some(),
+            sendRetry: preparing == Some(true) || outgoing.is_some_and(|entry| matches!(entry.state, crate::outbox::State::Failed | crate::outbox::State::Uncertain)),
+            sendState: outgoing.map(|entry| t(match entry.state {
+                crate::outbox::State::Queued => "outbox.queued",
+                crate::outbox::State::Sending => "outbox.sending",
+                crate::outbox::State::Uncertain => "outbox.uncertain",
+                crate::outbox::State::Failed => "outbox.failed",
+            })).unwrap_or_else(|| preparing.map(|failed| t(if failed { "outbox.failed" } else { "outbox.preparing" })).unwrap_or_default()).into(),
+            cardKind: card.kind.into(),
+            cardInitial: initial_of(&card.title).into(),
+            cardTitle: card.title.into(),
+            cardBody: card.body.into(),
+            cardDetail: card.detail.into(),
+            cardOptions: ModelRc::new(VecModel::from(card.options.into_iter().map(SharedString::from).collect::<Vec<_>>())),
+            cardHasPicture: card_picture.is_some(),
+            cardPicture: card_picture.unwrap_or_else(empty_image),
             id: m.id.clone().into(),
             kind: (if m.deleted {
                 "text"
@@ -3599,7 +3877,7 @@ impl Bridge {
             reactionCount: reaction_count.into(),
             dayLabel: day_label.into(),
             unread_boundary: self.unread_boundary.as_deref() == Some(m.id.as_str()),
-            ticks: ticks.into(),
+            ticks: if outgoing.is_some() || preparing.is_some() { "pending" } else { ticks }.into(),
             ticksBlue: ticks_blue,
             senderHasAvatar: self.avatar_for(&sender_jid).is_some(),
             senderAvatar: self.avatar_for(&sender_jid).unwrap_or_else(empty_image),
@@ -3662,7 +3940,7 @@ impl Bridge {
                 "".into()
             },
             styled,
-            hasStyled: has_styled,
+            hasStyled: has_styled && card.kind.is_empty(),
             links: ModelRc::new(VecModel::from(links)),
             plain: plain.into(),
             linkTitle: m.link_title.trim().into(),
@@ -3774,7 +4052,7 @@ impl Bridge {
         {
             return;
         }
-        let quote = self.reply_to.take().and_then(|(chat, id)| {
+        let quote = self.reply_to.clone().and_then(|(chat, id)| {
             let m = self.store.messages_for(&chat).iter().find(|m| m.id == id)?;
             let raw = m.raw.clone()?;
             Some(QuoteRef {
@@ -3788,13 +4066,11 @@ impl Bridge {
                 message: raw,
             })
         });
-        self.clear_reply();
-        self.ui.set_mention_open(false);
         // "@Name" in the composer goes out as "@<number>" plus the jid in
         // the context, which is how every client renders a mention.
         let mut mentions: Vec<String> = Vec::new();
         let mut mention_all = None;
-        let picked = std::mem::take(&mut self.mentions);
+        let picked = self.mentions.clone();
         for (label, target) in picked {
             let token = format!("@{label}");
             if !body.contains(&token) {
@@ -3812,15 +4088,15 @@ impl Bridge {
                 }
             }
         }
-        self.store.drafts.remove(&jid);
-        self.schedule_refresh_chats();
-        self.wa.send(Cmd::SendText {
-            jid,
-            body,
-            quote,
-            mentions,
-            mention_all,
-        });
+        let message = crate::wa::build_text(&jid, body, &quote, mentions, mention_all);
+        if self.enqueue_prepared(&jid, message, None) {
+            self.store.drafts.remove(&jid);
+            self.mentions.clear();
+            self.clear_reply();
+            self.ui.set_mention_open(false);
+            self.ui.invoke_set_composer("".into(), 0);
+            self.schedule_refresh_chats();
+        }
     }
 
     // ---- mentions ----
@@ -8011,9 +8287,8 @@ impl Bridge {
         {
             return;
         }
-        self.wa.send(Cmd::SendText {
-            jid: item.jid.clone(), body, quote: None, mentions: Vec::new(), mention_all: None,
-        });
+        let message = crate::wa::build_text(&item.jid, body, &None, Vec::new(), None);
+        if !self.enqueue_prepared(&item.jid, message, None) { return; }
         if self.ui.get_send_receipts() {
             let message = self.store.messages_for(&item.jid).iter().find(|m| m.id == item.msg_id).cloned();
             if let Some(message) = message {
@@ -8256,7 +8531,7 @@ impl Bridge {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let jid = self.store.canon_owned(&normalize_jid(jid));
         let content = content.get_base_message();
-        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         let text = content.conversation.clone()
             .or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()))
             .or_else(|| content.image_message.as_option().and_then(|m| m.caption.clone()))
@@ -8287,6 +8562,7 @@ impl Bridge {
 
     pub fn on_message_pin(&mut self, jid: &str, id: &str, until: i64) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
             m.pinned_until = until;
             self.store.dirty_jids.insert(jid.clone());
@@ -8348,6 +8624,60 @@ impl Bridge {
     }
 
     fn message_action(&mut self, id: &str, action: &str) {
+        let preparation_key = format!("store:preparation:{id}");
+        let preparation = self.vault.as_ref().and_then(|vault| vault.get(&preparation_key))
+            .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
+        if let Some(preparation) = preparation {
+            if action == "retry" {
+                if self.preparations_active.contains(id) { return; }
+                self.show_preparation(&preparation, "outbox.preparing");
+                if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+                return;
+            }
+            if action == "cancel" {
+                if self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[], &[&preparation_key]).is_ok()) {
+                    self.preparation_states.remove(id);
+                    self.store.remove_messages(&preparation.jid, &[id.to_string()]);
+                    self.rebuild_conversation(&preparation.jid);
+                }
+                return;
+            }
+        }
+        if let Some(index) = self.outbox.iter().position(|entry| entry.id == id) {
+            if action == "recover" {
+                if let Some(message) = self.find_message(id) {
+                    let text = message.text.clone();
+                    self.ui.invoke_set_composer(text.clone().into(), text.len() as i32);
+                    self.save_draft(&text, true);
+                }
+                return;
+            }
+            if action == "retry" && self.outbox[index].state != crate::outbox::State::Sending {
+                self.outbox[index].state = crate::outbox::State::Queued;
+                if self.persist_outbox(&self.outbox).is_ok() {
+                    self.refresh_outbox_row(id);
+                    self.dispatch_outbox();
+                }
+                return;
+            }
+            if action == "cancel" {
+                if self.outbox[index].state != crate::outbox::State::Queued {
+                    self.message_action_failed(&t("outbox.cannotCancel"));
+                    return;
+                }
+                let entry = self.outbox[index].clone();
+                let mut entries = self.outbox.clone();
+                entries.remove(index);
+                if self.persist_outbox(&entries).is_err() {
+                    self.message_action_failed(&t("outbox.storageFailed"));
+                    return;
+                }
+                self.outbox = entries;
+                self.store.remove_messages(&entry.jid, &[id.to_string()]);
+                self.rebuild_conversation(&entry.jid);
+                return;
+            }
+        }
         let Some(m) = self.find_message(id).cloned() else { return };
         if m.deleted || m.kind == MessageKind::System { return; }
         match action {
