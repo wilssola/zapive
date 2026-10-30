@@ -743,7 +743,8 @@ export component AppWindow inherits Window {
         { key: "calls", title: @tr("Calls"), detail: @tr("Audio, video and devices"), icon: @image-url("../icons/phone.svg") },
         { key: "downloads", title: @tr("Automatic downloads"), detail: @tr("Media and files"), icon: @image-url("../icons/download.svg") },
         { key: "security", title: @tr("Security"), detail: @tr("PIN and app protection"), icon: @image-url("../icons/lock.svg") },
-        { key: "updates", title: @tr("Updates"), detail: @tr("Version and updates"), icon: @image-url("../icons/refresh.svg") }
+        { key: "updates", title: @tr("Updates"), detail: @tr("Version and updates"), icon: @image-url("../icons/refresh.svg") },
+        { key: "translation", title: @tr("Translation"), detail: @tr("Local translation with Argos"), icon: @image-url("../icons/translate.svg") }
     ];
     pure callback settings-search(string, string) -> bool;
     pure function settings-matches(text: string) -> bool {
@@ -752,6 +753,22 @@ export component AppWindow inherits Window {
     in-out property <bool> pin-set: false;
     in-out property <bool> autostart: false;
     in-out property <string> settings-status: "";
+    in property <string> translation-status: "Stopped";
+    in property <string> translation-detail: "";
+    in property <bool> translation-busy: false;
+    in property <bool> translation-running: false;
+    in property <string> translation-target: "pt";
+    in property <string> translation-source: "auto";
+    in property <string> translation-models;
+    in property <string> translation-pairs;
+    callback translation-action(string);
+    callback translation-install(string);
+    property <string> translation-model-source: "en";
+    callback translation-language(string, string);
+    pure function can-translate(message: MessageItem) -> bool {
+        return !message.deleted && message.cardKind == "" && !message.sticker
+            && message.text != "" && (message.kind == "text" || message.kind == "image" || message.kind == "video");
+    }
     callback autostart-changed(bool);
     callback save-pin(string, string);
     callback remove-pin(string);
@@ -2197,7 +2214,8 @@ export component AppWindow inherits Window {
                         property <bool> meta-inline:
                             msg.cardKind == "" && (msg.hasStyled || msg.kind == "text"
                                 || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
-                            && (msg.text != "" || msg.deleted);
+                            && (msg.text != "" || msg.deleted)
+                            && !(root.can-translate(msg) && (msg.translationText != "" || msg.translationBusy || msg.translationError != ""));
                         property <length> unread-offset: msg.unread-boundary ? 28px : 0;
                         property <length> day-offset: (msg.dayLabel != "" ? 40px : 0) + unread-offset + header-offset;
                         if msg.unread-boundary: Rectangle {
@@ -2968,6 +2986,7 @@ export component AppWindow inherits Window {
                                         width: min(self.preferred-width, msg-row.max-text-w);
                                     }
                                     stamp-in := Rectangle {
+                                        visible: msg-row.meta-inline;
                                         width: stamp-lay.preferred-width;
                                         height: stamp-lay.preferred-height;
                                         x: bubble.width - 24px - stamp-lay.preferred-width;
@@ -3068,6 +3087,7 @@ export component AppWindow inherits Window {
                                         height: self.preferred-height;
                                     }
                                     stamp-in2 := Rectangle {
+                                        visible: msg-row.meta-inline;
                                         width: stamp-lay2.preferred-width;
                                         height: stamp-lay2.preferred-height;
                                         x: bubble.width - 24px - stamp-lay2.preferred-width;
@@ -3079,6 +3099,64 @@ export component AppWindow inherits Window {
                                                 blue: msg.ticksBlue;
                                                 fromMe: msg.fromMe;
                                             }
+                                        }
+                                    }
+                                }
+
+                                if root.can-translate(msg) && (msg.translationText != "" || msg.translationBusy || msg.translationError != ""): Rectangle {
+                                    width: min(msg-row.content-w, max(260px, translated-body.preferred-width + 20px));
+                                    height: translated-content.preferred-height;
+                                    background: Theme.dark ? #111b21 : #0000000c;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: Theme.dark ? #ffffff18 : Theme.border;
+                                    translated-content := VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 6px;
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Text {
+                                                text: msg.translationLabel != "" ? @tr("Translated ({})", msg.translationLabel) : @tr("Translated");
+                                                color: Theme.text-dim;
+                                                font-size: 11px;
+                                                wrap: word-wrap;
+                                                vertical-alignment: center;
+                                                opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                            }
+                                            if msg.translationText != "": IconButton {
+                                                width: 24px;
+                                                height: 24px;
+                                                icon-size: 14px;
+                                                icon: @image-url("../icons/copy.svg");
+                                                accessible-role: button;
+                                                accessible-label: @tr("Copy translation");
+                                                clicked => { root.message-action(msg.id, "translation-copy"); }
+                                            }
+                                        }
+                                        translated-body := TextInput {
+                                            text: msg.translationText;
+                                            visible: msg.translationText != "";
+                                            read-only: true;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            font-size: 14px;
+                                            color: Theme.bubble-text;
+                                            selection-background-color: #3390ec;
+                                            selection-foreground-color: white;
+                                            opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
+                                        }
+                                        if msg.translationBusy: Text {
+                                            text: @tr("Translating…");
+                                            color: Theme.text-dim;
+                                            font-size: 12px;
+                                        }
+                                        if msg.translationError != "": Text {
+                                            text: msg.translationError;
+                                            color: Theme.text-dim;
+                                            font-size: 12px;
+                                            wrap: word-wrap;
+                                            opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
                                         }
                                     }
                                 }
@@ -3120,7 +3198,7 @@ export component AppWindow inherits Window {
                             x: msg.fromMe
                                 ? max(0px, bubble.x - self.width - 6px)
                                 : bubble.x + bubble.width + 6px;
-                            width: 96px;
+                            width: root.can-translate(msg) ? 128px : 96px;
                             height: 28px;
                             HorizontalLayout {
                                 spacing: 4px;
@@ -3136,6 +3214,15 @@ export component AppWindow inherits Window {
                                     icon: @image-url("../icons/corner-up-right.svg");
                                     icon-size: 17px;
                                     clicked => { root.request-forward(msg.id); }
+                                }
+                                if root.can-translate(msg): IconButton {
+                                    icon: @image-url("../icons/translate.svg");
+                                    icon-size: 17px;
+                                    accessible-role: button;
+                                    accessible-label: @tr("Translate message");
+                                    enabled: !msg.translationBusy;
+                                    active: msg.translationText != "";
+                                    clicked => { root.message-action(msg.id, "translate"); }
                                 }
                                 IconButton {
                                     icon: @image-url("../icons/chevron-down.svg");
@@ -4763,10 +4850,35 @@ export component AppWindow inherits Window {
                         label: @tr("Forward");
                         clicked => { root.message-menu-open = false; root.request-forward(root.menu-message.id); }
                     }
+                    if root.can-translate(root.menu-message): MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/translate.svg");
+                        label: root.menu-message.translationBusy ? @tr("Translating…") : @tr("Translate message");
+                        enabled: !root.menu-message.translationBusy;
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translate"); }
+                    }
+                    if root.can-translate(root.menu-message) && root.menu-message.translationText != "": MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/x.svg");
+                        label: @tr("Hide translation");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-hide"); }
+                    }
+                    if root.can-translate(root.menu-message) && root.menu-message.translationSource != "": MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/translate.svg");
+                        label: @tr("Always translate from {}", root.menu-message.translationSource);
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-always"); }
+                    }
+                    if root.can-translate(root.menu-message) && root.menu-message.translationSource != "": MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/circle-minus.svg");
+                        label: @tr("Never translate from {}", root.menu-message.translationSource);
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-never"); }
+                    }
                     if root.menu-message.text != "" && (root.menu-message.kind == "text" || root.menu-message.kind == "image" || root.menu-message.kind == "video"): MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/copy.svg");
-                        label: @tr("Copy text");
+                        label: @tr("Copy original text");
                         clicked => { root.message-menu-open = false; root.copy-text(root.menu-message.id); }
                     }
                     if root.menu-message.kind == "image" && root.menu-message.mediaReady: MenuRow {
@@ -5712,7 +5824,7 @@ export component AppWindow inherits Window {
                             VerticalLayout {
                                 alignment: center; spacing: 4px;
                                 Text {
-                                    text: root.settings-query != "" ? @tr("Search results") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : 1].title;
+                                    text: root.settings-query != "" ? @tr("Search results") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : root.settings-section == "translation" ? 9 : 1].title;
                                     color: Theme.text; font-size: 20px; font-weight: 700;
                                 }
                                 Text {
@@ -6051,6 +6163,94 @@ export component AppWindow inherits Window {
                                     on: root.auto-download-stickers;
                                     clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
                                 }
+                            }
+                        }
+                        if ((root.settings-query == "" && root.settings-section == "translation") || (root.settings-query != "" && root.settings-matches(@tr("Translation") + " " + @tr("Local translation with Argos") + " " + @tr("Source language") + " " + @tr("Target language") + " " + @tr("Translation models")))): SettingsCard {
+                            title: @tr("Translation");
+                            hint: @tr("Messages are translated locally with Argos. The translation service runs in the background without opening a window.");
+                            SettingsRow {
+                                label: @tr("Translation service");
+                                detail: (root.translation-status == "Stopped" ? @tr("Stopped") : root.translation-status)
+                                    + (root.translation-detail != "" ? " · " + root.translation-detail : "");
+                                icon: @image-url("../icons/translate.svg");
+                                DialogButton {
+                                    label: root.translation-busy ? @tr("Working…") : root.translation-running ? @tr("Restart") : @tr("Start");
+                                    enabled: !root.translation-busy;
+                                    clicked => { root.translation-action(root.translation-running ? "restart" : "start"); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Stop translation service");
+                                detail: @tr("Start it again whenever you need local translation.");
+                                DialogButton {
+                                    label: @tr("Stop");
+                                    enabled: root.translation-running || root.translation-busy;
+                                    clicked => { root.translation-action("stop"); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Source language");
+                                detail: @tr("Use auto to detect the message language.");
+                                ComboBox {
+                                    width: min(210px, root.width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    enabled: !root.translation-busy;
+                                    model: ["auto", "en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
+                                    current-value: root.translation-source;
+                                    selected(value) => { root.translation-language("source", value); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Target language");
+                                detail: @tr("Translate messages into this language.");
+                                ComboBox {
+                                    width: min(210px, root.width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    enabled: !root.translation-busy;
+                                    model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
+                                    current-value: root.translation-target;
+                                    selected(value) => { root.translation-language("target", value); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Model source language");
+                                detail: @tr("Choose the language to download without changing automatic detection.");
+                                ComboBox {
+                                    width: min(210px, root.width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    enabled: !root.translation-busy;
+                                    model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
+                                    current-value: root.translation-model-source;
+                                    selected(value) => { root.translation-model-source = value; }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Translation models");
+                                detail: root.translation-detail != "" ? root.translation-detail
+                                    : root.translation-model-source == root.translation-target
+                                    ? @tr("Choose different source and target languages to install a model.")
+                                    : @tr("Install model: {} → {}", root.translation-model-source, root.translation-target);
+                                DialogButton {
+                                    label: root.translation-busy ? @tr("Working…") : @tr("Install model");
+                                    enabled: !root.translation-busy && root.translation-model-source != root.translation-target;
+                                    clicked => { root.translation-install(root.translation-model-source); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Installed models");
+                                detail: root.translation-models != "" ? root.translation-models : @tr("No translation models installed.");
+                                DialogButton {
+                                    label: @tr("Refresh");
+                                    enabled: !root.translation-busy;
+                                    clicked => { root.translation-action("refresh"); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Available language pairs");
+                                detail: root.translation-pairs != "" ? root.translation-pairs : @tr("Refresh to list available language pairs.");
                             }
                         }
                         if ((root.settings-query == "" && (root.settings-section == "updates")) || (root.settings-query != "" && root.settings-matches(@tr("About") + " " + @tr("Updates")))): SettingsCard {

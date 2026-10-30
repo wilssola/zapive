@@ -758,3 +758,105 @@ msgstr "Novidades da {}"
 
 msgid "Copy to composer"
 msgstr "Copiar para o campo de mensagem"
+
+msgid "Translation"
+msgstr "Tradução"
+
+msgid "Local translation with Argos"
+msgstr "Tradução local com Argos"
+
+msgid "Translate message"
+msgstr "Traduzir mensagem"
+
+msgid "Translated ({})"
+msgstr "Traduzido ({})"
+
+msgid "Translated"
+msgstr "Traduzido"
+
+msgid "Copy translation"
+msgstr "Copiar tradução"
+
+msgid "Translating…"
+msgstr "Traduzindo…"
+
+msgid "Hide translation"
+msgstr "Ocultar tradução"
+
+msgid "Always translate from {}"
+msgstr "Sempre traduzir de {}"
+
+msgid "Never translate from {}"
+msgstr "Nunca traduzir de {}"
+
+msgid "Copy original text"
+msgstr "Copiar texto original"
+
+msgid "Messages are translated locally with Argos. The translation service runs in the background without opening a window."
+msgstr "As mensagens são traduzidas localmente com Argos. O serviço de tradução funciona em segundo plano sem abrir uma janela."
+
+msgid "Translation service"
+msgstr "Serviço de tradução"
+
+msgid "Stopped"
+msgstr "Parado"
+
+msgid "Working…"
+msgstr "Processando…"
+
+msgid "Start"
+msgstr "Iniciar"
+
+msgid "Stop translation service"
+msgstr "Parar serviço de tradução"
+
+msgid "Start it again whenever you need local translation."
+msgstr "Inicie novamente quando precisar de tradução local."
+
+msgid "Stop"
+msgstr "Parar"
+
+msgid "Source language"
+msgstr "Idioma de origem"
+
+msgid "Use auto to detect the message language."
+msgstr "Use auto para detectar o idioma da mensagem."
+
+msgid "Target language"
+msgstr "Idioma de destino"
+
+msgid "Translate messages into this language."
+msgstr "Traduza mensagens para este idioma."
+
+msgid "Translation models"
+msgstr "Modelos de tradução"
+
+msgid "Model source language"
+msgstr "Idioma de origem do modelo"
+
+msgid "Choose the language to download without changing automatic detection."
+msgstr "Escolha o idioma para baixar sem alterar a detecção automática."
+
+msgid "Choose different source and target languages to install a model."
+msgstr "Escolha idiomas de origem e destino diferentes para instalar um modelo."
+
+msgid "Install model: {} → {}"
+msgstr "Instalar modelo: {} → {}"
+
+msgid "Install model"
+msgstr "Instalar modelo"
+
+msgid "Installed models"
+msgstr "Modelos instalados"
+
+msgid "No translation models installed."
+msgstr "Nenhum modelo de tradução instalado."
+
+msgid "Refresh"
+msgstr "Atualizar"
+
+msgid "Available language pairs"
+msgstr "Pares de idiomas disponíveis"
+
+msgid "Refresh to list available language pairs."
+msgstr "Atualize para listar os pares de idiomas disponíveis."

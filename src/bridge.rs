@@ -49,11 +49,93 @@ struct NotificationToken {
     expires: SystemTime,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct TranslationSettings {
+    source: String,
+    target: String,
+    policies: HashMap<String, String>,
+}
+
+impl Default for TranslationSettings {
+    fn default() -> Self {
+        Self { source: "auto".into(), target: "pt".into(), policies: HashMap::new() }
+    }
+}
+
+struct TranslationEntry {
+    request: u64,
+    original: String,
+    source: String,
+    text: String,
+    error: String,
+    busy: bool,
+    hidden: bool,
+    automatic: bool,
+}
+
+fn translation_text(en: &str, pt: &str) -> String {
+    if crate::i18n::current_locale() == crate::i18n::Locale::Pt { pt.into() } else { en.into() }
+}
+
+fn translation_language_name(code: &str) -> String {
+    let (en, pt) = match code {
+        "en" => ("English", "Inglês"), "pt" => ("Portuguese", "Português"),
+        "es" => ("Spanish", "Espanhol"), "fr" => ("French", "Francês"),
+        "de" => ("German", "Alemão"), "zh" => ("Chinese", "Chinês"),
+        "ja" => ("Japanese", "Japonês"), "ru" => ("Russian", "Russo"),
+        "it" => ("Italian", "Italiano"), "ar" => ("Arabic", "Árabe"),
+        _ => ("Other language", "Outro idioma"),
+    };
+    translation_text(en, pt)
+}
+
+fn translation_error(code: &str) -> String {
+    let (en, pt) = match code {
+        "worker_outdated" | "network_managed_by_app" => ("The translation helper needs updating. Restart the app to load the updated helper.", "O auxiliar de tradução precisa ser atualizado. Reinicie o aplicativo para carregar o auxiliar atualizado."),
+        "invalid_model_archive" | "invalid_model_file" | "model_file_missing" => ("The model file is missing or invalid. Download and install the model again in Settings.", "O arquivo do modelo está ausente ou é inválido. Baixe e instale o modelo novamente nas Configurações."),
+        "model_install_failed" => ("Could not install the translation model. Check available disk space and folder permissions, then try again.", "Não foi possível instalar o modelo de tradução. Verifique o espaço em disco e as permissões da pasta e tente novamente."),
+        "invalid_catalog" => ("The translation model catalog is invalid. Refresh the catalog and try again.", "O catálogo de modelos de tradução é inválido. Atualize o catálogo e tente novamente."),
+        "insecure_download" => ("The translation download was blocked because it is not secure. Refresh the catalog or update the app.", "O download de tradução foi bloqueado por não ser seguro. Atualize o catálogo ou o aplicativo."),
+        "download_too_large" => ("The translation download exceeds the supported size. Refresh the catalog or choose another model.", "O download de tradução excede o tamanho permitido. Atualize o catálogo ou escolha outro modelo."),
+        "worker_unavailable" => ("The translation helper is missing or could not start. Check the application installation.", "O auxiliar de tradução não foi encontrado ou não pôde iniciar. Verifique a instalação do aplicativo."),
+        "source_required" => ("Choose the source language in Settings.", "Selecione o idioma de origem nas Configurações."),
+        "model_not_installed" | "pair_unavailable" => ("Install a model for this language pair in Settings.", "Instale um modelo para este par de idiomas nas Configurações."),
+        "worker_busy" => ("Translation is busy. Try again shortly.", "A tradução está ocupada. Tente novamente em instantes."),
+        "worker_timeout" => ("Translation timed out. Try restarting it.", "A tradução demorou demais. Tente reiniciá-la."),
+        "request_too_large" => ("This message is too long to translate.", "Esta mensagem é longa demais para traduzir."),
+        "network_tls_certificate" => ("The translation server certificate could not be verified. Check your system certificates, clock and HTTPS proxy.", "Não foi possível verificar o certificado do servidor de tradução. Verifique os certificados do sistema, o relógio e o proxy HTTPS."),
+        "network_tls" => ("A secure connection to the translation server could not be established.", "Não foi possível estabelecer uma conexão segura com o servidor de tradução."),
+        "network_access_denied" => ("The operating system denied the app's translation network connection. Check application network permissions.", "O sistema operacional negou a conexão de rede de tradução do aplicativo. Verifique as permissões de rede do aplicativo."),
+        "network_http_unauthorized" => ("The translation download server requires authentication (HTTP 401).", "O servidor de download de tradução exige autenticação (HTTP 401)."),
+        "network_http_forbidden" => ("The translation download server refused the request (HTTP 403).", "O servidor de download de tradução recusou a solicitação (HTTP 403)."),
+        "network_proxy_auth" => ("The proxy requires authentication for translation downloads (HTTP 407). Check your proxy settings.", "O proxy exige autenticação para os downloads de tradução (HTTP 407). Verifique as configurações do proxy."),
+        "network_rate_limited" | "network_server" => ("The translation server is temporarily unavailable or limiting requests. Try again later.", "O servidor de tradução está temporariamente indisponível ou limitando solicitações. Tente novamente mais tarde."),
+        "network_not_found" => ("The translation download was not found. Refresh the catalog and try again.", "O download de tradução não foi encontrado. Atualize o catálogo e tente novamente."),
+        "model_download_failed" | "network_failed" | "network_timeout" | "network_dns" | "network_refused" | "network_interrupted" | "network_unreachable" | "network_http" => ("Could not download translation data. Check your connection and try again.", "Não foi possível baixar os dados de tradução. Verifique sua conexão e tente novamente."),
+        _ => ("Translation is unavailable. Check the installation and restart it in Settings.", "A tradução está indisponível. Verifique a instalação e reinicie nas Configurações."),
+    };
+    translation_text(en, pt)
+}
+
+fn translation_eligible(m: &StoredMessage) -> bool {
+    !m.deleted && !m.revoked && !m.sticker && !m.text.trim().is_empty()
+        && m.text.len() <= 16_000
+        && matches!(m.kind, MessageKind::Text | MessageKind::Image | MessageKind::Video)
+        && crate::wa_map::special_card(m).kind.is_empty()
+}
+
 pub struct Bridge {
     ui: AppWindow,
     wa: WaService,
     vault: Option<Vault>,
     store: Store,
+    translation: crate::translation::Worker,
+    translation_gen: u64,
+    translation_request: u64,
+    translation_monitor: Option<u64>,
+    translation_cache: HashMap<(String, String, String, String), TranslationEntry>,
+    translation_settings: TranslationSettings,
     chats_model: Rc<VecModel<ChatItem>>,
     messages_model: Rc<VecModel<MessageItem>>,
     current_jid: Option<String>,
@@ -545,6 +627,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         wa,
         vault: None,
         store: Store::default(),
+        translation: crate::translation::Worker::new(),
+        translation_gen: 0,
+        translation_request: 0,
+        translation_monitor: None,
+        translation_cache: HashMap::new(),
+        translation_settings: TranslationSettings::default(),
         chats_model,
         messages_model,
         current_jid: None,
@@ -696,6 +784,9 @@ pub fn install(ui: &AppWindow, wa: WaService) {
 }
 
 fn wire_callbacks(ui: &AppWindow) {
+    ui.on_translation_action(|action| defer(move |b| b.translation_action(&action)));
+    ui.on_translation_install(|source| defer(move |b| b.install_translation_model(&source)));
+    ui.on_translation_language(|kind, value| defer(move |b| b.translation_language(&kind, &value)));
     ui.set_status_text(t("status.connecting").into());
 
     ui.on_request_pairing_code(|phone| {
@@ -1497,6 +1588,7 @@ impl Bridge {
         self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
         self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
+        self.load_translation_settings();
         self.restore_outbox();
         self.expire_notification_tokens();
         println!(
@@ -1525,6 +1617,293 @@ impl Bridge {
         for f in std::mem::take(&mut self.locked_backlog) {
             f(self);
         }
+    }
+
+    fn load_translation_settings(&mut self) {
+        self.translation_settings = self.vault.as_ref()
+            .and_then(|v| v.get("settings:translation"))
+            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        self.ui.set_translation_source(self.translation_settings.source.clone().into());
+        self.ui.set_translation_target(self.translation_settings.target.clone().into());
+    }
+
+    fn save_translation_settings(&self) {
+        if let Some(vault) = &self.vault {
+            if let Ok(value) = serde_json::to_string(&self.translation_settings) {
+                vault.set("settings:translation", &value);
+            }
+        }
+    }
+
+    fn reset_translation(&mut self) {
+        self.translation_gen = self.translation_gen.wrapping_add(1);
+        self.translation_cache.clear();
+        self.translation = crate::translation::Worker::new();
+        self.translation_monitor = None;
+        self.ui.set_translation_running(false);
+        self.ui.set_translation_busy(false);
+        self.ui.set_translation_status(translation_text("Stopped", "Parado").into());
+        self.ui.set_translation_detail("".into());
+        self.ui.set_translation_models("".into());
+        self.ui.set_translation_pairs("".into());
+    }
+
+    fn translation_language(&mut self, kind: &str, value: &str) {
+        if self.vault.is_none() || self.switching { return; }
+        if !matches!(value, "en" | "pt" | "es" | "fr" | "de" | "zh" | "ja" | "ru" | "it" | "ar")
+            && !(kind == "source" && value == "auto") { return; }
+        match kind {
+            "source" => self.translation_settings.source = value.into(),
+            "target" => self.translation_settings.target = value.into(),
+            _ => return,
+        }
+        self.save_translation_settings();
+        self.ui.set_translation_source(self.translation_settings.source.clone().into());
+        self.ui.set_translation_target(self.translation_settings.target.clone().into());
+        if let Some(jid) = self.current_jid.clone() {
+            self.rebuild_conversation(&jid);
+            self.auto_translate_chat(&jid);
+        }
+    }
+
+    fn install_translation_model(&mut self, source: &str) {
+        if !matches!(source, "en" | "pt" | "es" | "fr" | "de" | "zh" | "ja" | "ru" | "it" | "ar")
+            || source == self.translation_settings.target { return; }
+        self.run_translation_action("install", Some(source));
+    }
+
+    fn translation_action(&mut self, action: &str) {
+        self.run_translation_action(action, None);
+    }
+
+    fn run_translation_action(&mut self, action: &str, model_source: Option<&str>) {
+        log::info!("[translation] requested action={action}");
+        if self.vault.is_none() || self.switching || (self.ui.get_translation_busy() && action != "stop") {
+            log::warn!("[translation] action ignored: unlocked={} switching={} busy={}", self.vault.is_some(), self.switching, self.ui.get_translation_busy());
+            return;
+        }
+        let op = match action {
+            "start" => "status", "restart" => "restart", "stop" => "stop",
+            "refresh" => "refresh", "install" => "install", _ => return,
+        };
+        if matches!(op, "restart" | "stop") {
+            self.translation_gen = self.translation_gen.wrapping_add(1);
+            for e in self.translation_cache.values_mut() {
+                if e.busy { e.busy = false; e.error = translation_text("Translation cancelled. Try again.", "Tradução cancelada. Tente novamente."); }
+            }
+            if let Some(jid) = self.current_jid.clone() { self.rebuild_conversation(&jid); }
+        }
+        let generation = self.translation_gen;
+        let epoch = self.epoch;
+        let account = self.account.clone();
+        let stopped = op == "stop";
+        self.ui.set_translation_busy(true);
+        self.ui.set_translation_detail(if op == "install" {
+            translation_text("Downloading and installing the model…", "Baixando e instalando o modelo…")
+        } else { String::new() }.into());
+        log::info!("[translation] action={op} source={} target={}", model_source.unwrap_or(&self.translation_settings.source), self.translation_settings.target);
+        let result = self.translation.request(serde_json::json!({"op":op,
+            "source":model_source.unwrap_or(&self.translation_settings.source), "target":self.translation_settings.target}), move |result| {
+            ui_apply(move |b| {
+                if b.translation_gen != generation || b.epoch != epoch || b.account != account || b.switching { return; }
+                b.ui.set_translation_busy(false);
+                match result {
+                    Ok(value) => {
+                        log::info!("[translation] action completed");
+                        b.ui.set_translation_detail("".into());
+                        b.ui.set_translation_running(b.translation.status()["running"].as_bool().unwrap_or(false));
+                        b.ui.set_translation_status(if stopped { translation_text("Stopped", "Parado") } else { translation_text("Ready", "Pronto") }.into());
+                        if let Some(models) = value["models"].as_str() { b.ui.set_translation_models(b.translation_pairs_label(models).into()); }
+                        if let Some(pairs) = value["pairs"].as_str() { b.ui.set_translation_pairs(b.translation_pairs_label(pairs).into()); }
+                        if !stopped {
+                            b.monitor_translation(generation);
+                            if let Some(jid) = b.current_jid.clone() { b.auto_translate_chat(&jid); }
+                        }
+                    }
+                    Err(error) => b.translation_failed(&error),
+                }
+            });
+        });
+        if let Err(error) = result { self.translation_failed(&error); }
+    }
+
+    fn translation_pairs_label(&self, pairs: &str) -> String {
+        pairs.split(',').filter_map(|pair| pair.split_once(':'))
+            .map(|(a, b)| format!("{} → {}", translation_language_name(a), translation_language_name(b)))
+            .collect::<Vec<_>>().join(", ")
+    }
+
+    fn translation_failed(&mut self, error: &str) {
+        log::error!("[translation] operation failed: {error}");
+        self.ui.set_translation_busy(false);
+        self.ui.set_translation_running(self.translation.status()["running"].as_bool().unwrap_or(false));
+        self.ui.set_translation_status(translation_text("Unavailable", "Indisponível").into());
+        self.ui.set_translation_detail(translation_error(error).into());
+        if self.ui.get_translation_running() { self.monitor_translation(self.translation_gen); }
+    }
+
+    fn monitor_translation(&mut self, generation: u64) {
+        if self.translation_monitor == Some(generation) { return; }
+        self.translation_monitor = Some(generation);
+        self.once(5000, move |b| {
+            if b.translation_monitor == Some(generation) { b.translation_monitor = None; }
+            if b.translation_gen != generation || !b.ui.get_translation_running() { return; }
+            if b.translation.status()["running"].as_bool() != Some(true) {
+                b.translation_failed("runtime_failed");
+                for e in b.translation_cache.values_mut().filter(|e| e.busy) {
+                    e.busy = false;
+                    e.error = translation_error("runtime_failed");
+                }
+                if let Some(jid) = b.current_jid.clone() { b.rebuild_conversation(&jid); }
+            } else {
+                b.monitor_translation(generation);
+            }
+        });
+    }
+
+    fn translation_key(&self, jid: &str, id: &str) -> (String, String, String, String) {
+        (jid.into(), id.into(), self.translation_settings.source.clone(), self.translation_settings.target.clone())
+    }
+
+    fn translation_entry(&self, m: &StoredMessage) -> Option<&TranslationEntry> {
+        if !translation_eligible(m) { return None; }
+        self.translation_cache.get(&self.translation_key(&m.jid, &m.id)).filter(|e| e.original == m.text)
+    }
+
+    fn refresh_translation_row(&self, jid: &str, id: &str) {
+        if self.current_jid.as_deref() != Some(jid) { return; }
+        if let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id) {
+            let fresh = self.to_row(m, None);
+            self.patch_row(id, |row| {
+                row.translationText = fresh.translationText;
+                row.translationLabel = fresh.translationLabel;
+                row.translationBusy = fresh.translationBusy;
+                row.translationError = fresh.translationError;
+                row.translationSource = fresh.translationSource;
+                row.translationPolicy = fresh.translationPolicy;
+            });
+        }
+    }
+
+    fn auto_translate_chat(&mut self, jid: &str) {
+        let ids: Vec<String> = self.store.messages_for(jid).iter().rev().take(40)
+            .filter(|m| !m.from_me && translation_eligible(m)).map(|m| m.id.clone()).collect();
+        for id in ids { self.request_translation(jid, &id, true); }
+    }
+
+    fn request_translation(&mut self, jid: &str, id: &str, automatic: bool) {
+        if self.vault.is_none() || self.switching || self.ui.get_translation_busy() { return; }
+        let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id).cloned() else { return; };
+        if !translation_eligible(&m) { return; }
+        let source = self.translation_settings.source.clone();
+        let target = self.translation_settings.target.clone();
+        if source == target { return; }
+        if automatic && (m.from_me || !self.ui.get_translation_running()
+            || !self.translation_settings.policies.values().any(|p| p == "always")
+            || (source != "auto" && self.translation_settings.policies.get(&source).map(String::as_str) != Some("always"))) { return; }
+        let key = self.translation_key(jid, id);
+        if let Some(e) = self.translation_cache.get_mut(&key) {
+            if e.original == m.text {
+                if automatic || e.busy { return; }
+                if !e.text.is_empty() {
+                    e.hidden = false;
+                    self.refresh_translation_row(jid, id);
+                    return;
+                }
+            }
+        }
+        if self.translation_cache.values().filter(|e| e.busy).count() >= 4 { return; }
+        while self.translation_cache.len() >= 128 {
+            let Some(old) = self.translation_cache.iter().find(|(_, e)| !e.busy).map(|(k, _)| k.clone()) else { return; };
+            self.translation_cache.remove(&old);
+        }
+        let original = m.text.clone();
+        self.translation_request = self.translation_request.wrapping_add(1);
+        let request = self.translation_request;
+        self.translation_cache.insert(key.clone(), TranslationEntry {
+            request,
+            original: original.clone(), source: if source == "auto" { String::new() } else { source.clone() },
+            text: String::new(), error: String::new(), busy: true, hidden: false, automatic,
+        });
+        self.refresh_translation_row(jid, id);
+        let generation = self.translation_gen;
+        let epoch = self.epoch;
+        let account = self.account.clone();
+        let result = self.translation.request(serde_json::json!({"op":"translate", "source":source, "target":target, "text":original}), move |result| {
+            ui_apply(move |b| {
+                if generation != b.translation_gen || epoch != b.epoch || account != b.account || b.switching { return; }
+                let valid = b.store.messages_for(&key.0).iter().any(|m| m.id == key.1 && m.text == original && translation_eligible(m));
+                if !valid { b.translation_cache.remove(&key); return; }
+                let Some(entry) = b.translation_cache.get_mut(&key) else { return; };
+                if entry.original != original || entry.request != request { return; }
+                entry.busy = false;
+                match result {
+                    Ok(value) => {
+                        let detected = value["source"].as_str().unwrap_or("");
+                        let text = value["text"].as_str().unwrap_or("");
+                        if value["target"].as_str() != Some(key.3.as_str()) || detected.is_empty()
+                            || (key.2 != "auto" && detected != key.2) || text.len() > 64_000 {
+                            entry.error = translation_error("runtime_failed");
+                        } else {
+                            entry.source = detected.into();
+                            let allowed = !automatic || (detected != key.3 && b.translation_settings.policies.get(detected).map(String::as_str) == Some("always"));
+                            if allowed { entry.text = text.into(); } else { entry.hidden = true; }
+                        }
+                    }
+                    Err(error) => entry.error = translation_error(&error),
+                }
+                let running = b.translation.status()["running"].as_bool().unwrap_or(false);
+                if running && !b.ui.get_translation_running() {
+                    b.ui.set_translation_running(true);
+                    b.ui.set_translation_status(translation_text("Ready", "Pronto").into());
+                    b.monitor_translation(generation);
+                } else if !running { b.translation_failed("runtime_failed"); }
+                if b.translation_settings.source == key.2 && b.translation_settings.target == key.3 {
+                    b.refresh_translation_row(&key.0, &key.1);
+                }
+                if automatic {
+                    if let Some(jid) = b.current_jid.clone() { b.auto_translate_chat(&jid); }
+                }
+            });
+        });
+        if let Err(error) = result {
+            let key = self.translation_key(jid, id);
+            if let Some(e) = self.translation_cache.get_mut(&key) { e.busy = false; e.error = translation_error(&error); }
+            self.refresh_translation_row(jid, id);
+        }
+    }
+
+    fn translation_message_action(&mut self, id: &str, action: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return; };
+        if !translation_eligible(&m) { return; }
+        if action == "translate" { self.request_translation(&m.jid, id, false); return; }
+        let key = self.translation_key(&m.jid, id);
+        let Some(entry) = self.translation_cache.get_mut(&key).filter(|e| e.original == m.text) else { return; };
+        match action {
+            "translation-hide" => entry.hidden = true,
+            "translation-copy" => {
+                if !entry.hidden && !entry.text.is_empty() {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() { let _ = clipboard.set_text(entry.text.clone()); }
+                }
+            }
+            "translation-always" | "translation-never" if !entry.source.is_empty() => {
+                let source = entry.source.clone();
+                let policy = if action == "translation-always" { "always" } else { "never" };
+                self.translation_settings.policies.insert(source.clone(), policy.into());
+                if policy == "never" {
+                    for entry in self.translation_cache.values_mut().filter(|e| e.source == source && e.automatic) { entry.hidden = true; }
+                }
+                if policy == "always" {
+                    self.translation_cache.retain(|_, e| !e.automatic || e.busy || !e.text.is_empty() || e.source != source);
+                    for e in self.translation_cache.values_mut().filter(|e| e.automatic && e.source == source && !e.text.is_empty()) { e.hidden = false; }
+                }
+                self.save_translation_settings();
+                self.rebuild_conversation(&m.jid);
+                self.auto_translate_chat(&m.jid);
+            }
+            _ => {}
+        }
+        self.refresh_translation_row(&m.jid, id);
     }
 
     fn handle_unlock(&mut self, pin: &str) {
@@ -1808,6 +2187,7 @@ impl Bridge {
     // disk is untouched: this is also how the bridge lets go of an
     // account it is switching away from.
     fn clear_store_state(&mut self) {
+        self.reset_translation();
         self.clear_notification_sensitive_state();
         self.preparation_states.clear();
         self.preparations_active.clear();
@@ -1961,6 +2341,7 @@ impl Bridge {
             self.ui.set_status_text(t("account.inCall").into());
             return;
         }
+        self.reset_translation();
         self.switching = true;
         self.ui.set_account_switching(true);
         self.save_now();
@@ -2149,6 +2530,7 @@ impl Bridge {
             self.store.load_from(&vault);
             self.vault = Some(vault);
         }
+        self.load_translation_settings();
         self.restore_outbox();
         // "Add account" backed out of before pairing: the empty slot
         // would otherwise sit in the switcher forever.
@@ -2424,9 +2806,11 @@ impl Bridge {
             if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
             let mentions_me = stored.mentions_me;
             let sender = stored.sender_jid.clone();
+            let translation_id = stored.id.clone();
             if !self.store.add_message(stored) {
                 continue;
             }
+            self.request_translation(&jid, &translation_id, true);
             if !from_me {
                 self.clear_participant_typing(&jid, &sender);
             }
@@ -3538,6 +3922,7 @@ impl Bridge {
             b.ui.set_scroll_armed(!anchored_top);
         });
         self.schedule_refresh_chats();
+        self.auto_translate_chat(jid);
         self.load_media_for_chat(jid);
         self.queue_row_avatars(jid);
         self.queue_avatar(jid);
@@ -3784,7 +4169,15 @@ impl Bridge {
         let system = m.kind == MessageKind::System;
         let outgoing = self.outbox.iter().find(|entry| entry.id == m.id);
         let preparing = self.preparation_states.get(&m.id).copied();
+        let tr = self.translation_entry(m);
+        let source = tr.map(|e| e.source.as_str()).unwrap_or("");
         MessageItem {
+            translationText: tr.filter(|e| !e.hidden).map(|e| e.text.as_str()).unwrap_or("").into(),
+            translationLabel: tr.filter(|e| !e.text.is_empty()).map(|e| format!("{} → {}", translation_language_name(&e.source), translation_language_name(&self.translation_settings.target))).unwrap_or_default().into(),
+            translationBusy: tr.is_some_and(|e| e.busy),
+            translationError: tr.filter(|e| !e.hidden).map(|e| e.error.as_str()).unwrap_or("").into(),
+            translationSource: source.into(),
+            translationPolicy: self.translation_settings.policies.get(source).map(String::as_str).unwrap_or("").into(),
             sendPending: outgoing.is_some() || preparing.is_some(),
             sendRetry: preparing == Some(true) || outgoing.is_some_and(|entry| matches!(entry.state, crate::outbox::State::Failed | crate::outbox::State::Uncertain)),
             sendState: outgoing.map(|entry| t(match entry.state {
@@ -6350,6 +6743,7 @@ impl Bridge {
 
     // Empties a conversation here and, when asked, on the phone too.
     fn clear_chat(&mut self, jid: &str, remote: bool) {
+        self.translation_cache.retain(|key, _| key.0 != jid);
         self.store.clear_messages(jid);
         if Some(jid) == self.current_jid.as_deref() {
             self.messages_model.set_vec(Vec::new());
@@ -6365,6 +6759,7 @@ impl Bridge {
     pub fn on_chat_cleared(&mut self, jid: &str, deleted: bool) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
         if deleted {
+            self.translation_cache.retain(|key, _| key.0 != jid);
             self.store.delete_chat(&jid);
             if Some(&jid) == self.current_jid.as_ref() {
                 self.close_chat();
@@ -8682,6 +9077,10 @@ impl Bridge {
     }
 
     fn message_action(&mut self, id: &str, action: &str) {
+        if action == "translate" || action.starts_with("translation-") {
+            self.translation_message_action(id, action);
+            return;
+        }
         let preparation_key = format!("store:preparation:{id}");
         let preparation = self.vault.as_ref().and_then(|vault| vault.get(&preparation_key))
             .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
@@ -9467,6 +9866,65 @@ fn message_editable(m: &StoredMessage) -> bool {
 #[cfg(test)]
 mod message_action_tests {
     use super::*;
+
+    #[test]
+    fn translation_preferences_round_trip_with_source_policies() {
+        let mut settings = TranslationSettings::default();
+        settings.policies.insert("en".into(), "always".into());
+        settings.policies.insert("es".into(), "never".into());
+        let json = serde_json::to_string(&settings).unwrap();
+        let restored: TranslationSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.source, "auto");
+        assert_eq!(restored.target, "pt");
+        assert_eq!(restored.policies["en"], "always");
+        assert_eq!(restored.policies["es"], "never");
+        let defaults: TranslationSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.target, "pt");
+    }
+
+    #[test]
+    fn translation_errors_do_not_expose_runtime_details() {
+        for code in ["source_required", "model_not_installed", "worker_busy", "worker_timeout", "runtime_failed", "private message or internal path"] {
+            let friendly = translation_error(code);
+            assert!(!friendly.is_empty());
+            assert!(!friendly.contains(code));
+        }
+    }
+
+    #[test]
+    fn translation_outdated_helper_requires_app_restart() {
+        let expected = translation_text(
+            "The translation helper needs updating. Restart the app to load the updated helper.",
+            "O auxiliar de tradução precisa ser atualizado. Reinicie o aplicativo para carregar o auxiliar atualizado.",
+        );
+        assert_eq!(translation_error("worker_outdated"), expected);
+        assert_eq!(translation_error("network_managed_by_app"), expected);
+        assert_ne!(expected, translation_error("worker_unavailable"));
+    }
+
+    #[test]
+    fn translation_invalid_model_errors_suggest_reinstallation() {
+        let expected = translation_text(
+            "The model file is missing or invalid. Download and install the model again in Settings.",
+            "O arquivo do modelo está ausente ou é inválido. Baixe e instale o modelo novamente nas Configurações.",
+        );
+        for code in ["invalid_model_archive", "invalid_model_file", "model_file_missing"] {
+            assert_eq!(translation_error(code), expected);
+        }
+    }
+
+    #[test]
+    fn translation_network_denials_distinguish_http_from_socket_permissions() {
+        let socket = translation_error("network_access_denied");
+        for (code, status) in [("network_http_unauthorized", "401"), ("network_http_forbidden", "403"), ("network_proxy_auth", "407")] {
+            let friendly = translation_error(code);
+            assert!(friendly.contains(status));
+            assert_ne!(friendly, socket);
+            assert!(!friendly.to_lowercase().contains("firewall"));
+        }
+        assert!(!socket.contains("HTTP"));
+        assert!(!socket.to_lowercase().contains("firewall"));
+    }
 
     #[test]
     fn sidebar_search_includes_archived_chats_without_changing_archive_filter() {
