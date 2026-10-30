@@ -2211,11 +2211,13 @@ export component AppWindow inherits Window {
                                 ? max(150px, msg.picW * 1px)
                                 : max-text-w;
                         // Whether the time/ticks float on the last text line (text paths only).
+                        property <bool> has-translation: root.can-translate(msg)
+                            && (msg.translationText != "" || msg.translationBusy || msg.translationError != "");
                         property <bool> meta-inline:
                             msg.cardKind == "" && (msg.hasStyled || msg.kind == "text"
                                 || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
                             && (msg.text != "" || msg.deleted)
-                            && !(root.can-translate(msg) && (msg.translationText != "" || msg.translationBusy || msg.translationError != ""));
+                            && !self.has-translation;
                         property <length> unread-offset: msg.unread-boundary ? 28px : 0;
                         property <length> day-offset: (msg.dayLabel != "" ? 40px : 0) + unread-offset + header-offset;
                         if msg.unread-boundary: Rectangle {
@@ -2253,7 +2255,7 @@ export component AppWindow inherits Window {
                         }
                         property <length> message-height: msg.kind == "system"
                             ? sys-pill.height + 12px + self.day-offset
-                            : bubble.height + (msg.firstOfRun ? 16px : 6px)
+                            : bubble.height + translation-card.height + (msg.firstOfRun ? 16px : 6px)
                                 + (msg.reactions != "" ? 14px : 0) + self.day-offset;
                         height: self.message-height + (i == root.messages.length - 1
                             ? msg-list.typing-space + root.composer-tail-space : 0px);
@@ -2303,12 +2305,21 @@ export component AppWindow inherits Window {
                                 ? parent.width - self.width - 30px
                                 : (msg.groupIndent ? 48px : 30px) + (root.select-mode ? 30px : 0px);
                             animate x { duration: 140ms; easing: ease-out; }
-                            width: msg.kind == "system" ? 0 : content.preferred-width;
+                            width: msg.kind == "system" ? 0 : max(content.preferred-width,
+                                msg-row.has-translation ? min(msg-row.content-w + 24px,
+                                    max(260px, translation-measure.preferred-width + 52px)) : 0px);
                             height: msg.kind == "system" ? 0 : content.preferred-height;
                             background: msg.sticker
                                 ? transparent
                                 : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
-                            border-radius: 10px;
+                            border-radius: msg-row.has-translation ? 11px : 10px;
+                            translation-measure := Text {
+                                text: msg.translationText;
+                                font-size: 14px;
+                                visible: false;
+                                width: 0px;
+                                height: 0px;
+                            }
                             num-measure := Text {
                                 text: msg.senderNumber;
                                 font-size: 11px;
@@ -2316,7 +2327,7 @@ export component AppWindow inherits Window {
                                 width: 0px;
                                 height: 0px;
                             }
-                            if msg.showSender && msg.senderNumber != "": Text {
+                            if msg.showSender && msg.senderNumber != "" && !msg-row.has-translation: Text {
                                 text: msg.senderNumber;
                                 font-size: 11px;
                                 color: Theme.text-dim;
@@ -2340,6 +2351,7 @@ export component AppWindow inherits Window {
                                     spacing: 8px;
                                     sender-touch := TouchArea {
                                         width: sender-text.width;
+                                        horizontal-stretch: msg-row.has-translation ? 0 : 1;
                                         height: sender-text.preferred-height;
                                         mouse-cursor: pointer;
                                         clicked => { root.open-dm(msg.senderJid); }
@@ -2358,12 +2370,18 @@ export component AppWindow inherits Window {
                                             overflow: elide;
                                         }
                                     }
-                                    // Reserves the number's width without
-                                    // depending on the bubble, which would
-                                    // create a layout loop.
-                                    if msg.senderNumber != "": Rectangle {
+                                    if msg.senderNumber != "" && msg-row.has-translation: Text {
+                                        text: msg.senderNumber;
+                                        font-size: 11px;
+                                        color: Theme.text-dim;
+                                        width: num-measure.preferred-width;
+                                        horizontal-stretch: 0;
+                                        vertical-alignment: center;
+                                    }
+                                    if msg.senderNumber != "" && !msg-row.has-translation: Rectangle {
                                         width: num-measure.preferred-width + 24px;
                                     }
+                                    if msg-row.has-translation: Rectangle { horizontal-stretch: 1; }
                                 }
 
                                 if msg.hasQuote && !msg.deleted: Rectangle {
@@ -3103,79 +3121,23 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                if root.can-translate(msg) && (msg.translationText != "" || msg.translationBusy || msg.translationError != ""): Rectangle {
-                                    width: min(msg-row.content-w, max(260px, translated-body.preferred-width + 20px));
-                                    height: translated-content.preferred-height;
-                                    background: Theme.dark ? #111b21 : #0000000c;
-                                    border-radius: 6px;
-                                    border-width: 1px;
-                                    border-color: Theme.dark ? #ffffff18 : Theme.border;
-                                    translated-content := VerticalLayout {
-                                        padding: 10px;
-                                        spacing: 6px;
-                                        HorizontalLayout {
-                                            spacing: 6px;
-                                            Text {
-                                                text: msg.translationLabel != "" ? @tr("Translated ({})", msg.translationLabel) : @tr("Translated");
-                                                color: Theme.text-dim;
-                                                font-size: 11px;
-                                                wrap: word-wrap;
-                                                vertical-alignment: center;
-                                                opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
-                                            }
-                                            if msg.translationText != "": IconButton {
-                                                width: 24px;
-                                                height: 24px;
-                                                icon-size: 14px;
-                                                icon: @image-url("../icons/copy.svg");
-                                                accessible-role: button;
-                                                accessible-label: @tr("Copy translation");
-                                                clicked => { root.message-action(msg.id, "translation-copy"); }
-                                            }
-                                        }
-                                        translated-body := TextInput {
-                                            text: msg.translationText;
-                                            visible: msg.translationText != "";
-                                            read-only: true;
-                                            single-line: false;
-                                            wrap: word-wrap;
-                                            font-size: 14px;
-                                            color: Theme.bubble-text;
-                                            selection-background-color: #3390ec;
-                                            selection-foreground-color: white;
-                                            opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
-                                            animate opacity { duration: 120ms; easing: ease-out; }
-                                        }
-                                        if msg.translationBusy: Text {
-                                            text: @tr("Translating…");
-                                            color: Theme.text-dim;
-                                            font-size: 12px;
-                                        }
-                                        if msg.translationError != "": Text {
-                                            text: msg.translationError;
-                                            color: Theme.text-dim;
-                                            font-size: 12px;
-                                            wrap: word-wrap;
-                                            opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
-                                        }
-                                    }
-                                }
-
                                 // Stickers have no bubble, so the timestamp
                                 // gets its own pill like WhatsApp draws it,
                                 // with breathing room under the artwork.
                                 if msg.sticker: Rectangle { height: 6px; }
                                 if msg.kind != "audio" && msg.kind != "system" && !msg-row.meta-inline: HorizontalLayout {
                                     alignment: end;
+                                    spacing: msg-row.has-translation ? 8px : 0px;
                                     Rectangle {
                                         width: stamp.preferred-width + (msg.sticker ? 14px : 0);
-                                        height: msg.sticker ? 20px : stamp.preferred-height;
+                                        height: msg-row.has-translation ? 26px : msg.sticker ? 20px : stamp.preferred-height;
                                         border-radius: 10px;
                                         background: msg.sticker
                                             ? (msg.fromMe ? Theme.bubble-out : Theme.bubble-in)
                                             : transparent;
                                         stamp := HorizontalLayout {
                                             spacing: 4px;
+                                            padding-top: msg-row.has-translation ? 12px : 0px;
                                             padding-left: msg.sticker ? 7px : 0;
                                             padding-right: msg.sticker ? 7px : 0;
                                             if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
@@ -3187,7 +3149,106 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                     }
+                                    if msg-row.has-translation: IconButton {
+                                        width: 26px;
+                                        height: 26px;
+                                        radius: 6px;
+                                        icon: @image-url("../icons/translate.svg");
+                                        icon-size: 16px;
+                                        background: Theme.selected;
+                                        active-background: Theme.selected;
+                                        active: msg.translationText != "";
+                                        enabled: !msg.translationBusy && !root.select-mode;
+                                        accessible-role: button;
+                                        accessible-label: @tr("Translate message");
+                                        clicked => { root.message-action(msg.id, "translate"); }
+                                    }
                                 }
+                            }
+                        }
+                        translation-card := Rectangle {
+                            visible: msg-row.has-translation;
+                            x: bubble.x;
+                            y: bubble.y + bubble.height;
+                            width: bubble.width;
+                            height: msg-row.has-translation
+                                ? max(msg.translationText != "" ? 94px : 54px, translated-content.preferred-height) : 0px;
+                            border-radius: 11px;
+                            background: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
+                            drop-shadow-blur: 6px;
+                            drop-shadow-color: Theme.dark ? #00000030 : #00000012;
+                            Rectangle {
+                                x: 4px;
+                                y: 1px;
+                                width: max(0px, parent.width - 8px);
+                                height: max(0px, parent.height - 2px);
+                                border-radius: 10px;
+                                border-width: 1px;
+                                border-color: Theme.text-dim.with-alpha(0.18);
+                                drop-shadow-blur: 2px;
+                                drop-shadow-color: Theme.dark ? #00000020 : #00000008;
+                            }
+                            translated-content := VerticalLayout {
+                                x: 18px;
+                                width: max(0px, parent.width - 62px);
+                                height: self.preferred-height;
+                                padding-top: 8px;
+                                padding-bottom: 14px;
+                                spacing: 6px;
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    Image {
+                                        source: @image-url("../icons/translate.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 10px;
+                                        height: 10px;
+                                        vertical-stretch: 0;
+                                    }
+                                    Text {
+                                        text: msg.translationLabel != "" ? @tr("Translated ({})", msg.translationLabel) : @tr("Translated");
+                                        color: Theme.text-dim;
+                                        font-size: 10px;
+                                        wrap: word-wrap;
+                                        opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                    }
+                                }
+                                if msg.translationText != "": TextInput {
+                                    text: msg.translationText;
+                                    read-only: true;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    font-size: 14px;
+                                    color: Theme.bubble-text;
+                                    selection-background-color: #3390ec;
+                                    selection-foreground-color: white;
+                                    opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                    animate opacity { duration: 120ms; easing: ease-out; }
+                                }
+                                if msg.translationBusy: Text {
+                                    text: @tr("Translating…");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                }
+                                if msg.translationError != "": Text {
+                                    text: msg.translationError;
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                    opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                }
+                            }
+                            if msg.translationText != "": IconButton {
+                                x: parent.width - 39px;
+                                y: 11px;
+                                width: 24px;
+                                height: 24px;
+                                icon-size: 14px;
+                                icon: @image-url("../icons/copy.svg");
+                                tint: Theme.text-dim;
+                                enabled: !root.select-mode;
+                                accessible-role: button;
+                                accessible-label: @tr("Copy translation");
+                                clicked => { root.message-action(msg.id, "translation-copy"); }
                             }
                         }
                         // Hover actions, mirroring WhatsApp: react, forward
@@ -3198,7 +3259,7 @@ export component AppWindow inherits Window {
                             x: msg.fromMe
                                 ? max(0px, bubble.x - self.width - 6px)
                                 : bubble.x + bubble.width + 6px;
-                            width: root.can-translate(msg) ? 128px : 96px;
+                            width: root.can-translate(msg) && !msg-row.has-translation ? 128px : 96px;
                             height: 28px;
                             HorizontalLayout {
                                 spacing: 4px;
@@ -3215,7 +3276,7 @@ export component AppWindow inherits Window {
                                     icon-size: 17px;
                                     clicked => { root.request-forward(msg.id); }
                                 }
-                                if root.can-translate(msg): IconButton {
+                                if root.can-translate(msg) && !msg-row.has-translation: IconButton {
                                     icon: @image-url("../icons/translate.svg");
                                     icon-size: 17px;
                                     accessible-role: button;
@@ -3293,7 +3354,7 @@ export component AppWindow inherits Window {
                         }
 
                         if msg.reactions != "": Rectangle {
-                            y: bubble.y + bubble.height - 4px;
+                            y: translation-card.y + translation-card.height - 4px;
                             x: msg.fromMe
                                 ? bubble.x + bubble.width - self.width - 4px
                                 : bubble.x + 4px;
