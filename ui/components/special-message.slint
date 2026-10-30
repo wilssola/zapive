@@ -1,0 +1,188 @@
+import { Theme } from "theme.slint";
+import { MessageItem } from "types.slint";
+
+export component SpecialMessage inherits Rectangle {
+    in property <MessageItem> message;
+    in property <bool> privacy-hidden;
+    callback details();
+    property <bool> location: message.cardKind == "location" || message.cardKind == "live-location";
+    property <bool> contact: message.cardKind == "contact";
+    property <bool> poll: message.cardKind == "poll";
+    property <color> surface: message.fromMe
+        ? (Theme.dark ? #003c32 : #c9edc6)
+        : (Theme.dark ? #182831 : #f3f6f5);
+    height: card-layout.preferred-height;
+    border-radius: 12px;
+    background: surface;
+    clip: true;
+    opacity: privacy-hidden ? 0.08 : 1;
+    animate opacity { duration: 120ms; easing: ease-out; }
+
+    card-layout := VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+        if root.location: Rectangle {
+            height: root.message.cardHasPicture ? 158px : 92px;
+            background: Theme.dark ? #142e3c : #dce8e9;
+            clip: true;
+            if root.message.cardHasPicture: Image {
+                source: root.message.cardPicture;
+                width: parent.width;
+                height: parent.height;
+                image-fit: cover;
+            }
+            if !root.message.cardHasPicture: Rectangle {
+                width: 52px;
+                height: 52px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: 26px;
+                background: Theme.dark ? #164d4c : #c0dcd4;
+                Image {
+                    source: root.message.cardKind == "live-location"
+                        ? @image-url("../icons/circle-dot.svg") : @image-url("../icons/pin.svg");
+                    colorize: Theme.accent;
+                    width: 30px;
+                    height: 30px;
+                    x: 11px;
+                    y: 11px;
+                }
+            }
+        }
+        HorizontalLayout {
+            padding: 14px;
+            spacing: 12px;
+            Rectangle {
+                width: root.contact ? 54px : 42px;
+                height: max(self.width, header-text.preferred-height);
+                Rectangle {
+                    width: parent.width;
+                    height: self.width;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: self.width / 2;
+                    background: root.contact ? Theme.accent : (Theme.dark ? #075448 : #d2e8df);
+                    if root.contact: Text {
+                        text: root.message.cardInitial;
+                        color: white;
+                        font-size: 21px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    if !root.contact: Image {
+                        source: root.poll ? @image-url("../icons/list-details.svg")
+                            : root.location ? (root.message.cardKind == "live-location"
+                                ? @image-url("../icons/circle-dot.svg") : @image-url("../icons/pin.svg"))
+                            : root.message.cardKind == "view-once" ? @image-url("../icons/eye.svg")
+                            : @image-url("../icons/file-text.svg");
+                        colorize: root.location || root.poll ? Theme.accent : Theme.icon;
+                        width: 23px;
+                        height: 23px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                height: max(root.contact ? 54px : 42px, header-text.preferred-height);
+                header-text := VerticalLayout {
+                    y: (parent.height - self.preferred-height) / 2;
+                    height: self.preferred-height;
+                    spacing: 5px;
+                    Text {
+                        text: root.message.cardTitle;
+                        color: Theme.bubble-text;
+                        font-size: 14px;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+                    if root.message.cardBody != "": Text {
+                        text: root.message.cardBody;
+                        color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                        font-size: 12.5px;
+                        wrap: word-wrap;
+                    }
+                    if root.message.cardDetail != "" && !root.poll: Text {
+                        text: root.message.cardDetail;
+                        color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                        font-size: 11.5px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+        for option in root.message.cardOptions: Rectangle {
+            height: option-layout.preferred-height;
+            border-width: 1px;
+            border-color: root.message.fromMe
+                ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
+            option-layout := HorizontalLayout {
+                padding: 14px;
+                spacing: 14px;
+                Rectangle {
+                    width: 20px;
+                    Rectangle {
+                        width: 20px;
+                        height: 20px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 10px;
+                        border-width: 2px;
+                        border-color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                    }
+                }
+                Text {
+                    text: option;
+                    min-height: 20px;
+                    vertical-alignment: center;
+                    color: Theme.bubble-text;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        if root.poll: VerticalLayout {
+            padding: 14px;
+            Text {
+                text: root.message.cardDetail;
+                color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+        Rectangle {
+            height: 1px;
+            background: root.message.fromMe
+                ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
+        }
+        details-touch := TouchArea {
+            height: 42px;
+            mouse-cursor: pointer;
+            clicked => { root.details(); }
+            Rectangle {
+                background: details-touch.has-hover ? Theme.accent.with-alpha(0.12) : transparent;
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                Rectangle {
+                    width: 17px;
+                    Image {
+                        source: @image-url("../icons/info-circle.svg");
+                        colorize: Theme.bubble-text;
+                        width: 17px;
+                        height: 17px;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+                Text {
+                    text: @tr("View details");
+                    color: Theme.bubble-text;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

@@ -81,7 +81,7 @@ fn card_text(value: &str) -> String {
     clean_text(value).chars().filter(|c| !c.is_control()).take(2048).collect::<String>().trim().to_string()
 }
 
-fn contact_card(contact: &wa::message::ContactMessage) -> String {
+fn contact_parts(contact: &wa::message::ContactMessage) -> (String, Vec<String>) {
     let mut name = card_text(contact.display_name.as_deref().unwrap_or(""));
     let mut phones = Vec::new();
     for line in contact.vcard.as_deref().unwrap_or("").lines().take(512) {
@@ -102,6 +102,11 @@ fn contact_card(contact: &wa::message::ContactMessage) -> String {
             }
         }
     }
+    (name, phones)
+}
+
+fn contact_card(contact: &wa::message::ContactMessage) -> String {
+    let (name, phones) = contact_parts(contact);
     let mut lines = vec![t("compat.contact")];
     if !name.is_empty() { lines.push(name); }
     lines.extend(phones);
@@ -119,6 +124,115 @@ fn location_card(lat: Option<f64>, lon: Option<f64>, live: bool, details: &[&str
         _ => lines.push(t("compat.invalidLocation")),
     }
     lines.join("\n")
+}
+
+#[derive(Default, Debug)]
+pub struct SpecialCard<'a> {
+    pub kind: &'static str,
+    pub title: String,
+    pub body: String,
+    pub detail: String,
+    pub options: Vec<String>,
+    pub thumbnail: Option<&'a [u8]>,
+}
+
+fn titled_card(kind: &'static str, title: &str, body: &str) -> SpecialCard<'static> {
+    SpecialCard { kind, title: t(title), body: t(body), ..Default::default() }
+}
+
+pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
+    if message.deleted || message.kind == MessageKind::System {
+        return SpecialCard::default();
+    }
+    let Some(raw) = message.raw.as_deref() else {
+        if crate::i18n::is_translation("compat.viewOnce", &message.text) {
+            return titled_card("view-once", "card.viewOnce", "card.viewOnceBody");
+        }
+        if crate::i18n::is_translation("compat.unsupported", &message.text) {
+            return titled_card("unsupported", "card.unsupported", "card.unsupportedBody");
+        }
+        return SpecialCard::default();
+    };
+    let Some(content) = display_content(raw) else {
+        return titled_card("view-once", "card.viewOnce", "card.viewOnceBody");
+    };
+    if let Some(contact) = content.contact_message.as_option() {
+        let (name, phones) = contact_parts(contact);
+        return SpecialCard {
+            kind: "contact",
+            title: if name.is_empty() { t("compat.contact") } else { name },
+            body: phones.join("\n"),
+            ..Default::default()
+        };
+    }
+    if let Some(contacts) = content.contacts_array_message.as_option() {
+        let body = contacts.contacts.iter().take(256).map(|contact| {
+            let (name, phones) = contact_parts(contact);
+            let mut lines = vec![if name.is_empty() { t("compat.contact") } else { name }];
+            lines.extend(phones);
+            lines.join("\n")
+        }).collect::<Vec<_>>().join("\n\n");
+        return SpecialCard { kind: "contact", title: t("card.contacts"), body, ..Default::default() };
+    }
+    if let Some(loc) = content.location_message.as_option() {
+        let live = loc.is_live.unwrap_or(false);
+        let name = card_text(loc.name.as_deref().unwrap_or(""));
+        let body = [loc.address.as_deref().unwrap_or(""), loc.comment.as_deref().unwrap_or("")]
+            .into_iter().map(card_text).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+        return SpecialCard {
+            kind: if live { "live-location" } else { "location" },
+            title: if name.is_empty() { t(if live { "card.liveLocation" } else { "compat.location" }) } else { name },
+            body,
+            detail: coordinate_detail(loc.degrees_latitude, loc.degrees_longitude, live),
+            thumbnail: loc.jpeg_thumbnail.as_deref(),
+            ..Default::default()
+        };
+    }
+    if let Some(loc) = content.live_location_message.as_option() {
+        return SpecialCard {
+            kind: "live-location", title: t("card.liveLocation"),
+            body: card_text(loc.caption.as_deref().unwrap_or("")),
+            detail: coordinate_detail(loc.degrees_latitude, loc.degrees_longitude, true),
+            thumbnail: loc.jpeg_thumbnail.as_deref(),
+            ..Default::default()
+        };
+    }
+    let poll = content.poll_creation_message.as_option()
+        .or_else(|| content.poll_creation_message_v2.as_option())
+        .or_else(|| content.poll_creation_message_v3.as_option())
+        .or_else(|| content.poll_creation_message_v5.as_option())
+        .or_else(|| content.poll_creation_message_v6.as_option());
+    if let Some(poll) = poll {
+        let question = card_text(poll.name.as_deref().unwrap_or(""));
+        return SpecialCard {
+            kind: "poll", title: if question.is_empty() { t("compat.poll") } else { question },
+            detail: t("compat.pollPhone"),
+            options: poll.options.iter().take(256).map(|option| card_text(option.option_name.as_deref().unwrap_or("")))
+                .filter(|name| !name.is_empty()).collect(),
+            ..Default::default()
+        };
+    }
+    if has_unsupported_content(content)
+        && content.conversation.is_none()
+        && !content.extended_text_message.is_set()
+        && !content.image_message.is_set()
+        && !content.video_message.is_set()
+        && !content.audio_message.is_set()
+        && !content.document_message.is_set()
+        && !content.sticker_message.is_set()
+    {
+        return titled_card("unsupported", "card.unsupported", "card.unsupportedBody");
+    }
+    SpecialCard::default()
+}
+
+fn coordinate_detail(lat: Option<f64>, lon: Option<f64>, live: bool) -> String {
+    let coordinates = match (lat, lon) {
+        (Some(lat), Some(lon)) if lat.is_finite() && lon.is_finite()
+            && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) => format!("{lat:.6}, {lon:.6}"),
+        _ => t("compat.invalidLocation"),
+    };
+    if live { format!("{coordinates}\n{}", t("card.liveLocationDetail")) } else { coordinates }
 }
 
 pub fn compatibility_card(content: &wa::Message) -> Option<String> {
@@ -775,6 +889,89 @@ mod tests {
     }
 
     #[test]
+    fn presentation_contacts_and_wrapped_poll_use_structured_fields() {
+        let contacts = wa::message::ContactsArrayMessage {
+            contacts: vec![
+                wa::message::ContactMessage { vcard: Some("FN:Alice\nTEL:+123\nURL:javascript:bad".into()), ..Default::default() },
+                wa::message::ContactMessage { display_name: Some("Bob".into()), vcard: Some("TEL:+456".into()), ..Default::default() },
+            ], ..Default::default()
+        };
+        let stored = mapped(&fixture(13, &contacts.encode_to_vec())).unwrap();
+        let before = stored.text.clone();
+        let card = special_card(&stored);
+        assert_eq!(card.kind, "contact");
+        assert_eq!(card.title, t("card.contacts"));
+        assert_eq!(card.body, "Alice\n+123\n\nBob\n+456");
+        assert_eq!(stored.text, before);
+        let poll = wa::message::PollCreationMessage {
+            name: Some("Lunch?".into()), options: vec![wa::message::poll_creation_message::Option {
+                option_name: Some("Rice".into()), ..Default::default()
+            }], ..Default::default()
+        };
+        let wrapper = wa::message::FutureProofMessage {
+            message: fixture(49, &poll.encode_to_vec()).into(), ..Default::default()
+        };
+        for raw in [
+            fixture(93, &wrapper.encode_to_vec()),
+            wa::Message { ephemeral_message: wrapper.clone().into(), ..Default::default() },
+            wa::Message { edited_message: wrapper.clone().into(), ..Default::default() },
+            wa::Message { document_with_caption_message: wrapper.clone().into(), ..Default::default() },
+        ] {
+            let mut stored = mapped(&fixture(49, &poll.encode_to_vec())).unwrap();
+            stored.raw = Some(Arc::new(raw));
+            let card = special_card(&stored);
+            assert_eq!(card.kind, "poll");
+            assert_eq!(card.title, "Lunch?");
+            assert_eq!(card.options, ["Rice"]);
+            assert_eq!(card.detail, t("compat.pollPhone"));
+        }
+    }
+
+    #[test]
+    fn presentation_locations_validate_and_expose_only_embedded_thumbnail() {
+        let loc = wa::message::LocationMessage {
+            name: Some("Park".into()), address: Some("Main St".into()),
+            degrees_latitude: Some(1.5), degrees_longitude: Some(-2.5),
+            jpeg_thumbnail: Some(vec![1, 2, 3]), ..Default::default()
+        };
+        let stored = mapped(&fixture(5, &loc.encode_to_vec())).unwrap();
+        let card = special_card(&stored);
+        assert_eq!(card.kind, "location");
+        assert_eq!(card.title, "Park");
+        assert_eq!(card.body, "Main St");
+        assert_eq!(card.detail, "1.500000, -2.500000");
+        assert_eq!(card.thumbnail, Some([1, 2, 3].as_slice()));
+        let loc = wa::message::LiveLocationMessage {
+            degrees_latitude: Some(f64::NAN), ..Default::default()
+        };
+        let stored = mapped(&fixture(18, &loc.encode_to_vec())).unwrap();
+        let card = special_card(&stored);
+        assert_eq!(card.kind, "live-location");
+        assert!(card.detail.contains(&t("compat.invalidLocation")));
+        assert!(card.detail.contains(&t("card.liveLocationDetail")));
+    }
+
+    #[test]
+    fn presentation_deleted_unsupported_private_and_literal_text() {
+        for (field, kind) in [(4, "contact"), (80, "unsupported"), (55, "view-once")] {
+            let mut stored = mapped(&fixture(field, &[])).unwrap();
+            assert_eq!(special_card(&stored).kind, kind);
+            stored.deleted = true;
+            assert!(special_card(&stored).kind.is_empty());
+        }
+        let mut stored = mapped(&fixture(80, &[])).unwrap();
+        stored.raw = Some(Arc::new(fixture(80, &[])));
+        assert_eq!(special_card(&stored).kind, "unsupported");
+        for key in ["compat.unsupported", "compat.viewOnce"] {
+            let literal = wa::Message { conversation: Some(t(key)), ..Default::default() };
+            assert!(special_card(&mapped(&literal).unwrap()).kind.is_empty());
+        }
+        stored.raw = None;
+        stored.text = format!("{} extra", t("compat.unsupported"));
+        assert!(special_card(&stored).kind.is_empty());
+    }
+
+    #[test]
     fn contacts_are_readable_and_vcard_urls_are_not_copied() {
         let contact = wa::message::ContactMessage {
             vcard: Some("BEGIN:VCARD\nFN:Alice\nTEL;waid=5511999999999:+55 (11) 99999-9999\nTEL:https://evil.invalid\nURL:javascript:alert(1)\nEND:VCARD".into()),
@@ -869,6 +1066,11 @@ mod tests {
                 for message in [message, nested] {
                     let stored = mapped(&message).unwrap();
                     assert_eq!(stored.text, t("compat.viewOnce"));
+                    let card = special_card(&stored);
+                    assert_eq!(card.kind, "view-once");
+                    assert_eq!(card.title, t("card.viewOnce"));
+                    assert_eq!(card.body, t("card.viewOnceBody"));
+                    assert!(card.thumbnail.is_none());
                     assert!(stored.raw.is_none());
                     assert!(stored.mimetype.is_empty());
                     assert!(stored.quote_text.is_empty());
@@ -879,7 +1081,9 @@ mod tests {
         let flagged = wa::Message { image_message: wa::message::ImageMessage {
             view_once: Some(true), caption: Some("PRIVATE".into()), ..Default::default()
         }.into(), ..Default::default() };
-        assert!(mapped(&flagged).unwrap().raw.is_none());
+        let stored = mapped(&flagged).unwrap();
+        assert!(stored.raw.is_none());
+        assert_eq!(special_card(&stored).kind, "view-once");
         assert!(!display_content_summary(&flagged).contains("PRIVATE"));
     }
 

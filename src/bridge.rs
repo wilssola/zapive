@@ -325,8 +325,19 @@ fn image_of(d: &crate::media::Decoded) -> slint::Image {
     slint::Image::from_rgba8(buf)
 }
 
-// What an image costs in memory: Slint keeps decoded RGBA, so it is the
-// pixel count times four regardless of the size it is drawn at.
+fn card_thumbnail(bytes: &[u8]) -> Option<slint::Image> {
+    if bytes.len() > 2 * 1024 * 1024 { return None; }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(2048);
+    limits.max_image_height = Some(2048);
+    limits.max_alloc = Some(16 * 1024 * 1024);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.thumbnail(480, 320).to_rgba8();
+    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
+    Some(slint::Image::from_rgba8(buffer))
+}
+
 fn image_bytes(image: &slint::Image) -> usize {
     let size = image.size();
     size.width as usize * size.height as usize * 4
@@ -3768,6 +3779,8 @@ impl Bridge {
         } else {
             String::new()
         };
+        let card = crate::wa_map::special_card(m);
+        let card_picture = card.thumbnail.and_then(card_thumbnail);
         let (styled, has_styled, plain, links) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
         let system = m.kind == MessageKind::System;
@@ -3782,6 +3795,14 @@ impl Bridge {
                 crate::outbox::State::Uncertain => "outbox.uncertain",
                 crate::outbox::State::Failed => "outbox.failed",
             })).unwrap_or_else(|| preparing.map(|failed| t(if failed { "outbox.failed" } else { "outbox.preparing" })).unwrap_or_default()).into(),
+            cardKind: card.kind.into(),
+            cardInitial: initial_of(&card.title).into(),
+            cardTitle: card.title.into(),
+            cardBody: card.body.into(),
+            cardDetail: card.detail.into(),
+            cardOptions: ModelRc::new(VecModel::from(card.options.into_iter().map(SharedString::from).collect::<Vec<_>>())),
+            cardHasPicture: card_picture.is_some(),
+            cardPicture: card_picture.unwrap_or_else(empty_image),
             id: m.id.clone().into(),
             kind: (if m.deleted {
                 "text"
@@ -3919,7 +3940,7 @@ impl Bridge {
                 "".into()
             },
             styled,
-            hasStyled: has_styled,
+            hasStyled: has_styled && card.kind.is_empty(),
             links: ModelRc::new(VecModel::from(links)),
             plain: plain.into(),
             linkTitle: m.link_title.trim().into(),

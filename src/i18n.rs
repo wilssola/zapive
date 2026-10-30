@@ -173,6 +173,13 @@ fn en(key: &str) -> &'static str {
         "update.checking" => "Checking for updates…",
         "update.latest" => "You are on the latest version.",
         "autostart.failed" => "Could not change the startup setting: {0}",
+        "card.contacts" => "Contacts",
+        "card.liveLocation" => "Live location",
+        "card.liveLocationDetail" => "Last shared position only. Live updates are not available here.",
+        "card.viewOnce" => "View-once message",
+        "card.viewOnceBody" => "Open this message on your phone.",
+        "card.unsupported" => "Unsupported message",
+        "card.unsupportedBody" => "This message type cannot be displayed here. View it on your phone.",
         "compat.contact" => "Contact",
         "compat.location" => "Location",
         "compat.liveLocation" => "Live location — last position only; not updated here",
@@ -391,6 +398,13 @@ fn pt(key: &str) -> &'static str {
         "update.checking" => "Verificando atualizações…",
         "update.latest" => "Você já está na versão mais recente.",
         "autostart.failed" => "Não foi possível alterar a inicialização automática: {0}",
+        "card.contacts" => "Contatos",
+        "card.liveLocation" => "Localização em tempo real",
+        "card.liveLocationDetail" => "Apenas a última posição compartilhada. Atualizações em tempo real não estão disponíveis aqui.",
+        "card.viewOnce" => "Mensagem de visualização única",
+        "card.viewOnceBody" => "Abra esta mensagem no celular.",
+        "card.unsupported" => "Mensagem não suportada",
+        "card.unsupportedBody" => "Este tipo de mensagem não pode ser exibido aqui. Consulte no celular.",
         "compat.contact" => "Contato",
         "compat.location" => "Localização",
         "compat.liveLocation" => "Localização em tempo real — apenas última posição; sem atualização aqui",
@@ -468,7 +482,9 @@ mod tests {
     fn compatibility_labels_are_localized() {
         for key in ["compat.contact", "compat.location", "compat.liveLocation",
             "compat.invalidLocation", "compat.poll", "compat.pollPhone",
-            "compat.viewOnce", "compat.unsupported"] {
+            "compat.viewOnce", "compat.unsupported", "card.contacts", "card.liveLocation",
+            "card.liveLocationDetail", "card.viewOnce", "card.viewOnceBody",
+            "card.unsupported", "card.unsupportedBody"] {
             assert!(!en(key).is_empty());
             assert!(!pt(key).is_empty());
             assert_ne!(en(key), pt(key));
@@ -491,6 +507,10 @@ mod tests {
             assert_eq!(pt(key), portuguese);
         }
     }
+}
+
+pub fn is_translation(key: &str, value: &str) -> bool {
+    value == en(key) || value == pt(key)
 }
 
 pub fn t(key: &str) -> String {

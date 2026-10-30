@@ -14,6 +14,7 @@ import { EmojiText } from "emoji.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { HomeScreen } from "home-screen.slint";
 import { ImagePreview } from "image-preview.slint";
+import { SpecialMessage } from "special-message.slint";
 import { MenuRow } from "rows/menu.slint";
 import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
@@ -2188,12 +2189,13 @@ export component AppWindow inherits Window {
                         // Media drives the bubble width; the header and the
                         // caption wrap inside it instead of widening the bubble.
                         property <length> content-w:
-                            (msg.kind == "image" || msg.kind == "video") && msg.picW > 0
+                            msg.cardKind != "" ? min(360px, max-text-w)
+                                : (msg.kind == "image" || msg.kind == "video") && msg.picW > 0
                                 ? max(150px, msg.picW * 1px)
                                 : max-text-w;
                         // Whether the time/ticks float on the last text line (text paths only).
                         property <bool> meta-inline:
-                            (msg.hasStyled || msg.kind == "text"
+                            msg.cardKind == "" && (msg.hasStyled || msg.kind == "text"
                                 || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
                             && (msg.text != "" || msg.deleted);
                         property <length> unread-offset: msg.unread-boundary ? 28px : 0;
@@ -2544,6 +2546,13 @@ export component AppWindow inherits Window {
                                         height: parent.height;
                                         background: Theme.dark ? #172126 : #dfe5e8;
                                     }
+                                }
+
+                                if msg.cardKind != "": SpecialMessage {
+                                    width: msg-row.content-w;
+                                    message: msg;
+                                    privacy-hidden: (root.blur-messages || (root.blur-names && msg.cardKind == "contact") || (root.blur-media && (msg.cardKind == "location" || msg.cardKind == "live-location"))) && !row-hover.has-hover;
+                                    details => { root.message-action(msg.id, "details"); }
                                 }
 
                                 if msg.kind == "doc": VerticalLayout {
@@ -3036,7 +3045,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                if !msg.hasStyled && (msg.kind == "text" || ((msg.kind == "image" || msg.kind == "video") && msg.text != "")): Rectangle {
+                                if msg.cardKind == "" && !msg.hasStyled && (msg.kind == "text" || ((msg.kind == "image" || msg.kind == "video") && msg.text != "")): Rectangle {
                                     width: min(plain-text.preferred-width, msg-row.content-w);
                                     height: plain-text.preferred-height;
                                     plain-text := TextInput {
