@@ -1472,6 +1472,11 @@ pub fn normalize_jid(jid: &str) -> String {
 // One line describing a quoted message, from the copy WhatsApp embeds in
 // the reply.
 pub fn quoted_summary(quoted: &wa::Message) -> String {
+    use whatsapp_rust::proto_helpers::MessageExt as _;
+    if quoted.is_view_once() { return t("compat.viewOnce"); }
+    if let Some(card) = crate::wa_map::compatibility_card(quoted.get_base_message()) {
+        return card.chars().take(120).collect();
+    }
     let inner: &wa::Message = quoted
         .ephemeral_message
         .as_option()
