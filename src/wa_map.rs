@@ -717,13 +717,12 @@ pub fn normalize(
         stored.mentions = ctx
             .map(|c| c.mentioned_jid.iter().map(|j| j.to_string()).collect())
             .unwrap_or_default();
-        // Sites that expose no metadata (private pages, login walls) send
-        // back just the URL; WhatsApp shows no card for those, and neither
-        // do we.
-        let url = ext.matched_text.as_deref().unwrap_or("");
+        let detected_url = crate::link_preview::first_url(&stored.text);
+        let url = ext.matched_text.as_deref().filter(|url| !url.is_empty()).unwrap_or(&detected_url);
         let link_title = clean_text(ext.title.as_deref().unwrap_or(""));
         let link_desc = clean_text(ext.description.as_deref().unwrap_or(""));
-        let has_thumb = ext.jpeg_thumbnail.as_ref().is_some_and(|t| !t.is_empty());
+        let has_thumb = ext.jpeg_thumbnail.as_ref().is_some_and(|t| !t.is_empty())
+            || ext.thumbnail_direct_path.as_ref().is_some_and(|path| !path.is_empty());
         let host = url
             .trim_start_matches("https://")
             .trim_start_matches("http://")

@@ -12,6 +12,7 @@ mod emoji;
 mod fonts;
 mod i18n;
 mod logging;
+mod link_preview;
 mod markup;
 mod media;
 mod video;

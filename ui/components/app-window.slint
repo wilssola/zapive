@@ -2865,54 +2865,42 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Link preview card. Blocks are placed by
-                                // hand and the height is their exact sum, so
-                                // the card never grows past its content.
                                 if msg.hasLink: Rectangle {
-                                    // The card spans the bubble like WhatsApp
-                                    // does, instead of leaving a margin beside it.
                                     property <length> card-w: msg-row.max-text-w;
-                                    property <length> img-h: msg.hasLinkThumb
-                                        ? min(300px, card-w * msg.linkThumbH
-                                            / max(msg.linkThumbW, 1))
-                                        : 0px;
-                                    property <length> host-h: msg.linkHost != "" ? 24px : 0px;
+                                    property <bool> large-image: msg.hasLinkThumb && msg.hasLinkOg;
+                                    property <bool> favicon: msg.hasLinkThumb && !msg.hasLinkOg;
+                                    property <length> img-h: large-image ? card-w * 0.525 : 0px;
+                                    property <length> text-x: favicon ? 76px : 10px;
+                                    property <length> text-w: max(24px, card-w - text-x - 10px);
                                     property <length> title-h: msg.linkTitle != ""
-                                        ? link-title.preferred-height + 8px : 0px;
+                                        ? min(38px, link-title.preferred-height) + 4px : 0px;
                                     property <length> desc-h: msg.linkDesc != ""
-                                        ? link-desc.preferred-height + 8px : 0px;
-
+                                        ? min(48px, link-desc.preferred-height) + 4px : 0px;
+                                    property <length> host-h: msg.linkHost != "" ? 17px : 0px;
+                                    property <length> body-h: max(favicon ? 56px : 0px,
+                                        title-h + desc-h + host-h) + 20px;
                                     width: card-w;
-                                    height: img-h + host-h + title-h + desc-h;
-                                    // A bare Rectangle stretches by default and
-                                    // would swallow the bubble's leftover space.
+                                    height: img-h + body-h;
                                     horizontal-stretch: 0;
                                     vertical-stretch: 0;
                                     border-radius: 6px;
                                     clip: true;
                                     background: msg.fromMe ? #ffffff14 : #00000014;
+                                    opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
 
-                                    if msg.hasLinkThumb: Image {
-                                        source: msg.linkThumb;
-                                        x: 0;
-                                        y: 0;
-                                        width: parent.width;
-                                        height: parent.img-h;
-                                        image-fit: cover;
-                                    }
-                                    if msg.linkHost != "": Rectangle {
-                                        x: 0;
-                                        y: parent.img-h;
-                                        width: parent.width;
-                                        height: parent.host-h;
-                                        background: msg.fromMe ? #ffffff10 : #00000010;
-                                        Text {
-                                            text: msg.linkHost;
-                                            color: Theme.text-dim;
-                                            font-size: 11px;
-                                            x: 9px;
+                                    if msg.hasLinkThumb: Rectangle {
+                                        x: parent.large-image ? 0px : 10px;
+                                        y: parent.large-image ? 0px : 10px;
+                                        width: parent.large-image ? parent.width : 56px;
+                                        height: parent.large-image ? parent.img-h : 56px;
+                                        border-radius: parent.large-image ? 0px : 6px;
+                                        clip: true;
+                                        Image {
+                                            source: msg.linkThumb;
+                                            width: parent.width;
                                             height: parent.height;
-                                            vertical-alignment: center;
+                                            image-fit: msg.hasLinkOg ? cover : contain;
+                                            opacity: root.blur-media && !row-hover.has-hover ? 0.08 : 1;
                                         }
                                     }
                                     link-title := Text {
@@ -2922,13 +2910,11 @@ export component AppWindow inherits Window {
                                         font-size: 13px;
                                         font-weight: 700;
                                         wrap: word-wrap;
-                                        x: 9px;
-                                        y: parent.img-h + parent.host-h + 4px;
-                                        width: parent.width - 18px;
-                                    }
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.open-dm(msg.linkUrl); }
+                                        overflow: elide;
+                                        x: parent.text-x;
+                                        y: parent.img-h + 10px;
+                                        width: parent.text-w;
+                                        height: max(0px, parent.title-h - 4px);
                                     }
                                     link-desc := Text {
                                         text: msg.linkDesc;
@@ -2936,9 +2922,25 @@ export component AppWindow inherits Window {
                                         color: Theme.text-dim;
                                         font-size: 12px;
                                         wrap: word-wrap;
-                                        x: 9px;
-                                        y: parent.img-h + parent.host-h + parent.title-h + 4px;
-                                        width: parent.width - 18px;
+                                        overflow: elide;
+                                        x: parent.text-x;
+                                        y: parent.img-h + parent.title-h + 10px;
+                                        width: parent.text-w;
+                                        height: max(0px, parent.desc-h - 4px);
+                                    }
+                                    Text {
+                                        text: msg.linkHost;
+                                        color: Theme.text-dim;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                        x: parent.text-x;
+                                        y: parent.img-h + parent.title-h + parent.desc-h + 10px;
+                                        width: parent.text-w;
+                                        height: parent.host-h;
+                                    }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-dm(msg.linkUrl); }
                                     }
                                 }
 

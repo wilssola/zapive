@@ -3615,9 +3615,7 @@ impl Bridge {
         let prev = list.len().checked_sub(2).and_then(|i| list.get(i));
         let row = self.to_row(stored, prev);
         let from_me = stored.from_me;
-        let needs_media = stored.kind != MessageKind::Text
-            || !stored.link_title.is_empty()
-            || !stored.link_url.is_empty();
+        let needs_media = needs_media(stored);
         let stored = stored.clone();
         self.messages_model.push(row);
         // Don't yank the view down while the user is reading older rows.
@@ -3950,6 +3948,7 @@ impl Bridge {
             hasLink: !m.link_title.is_empty() || !m.link_url.is_empty(),
             linkThumb: empty_image(),
             hasLinkThumb: false,
+            hasLinkOg: false,
             linkThumbW: 0,
             linkThumbH: 0,
             hasWave: self.waves.contains_key(&m.id),
@@ -4681,7 +4680,7 @@ impl Bridge {
             .raw
             .as_ref()
             .is_some_and(|raw| crate::media::cached_path(&m.id, &m.mimetype, raw).1);
-        if enabled || voice || cached {
+        if enabled || voice || cached || m.kind == MessageKind::Text {
             self.request_media(m);
         }
     }
@@ -4706,15 +4705,17 @@ impl Bridge {
         if m.deleted || self.media_inflight.contains(&m.id) || self.media_failed.contains(&m.id) {
             return;
         }
-        let Some(raw) = m.raw.clone() else { return };
+        let raw = match m.raw.clone() {
+            Some(raw) => raw,
+            None if m.kind == MessageKind::Text => std::sync::Arc::new(wa::Message::default()),
+            None => return,
+        };
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let inner = raw.get_base_message();
         match m.kind {
             MessageKind::System => {}
             MessageKind::Text => {
-                let Some(ext) = inner.extended_text_message.as_option() else {
-                    return;
-                };
+                let ext = inner.extended_text_message.as_option().cloned().unwrap_or_default();
                 let inline = ext
                     .jpeg_thumbnail
                     .clone()
@@ -4751,6 +4752,12 @@ impl Bridge {
                         bytes: inline,
                         link: true,
                     });
+                } else {
+                    let url = message_link(m);
+                    if !url.is_empty() {
+                        self.media_inflight.insert(m.id.clone());
+                        self.wa.send(Cmd::LinkPreview { jid: m.jid.clone(), id: m.id.clone(), text: m.text.clone(), url });
+                    }
                 }
                 return;
             }
@@ -5086,15 +5093,61 @@ impl Bridge {
         self.restick();
     }
 
+    pub fn on_link_preview(&mut self, jid: &str, id: &str, text: &str, preview: Option<crate::link_preview::Preview>) {
+        let jid = self.store.canon_owned(jid);
+        let Some(m) = self.store.messages.get_mut(&jid).and_then(|messages| messages.iter_mut().find(|m| m.id == id)) else {
+            self.media_inflight.remove(id);
+            return;
+        };
+        if m.deleted || m.kind != MessageKind::Text || m.text != text { return; }
+        self.media_inflight.remove(id);
+        let Some(preview) = preview else {
+            self.on_media_missing(id);
+            return;
+        };
+        if m.link_title.is_empty() { m.link_title = preview.title; }
+        if m.link_desc.is_empty() { m.link_desc = preview.description; }
+        if m.link_url.is_empty() { m.link_url = crate::link_preview::first_url(text); }
+        let (title, desc, url) = (m.link_title.clone(), m.link_desc.clone(), m.link_url.clone());
+        self.store.dirty_jids.insert(jid);
+        self.schedule_save();
+        let image = preview.image.as_ref().map(image_of);
+        if image.is_none() { self.media_failed.insert(id.to_owned()); }
+        self.patch_row(id, |row| {
+            row.linkTitle = title.into();
+            row.linkDesc = desc.into();
+            row.linkHost = host_of(&url).into();
+            row.linkUrl = url.into();
+            row.hasLink = true;
+            row.mediaLoading = false;
+            row.hasLinkOg = preview.og;
+            if let (Some(image), Some(decoded)) = (image, preview.image) {
+                row.linkThumb = image;
+                row.hasLinkThumb = true;
+                row.linkThumbW = decoded.w as i32;
+                row.linkThumbH = decoded.h as i32;
+            }
+        });
+        self.restick();
+    }
+
     pub fn on_thumb(&mut self, id: &str, link: bool, img: crate::media::Decoded) {
         let image = image_of(&img);
         let (w, h) = (img.w as i32, img.h as i32);
         if link {
+            let valid = self.find_message(id).is_some_and(|m| !m.deleted && m.kind == MessageKind::Text && m.raw.as_ref().is_some_and(|raw| {
+                raw.get_base_message().extended_text_message.as_option().is_some_and(|ext| {
+                    ext.jpeg_thumbnail.as_ref().is_some_and(|bytes| !bytes.is_empty())
+                        || ext.thumbnail_direct_path.as_ref().is_some_and(|path| !path.is_empty())
+                })
+            }));
+            if !valid { return; }
             self.media_inflight.remove(id);
             self.patch_row(id, |row| row.mediaLoading = false);
             self.patch_row(id, |row| {
                 row.linkThumb = image;
                 row.hasLinkThumb = true;
+                row.hasLinkOg = true;
                 row.linkThumbW = w;
                 row.linkThumbH = h;
             });
@@ -8548,6 +8601,8 @@ impl Bridge {
         m.link_title.clear();
         m.link_desc.clear();
         let updated = m.clone();
+        self.media_inflight.remove(id);
+        self.media_failed.remove(id);
         self.store.search.remove(&jid, id);
         self.store.search.add(&jid, &updated);
         if self.store.messages_for(&jid).last().is_some_and(|m| m.id == id) {
@@ -8555,7 +8610,10 @@ impl Bridge {
             if let Some(meta) = self.store.chats.get_mut(&jid) { meta.preview = preview; }
         }
         self.store.dirty_jids.insert(jid.clone());
-        if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+        if self.current_jid.as_ref() == Some(&jid) {
+            self.rebuild_conversation(&jid);
+            self.request_automatic_media(&updated);
+        }
         self.schedule_save();
         self.schedule_refresh_chats();
     }
@@ -9372,8 +9430,7 @@ fn quote_chat(m: &StoredMessage) -> &str {
 
 fn message_link(m: &StoredMessage) -> String {
     if !m.link_url.is_empty() { return m.link_url.clone(); }
-    static LINKS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r#"https?://[^\s<>\"]+"#).unwrap());
-    LINKS.find(&m.text).map(|v| v.as_str().trim_end_matches(['.', ',', ';', '!', ')', ']']).to_string()).unwrap_or_default()
+    crate::link_preview::first_url(&m.text)
 }
 
 fn document_type(m: &StoredMessage) -> String {
@@ -9550,7 +9607,8 @@ fn needs_media(m: &StoredMessage) -> bool {
     !m.deleted
         && (m.kind != MessageKind::Text && m.kind != MessageKind::System
             || !m.link_title.is_empty()
-            || !m.link_url.is_empty())
+            || !m.link_url.is_empty()
+            || (m.kind == MessageKind::Text && !crate::link_preview::first_url(&m.text).is_empty()))
 }
 
 // What a message becomes in a copy or an export: its text, or a
