@@ -1,6 +1,7 @@
 target/
 *.log
 .idea/
+.maestri/
 # Packaging outputs (release workflow scratch space).
 build/
 dist/

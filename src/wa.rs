@@ -36,6 +36,7 @@ pub static SESSION_EPOCH: AtomicU64 = AtomicU64::new(0);
 pub struct QuoteRef {
     pub id: String,
     pub sender_jid: String,
+    pub chat_jid: String,
     pub message: Arc<wa::Message>,
 }
 
@@ -133,6 +134,9 @@ pub enum Cmd {
     // Message actions.
     React { jid: String, id: String, from_me: bool, participant: Option<String>, emoji: String },
     Revoke { jid: String, id: String },
+    Edit { jid: String, id: String, text: String },
+    PinMessage { jid: String, id: String, from_me: bool, participant: Option<String>, pin: bool },
+    MarkUnread(String),
     Star { jid: String, id: String, from_me: bool, participant: Option<String>, starred: bool },
     // "Send message viewed" (opt-in, off by default): blue ticks and the
     // blue mic. `sender` is the group participant a receipt is addressed
@@ -157,8 +161,6 @@ pub enum Cmd {
     },
     SendDocument { jid: String, path: std::path::PathBuf, origin: Option<String> },
     SendAudioFile { jid: String, path: std::path::PathBuf, origin: Option<String> },
-    // Decode a local image for the send-preview overlay.
-    PreviewImage { path: std::path::PathBuf },
     // Stickers and GIFs (the video player runs its own threads).
     SendSticker { jid: String, path: std::path::PathBuf },
     GifSearch(String),
@@ -684,8 +686,8 @@ impl EventHandler for Pump {
             Event::Receipt(receipt) => {
                 let status = match receipt.r#type {
                     ReceiptType::Delivered => 3,
-                    ReceiptType::Read | ReceiptType::ReadSelf => 4,
-                    ReceiptType::Played | ReceiptType::PlayedSelf => 5,
+                    ReceiptType::Read => 4,
+                    ReceiptType::Played => 5,
                     _ => 0,
                 };
                 if status == 0 {
@@ -693,7 +695,10 @@ impl EventHandler for Pump {
                 }
                 let chat = receipt.source.chat.to_non_ad_string();
                 let ids: Vec<String> = receipt.message_ids.iter().map(|i| i.to_string()).collect();
-                ui_apply(move |b| b.on_receipt(&chat, &ids, status));
+                let participant = receipt.source.sender.to_non_ad_string();
+                let timestamp = receipt.timestamp.timestamp();
+                let alternate = receipt.source.sender_alt.as_ref().map(|jid| jid.to_non_ad_string());
+                ui_apply(move |b| b.on_receipt(&chat, &ids, &participant, alternate.as_deref(), status, timestamp));
             }
             Event::HistorySync(_lazy) => {
                 // Decoding inflates megabytes of protobuf: keep it off the
@@ -1097,6 +1102,46 @@ async fn executor(
                     }
                 });
             }
+            Cmd::Edit { jid, id, text } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let message = wa::Message { conversation: Some(text), ..Default::default() };
+                    match client.edit_message(chat, id.clone(), message.clone()).await {
+                        Ok(_) => { let timestamp = crate::store::now_secs(); ui_apply(move |b| b.on_message_edit(&jid, &id, &message, timestamp)); }
+                        Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    }
+                });
+            }
+            Cmd::PinMessage { jid, id, from_me, participant, pin } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    let key = wa::MessageKey {
+                        remote_jid: Some(jid.clone()), id: Some(id.clone()),
+                        from_me: Some(from_me), participant, ..Default::default()
+                    };
+                    let result = if pin {
+                        client.pin_message(chat, key, whatsapp_rust::send::PinDuration::Days7).await
+                    } else {
+                        client.unpin_message(chat, key).await
+                    };
+                    match result {
+                        Ok(_) => ui_apply(move |b| b.on_message_pin(&jid, &id, if pin { crate::store::now_secs() + 604800 } else { 0 })),
+                        Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    }
+                });
+            }
+            Cmd::MarkUnread(jid) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else { return };
+                    match client.chat_actions().mark_chat_as_read(&chat, false, None).await {
+                        Ok(_) => ui_apply(move |b| b.on_mark_read(&jid, false)),
+                        Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    }
+                });
+            }
             Cmd::Star { jid, id, from_me, participant, starred } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
@@ -1174,6 +1219,7 @@ async fn executor(
 
             Cmd::SendImage { jid, path, origin, caption } => {
                 let client = session.client.clone();
+                let key = media_key.clone();
                 tokio::spawn(async move {
                     let Ok(bytes) = tokio::fs::read(&path).await else { return };
                     let thumb_src = bytes.clone();
@@ -1183,7 +1229,7 @@ async fn executor(
                         .flatten();
                     let Some(to) = parse_jid(&jid) else { return };
                     let upload = match client
-                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Image, Default::default())
+                        .upload(bytes.clone(), whatsapp_rust::wacore::download::MediaType::Image, Default::default())
                         .await
                     {
                         Ok(u) => u,
@@ -1203,7 +1249,27 @@ async fn executor(
                     match client.send_message(to, message.clone()).await {
                         Ok(sent) => {
                             let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
+                            let mimetype = message.image_message.as_option()
+                                .and_then(|image| image.mimetype.as_deref())
+                                .unwrap_or("image/jpeg");
+                            let cached = crate::media::cache_sent(&key, &id, mimetype, &message, &bytes).await;
+                            let decoded = if cached.is_some() {
+                                tokio::task::spawn_blocking(move || {
+                                    crate::media::decode_bytes(&bytes, crate::media::BUBBLE_PX)
+                                }).await.ok().flatten()
+                            } else {
+                                None
+                            };
+                            ui_apply(move |b| {
+                                if let Some(path) = cached {
+                                    if let Some(img) = decoded {
+                                        b.on_media_image(&id, &path, img);
+                                    } else {
+                                        b.on_media_file(&id, &path);
+                                    }
+                                }
+                                b.echo_sent_from(&jid, &id, message, origin);
+                            });
                         }
                         Err(e) => eprintln!("[wa] image send failed: {e}"),
                     }
@@ -1287,22 +1353,6 @@ async fn executor(
                 });
             }
 
-            Cmd::PreviewImage { path } => {
-                tokio::spawn(async move {
-                    let img = tokio::task::spawn_blocking(move || {
-                        std::fs::read(&path)
-                            .ok()
-                            .and_then(|d| crate::media::decode_bytes(&d, 1280))
-                            .map(|img| (path, img))
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    if let Some((path, img)) = img {
-                        ui_apply(move |b| b.on_preview_ready(&path, img));
-                    }
-                });
-            }
             Cmd::SendSticker { jid, path } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
@@ -2353,10 +2403,11 @@ async fn executor(
                     let mut ctx = match &quote {
                         Some(q) => {
                             let Some(sender) = parse_jid(&q.sender_jid) else { return };
+                            let Some(source) = parse_jid(&q.chat_jid) else { return };
                             Some(whatsapp_rust::proto_helpers::build_quote_context_with_info(
                                 q.id.clone(),
                                 &sender,
-                                &to,
+                                &source,
                                 &to,
                                 &q.message,
                             ))

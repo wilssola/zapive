@@ -153,6 +153,33 @@ msgstr "Sair do WhatsApp"
 msgid "Add a caption"
 msgstr "Adicione uma legenda"
 
+msgid "Crop"
+msgstr "Cortar"
+
+msgid "Pencil"
+msgstr "Lápis"
+
+msgid "Reset image"
+msgstr "Restaurar imagem"
+
+msgid "Thin"
+msgstr "Fino"
+
+msgid "Thick"
+msgstr "Grosso"
+
+msgid "Text"
+msgstr "Texto"
+
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Drag over the image to select the crop"
+msgstr "Arraste sobre a imagem para selecionar o recorte"
+
+msgid "Write text, then click the image to position it"
+msgstr "Escreva e clique na imagem para posicionar o texto"
+
 msgid "Status"
 msgstr "Status"
 
@@ -293,6 +320,48 @@ msgstr "Abrir o Zapive ao entrar no sistema"
 
 msgid "Privacy"
 msgstr "Privacidade"
+
+msgid "settings.privacyBlur"
+msgstr "Blur private content"
+
+msgid "settings.privacyBlurHint"
+msgstr "Choose which content to hide. Hover or keyboard focus reveals only that item."
+
+msgid "settings.blurNames"
+msgstr "Names"
+
+msgid "settings.blurPhotos"
+msgstr "Photos"
+
+msgid "settings.blurMessages"
+msgstr "Messages"
+
+msgid "settings.blurMedia"
+msgstr "Media"
+
+msgid "notify.reply"
+msgstr "Reply"
+
+msgid "notify.replyPlaceholder"
+msgstr "Type a reply"
+
+msgid "notify.play"
+msgstr "Play"
+
+msgid "notify.newMessage"
+msgstr "New message"
+
+msgid "Show notifications"
+msgstr "Mostrar notificações"
+
+msgid "When turned off, no banners appear for messages or calls. Unread counts still update."
+msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
+
+msgid "settings.notifyPreviews"
+msgstr "Show message previews in notifications"
+
+msgid "settings.notifyPreviewsHint"
+msgstr "When turned off, notifications hide message content and media."
 
 msgid "Send read receipts"
 msgstr "Enviar confirmação de leitura"

@@ -171,6 +171,24 @@ pub fn cached_path(id: &str, mimetype: &str, msg: &wa::Message) -> (PathBuf, boo
     (path, exists)
 }
 
+pub async fn cache_sent(
+    key: &KeyHandle,
+    id: &str,
+    mimetype: &str,
+    msg: &wa::Message,
+    bytes: &[u8],
+) -> Option<PathBuf> {
+    if !key.unlocked() {
+        return None;
+    }
+    let (path, _) = cached_path(id, mimetype, msg);
+    if let Err(e) = tokio::fs::write(&path, key.encrypt_bytes(bytes)).await {
+        eprintln!("[media] cache write failed for {id}: {e}");
+        return None;
+    }
+    Some(path)
+}
+
 // Downloads (if missing) and returns the cached, encrypted file's path.
 // The permit is only held while bytes actually move: a task waiting out
 // a rate limit must not sit on it, or cached media queues behind it.
@@ -387,6 +405,242 @@ pub fn temp_plain(key: &KeyHandle, path: &PathBuf) -> Option<PathBuf> {
 
 pub fn clean_tmp() {
     let _ = std::fs::remove_dir_all(media_cache().join(".tmp"));
+    clean_notification_thumbnails();
+}
+
+pub fn clean_notification_thumbnails() {
+    let _ = std::fs::remove_dir_all(crate::paths::cache_dir().join(".toast"));
+}
+
+pub fn notification_thumbnail(bytes: &[u8]) -> Option<PathBuf> {
+    const MAX_INPUT: usize = 64 * 1024;
+    const MAX_DIMENSION: u32 = 1024;
+    if bytes.is_empty() || bytes.len() > MAX_INPUT {
+        return None;
+    }
+    let image = image::load_from_memory(bytes).ok()?;
+    if image.width() > MAX_DIMENSION || image.height() > MAX_DIMENSION {
+        return None;
+    }
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut encoded, image::ImageFormat::Jpeg).ok()?;
+    if encoded.get_ref().len() > MAX_INPUT {
+        return None;
+    }
+    let dir = crate::paths::cache_dir().join(".toast");
+    std::fs::create_dir_all(&dir).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+    }
+    use rand::RngCore as _;
+    let mut random = [0u8; 16];
+    rand::rng().fill_bytes(&mut random);
+    let name = random.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let path = dir.join(format!("{name}.jpg"));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    use std::io::Write as _;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(0x100000);
+    }
+    let mut file = options.open(&path).ok()?;
+    file.write_all(encoded.get_ref()).ok()?;
+    Some(path)
+}
+
+pub enum PreviewEdit {
+    Crop(f32, f32, f32, f32),
+    Text(String, f32, f32),
+    Draw(String, [u8; 4], f32),
+}
+
+pub fn crop_preview(image: &image::RgbaImage, x: f32, y: f32, w: f32, h: f32) -> Option<image::RgbaImage> {
+    if ![x, y, w, h].iter().all(|v| v.is_finite()) || w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let (iw, ih) = image.dimensions();
+    let left = (x.clamp(0.0, 1.0) * iw as f32).floor() as u32;
+    let top = (y.clamp(0.0, 1.0) * ih as f32).floor() as u32;
+    let right = ((x + w).clamp(0.0, 1.0) * iw as f32).ceil() as u32;
+    let bottom = ((y + h).clamp(0.0, 1.0) * ih as f32).ceil() as u32;
+    if right <= left || bottom <= top {
+        return None;
+    }
+    Some(imageops::crop_imm(image, left, top, right - left, bottom - top).to_image())
+}
+
+fn preview_font() -> Option<ab_glyph::FontArc> {
+    static FONT: std::sync::OnceLock<Option<ab_glyph::FontArc>> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        let query = fontdb::Query {
+            families: &[fontdb::Family::Name("Arial"), fontdb::Family::Name("DejaVu Sans"), fontdb::Family::SansSerif],
+            weight: fontdb::Weight::BOLD,
+            ..Default::default()
+        };
+        let preferred = db.query(&query);
+        preferred.into_iter().chain(db.faces().map(|face| face.id)).find_map(|id| {
+            db.with_face_data(id, |data, index| {
+                ab_glyph::FontVec::try_from_vec_and_index(data.to_vec(), index).ok().map(ab_glyph::FontArc::new)
+            }).flatten()
+        })
+    }).clone()
+}
+
+pub fn burn_preview_text(image: &mut image::RgbaImage, text: &str, x: f32, y: f32) -> Option<()> {
+    use ab_glyph::{Font, ScaleFont};
+    if !x.is_finite() || !y.is_finite() || text.trim().is_empty() || image.width() == 0 || image.height() == 0 {
+        return None;
+    }
+    let font = preview_font()?;
+    let size = (image.width().min(image.height()) as f32 * 0.055).clamp(16.0, 96.0);
+    let scaled = font.as_scaled(size);
+    let outline = (size / 16.0).ceil() as i32;
+    let margin = outline as f32 + 1.0;
+    let start_x = (x.clamp(0.0, 1.0) * image.width() as f32).clamp(margin.min(image.width() as f32), (image.width() as f32 - margin).max(margin));
+    let mut pen_x = start_x;
+    let mut pen_y = (y.clamp(0.0, 1.0) * image.height() as f32).min((image.height() as f32 - size - margin).max(0.0)) + scaled.ascent();
+    let mut previous = None;
+    let mut glyphs = Vec::new();
+    for ch in text.chars().take(4096) {
+        if ch == '\n' {
+            pen_x = margin;
+            pen_y += scaled.height() + scaled.line_gap();
+            previous = None;
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        let id = scaled.glyph_id(ch);
+        if let Some(prev) = previous {
+            pen_x += scaled.kern(prev, id);
+        }
+        let advance = scaled.h_advance(id);
+        if pen_x + advance > image.width() as f32 - margin && pen_x > margin {
+            pen_x = margin;
+            pen_y += scaled.height() + scaled.line_gap();
+        }
+        if pen_y - scaled.ascent() >= image.height() as f32 {
+            break;
+        }
+        if let Some(glyph) = font.outline_glyph(id.with_scale_and_position(size, ab_glyph::point(pen_x, pen_y))) {
+            glyphs.push(glyph);
+        }
+        pen_x += advance;
+        previous = Some(id);
+    }
+    for dark in [true, false] {
+        for glyph in &glyphs {
+            let bounds = glyph.px_bounds();
+            glyph.draw(|gx, gy, coverage| {
+                let radius = if dark { outline } else { 0 };
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        if dx * dx + dy * dy > radius * radius { continue; }
+                        let px = bounds.min.x as i32 + gx as i32 + dx;
+                        let py = bounds.min.y as i32 + gy as i32 + dy;
+                        if px < 0 || py < 0 || px >= image.width() as i32 || py >= image.height() as i32 { continue; }
+                        let pixel = image.get_pixel_mut(px as u32, py as u32);
+                        let alpha = coverage + pixel[3] as f32 / 255.0 * (1.0 - coverage);
+                        for channel in 0..3 {
+                            let value = if dark { 16.0 } else { 255.0 };
+                            pixel[channel] = ((value * coverage + pixel[channel] as f32 * pixel[3] as f32 / 255.0 * (1.0 - coverage)) / alpha.max(f32::EPSILON)).round() as u8;
+                        }
+                        pixel[3] = (alpha * 255.0).round() as u8;
+                    }
+                }
+            });
+        }
+    }
+    Some(())
+}
+
+fn preview_draw_points(points: &str) -> Option<Vec<(f32, f32)>> {
+    let mut parsed = Vec::new();
+    for point in points.trim().strip_suffix(';').unwrap_or(points.trim()).split(';') {
+        if parsed.len() == 20_000 {
+            return None;
+        }
+        let (x, y) = point.split_once(',')?;
+        let x: f32 = x.trim().parse().ok()?;
+        let y: f32 = y.trim().parse().ok()?;
+        if ![x, y].iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+            return None;
+        }
+        parsed.push((x, y));
+    }
+    Some(parsed)
+}
+
+pub fn burn_preview_draw(image: &mut image::RgbaImage, points: &str, color: [u8; 4], thickness: f32) -> Option<()> {
+    if !thickness.is_finite() || thickness <= 0.0 || thickness > 1.0 || image.width() == 0 || image.height() == 0 {
+        return None;
+    }
+    let points = preview_draw_points(points)?;
+    let (w, h) = image.dimensions();
+    let radius = thickness * w.min(h) as f32 * 0.5;
+    let mut coverage = vec![0u8; (w as usize).checked_mul(h as usize)?];
+    let scaled: Vec<_> = points.iter().map(|&(x, y)| (x * w as f32, y * h as f32)).collect();
+    for i in 0..scaled.len() {
+        let (ax, ay) = scaled[i.saturating_sub(1)];
+        let (bx, by) = scaled[i];
+        let left = (ax.min(bx) - radius - 1.0).max(0.0) as u32;
+        let top = (ay.min(by) - radius - 1.0).max(0.0) as u32;
+        let right = (ax.max(bx) + radius + 1.0).ceil().min(w as f32) as u32;
+        let bottom = (ay.max(by) + radius + 1.0).ceil().min(h as f32) as u32;
+        let dx = bx - ax;
+        let dy = by - ay;
+        let length_squared = dx * dx + dy * dy;
+        for y in top..bottom {
+            for x in left..right {
+                let px = x as f32 + 0.5 - ax;
+                let py = y as f32 + 0.5 - ay;
+                let t = if length_squared > 0.0 { ((px * dx + py * dy) / length_squared).clamp(0.0, 1.0) } else { 0.0 };
+                let distance = (px - t * dx).hypot(py - t * dy);
+                let alpha = ((radius + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
+                let cell = &mut coverage[y as usize * w as usize + x as usize];
+                *cell = (*cell).max(alpha);
+            }
+        }
+    }
+    for (pixel, coverage) in image.pixels_mut().zip(coverage) {
+        let source_alpha = coverage as f32 / 255.0 * color[3] as f32 / 255.0;
+        if source_alpha == 0.0 { continue; }
+        let destination_alpha = pixel[3] as f32 / 255.0;
+        let alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
+        for channel in 0..3 {
+            pixel[channel] = ((color[channel] as f32 * source_alpha + pixel[channel] as f32 * destination_alpha * (1.0 - source_alpha)) / alpha).round() as u8;
+        }
+        pixel[3] = (alpha * 255.0).round() as u8;
+    }
+    Some(())
+}
+
+pub fn edit_preview(path: &std::path::Path, edit: PreviewEdit) -> Option<(PathBuf, Decoded)> {
+    let bytes = std::fs::read(path).ok()?;
+    let mut image = apply_orientation(image::load_from_memory(&bytes).ok()?, exif_rotation(&bytes)).to_rgba8();
+    match edit {
+        PreviewEdit::Crop(x, y, w, h) => image = crop_preview(&image, x, y, w, h)?,
+        PreviewEdit::Text(text, x, y) => burn_preview_text(&mut image, &text, x, y)?,
+        PreviewEdit::Draw(points, color, thickness) => burn_preview_draw(&mut image, &points, color, thickness)?,
+    }
+    let dir = media_cache().join(".tmp");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join(format!("edit-{:032x}.png", rand::random::<u128>()));
+    image.save(&path).ok()?;
+    let preview = image::DynamicImage::ImageRgba8(image).thumbnail(1280, 1280).to_rgba8();
+    Some((path, Decoded { w: preview.width(), h: preview.height(), rgba: preview.into_raw() }))
 }
 
 // A 512x512 webp sticker with transparent padding, like WhatsApp makes.
@@ -492,4 +746,149 @@ pub fn sticker_frames(data: &[u8], box_dim: u32, cap: usize) -> Vec<Decoded> {
         return frames;
     }
     decode_bytes(data, box_dim).map(|d| vec![d]).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_crop_uses_normalized_current_image_coordinates() {
+        let image = image::RgbaImage::from_fn(100, 80, |x, y| image::Rgba([x as u8, y as u8, 0, 255]));
+        let cropped = crop_preview(&image, 0.25, 0.25, 0.5, 0.5).unwrap();
+        assert_eq!(cropped.dimensions(), (50, 40));
+        assert_eq!(cropped.get_pixel(0, 0), image.get_pixel(25, 20));
+        assert_eq!(crop_preview(&cropped, 0.0, 0.0, 0.5, 0.5).unwrap().dimensions(), (25, 20));
+        assert!(crop_preview(&image, f32::NAN, 0.0, 1.0, 1.0).is_none());
+        assert!(crop_preview(&image, 1.0, 0.0, 0.1, 1.0).is_none());
+        assert!(crop_preview(&image, 0.0, 0.0, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn preview_draw_dot_is_round_and_antialiased() {
+        let mut image = image::RgbaImage::new(100, 80);
+        burn_preview_draw(&mut image, "0.5,0.5;", [20, 80, 160, 255], 0.125).unwrap();
+        assert_eq!(image.get_pixel(50, 40).0, [20, 80, 160, 255]);
+        assert_eq!(image.get_pixel(45, 35)[3], 0);
+        assert!(image.pixels().any(|p| p[3] > 0 && p[3] < 255));
+        assert_eq!(image.get_pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn preview_draw_segments_are_continuous_and_blended_once() {
+        let mut image = image::RgbaImage::new(100, 100);
+        burn_preview_draw(&mut image, "0.1,0.2;0.8,0.2;0.8,0.9;0.8,0.9;", [12, 34, 56, 128], 0.06).unwrap();
+        for x in 10..81 {
+            assert_eq!(image.get_pixel(x, 20).0, [12, 34, 56, 128]);
+        }
+        for y in 20..90 {
+            assert_eq!(image.get_pixel(80, y).0, [12, 34, 56, 128]);
+        }
+    }
+
+    #[test]
+    fn preview_draw_respects_rgba_and_image_alpha() {
+        let mut image = image::RgbaImage::from_pixel(40, 80, image::Rgba([0, 0, 255, 255]));
+        burn_preview_draw(&mut image, "0.5,0.5", [255, 0, 0, 128], 0.2).unwrap();
+        assert_eq!(image.get_pixel(20, 40).0, [128, 0, 127, 255]);
+        let original = image.clone();
+        burn_preview_draw(&mut image, "0,0;1,1;", [0, 255, 0, 0], 1.0).unwrap();
+        assert_eq!(image, original);
+    }
+
+    #[test]
+    fn preview_draw_rejects_invalid_input_without_changes() {
+        let mut image = image::RgbaImage::new(20, 20);
+        let original = image.clone();
+        for points in ["", ";", "0.5", "0.5,0.5,0.5", "NaN,0", "0,inf", "-0.1,0", "0,1.1", "0,0;;", "0,0;bad"] {
+            assert!(burn_preview_draw(&mut image, points, [255; 4], 0.1).is_none(), "{points}");
+            assert_eq!(image, original);
+        }
+        for thickness in [0.0, -0.1, 1.1, f32::NAN, f32::INFINITY] {
+            assert!(burn_preview_draw(&mut image, "0.5,0.5", [255; 4], thickness).is_none());
+        }
+        assert!(preview_draw_points(&"0,0;".repeat(20_000)).is_some());
+        assert!(preview_draw_points(&"0,0;".repeat(20_001)).is_none());
+        assert!(burn_preview_draw(&mut image::RgbaImage::new(0, 20), "0,0", [255; 4], 0.1).is_none());
+        assert_eq!(image, original);
+    }
+
+    #[test]
+    fn preview_text_burns_white_letters_and_dark_outline() {
+        let mut image = image::RgbaImage::from_pixel(640, 480, image::Rgba([120, 120, 120, 255]));
+        burn_preview_text(&mut image, "Readable text", 0.2, 0.3).expect("a system font is required");
+        assert!(image.pixels().any(|p| p[0] > 240 && p[1] > 240 && p[2] > 240));
+        assert!(image.pixels().any(|p| p[0] < 30 && p[1] < 30 && p[2] < 30));
+        assert_eq!(image.get_pixel(0, 0), &image::Rgba([120, 120, 120, 255]));
+        assert!(burn_preview_text(&mut image, "", 0.5, 0.5).is_none());
+        assert!(burn_preview_text(&mut image, "text", f32::NAN, 0.5).is_none());
+    }
+
+    #[tokio::test]
+    async fn sent_image_is_cached_encrypted_and_decodable() {
+        let id = format!("sent_image_test_{}", std::process::id());
+        let vault_path = std::env::temp_dir().join(format!("{id}.db"));
+        let mut vault = crate::vault::Vault::open_at(&vault_path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let key = vault.key_handle();
+        let message = wa::Message::default();
+        let image = image::DynamicImage::new_rgb8(2, 3);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let bytes = bytes.into_inner();
+        std::fs::create_dir_all(media_cache()).unwrap();
+
+        let path = cache_sent(&key, &id, "image/png", &message, &bytes).await.unwrap();
+
+        assert!(cached_path(&id, "image/png", &message).1);
+        assert_ne!(std::fs::read(&path).unwrap(), bytes);
+        let cached = read_cached(&key, &path).unwrap();
+        assert_eq!(cached, bytes);
+        let decoded = decode_bytes(&cached, BUBBLE_PX).unwrap();
+        assert_eq!((decoded.w, decoded.h), (2, 3));
+
+        std::fs::remove_file(path).unwrap();
+        drop(vault);
+        crate::paths::remove_db(&vault_path);
+    }
+
+    #[tokio::test]
+    async fn sent_image_is_not_cached_without_an_unlocked_key() {
+        let path = cache_sent(
+            &KeyHandle::default(),
+            "sent_image_locked_test",
+            "image/png",
+            &wa::Message::default(),
+            b"image bytes",
+        ).await;
+        assert!(path.is_none());
+    }
+}
+
+
+#[cfg(test)]
+mod notification_tests {
+    use super::notification_thumbnail;
+
+    #[test]
+    fn rejects_empty_thumbnail() {
+        assert!(notification_thumbnail(&[]).is_none());
+    }
+
+    #[test]
+    fn rejects_thumbnail_above_input_limit() {
+        assert!(notification_thumbnail(&vec![0; 64 * 1024 + 1]).is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_image_at_input_limit() {
+        assert!(notification_thumbnail(&vec![0; 64 * 1024]).is_none());
+    }
+
+    #[test]
+    fn rejects_corrupt_image_headers() {
+        for bytes in [&b"\xff\xd8\xff"[..], &b"\x89PNG\r\n\x1a\n"[..], &b"not an image"[..]] {
+            assert!(notification_thumbnail(bytes).is_none());
+        }
+    }
 }

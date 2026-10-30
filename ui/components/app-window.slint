@@ -1,6 +1,6 @@
 import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
+import { DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
 import { Avatar } from "avatar.slint";
 import { GreenLink } from "green-link.slint";
 import { IconButton } from "icon-button.slint";
@@ -13,11 +13,13 @@ import { LinkHover } from "link-hover.slint";
 import { EmojiText } from "emoji.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { HomeScreen } from "home-screen.slint";
+import { ImagePreview } from "image-preview.slint";
 import { MenuRow } from "rows/menu.slint";
 import { MemberRow } from "rows/member.slint";
 import { HitRow } from "rows/hit.slint";
 import { AccountRow } from "rows/account.slint";
 import { ModalLayer } from "modal.slint";
+
 
 // Delivery ticks drawn as vectors in WhatsApp's Material shape
 // (done/done_all): the "✓" glyph comes from the emoji fallback font,
@@ -63,6 +65,79 @@ component BubbleMeta {
     }
 }
 
+component MediaPlaceholder inherits TouchArea {
+    in property <image> preview;
+    in property <bool> privacy-blurred: false;
+    in property <bool> sticker;
+    in property <bool> video;
+    in property <string> file-size;
+    in property <bool> loading;
+    in property <float> progress: -1;
+    mouse-cursor: root.loading ? default : pointer;
+    enabled: !root.loading;
+
+    Rectangle {
+        border-radius: 6px;
+        clip: true;
+        background: Theme.hover;
+        Image {
+            source: root.preview;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+            opacity: root.privacy-blurred && !root.has-hover ? 0.05 : 1;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            visible: root.privacy-blurred && !root.has-hover;
+            background: Theme.dark ? #172126 : #dfe5e8;
+            animate background { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            backdrop-blur: 12px;
+            visible: !root.privacy-blurred || root.has-hover;
+            background: #00000050;
+        }
+        Rectangle {
+            width: 50px;
+            height: 50px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 25px;
+            background: root.has-hover ? #ffffff28 : #ffffff18;
+            Image {
+                source: root.sticker ? @image-url("../icons/sticker-2.svg")
+                    : root.video ? @image-url("../icons/video.svg")
+                    : @image-url("../icons/photo.svg");
+                width: 28px;
+                height: 28px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                colorize: white;
+            }
+        }
+        if root.loading: Text {
+            text: root.progress < 0 ? @tr("Downloading…") : round(clamp(root.progress, 0, 100)) + "%";
+            color: white;
+            font-size: 11px;
+            width: parent.width;
+            horizontal-alignment: center;
+            y: parent.height / 2 + 30px;
+        }
+        if root.file-size != "": Text {
+            text: root.file-size;
+            color: white;
+            font-size: 11px;
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 6px;
+        }
+    }
+}
+
 component InfoAction inherits TouchArea {
     in property <image> icon;
     in property <string> label;
@@ -103,7 +178,23 @@ export component AppWindow inherits Window {
     icon: @image-url("../zapive.png");
     preferred-width: 1100px;
     preferred-height: 700px;
-    background: Theme.bg;
+    in property <bool> native-backdrop: false;
+    in-out property <string> theme-style: "glass";
+    in-out property <bool> notifications: true;
+    in-out property <bool> notify-previews: false;
+    in-out property <bool> blur-names: false;
+    in-out property <bool> blur-photos: false;
+    in-out property <bool> blur-messages: false;
+    in-out property <bool> blur-media: false;
+    in property <bool> window-active: true;
+    callback style-changed(string);
+    callback notifications-changed(bool);
+    callback notify-previews-changed(bool);
+    callback privacy-blur-changed(string, bool);
+    // Glass only while the OS backdrop is live and the window has focus;
+    // an unfocused backdrop turns grey, so fall back to the opaque theme.
+    out property <bool> glass: native-backdrop && theme-style == "glass" && window-active;
+    background: glass ? transparent : Theme.bg;
     default-font-weight: 400;
     init => {
         Palette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light;
@@ -149,6 +240,11 @@ export component AppWindow inherits Window {
     in-out property <[ChatItem]> chats;
     in-out property <[ChatItem]> statuses;
     in-out property <string> sidebar-view: "chats";
+    in-out property <int> chats-unread-count: 0;
+    in-out property <int> channels-unread-count: 0;
+    in-out property <int> communities-unread-count: 0;
+    in-out property <int> calls-unseen-count: 0;
+    in-out property <bool> statuses-unseen: false;
     callback status-open(string);
     callback view-changed(string);
     // Calls (the ringing/in-call UI lives in CallWindow)
@@ -202,6 +298,7 @@ export component AppWindow inherits Window {
 
     // Conversation
     in-out property <bool> chat-open: false;
+    out property <length> composer-tail-space: composer-dock.height + 8px;
     in-out property <string> sync-banner: "";
     in-out property <string> current-chat-name;
     in-out property <string> current-jid: "";
@@ -282,9 +379,46 @@ export component AppWindow inherits Window {
     in-out property <bool> reactions-open;
     callback show-reactions(string);
     callback request-reply(string);
-    callback open-quote(string);
+    callback open-quote(string, string);
     callback toggle-star(string);
     callback delete-message(string);
+    callback message-action(string, string);
+    callback submit-edit(string, string);
+    in-out property <bool> details-open;
+    in-out property <string> details-id;
+    in-out property <string> details-text;
+    in-out property <image> details-image;
+    in-out property <bool> details-has-image;
+    in-out property <[DetailRow]> details-rows;
+    in-out property <bool> message-dialog-open;
+    in-out property <bool> message-dialog-edit;
+    in-out property <string> message-dialog-title;
+    in-out property <string> message-dialog-text;
+    in-out property <string> message-dialog-id;
+    property <int> message-menu-request;
+    property <length> message-menu-request-x;
+    property <length> message-menu-request-y;
+    property <MessageItem> menu-message;
+    in-out property <bool> message-menu-open;
+    property <length> message-menu-x;
+    property <length> message-menu-y;
+    public function open-message-menu(x: float, y: float) -> bool {
+        if (root.screen != "main" || !root.chat-open || !root.conv-ready || root.select-mode
+            || root.message-menu-open || root.message-dialog-open || root.details-open || root.confirm-open
+            || root.settings-open || root.forward-open || root.share-open || root.preview-open
+            || root.lightbox-open || root.video-open || root.pdf-open || root.sv-open
+            || root.alert-open || root.member-pick-open || root.reactions-open
+            || root.picker-open || root.attach-open || root.chat-menu-open || root.account-menu-open
+            || x * 1px < msg-list.absolute-position.x || x * 1px >= msg-list.absolute-position.x + msg-list.width
+            || y * 1px < contact-header.absolute-position.y + contact-header.height
+            || y * 1px >= composer-dock.absolute-position.y) {
+            return false;
+        }
+        root.message-menu-request-x = x * 1px;
+        root.message-menu-request-y = y * 1px;
+        root.message-menu-request += 1;
+        return true;
+    }
     callback react-to(string, string);
     callback react-pick(string);
     // Quick reaction bar: the message it belongs to, empty when hidden.
@@ -456,6 +590,17 @@ export component AppWindow inherits Window {
     in-out property <bool> sv-video-ready: false;
     callback status-play();
 
+    public function focus-composer() {
+        if (root.screen == "main" && root.chat-open && root.current-can-send && !root.select-mode
+            && !root.message-menu-open && !root.message-dialog-open && !root.details-open && !root.confirm-open
+            && !root.settings-open && !root.forward-open && !root.share-open && !root.preview-open
+            && !root.lightbox-open && !root.video-open && !root.pdf-open && !root.sv-open
+            && !root.alert-open && !root.member-pick-open && !root.reactions-open
+            && !root.picker-open && !root.attach-open && !root.chat-menu-open && !root.account-menu-open
+            && !root.chat-search-open && !root.sync-open && !root.new-list-open && !root.info-open) {
+            message-input.focus();
+        }
+    }
     public function append-composer(t: string) {
         message-input.text = message-input.text + t;
     }
@@ -571,6 +716,15 @@ export component AppWindow inherits Window {
     in-out property <image> preview-image;
     callback confirm-send-image(string);
     callback cancel-send-image();
+    callback crop-preview(float, float, float, float);
+    callback text-preview(string, float, float);
+    callback draw-preview(string, color, float);
+    in-out property <bool> preview-busy: false;
+    callback reset-preview();
+    public function focus-preview-caption() { image-editor.focus-caption(); }
+    changed preview-open => {
+        if (!root.preview-open) { image-editor.clear(); }
+    }
 
     // ---------- Lock screen ----------
     if root.screen == "locked": VerticalBox {
@@ -848,6 +1002,9 @@ export component AppWindow inherits Window {
                 if (root.video-open) { root.close-video(); }
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
+                else if (root.message-menu-open) { root.message-menu-open = false; }
+                else if (root.details-open) { root.details-open = false; }
+                else if (root.message-dialog-open) { root.message-dialog-open = false; }
                 else if (root.confirm-open) { root.confirm-open = false; }
                 else if (root.preview-open) { root.cancel-send-image(); }
                 else if (root.share-open) { root.share-cancel(); }
@@ -895,6 +1052,8 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/message-circle.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.chats-unread-count;
                     active: root.sidebar-view == "chats";
                     clicked => {
                         root.sidebar-view = "chats";
@@ -905,6 +1064,8 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/circle-dot.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-dot: root.statuses-unseen;
                     active: root.sidebar-view == "status";
                     clicked => { root.sidebar-view = "status"; }
                 }
@@ -912,13 +1073,17 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/phone.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.calls-unseen-count;
                     active: root.sidebar-view == "calls";
-                    clicked => { root.sidebar-view = "calls"; }
+                    clicked => { root.sidebar-view = "calls"; root.view-changed("calls"); }
                 }
                 IconButton {
                     icon: @image-url("../icons/speakerphone.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.channels-unread-count;
                     active: root.sidebar-view == "channels";
                     clicked => {
                         root.sidebar-view = "channels";
@@ -929,6 +1094,8 @@ export component AppWindow inherits Window {
                     icon: @image-url("../icons/users-group.svg");
                     active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
                     tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
+                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    badge-count: root.communities-unread-count;
                     active: root.sidebar-view == "communities";
                     clicked => {
                         root.sidebar-view = "communities";
@@ -974,12 +1141,13 @@ export component AppWindow inherits Window {
 
         Rectangle { width: 1px; background: Theme.border; }
 
-
-
         // Sidebar
         Rectangle {
             width: 380px;
-            background: Theme.sidebar;
+            background: root.glass
+                ? (Theme.dark ? #111b21b8 : #ffffffc8) : Theme.sidebar;
+            border-width: root.glass ? 1px : 0px;
+            border-color: Theme.dark ? #ffffff35 : #111b2130;
 
             VerticalBox {
                 visible: root.sidebar-view == "status";
@@ -1266,8 +1434,8 @@ export component AppWindow inherits Window {
                 Flickable {
                     height: root.sidebar-view == "chats" ? 40px : 0;
                     visible: root.sidebar-view == "chats";
-                    viewport-width: chips.preferred-width;
-                    viewport-height: self.height;
+                    content-width: chips.preferred-width;
+                    content-height: self.height;
                     interactive: chips.preferred-width > self.width;
                     chips := HorizontalLayout {
                         padding-left: 14px;
@@ -1281,6 +1449,7 @@ export component AppWindow inherits Window {
                         }
                         FilterChip {
                             label: @tr("Unread");
+                            count: root.chats-unread-count;
                             active: root.chat-tab == "unread";
                             clicked => { root.chat-tab = "unread"; root.tab-changed("unread"); }
                         }
@@ -1387,6 +1556,8 @@ export component AppWindow inherits Window {
                                 : touch.has-hover ? Theme.hover : transparent;
                             border-width: chat.jid == root.selected-jid ? 1px : 0px;
                             border-color: Theme.dark ? #255044 : #a6d8bf;
+                            animate background { duration: 140ms; easing: ease-out; }
+                            animate border-color { duration: 140ms; easing: ease-out; }
                         }
                         touch := TouchArea {
                             clicked => { root.open-chat(chat.jid); }
@@ -1408,6 +1579,8 @@ export component AppWindow inherits Window {
                                     has-image: chat.hasAvatar;
                                     initial: chat.initial;
                                     color-idx: chat.colorIdx;
+                                    privacy-blurred: root.blur-photos;
+                                    privacy-reveal: touch.has-hover;
                                 }
                             }
                             VerticalLayout {
@@ -1419,6 +1592,8 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: chat.name;
                                         color: Theme.text;
+                                        opacity: root.blur-names && !touch.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 14px;
                                         font-weight: chat.jid == root.selected-jid || chat.unread > 0 ? 600 : 400;
                                         overflow: elide;
@@ -1442,6 +1617,8 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: chat.preview;
                                         color: Theme.text-dim;
+                                        opacity: root.blur-messages && !touch.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
@@ -1545,7 +1722,9 @@ export component AppWindow inherits Window {
                 y: parent.height - self.height;
                 width: parent.width;
                 height: 56px;
-                background: #008069;
+                background: #008069e8;
+                border-width: 1px;
+                border-color: #ffffff55;
                 mini-touch := TouchArea {
                     mouse-cursor: pointer;
                     clicked => { root.mini-audio-open(); }
@@ -1645,7 +1824,8 @@ export component AppWindow inherits Window {
 
         // Conversation pane
         conv-pane := Rectangle {
-            background: Theme.conv-background;
+            background: root.glass
+                ? (Theme.dark ? #101c2390 : #efeae2a8) : Theme.conv-background;
 
             HomeScreen {
                 visible: !root.chat-open;
@@ -1675,16 +1855,15 @@ export component AppWindow inherits Window {
                 }
             }
 
-            VerticalBox {
+            Rectangle {
                 visible: root.chat-open;
                 width: 100%;
                 height: 100%;
-                padding: 0;
-                spacing: 0;
 
                 // The conversation and the day pill floating over it.
                 Rectangle {
-                    vertical-stretch: 1;
+                    width: parent.width;
+                    height: parent.height;
                     // Fades the floating day out once the wheel stops.
                     scroll-idle := Timer {
                         interval: 1400ms;
@@ -1695,6 +1874,11 @@ export component AppWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     opacity: root.conv-ready ? 1.0 : 0.0;
+                    animate opacity {
+                        duration: 160ms;
+                        easing: ease-out;
+                        enabled: root.conv-ready;
+                    }
                     changed viewport-height => {
                         root.conv-viewport-h = self.viewport-height;
                     }
@@ -1717,6 +1901,19 @@ export component AppWindow inherits Window {
                         }
                     }
                     for msg[i] in root.messages: msg-row := Rectangle {
+                        property <int> menu-request: root.message-menu-request;
+                        changed menu-request => {
+                            if (self.menu-request > 0 && !msg.deleted && msg.kind != "system"
+                                && root.message-menu-request-x >= self.absolute-position.x
+                                && root.message-menu-request-x < self.absolute-position.x + self.width
+                                && root.message-menu-request-y >= self.absolute-position.y + bubble.y
+                                && root.message-menu-request-y < self.absolute-position.y + bubble.y + bubble.height) {
+                                root.menu-message = msg;
+                                root.message-menu-x = root.message-menu-request-x;
+                                root.message-menu-y = root.message-menu-request-y;
+                                root.message-menu-open = true;
+                            }
+                        }
                         property <length> header-offset: i == 0 ? contact-header.height : 0px;
                         // The row crossing the top edge names the day in
                         // the floating pill. Rows sit in viewport
@@ -1760,7 +1957,7 @@ export component AppWindow inherits Window {
                             double-clicked => {
                                 if (!root.select-mode && !msg.deleted) {
                                     root.request-reply(msg.id);
-                                    message-input.focus();
+                                    root.focus-composer();
                                 }
                             }
                         }
@@ -1793,6 +1990,8 @@ export component AppWindow inherits Window {
                             }
                             sys-text := Text {
                                 text: sys-pill.is-system ? msg.text : "";
+                                opacity: root.blur-messages && !sys-touch.has-hover ? 0.08 : 1;
+                                animate opacity { duration: 120ms; easing: ease-out; }
                                 color: msg.clickable ? Theme.accent : Theme.text-dim;
                                 font-size: 12px;
                                 wrap: word-wrap;
@@ -1803,19 +2002,23 @@ export component AppWindow inherits Window {
                             }
                         }
                         if root.select-mode && msg.kind != "system": Rectangle {
-                            x: 10px;
-                            y: bubble.y + (bubble.height - self.height) / 2;
+                            x: 14px;
+                            // Centred on short bubbles, pinned near the top of tall ones.
+                            y: bubble.y + max(0px, min((bubble.height - self.height) / 2, 8px));
                             width: 20px;
                             height: 20px;
-                            border-radius: 4px;
+                            border-radius: 10px;
                             border-width: 2px;
                             border-color: msg.selected ? Theme.accent : Theme.text-dim;
                             background: msg.selected ? Theme.accent : transparent;
+                            animate background, border-color { duration: 120ms; easing: ease-out; }
                             if msg.selected: Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
                                 source: @image-url("../icons/check.svg");
                                 colorize: white;
-                                width: 14px;
-                                height: 14px;
+                                width: 13px;
+                                height: 13px;
                             }
                         }
                         // A link card drives the bubble width, so the text
@@ -1870,10 +2073,13 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        height: msg.kind == "system"
+                        height: (msg.kind == "system"
                             ? sys-pill.height + 12px + self.day-offset
+                                + (i == root.messages.length - 1 ? root.composer-tail-space : 0px)
                             : bubble.height + (msg.firstOfRun ? 16px : 6px)
-                                + (msg.reactions != "" ? 14px : 0) + self.day-offset;
+                                + (msg.reactions != "" ? 14px : 0) + self.day-offset)
+                                + (i == root.messages.length - 1 && msg.kind != "system"
+                                    ? root.composer-tail-space : 0px);
                         if msg.dayLabel != "": Rectangle {
                             y: 8px + msg-row.header-offset;
                             x: (parent.width - self.width) / 2;
@@ -1896,7 +2102,10 @@ export component AppWindow inherits Window {
                         if msg.showAvatar: Avatar {
                             width: 28px;
                             height: 28px;
-                            x: 12px;
+                            privacy-blurred: root.blur-photos;
+                            privacy-reveal: row-hover.has-hover;
+                            x: root.select-mode ? 42px : 12px;
+                            animate x { duration: 140ms; easing: ease-out; }
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
                             src: msg.senderAvatar;
                             has-image: msg.senderHasAvatar;
@@ -1908,7 +2117,8 @@ export component AppWindow inherits Window {
                             y: (msg.firstOfRun ? 12px : 3px) + msg-row.day-offset;
                             x: msg.fromMe
                                 ? parent.width - self.width - 30px
-                                : (msg.groupIndent ? 48px : 30px);
+                                : (msg.groupIndent ? 48px : 30px) + (root.select-mode ? 30px : 0px);
+                            animate x { duration: 140ms; easing: ease-out; }
                             width: msg.kind == "system" ? 0 : content.preferred-width;
                             height: msg.kind == "system" ? 0 : content.preferred-height;
                             background: msg.sticker
@@ -1933,7 +2143,7 @@ export component AppWindow inherits Window {
                                 enabled: !root.select-mode && !msg.deleted;
                                 double-clicked => {
                                     root.request-reply(msg.id);
-                                    message-input.focus();
+                                    root.focus-composer();
                                 }
                             }
                             content := VerticalLayout {
@@ -1951,6 +2161,8 @@ export component AppWindow inherits Window {
                                         clicked => { root.open-dm(msg.senderJid); }
                                         sender-text := Text {
                                             text: msg.senderLabel;
+                                            opacity: root.blur-names && !sender-touch.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
                                             font-size: 12px;
                                             font-weight: 700;
                                             color: Theme.sender;
@@ -1977,7 +2189,7 @@ export component AppWindow inherits Window {
                                     clip: true;
                                     quote-touch := TouchArea {
                                         mouse-cursor: pointer;
-                                        clicked => { root.open-quote(msg.quoteId); }
+                                        clicked => { root.open-quote(msg.quoteJid, msg.quoteId); }
                                     }
                                     Rectangle {
                                         x: 0;
@@ -1991,6 +2203,8 @@ export component AppWindow inherits Window {
                                         spacing: 2px;
                                         Text {
                                             text: msg.quoteName;
+                                            opacity: root.blur-names && !row-hover.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
                                             color: Theme.accent;
                                             font-size: 12px;
                                             font-weight: 700;
@@ -2000,6 +2214,8 @@ export component AppWindow inherits Window {
                                         }
                                         Text {
                                             text: msg.quoteText;
+                                            opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
                                             color: Theme.text-dim;
                                             font-size: 12.5px;
                                             overflow: elide;
@@ -2048,62 +2264,20 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Still downloading: the thumbnail that came
-                                // with the message, dimmed, in the clip's box.
-                                if msg.kind == "video" && !msg.mediaReady && msg.picW > 0: TouchArea {
-                                    mouse-cursor: pointer;
-                                    enabled: !msg.mediaLoading;
-                                    clicked => { root.download-media(msg.id); }
+                                if (msg.kind == "image" || msg.kind == "video") && !msg.mediaReady: MediaPlaceholder {
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
-
-                                    Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: Theme.hover; }
-
-                                    Image {
-                                        source: msg.picture;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: cover;
-                                        opacity: 0.55;
-                                    }
-                                    Rectangle {
-                                        width: 140px;
-                                        height: 36px;
-                                        border-radius: 18px;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2 + 22px;
-                                        background: #00000090;
-                                        Image {
-                                            source: msg.kind == "image" ? @image-url("../icons/photo.svg") : @image-url("../icons/video.svg");
-                                            width: 32px;
-                                            height: 32px;
-                                            x: (parent.width - self.width) / 2;
-                                            y: -44px;
-                                            colorize: white;
-                                        }
-                                        HorizontalLayout {
-                                            y: (parent.height - self.height) / 2;
-                                            height: 18px;
-                                            padding-left: 12px;
-                                            padding-right: 12px;
-                                            spacing: 6px;
-                                            alignment: center;
-                                            Image {
-                                                source: @image-url("../icons/download.svg");
-                                                width: 18px;
-                                                height: 18px;
-                                                colorize: white;
-                                            }
-                                            Text {
-                                                text: msg.mediaLoading ? (msg.mediaProgress < 0 ? @tr("Downloading…") : round(clamp(msg.mediaProgress, 0, 100)) + "%") : @tr("Download");
-                                                color: white;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
+                                    preview: msg.picture;
+                                    privacy-blurred: root.blur-media;
+                                    sticker: msg.sticker;
+                                    video: msg.kind == "video";
+                                    file-size: msg.mediaSize;
+                                    loading: msg.mediaLoading;
+                                    progress: msg.mediaProgress;
+                                    clicked => { root.download-media(msg.id); }
                                 }
                                 if msg.kind == "video" && msg.mediaReady && msg.picW > 0: TouchArea {
+                                    property <bool> media-hover: self.has-hover;
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
@@ -2117,6 +2291,13 @@ export component AppWindow inherits Window {
                                             width: parent.width;
                                             height: parent.height;
                                             image-fit: cover;
+                                            opacity: root.blur-media && !media-hover ? 0.05 : 1;
+                                            animate opacity { duration: 120ms; easing: ease-out; }
+                                        }
+                                        if root.blur-media && !media-hover: Rectangle {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            background: Theme.dark ? #172126 : #dfe5e8;
                                         }
                                     }
                                     if msg.videoLen != "": Rectangle {
@@ -2182,6 +2363,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 if msg.kind == "image" && msg.mediaReady: TouchArea {
+                                    property <bool> media-hover: self.has-hover;
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
                                     mouse-cursor: pointer;
@@ -2190,59 +2372,13 @@ export component AppWindow inherits Window {
                                         source: msg.picture;
                                         width: parent.width;
                                         height: parent.height;
+                                        opacity: root.blur-media && !media-hover ? 0.05 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                     }
-                                }
-                                // Placeholder of the final size: the bubble
-                                // never changes height once the image lands.
-                                if msg.kind == "image" && !msg.mediaReady: TouchArea {
-                                    mouse-cursor: pointer;
-                                    enabled: !msg.mediaLoading;
-                                    clicked => { root.download-media(msg.id); }
-                                    width: msg.picW * 1px;
-                                    height: msg.picH * 1px;
-
-                                    Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: Theme.hover; }
-                                    Image {
-                                        source: msg.picture;
+                                    if root.blur-media && !media-hover: Rectangle {
                                         width: parent.width;
                                         height: parent.height;
-                                        image-fit: cover;
-                                    }
-                                    Rectangle {
-                                        width: 140px;
-                                        height: 36px;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2 + 22px;
-                                        border-radius: 18px;
-                                        background: #000000a0;
-                                        Image {
-                                            source: msg.kind == "image" ? @image-url("../icons/photo.svg") : @image-url("../icons/video.svg");
-                                            width: 32px;
-                                            height: 32px;
-                                            x: (parent.width - self.width) / 2;
-                                            y: -44px;
-                                            colorize: white;
-                                        }
-                                        HorizontalLayout {
-                                            y: (parent.height - self.height) / 2;
-                                            height: 18px;
-                                            padding-left: 12px;
-                                            padding-right: 12px;
-                                            spacing: 6px;
-                                            alignment: center;
-                                            Image {
-                                                source: @image-url("../icons/download.svg");
-                                                width: 18px;
-                                                height: 18px;
-                                                colorize: white;
-                                            }
-                                            Text {
-                                                text: msg.mediaLoading ? (msg.mediaProgress < 0 ? @tr("Downloading…") : round(clamp(msg.mediaProgress, 0, 100)) + "%") : @tr("Download");
-                                                color: white;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
+                                        background: Theme.dark ? #172126 : #dfe5e8;
                                     }
                                 }
 
@@ -2262,20 +2398,47 @@ export component AppWindow inherits Window {
                                             spacing: 8px;
                                             VerticalLayout {
                                                 alignment: center;
-                                                Image {
-                                                    source: @image-url("../icons/file-text.svg");
-                                                    colorize: Theme.icon;
-                                                    width: 26px;
-                                                    height: 26px;
+                                                Rectangle {
+                                                    property <bool> sheet: msg.documentType == "XLS" || msg.documentType == "XLSX" || msg.documentType == "CSV" || msg.documentType == "ODS";
+                                                    property <bool> slides: msg.documentType == "PPT" || msg.documentType == "PPTX" || msg.documentType == "ODP";
+                                                    property <bool> archive: msg.documentType == "ZIP" || msg.documentType == "RAR" || msg.documentType == "7Z" || msg.documentType == "GZ" || msg.documentType == "TAR";
+                                                    width: 38px;
+                                                    height: 42px;
+                                                    border-radius: 8px;
+                                                    background: msg.documentType == "PDF" ? #fa5252
+                                                        : self.sheet ? #0cba68
+                                                        : self.slides ? #ef8534
+                                                        : self.archive ? #9671d5
+                                                        : msg.documentType == "DOC" || msg.documentType == "DOCX" || msg.documentType == "ODT" ? #4285e0 : #718894;
+                                                    Image {
+                                                        source: parent.archive ? @image-url("../icons/archive.svg")
+                                                            : parent.sheet ? @image-url("../icons/list-details.svg")
+                                                            : @image-url("../icons/file-text.svg");
+                                                        colorize: white;
+                                                        width: 22px;
+                                                        height: 22px;
+                                                        x: (parent.width - self.width) / 2;
+                                                        y: (parent.height - self.height) / 2;
+                                                    }
                                                 }
                                             }
-                                            Text {
-                                                text: msg.text;
-                                                color: Theme.bubble-text;
-                                                font-size: 14px;
-                                                vertical-alignment: center;
-                                                overflow: elide;
-                                                width: min(self.preferred-width, msg-row.max-text-w - 60px);
+                                            VerticalLayout {
+                                                alignment: center;
+                                                spacing: 4px;
+                                                Text {
+                                                    text: msg.text;
+                                                    opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                                    animate opacity { duration: 120ms; easing: ease-out; }
+                                                    color: Theme.bubble-text;
+                                                    font-size: 13px;
+                                                    overflow: elide;
+                                                    width: min(max(self.preferred-width, 180px), msg-row.max-text-w - 68px);
+                                                }
+                                                Text {
+                                                    text: (msg.mediaSize != "" ? msg.mediaSize + " · " : "") + msg.documentType;
+                                                    color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                    font-size: 11px;
+                                                }
                                             }
                                         }
                                     }
@@ -2622,6 +2785,8 @@ export component AppWindow inherits Window {
                                     height: styled-body.preferred-height;
                                     styled-body := StyledText {
                                         text: msg.styled;
+                                        opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         default-color: Theme.bubble-text;
                                         default-font-size: 14px;
                                         link-color: Theme.accent;
@@ -2713,6 +2878,8 @@ export component AppWindow inherits Window {
                                     plain-text := TextInput {
                                         text: (msg.deleted ? "🚫 " + msg.text : msg.text)
                                             + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
+                                        opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
+                                        animate opacity { duration: 120ms; easing: ease-out; }
                                         read-only: true;
                                         single-line: false;
                                         wrap: word-wrap;
@@ -2769,44 +2936,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            // One menu for the whole bubble, whatever it
-                            // holds. Left clicks pass through to the text
-                            // (selection) and the links underneath.
-                            msg-menu := ContextMenuArea {
-                                enabled: !root.select-mode && !msg.deleted;
-                                Menu {
-                                    MenuItem {
-                                        title: @tr("Copy image");
-                                        enabled: msg.kind == "image" && msg.mediaReady;
-                                        activated => { root.copy-image(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Reply");
-                                        activated => { root.request-reply(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Copy");
-                                        enabled: msg.kind == "text" || msg.text != "";
-                                        activated => { root.copy-text(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Forward");
-                                        activated => { root.request-forward(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Select");
-                                        activated => { root.select-start(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: msg.starred ? @tr("Unstar") : @tr("Star");
-                                        activated => { root.toggle-star(msg.id); }
-                                    }
-                                    MenuItem {
-                                        title: @tr("Delete");
-                                        activated => { root.delete-message(msg.id); }
-                                    }
-                                }
-                            }
                         }
                         // Hover actions, mirroring WhatsApp: react, forward
                         // and the message menu.
@@ -2836,7 +2965,12 @@ export component AppWindow inherits Window {
                                 IconButton {
                                     icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
-                                    clicked => { msg-menu.show({ x: 0px, y: bubble.height }); }
+                                    clicked => {
+                                        root.menu-message = msg;
+                                        root.message-menu-x = self.absolute-position.x;
+                                        root.message-menu-y = self.absolute-position.y + self.height;
+                                        root.message-menu-open = true;
+                                    }
                                 }
                             }
                         }
@@ -2973,7 +3107,23 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle { height: 10px; }
+                composer-dock := Rectangle {
+                    x: 0px;
+                    width: parent.width;
+                    height: dock-col.preferred-height;
+                    y: parent.height - self.height;
+                    background: Theme.dark ? #0b141a28 : #ffffff28;
+                    backdrop-blur: 12px;
+                    dock-touch := TouchArea {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+                    dock-col := VerticalLayout {
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 6px;
 
                 if root.reply-open: Rectangle {
                     height: 58px;
@@ -3025,10 +3175,21 @@ export component AppWindow inherits Window {
 
                 // Selection bar: what to do with the picked messages.
                 if root.select-mode: Rectangle {
-                    height: 62px;
-                    background: Theme.header;
+                    height: 56px;
+                    Rectangle {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
+                    border-width: 1px;
+                    border-color: Theme.dark ? #24343e : Theme.border;
+                    border-radius: 18px;
+                    drop-shadow-blur: 10px;
+                    drop-shadow-color: #00000040;
                     HorizontalBox {
-                        padding: 11px;
+                        padding: 8px;
+                        padding-left: 10px;
+                        padding-right: 10px;
                         spacing: 8px;
                         IconButton {
                             icon: @image-url("../icons/x.svg");
@@ -3061,6 +3222,7 @@ export component AppWindow inherits Window {
                             enabled: root.select-count > 0;
                             clicked => { root.select-delete(); }
                         }
+                    }
                     }
                 }
 
@@ -3108,13 +3270,12 @@ export component AppWindow inherits Window {
                         x: 12px;
                         width: parent.width - 24px;
                         height: parent.height;
-                        background: Theme.dark ? #111c22 : Theme.header;
+                        background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
                         border-width: 1px;
-                        border-color: Theme.dark ? #1b2931 : Theme.border;
-                        border-top-left-radius: 16px;
-                        border-top-right-radius: 16px;
-                        border-bottom-left-radius: 0px;
-                        border-bottom-right-radius: 0px;
+                        border-color: Theme.dark ? #24343e : Theme.border;
+                        border-radius: 18px;
+                        drop-shadow-blur: 10px;
+                        drop-shadow-color: #00000040;
 
                         // Recording bar (replaces the composer while capturing)
                         HorizontalBox {
@@ -3211,8 +3372,8 @@ export component AppWindow inherits Window {
                                     y: 8px;
                                     width: parent.width - 24px;
                                     height: parent.height - 16px;
-                                    viewport-height: max(self.height, message-input.preferred-height);
-                                    viewport-width: self.width;
+                                    content-height: max(self.height, message-input.preferred-height);
+                                    content-width: self.width;
                                     // TextInput never scrolls itself into view
                                     // (that's the enclosing widget's job, per
                                     // Slint's own docs) -- interactive lets a
@@ -3297,6 +3458,8 @@ export component AppWindow inherits Window {
                     }
                     }
                 }
+                    }
+                }
             }
 
             contact-header := Rectangle {
@@ -3304,7 +3467,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 visible: root.chat-open;
-                height: root.sync-banner != "" ? 112px : 80px;
+                height: 80px;
 
                 background: Theme.dark ? #0b141a28 : #ffffff28;
                 backdrop-blur: 12px;
@@ -3330,6 +3493,12 @@ export component AppWindow inherits Window {
                                 has-image: root.current-avatar-has;
                                 initial: root.current-initial;
                                 color-idx: root.current-color-idx;
+                                privacy-blurred: root.blur-photos;
+                                privacy-reveal: header-avatar-touch.has-hover;
+                            }
+                            header-avatar-touch := TouchArea {
+                                width: 40px;
+                                height: 40px;
                             }
                         }
                         Rectangle {
@@ -3346,6 +3515,8 @@ export component AppWindow inherits Window {
                                 Text {
                                     text: root.current-chat-name;
                                     color: Theme.text;
+                                    opacity: root.blur-names && !head-touch.has-hover ? 0.08 : 1;
+                                    animate opacity { duration: 120ms; easing: ease-out; }
                                     font-size: 15px;
                                     font-weight: 600;
                                     overflow: elide;
@@ -3410,50 +3581,51 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.sync-banner != "": Rectangle {
-                    y: 80px;
-                    height: 32px;
-                    HorizontalLayout {
-                        alignment: center;
-                        padding-top: 6px;
-                        Rectangle {
-                            width: banner-text.preferred-width + 44px;
-                            height: 24px;
-                            border-radius: 12px;
-                            background: banner-touch.has-hover ? Theme.selected : Theme.pill;
-                            banner-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.sync-clicked(); }
+            }
+
+            if root.chat-open && root.sync-banner != "": Rectangle {
+                y: contact-header.height + 4px;
+                width: parent.width;
+                height: 32px;
+                HorizontalLayout {
+                    alignment: center;
+                    padding-top: 6px;
+                    Rectangle {
+                        width: banner-text.preferred-width + 44px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: banner-touch.has-hover ? Theme.selected : Theme.pill;
+                        banner-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.sync-clicked(); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            Image {
+                                source: @image-url("../icons/refresh.svg");
+                                colorize: Theme.text-dim;
+                                width: 13px;
+                                height: 13px;
+                                y: (parent.height - self.height) / 2;
                             }
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                spacing: 6px;
-                                Image {
-                                    source: @image-url("../icons/refresh.svg");
-                                    colorize: Theme.text-dim;
-                                    width: 13px;
-                                    height: 13px;
-                                    y: (parent.height - self.height) / 2;
-                                }
-                                banner-text := Text {
-                                    text: root.sync-banner;
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                }
+                            banner-text := Text {
+                                text: root.sync-banner;
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                vertical-alignment: center;
                             }
                         }
                     }
                 }
-
             }
 
 
             // Floating "jump to latest" button
             if root.chat-open && !root.stick-bottom: Rectangle {
                 x: parent.width - self.width - 24px;
-                y: parent.height - self.height - 86px;
+                y: parent.height - self.height - composer-dock.height - 16px;
                 width: 42px;
                 height: 42px;
                 border-radius: 21px;
@@ -3480,7 +3652,7 @@ export component AppWindow inherits Window {
             // "@" mention list above the composer.
             if root.mention-open && root.chat-open && !root.select-mode: Rectangle {
                 x: 12px;
-                y: parent.height - self.height - 74px;
+                y: parent.height - self.height - composer-dock.height - 8px;
                 width: 360px;
                 height: min(320px, mention-col.preferred-height + 12px);
                 background: Theme.panel;
@@ -3498,8 +3670,29 @@ export component AppWindow inherits Window {
                 }
             }
 
+            preview-layer := ModalLayer {
+                open: root.preview-open && root.chat-open;
+                scrim: transparent;
+                dismissible: false;
+                width: parent.width;
+                height: parent.height;
+                image-editor := ImagePreview {
+                    opacity: preview-layer.progress;
+                    width: parent.width;
+                    height: parent.height;
+                    picture: root.preview-image;
+                    busy: root.preview-busy;
+                    cancel => { root.cancel-send-image(); }
+                    send(caption) => { root.confirm-send-image(caption); }
+                    crop(x, y, w, h) => { root.crop-preview(x, y, w, h); }
+                    annotate(text, x, y) => { root.text-preview(text, x, y); }
+                    draw(points, ink, thickness) => { root.draw-preview(points, ink, thickness); }
+                    reset => { root.reset-preview(); }
+                }
+            }
         }
     }
+
 
     // Emoji / sticker picker above the composer
     picker-layer := ModalLayer {
@@ -3508,7 +3701,7 @@ export component AppWindow inherits Window {
         dismiss => { root.picker-open = false; }
         if picker-layer.mounted: Rectangle {
             x: conv-pane.absolute-position.x - picker-layer.absolute-position.x + 12px;
-            y: conv-pane.absolute-position.y - picker-layer.absolute-position.y + conv-pane.height - self.height - 74px + (1 - picker-layer.progress) * 8px;
+            y: conv-pane.absolute-position.y - picker-layer.absolute-position.y + conv-pane.height - self.height - composer-dock.height - 8px + (1 - picker-layer.progress) * 8px;
             width: 380px;
             height: 320px;
             opacity: picker-layer.progress;
@@ -3517,6 +3710,7 @@ export component AppWindow inherits Window {
             drop-shadow-blur: 8px;
             drop-shadow-color: #00000055;
             TouchArea { }
+
             VerticalLayout {
                 padding: 10px;
                 spacing: 8px;
@@ -3717,12 +3911,13 @@ export component AppWindow inherits Window {
             y: conv-pane.absolute-position.y - chat-menu-layer.absolute-position.y + 50px - (1 - chat-menu-layer.progress) * 8px;
             width: 260px;
             height: chat-menu-col.preferred-height + 12px;
-            opacity: chat-menu-layer.progress;
             background: Theme.panel;
             border-radius: 10px;
             drop-shadow-blur: 10px;
             drop-shadow-color: #00000066;
+            opacity: chat-menu-layer.progress;
             TouchArea { }
+
             chat-menu-col := VerticalLayout {
                 padding: 6px;
                 spacing: 1px;
@@ -3877,7 +4072,7 @@ export component AppWindow inherits Window {
         dismiss => { root.attach-open = false; }
         if attach-layer.mounted: Rectangle {
             x: conv-pane.absolute-position.x - attach-layer.absolute-position.x + 12px;
-            y: conv-pane.absolute-position.y - attach-layer.absolute-position.y + conv-pane.height - self.height - 74px + (1 - attach-layer.progress) * 8px;
+            y: conv-pane.absolute-position.y - attach-layer.absolute-position.y + conv-pane.height - self.height - composer-dock.height - 8px + (1 - attach-layer.progress) * 8px;
             width: 220px;
             height: menu-col.preferred-height + 16px;
             opacity: attach-layer.progress;
@@ -3886,6 +4081,7 @@ export component AppWindow inherits Window {
             drop-shadow-blur: 8px;
             drop-shadow-color: #00000055;
             TouchArea { }
+
             menu-col := VerticalLayout {
                 padding: 8px;
                 spacing: 2px;
@@ -3909,10 +4105,9 @@ export component AppWindow inherits Window {
                     label: @tr("Sticker");
                     clicked => { root.attach-open = false; root.attach-sticker(); }
                 }
-            }
         }
     }
-
+            }
     // ---------- Contact / group info ----------
     info-layer := ModalLayer {
         open: root.info-open;
@@ -3960,8 +4155,8 @@ export component AppWindow inherits Window {
                     }
                 }
                 Flickable {
-                    viewport-height: info-col.preferred-height;
-                    viewport-width: self.width;
+                    content-height: info-col.preferred-height;
+                    content-width: self.width;
                     Rectangle {
                         height: info-col.preferred-height;
                         width: parent.width;
@@ -4312,13 +4507,13 @@ export component AppWindow inherits Window {
         if account-layer.mounted: Rectangle {
             x: 64px;
             y: parent.height - self.height - 10px + (1 - account-layer.progress) * 8px;
+            opacity: account-layer.progress;
             width: 300px;
             height: account-col.preferred-height;
             background: Theme.panel;
             border-radius: 10px;
             drop-shadow-blur: 10px;
             drop-shadow-color: #00000066;
-            opacity: account-layer.progress;
             TouchArea { }
             account-col := VerticalLayout {
                 padding: 6px;
@@ -4374,20 +4569,305 @@ export component AppWindow inherits Window {
         }
     }
 
+    message-menu-layer := ModalLayer {
+        open: root.message-menu-open;
+        scrim: transparent;
+        dismiss => { root.message-menu-open = false; }
+        if message-menu-layer.mounted: Rectangle {
+            x: max(8px, min(root.message-menu-x, root.width - self.width - 8px));
+            y: max(8px, min(root.message-menu-y, root.height - self.height - 8px)) + (1 - message-menu-layer.progress) * 4px;
+            opacity: message-menu-layer.progress;
+            width: 264px;
+            height: min(root.height - 16px, message-menu-items.preferred-height + 12px);
+            border-radius: 12px;
+            background: Theme.dark ? (root.theme-style == "glass" ? #222c32f5 : #222c32) : Theme.panel;
+            border-width: 1px;
+            border-color: Theme.dark ? #ffffff18 : Theme.border;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            TouchArea { }
+            ScrollView {
+                x: 6px; y: 6px;
+                width: parent.width - 12px;
+                height: parent.height - 12px;
+                message-menu-items := VerticalLayout {
+                    spacing: 1px;
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/message-circle.svg");
+                        label: @tr("Reply");
+                        clicked => { root.message-menu-open = false; root.request-reply(root.menu-message.id); }
+                    }
+                    if root.menu-message.privateReply: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/users.svg");
+                        label: @tr("Reply privately");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "private"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/corner-up-right.svg");
+                        label: @tr("Forward");
+                        clicked => { root.message-menu-open = false; root.request-forward(root.menu-message.id); }
+                    }
+                    if root.menu-message.text != "" && (root.menu-message.kind == "text" || root.menu-message.kind == "image" || root.menu-message.kind == "video"): MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/copy.svg");
+                        label: @tr("Copy text");
+                        clicked => { root.message-menu-open = false; root.copy-text(root.menu-message.id); }
+                    }
+                    if root.menu-message.kind == "image" && root.menu-message.mediaReady: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/photo.svg");
+                        label: @tr("Copy image");
+                        clicked => { root.message-menu-open = false; root.copy-image(root.menu-message.id); }
+                    }
+                    if root.menu-message.linkUrl != "": MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/copy.svg");
+                        label: @tr("Copy link");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "link"); }
+                    }
+                    if root.menu-message.kind != "text" && root.menu-message.mediaReady: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/download.svg");
+                        label: @tr("Save as…");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "save"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/mood-smile.svg");
+                        label: @tr("React");
+                        clicked => { root.message-menu-open = false; root.react-pick(root.menu-message.id); }
+                    }
+                    if root.menu-message.editable: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/file-text.svg");
+                        label: @tr("Edit");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "edit"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/pin.svg");
+                        label: root.menu-message.pinned ? @tr("Unpin") : @tr("Pin for 7 days");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "pin"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/message-circle.svg");
+                        label: @tr("Mark conversation unread");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "unread"); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/star.svg");
+                        label: root.menu-message.starred ? @tr("Unstar") : @tr("Star");
+                        clicked => { root.message-menu-open = false; root.toggle-star(root.menu-message.id); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/checkbox.svg");
+                        label: @tr("Select");
+                        clicked => { root.message-menu-open = false; root.select-start(root.menu-message.id); }
+                    }
+                    MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/info-circle.svg");
+                        label: @tr("Details");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "details"); }
+                    }
+                    Rectangle { height: 1px; background: Theme.dark ? #ffffff18 : Theme.border; }
+                    MenuRow {
+                        height: 34px;
+                        icon: @image-url("../icons/trash.svg");
+                        label: @tr("Delete");
+                        tint: #f47783;
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "delete"); }
+                    }
+                }
+            }
+        }
+    }
+
+    details-layer := ModalLayer {
+        open: root.details-open;
+        scrim: #00000025;
+        dismiss => { root.details-open = false; }
+        if details-layer.mounted: Rectangle {
+            width: 100%;
+            height: 100%;
+            FocusScope {
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    if (e.text == Key.Escape) { root.details-open = false; return accept; }
+                    return reject;
+                }
+            }
+            Rectangle {
+                width: min(336px, root.width);
+                height: parent.height;
+                x: parent.width - self.width + (1 - details-layer.progress) * self.width;
+                opacity: details-layer.progress;
+                background: Theme.dark ? #1b252dee : Theme.panel;
+                border-width: 1px;
+                border-color: Theme.border;
+                TouchArea { }
+                VerticalLayout {
+                    spacing: 0px;
+                    Rectangle {
+                        height: 64px;
+                        background: Theme.header;
+                        HorizontalLayout {
+                            padding: 16px;
+                            Text { text: @tr("Detalhes da mensagem"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
+                            Rectangle {
+                                width: 28px;
+                                Text { text: "×"; color: Theme.text-dim; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; }
+                                TouchArea { clicked => { root.details-open = false; } }
+                            }
+                        }
+                    }
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 12px;
+                            Rectangle {
+                                border-radius: 10px;
+                                background: Theme.bubble-in;
+                                height: details-preview.preferred-height;
+                                details-preview := VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    if root.details-has-image: Image {
+                                        source: root.details-image;
+                                        height: 154px;
+                                        image-fit: contain;
+                                    }
+                                    Text { text: root.details-text; color: Theme.text; wrap: word-wrap; }
+                                }
+                            }
+                            for row in root.details-rows: Rectangle {
+                                background: row.kind == "status" ? Theme.bubble-in : transparent;
+                                border-radius: 8px;
+                                height: row.kind == "person" ? 38px : row.kind == "participant-heading" ? 28px : detail-content.preferred-height;
+                                detail-content := HorizontalLayout {
+                                    padding: row.kind == "heading" || row.kind == "person" || row.kind == "participant-heading" ? 0px : 10px;
+                                    spacing: row.kind == "person" ? 8px : 10px;
+                                    alignment: start;
+                                    if row.kind == "person": Avatar {
+                                        width: 28px; height: 28px;
+                                        vertical-stretch: 0;
+                                        src: row.avatar; has-image: row.hasAvatar;
+                                        initial: row.initial; color-idx: row.colorIdx;
+                                    }
+                                    if row.kind == "status" || row.kind == "participant-heading": Ticks {
+                                        ticks: row.ticks; blue: row.blue;
+                                        vertical-stretch: 0;
+                                    }
+                                    if row.kind == "version": Rectangle {
+                                        width: 10px;
+                                        background: transparent;
+                                        Rectangle { x: 4px; width: 2px; height: parent.height; background: Theme.accent; }
+                                        Rectangle { y: 4px; width: 10px; height: 10px; border-radius: 5px; background: Theme.accent; }
+                                    }
+                                    VerticalLayout {
+                                        spacing: row.kind == "person" ? 1px : 5px;
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        Text {
+                                            text: row.title;
+                                            color: row.kind == "participant-heading" ? Theme.text-dim : row.kind == "heading" ? Theme.accent : Theme.text;
+                                            font-size: row.kind == "heading" ? 14px : row.kind == "person" ? 12px : 13px;
+                                            horizontal-alignment: left;
+                                            font-weight: row.kind == "heading" || row.kind == "version" || row.kind == "person" ? 600 : 400;
+                                            wrap: row.kind == "person" ? no-wrap : word-wrap;
+                                            overflow: elide;
+                                        }
+                                        if row.text != "": Text { text: row.text; color: Theme.text; wrap: word-wrap; font-size: 13px; }
+                                        if row.time != "": Text { text: row.time; color: Theme.text-dim; wrap: word-wrap; font-size: 11px; horizontal-alignment: left; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    message-dialog-layer := ModalLayer {
+        open: root.message-dialog-open;
+        scrim: #00000088;
+        dismiss => { root.message-dialog-open = false; }
+        if message-dialog-layer.mounted: Rectangle {
+            width: 100%;
+            height: 100%;
+            FocusScope {
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    if (e.text == Key.Escape) { root.message-dialog-open = false; return accept; }
+                    return reject;
+                }
+            }
+            Rectangle {
+                width: min(480px, root.width - 32px);
+                height: message-dialog-col.preferred-height + 40px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: 12px;
+                opacity: message-dialog-layer.progress;
+                transform-scale: 0.96 + 0.04 * message-dialog-layer.progress;
+                background: Theme.panel;
+                TouchArea { }
+                message-dialog-col := VerticalLayout {
+                    padding: 20px;
+                    spacing: 14px;
+                    Text { text: root.message-dialog-title; color: Theme.text; font-size: 18px; }
+                    if !root.message-dialog-edit: Text {
+                        text: root.message-dialog-text;
+                        color: Theme.text-dim;
+                        wrap: word-wrap;
+                    }
+                    if root.message-dialog-edit: TextInput {
+                        text <=> root.message-dialog-text;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                        height: 120px;
+                        init => { self.focus(); }
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: 8px;
+                        DialogButton {
+                            label: @tr("Close");
+                            clicked => { root.message-dialog-open = false; }
+                        }
+                        if root.message-dialog-edit: DialogButton {
+                            label: @tr("Save");
+                            primary: true;
+                            enabled: root.message-dialog-text != "";
+                            clicked => { root.submit-edit(root.message-dialog-id, root.message-dialog-text); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---------- Confirm dialog ----------
     confirm-layer := ModalLayer {
         open: root.confirm-open;
         scrim: #00000088;
         dismiss => { root.confirm-open = false; }
         if confirm-layer.mounted: Rectangle {
+            opacity: confirm-layer.progress;
+            transform-scale: 0.96 + 0.04 * confirm-layer.progress;
             width: 400px;
             height: confirm-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: confirm-layer.progress;
-            transform-scale: 0.96 + 0.04 * confirm-layer.progress;
             TouchArea { }
             confirm-col := VerticalLayout {
                 padding: 22px;
@@ -4436,14 +4916,14 @@ export component AppWindow inherits Window {
         scrim: #00000088;
         dismiss => { root.share-cancel(); }
         if share-layer.mounted: Rectangle {
+            opacity: share-layer.progress;
+            transform-scale: 0.96 + 0.04 * share-layer.progress;
             width: 500px;
             height: share-col.preferred-height + 48px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: share-layer.progress;
-            transform-scale: 0.96 + 0.04 * share-layer.progress;
             TouchArea { }
             share-col := VerticalLayout {
                 padding: 24px;
@@ -4516,14 +4996,14 @@ export component AppWindow inherits Window {
         scrim: #00000088;
         dismiss => { root.new-list-open = false; }
         if new-list-layer.mounted: Rectangle {
+            opacity: new-list-layer.progress;
+            transform-scale: 0.96 + 0.04 * new-list-layer.progress;
             width: 380px;
             height: list-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: new-list-layer.progress;
-            transform-scale: 0.96 + 0.04 * new-list-layer.progress;
             TouchArea { }
             list-col := VerticalLayout {
                 padding: 22px;
@@ -4577,14 +5057,14 @@ export component AppWindow inherits Window {
         scrim: #000000aa;
         dismiss => { root.member-pick-open = false; }
         if member-pick-layer.mounted: Rectangle {
+            opacity: member-pick-layer.progress;
+            transform-scale: 0.96 + 0.04 * member-pick-layer.progress;
             width: 420px;
             height: 560px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: member-pick-layer.progress;
-            transform-scale: 0.96 + 0.04 * member-pick-layer.progress;
             TouchArea { }
             VerticalBox {
                 padding: 18px;
@@ -4749,14 +5229,14 @@ export component AppWindow inherits Window {
         scrim: #000000aa;
         dismissible: false;
         if alert-layer.mounted: Rectangle {
+            opacity: alert-layer.progress;
+            transform-scale: 0.96 + 0.04 * alert-layer.progress;
             width: 380px;
             height: alert-col.preferred-height + 44px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: alert-layer.progress;
-            transform-scale: 0.96 + 0.04 * alert-layer.progress;
             alert-col := VerticalLayout {
                 padding: 22px;
                 spacing: 12px;
@@ -4828,14 +5308,14 @@ export component AppWindow inherits Window {
         scrim: #00000066;
         dismiss => { root.reactions-open = false; }
         if reactions-layer.mounted: Rectangle {
+            opacity: reactions-layer.progress;
+            transform-scale: 0.96 + 0.04 * reactions-layer.progress;
             width: 380px;
             height: min(440px, 108px + root.reaction-rows.length * 56px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: reactions-layer.progress;
-            transform-scale: 0.96 + 0.04 * reactions-layer.progress;
             TouchArea { }
             VerticalBox {
                 padding: 18px;
@@ -4911,14 +5391,14 @@ export component AppWindow inherits Window {
         scrim: #000000aa;
         dismiss => { root.forward-open = false; }
         if forward-layer.mounted: Rectangle {
+            opacity: forward-layer.progress;
+            transform-scale: 0.96 + 0.04 * forward-layer.progress;
             width: 420px;
             height: 540px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.panel;
             border-radius: 12px;
-            opacity: forward-layer.progress;
-            transform-scale: 0.96 + 0.04 * forward-layer.progress;
             TouchArea { }
             VerticalBox {
                 padding: 18px;
@@ -5114,6 +5594,24 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingsRow {
+                                label: @tr("Style");
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    height: 30px;
+                                    y: (parent.height - self.height) / 2;
+                                    FilterChip {
+                                        label: @tr("Glass");
+                                        active: root.theme-style == "glass";
+                                        clicked => { root.theme-style = "glass"; root.style-changed("glass"); }
+                                    }
+                                    FilterChip {
+                                        label: @tr("Opaque");
+                                        active: root.theme-style == "opaque";
+                                        clicked => { root.theme-style = "opaque"; root.style-changed("opaque"); }
+                                    }
+                                }
+                            }
+                            SettingsRow {
                                 label: @tr("Language");
                                 HorizontalLayout {
                                     spacing: 6px;
@@ -5213,6 +5711,74 @@ export component AppWindow inherits Window {
                                     clicked => { root.apply-deletions-changed(!root.apply-deletions); }
                                 }
                             }
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                Text {
+                                    text: @tr("settings.privacyBlurHint");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurNames");
+                                Toggle {
+                                    label: @tr("settings.blurNames");
+                                    on: root.blur-names;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("names", !root.blur-names); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurPhotos");
+                                Toggle {
+                                    label: @tr("settings.blurPhotos");
+                                    on: root.blur-photos;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurMessages");
+                                Toggle {
+                                    label: @tr("settings.blurMessages");
+                                    on: root.blur-messages;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.blurMedia");
+                                Toggle {
+                                    label: @tr("settings.blurMedia");
+                                    on: root.blur-media;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("media", !root.blur-media); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("Show notifications");
+                                detail: @tr("When turned off, no banners appear for messages or calls. Unread counts still update.");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("Show notifications");
+                                    on: root.notifications;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.notifications-changed(!root.notifications); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.notifyPreviews");
+                                detail: @tr("settings.notifyPreviewsHint");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.notifyPreviews");
+                                    on: root.notify-previews;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.notify-previews-changed(!root.notify-previews); }
+                                }
+                            }
                         }
                         SettingsCard {
                             title: @tr("Security");
@@ -5261,7 +5827,13 @@ export component AppWindow inherits Window {
                         }
                         SettingsCard {
                             title: @tr("Automatic downloads");
-                            Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; wrap: word-wrap; }
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                padding-top: 8px;
+                                padding-bottom: 4px;
+                                Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                            }
                             SettingsRow {
                                 label: @tr("Photos");
                                 Toggle {
@@ -5352,60 +5924,6 @@ export component AppWindow inherits Window {
                         color: #ffbc38;
                         font-size: 13px;
                         wrap: word-wrap;
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------- Send-image preview ----------
-    preview-layer := ModalLayer {
-        open: root.preview-open;
-        scrim: #000000d9;
-        dismissible: false;
-        if preview-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            opacity: preview-layer.progress;
-            VerticalLayout {
-                padding: 28px;
-                spacing: 14px;
-                HorizontalLayout {
-                    alignment: start;
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        clicked => { root.cancel-send-image(); }
-                    }
-                }
-                Rectangle {
-                    vertical-stretch: 1;
-                    Image {
-                        source: root.preview-image;
-                        width: parent.width * 0.9;
-                        height: parent.height * 0.96;
-                        x: parent.width * 0.05;
-                        y: parent.height * 0.02;
-                        image-fit: contain;
-                    }
-                }
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: 10px;
-                    preview-caption := LineEdit {
-                        width: 420px;
-                        placeholder-text: @tr("Add a caption");
-                        accepted => {
-                            root.confirm-send-image(self.text);
-                            self.text = "";
-                        }
-                    }
-                    Button {
-                        text: @tr("Send");
-                        primary: true;
-                        clicked => {
-                            root.confirm-send-image(preview-caption.text);
-                            preview-caption.text = "";
-                        }
                     }
                 }
             }
@@ -5505,8 +6023,8 @@ export component AppWindow inherits Window {
                 pdf-flick := Flickable {
                     width: parent.width;
                     height: parent.height;
-                    viewport-height: max(self.height, root.pdf-total-h * 1px);
-                    viewport-width: max(self.width, root.pdf-total-w * 1px);
+                    content-height: max(self.height, root.pdf-total-h * 1px);
+                    content-width: max(self.width, root.pdf-total-w * 1px);
                     changed viewport-y => { root.pdf-scrolled(-self.viewport-y / 1px); }
                     changed width => { if (root.pdf-open) { root.pdf-view-resized(); } }
                     for p in root.pdf-pages: Rectangle {

@@ -13,15 +13,16 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
+    DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
     MessageItem, PdfPage, ReactionItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use whatsapp_rust::types::events::MessageBatch;
+use whatsapp_rust::proto_helpers::MessageExt as _;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 const MAX_HISTORY_BATCHES: u32 = 20;
@@ -38,6 +39,15 @@ const CALL_LINGER_MS: u64 = 2_000;
 // plain overlay) so the text engine wraps the last line early and
 // leaves the bottom-right corner free for the floating time/ticks.
 const META_PAD: &str = "\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}";
+const NOTIFICATION_TOKEN_TTL: Duration = Duration::from_secs(60);
+const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
+
+#[derive(Clone)]
+struct NotificationToken {
+    jid: String,
+    msg_id: String,
+    expires: SystemTime,
+}
 
 pub struct Bridge {
     ui: AppWindow,
@@ -54,7 +64,7 @@ pub struct Bridge {
     view: String,
     groups_fetched: bool,
     // Message id being replied to.
-    reply_to: Option<String>,
+    reply_to: Option<(String, String)>,
     // Chats whose list currently starts mid-conversation (after a jump).
     truncated: HashSet<String>,
     scroll_pos: HashMap<String, f32>,
@@ -181,10 +191,18 @@ pub struct Bridge {
     // Who a pending "share group history" dialog is about.
     share_target: Option<(String, String)>,
     pending_image: Option<std::path::PathBuf>,
+    original_image: Option<std::path::PathBuf>,
+    preview_jid: Option<String>,
+    preview_generation: u64,
+    preview_busy: bool,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
-    notify_queue: Vec<(String, String, String)>,
+    notify_queue: Vec<(String, String, String, String)>,
     notify_queued: bool,
+    notifications: bool,
+    notify_previews: bool,
+    notify_tokens: HashMap<String, NotificationToken>,
+    notification_thumbnails: HashMap<String, std::path::PathBuf>,
     // A check the user asked for from Settings: it also reports "nothing
     // new", where the periodic one stays quiet.
     update_manual: bool,
@@ -607,9 +625,17 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         row_gc_queued: false,
         share_target: None,
         pending_image: None,
+        original_image: None,
+        preview_jid: None,
+        preview_generation: 0,
+        preview_busy: false,
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        notifications: true,
+        notify_previews: false,
+        notify_tokens: HashMap::new(),
+        notification_thumbnails: HashMap::new(),
         update_manual: false,
         status_model,
         calls_model,
@@ -697,6 +723,16 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_theme_changed(|mode| {
         let mode = mode.to_string();
         defer(move |b| b.handle_theme(&mode));
+    });
+    ui.on_style_changed(|style| {
+        let style = style.to_string();
+        defer(move |b| b.handle_style(&style));
+    });
+    ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
+    ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
+    ui.on_privacy_blur_changed(|category, enabled| {
+        let category = category.to_string();
+        defer(move |b| b.handle_privacy_blur(&category, enabled));
     });
     ui.on_autostart_changed(|on| {
         defer(move |b| b.handle_autostart(on));
@@ -791,9 +827,7 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_update_restart(|| {
         defer(|_| {
-            if let Ok(exe) = std::env::current_exe() {
-                let _ = std::process::Command::new(exe).spawn();
-            }
+            crate::update::request_restart();
             let _ = slint::quit_event_loop();
         });
     });
@@ -825,6 +859,10 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_view_changed(|view| {
         let view = view.to_string();
         defer(move |b| {
+            if view == "calls" {
+                b.store.mark_calls_seen();
+                b.refresh_calls();
+            }
             b.view = view;
             b.refresh_chats();
         });
@@ -847,13 +885,26 @@ fn wire_callbacks(ui: &AppWindow) {
         let id = id.to_string();
         defer(move |b| b.start_reply(&id));
     });
-    ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
-    ui.on_open_quote(|id| {
-        let id = id.to_string();
+    ui.on_message_action(|id, action| {
+        let (id, action) = (id.to_string(), action.to_string());
+        defer(move |b| b.message_action(&id, &action));
+    });
+    ui.on_submit_edit(|id, text| {
+        let (id, text) = (id.to_string(), text.to_string());
         defer(move |b| {
-            if let Some(jid) = b.current_jid.clone()
-                && !id.is_empty()
-            {
+            if b.find_message(&id).is_some_and(message_editable) && !text.trim().is_empty() {
+                if let Some(jid) = b.current_jid.clone() {
+                    b.wa.send(Cmd::Edit { jid, id, text: text.trim().to_string() });
+                    b.ui.set_message_dialog_open(false);
+                }
+            }
+        });
+    });
+    ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
+    ui.on_open_quote(|jid, id| {
+        let (jid, id) = (jid.to_string(), id.to_string());
+        defer(move |b| {
+            if !jid.is_empty() && !id.is_empty() {
                 b.open_dm(&jid, Some(&id));
             }
         });
@@ -915,12 +966,20 @@ fn wire_callbacks(ui: &AppWindow) {
         let caption = caption.to_string();
         defer(move |b| b.confirm_send_image(&caption));
     });
-    ui.on_cancel_send_image(|| {
-        defer(|b| {
-            b.pending_image = None;
-            b.ui.set_preview_open(false);
-        });
+    ui.on_cancel_send_image(|| defer(|b| b.cancel_preview()));
+    ui.on_crop_preview(|x, y, w, h| {
+        defer(move |b| b.edit_preview(crate::media::PreviewEdit::Crop(x, y, w, h)));
     });
+    ui.on_text_preview(|text, x, y| {
+        let text = text.to_string();
+        defer(move |b| b.edit_preview(crate::media::PreviewEdit::Text(text, x, y)));
+    });
+    ui.on_draw_preview(|points, color, thickness| {
+        let points = points.to_string();
+        let rgba = [color.red(), color.green(), color.blue(), color.alpha()];
+        defer(move |b| b.edit_preview(crate::media::PreviewEdit::Draw(points, rgba, thickness)));
+    });
+    ui.on_reset_preview(|| defer(|b| b.reset_preview()));
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
     ui.on_picker_opened(|| defer(|b| b.load_sticker_panel()));
     ui.on_picker_closed(|| defer(|_| {}));
@@ -1162,7 +1221,8 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_copy_image(|id| {
         let id = id.to_string();
         defer(move |b| {
-            let Some(path) = b.media_path.get(&id).cloned() else { return };
+            let Some(cached) = b.media_path.get(&id) else { return };
+            let Some(path) = crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached)) else { return };
             std::thread::spawn(move || {
                 let Ok(image) = image::open(path) else { return };
                 let image = image.to_rgba8();
@@ -1372,7 +1432,17 @@ impl Bridge {
             self.video_volume = volume.clamp(0.0, 1.0);
         }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
+        // On unless turned off, so existing installs keep their banners.
+        self.notifications = vault.setting_get("notifications").as_deref() != Some("0");
+        self.ui.set_notifications(self.notifications);
+        self.notify_previews = vault.setting_get("notify_previews").as_deref() == Some("1");
+        self.ui.set_notify_previews(self.notify_previews);
+        self.ui.set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
+        self.ui.set_blur_photos(vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
+        self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
+        self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
+        self.expire_notification_tokens();
         println!(
             "[store] loaded chats={} msgChats={} total={}",
             self.store.chats.len(),
@@ -1416,9 +1486,53 @@ impl Bridge {
 
     // Vault handed over before unlock; boot happens in handle_unlock.
     pub fn park_locked_vault(&mut self, vault: Vault, registered: bool) {
+        self.clear_notification_sensitive_state();
         self.vault = Some(vault);
         self.pending_registered = registered;
         self.ui.set_screen("locked".into());
+    }
+
+    fn handle_style(&mut self, style: &str) {
+        self.ui.set_theme_style(style.into());
+        if let Some(vault) = &self.vault {
+            vault.setting_set("theme_style", style);
+        }
+        #[cfg(windows)]
+        crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
+    }
+
+    fn handle_notifications(&mut self, enabled: bool) {
+        self.notifications = enabled;
+        self.ui.set_notifications(enabled);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("notifications", if enabled { "1" } else { "0" });
+        }
+        // Drop whatever is still waiting to flush.
+        if !enabled {
+            self.clear_notification_sensitive_state();
+        }
+    }
+
+    fn handle_notify_previews(&mut self, enabled: bool) {
+        self.notify_previews = enabled;
+        self.ui.set_notify_previews(enabled);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("notify_previews", if enabled { "1" } else { "0" });
+        }
+    }
+
+    fn handle_privacy_blur(&mut self, category: &str, enabled: bool) {
+        let (key, current) = match category {
+            "names" => ("privacy_blur_names", self.ui.get_blur_names()),
+            "photos" => ("privacy_blur_photos", self.ui.get_blur_photos()),
+            "messages" => ("privacy_blur_messages", self.ui.get_blur_messages()),
+            "media" => ("privacy_blur_media", self.ui.get_blur_media()),
+            _ => return,
+        };
+        if current != enabled { return; }
+        if let Some(vault) = &self.vault {
+            vault.setting_set(key, if enabled { "1" } else { "0" });
+        }
     }
 
     fn handle_theme(&mut self, mode: &str) {
@@ -1432,7 +1546,7 @@ impl Bridge {
             _ => self.ui.set_dark_theme(crate::platform::system_dark()),
         }
         #[cfg(windows)]
-        crate::platform::set_title_bar_theme(self.ui.get_dark_theme());
+        crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
     }
 
     // The OS is the only source of truth here (a Run entry, an autostart
@@ -1586,6 +1700,8 @@ impl Bridge {
 
     // Whatever is on screen belongs to a session that just ended.
     fn close_session_views(&mut self) {
+        self.ui.set_details_open(false);
+        self.cancel_preview();
         self.current_jid = None;
         self.unread_boundary = None;
         self.groups_fetched = false;
@@ -1599,6 +1715,8 @@ impl Bridge {
 
     // Drops the loaded account's conversations, in memory and on disk.
     fn wipe_conversations(&mut self) {
+        self.ui.set_details_open(false);
+        self.cancel_preview();
         self.current_jid = None;
         self.unread_boundary = None;
         self.ui.set_chat_open(false);
@@ -1621,12 +1739,18 @@ impl Bridge {
     // disk is untouched: this is also how the bridge lets go of an
     // account it is switching away from.
     fn clear_store_state(&mut self) {
+        self.clear_notification_sensitive_state();
         self.store = Store::default();
         self.self_jid.clear();
         self.chats_model.set_vec(Vec::new());
         self.messages_model.set_vec(Vec::new());
         self.status_model.set_vec(Vec::new());
         self.calls_model.set_vec(Vec::new());
+        self.ui.set_chats_unread_count(0);
+        self.ui.set_channels_unread_count(0);
+        self.ui.set_communities_unread_count(0);
+        self.ui.set_calls_unseen_count(0);
+        self.ui.set_statuses_unseen(false);
         self.warm_order.clear();
         self.truncated.clear();
         self.scroll_pos.clear();
@@ -1636,7 +1760,7 @@ impl Bridge {
         self.sync_messages = 0;
         self.requested_channels.clear();
         self.pending_forward.clear();
-        self.notify_queue.clear();
+        self.clear_notification_sensitive_state();
         self.audio_buffers.clear();
         self.waves.clear();
         self.avatars.clear();
@@ -2109,7 +2233,31 @@ impl Bridge {
                 }
                 continue;
             }
-            let content: &wa::Message = &inbound.message;
+            use whatsapp_rust::proto_helpers::MessageExt as _;
+            let content = inbound.message.get_base_message();
+            if let Some(pm) = content.protocol_message.as_option()
+                && pm.r#type == Some(wa::message::protocol_message::Type::MESSAGE_EDIT)
+                && let Some(key) = pm.key.as_option()
+                && let Some(id) = key.id.as_deref()
+                && let Some(edited) = pm.edited_message.as_option()
+            {
+                let jid = self.store.canon_owned(&normalize_jid(&chat));
+                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                let sender = self.store.canon_owned(&info.source.sender.to_non_ad_string());
+                let valid = self.store.messages_for(&jid).iter().find(|m| m.id == id).is_some_and(|m| {
+                    m.from_me == info.source.is_from_me && (m.from_me || self.store.canon(&m.sender_jid) == sender)
+                });
+                if valid { self.on_message_edit(&chat, id, edited, pm.timestamp_ms.map(|t| t / 1000).unwrap_or_else(|| info.timestamp.timestamp())); }
+                continue;
+            }
+            if let Some(pin) = content.pin_in_chat_message.as_option()
+                && let Some(id) = pin.key.as_option().and_then(|k| k.id.as_deref())
+            {
+                let duration = content.message_context_info.as_option().and_then(|c| c.message_add_on_duration_in_secs).unwrap_or(604800);
+                let until = if pin.r#type == Some(wa::message::pin_in_chat_message::Type::PinForAll) { info.timestamp.timestamp() + i64::from(duration) } else { 0 };
+                self.on_message_pin(&chat, id, until);
+                continue;
+            }
             // A disappearing-messages change in a one-to-one chat comes as
             // a protocol message; it shows as a notice, like on the phone.
             if let Some(pm) = content.protocol_message.as_option()
@@ -2225,18 +2373,23 @@ impl Bridge {
                     } else {
                         body
                     };
-                    self.push_notification(title, text, jid.clone());
+                    self.push_notification(title, text, jid.clone(), m.id.clone());
                 }
             }
         }
         self.schedule_refresh_chats();
     }
 
-    pub fn on_receipt(&mut self, chat: &str, ids: &[String], status: u32) {
+    pub fn on_receipt(&mut self, chat: &str, ids: &[String], participant: &str, alternate: Option<&str>, status: u32, timestamp: i64) {
+        if let Some(alternate) = alternate {
+            if participant.ends_with("@lid") { self.store.learn_alias(participant, alternate); }
+            else if alternate.ends_with("@lid") { self.store.learn_alias(alternate, participant); }
+        }
         let jid = self.store.canon_owned(&normalize_jid(chat));
+        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
         let mut changed = Vec::new();
         for id in ids {
-            if self.store.set_status(&jid, id, status) {
+            if self.store.apply_receipt(&jid, id, participant, status, timestamp) {
                 changed.push(id.clone());
             }
         }
@@ -2688,6 +2841,10 @@ impl Bridge {
     // In-place diff: only changed rows are rewritten, which is what keeps
     // the ListView's scroll position stable.
     fn refresh_chats(&mut self) {
+        let (chats, channels, communities) = self.store.sidebar_unread_counts();
+        self.ui.set_chats_unread_count(chats);
+        self.ui.set_channels_unread_count(channels);
+        self.ui.set_communities_unread_count(communities);
         let archived_unread = self
             .store
             .chats
@@ -2834,6 +2991,7 @@ impl Bridge {
     }
 
     fn schedule_save(&mut self) {
+        self.refresh_message_details();
         if self.save_queued || self.vault.is_none() {
             return;
         }
@@ -2920,6 +3078,9 @@ impl Bridge {
     }
 
     fn open_jid(&mut self, jid: &str, jump_to: Option<&str>) {
+        self.ui.set_message_menu_open(false);
+        self.ui.set_details_open(false);
+        self.ui.set_message_dialog_open(false);
         if let Some(current) = self.current_jid.clone()
             && current != jid
         {
@@ -2935,6 +3096,7 @@ impl Bridge {
             self.clear_reply();
         }
         if self.current_jid.as_deref() != Some(jid) {
+            self.cancel_preview();
             let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
             self.unread_boundary = if unread > 0 {
                 let incoming: Vec<_> = self
@@ -2979,8 +3141,7 @@ impl Bridge {
         // lands at the top exactly, instead of chasing a pixel offset
         // inside a virtualized list that estimates unmeasured heights.
         let at = jump_to
-            .and_then(|target| list.iter().position(|m| m.id == target))
-            .filter(|&i| i > 0);
+            .and_then(|target| list.iter().position(|m| m.id == target));
         let from = at.unwrap_or(0);
         if at.is_some() {
             self.truncated.insert(jid.to_string());
@@ -2995,6 +3156,7 @@ impl Bridge {
             .collect();
         self.messages_model.set_vec(rows);
         self.ui.set_chat_open(true);
+        self.ui.invoke_focus_composer();
         self.ui.set_conv_ready(false);
         if at.is_some() {
             self.ui.set_stick_bottom(false);
@@ -3308,7 +3470,7 @@ impl Bridge {
                     .into()
             },
             firstOfRun: first_of_run,
-            time: format_clock(m.timestamp).into(),
+            time: format!("{}{}{}", if m.pinned_until > now_secs() { "⌖ " } else { "" }, format_clock(m.timestamp), if m.edited { " · edited" } else { "" }).into(),
             // Rebuilt rows keep already-decoded media so scrollback and
             // re-opens draw instantly.
             picture: self
@@ -3325,10 +3487,16 @@ impl Bridge {
                 .cloned()
                 .unwrap_or_default()
                 .into(),
+            documentType: document_type(m).into(),
             mediaKind: "".into(),
             mediaOffer: false,
             mediaProgress: -1.0,
-            mediaSize: "".into(),
+            mediaSize: m.raw.as_ref()
+                .and_then(|raw| crate::media::expected_bytes(raw))
+                .filter(|&bytes| bytes > 0)
+                .map(crate::media::format_size)
+                .unwrap_or_default()
+                .into(),
             mediaReady: self.media_path.contains_key(&m.id),
             mediaLoading: self.media_inflight.contains(&m.id),
             reactions: reactions.into(),
@@ -3404,7 +3572,7 @@ impl Bridge {
             linkTitle: m.link_title.trim().into(),
             linkDesc: m.link_desc.trim().into(),
             linkHost: link_host.into(),
-            linkUrl: m.link_url.clone().into(),
+            linkUrl: message_link(m).into(),
             hasLink: !m.link_title.is_empty() || !m.link_url.is_empty(),
             linkThumb: empty_image(),
             hasLinkThumb: false,
@@ -3424,8 +3592,13 @@ impl Bridge {
             deleted: m.deleted,
             revoked: m.revoked,
             starred: m.starred,
+            pinned: m.pinned_until > now_secs(),
+            editable: message_editable(m),
+            privateReply: is_group(&m.jid) && !m.from_me && !m.sender_jid.is_empty(),
             hasQuote: !m.quote_text.is_empty() || !m.quote_id.is_empty(),
-            quoteName: if m.quote_author.is_empty() {
+            quoteName: if is_group(&m.quote_jid) && m.quote_jid != m.jid {
+                self.store.chat_name(&m.quote_jid).into()
+            } else if m.quote_author.is_empty() {
                 t("reactions.you").into()
             } else {
                 let name = self.store.chat_name(&m.quote_author);
@@ -3437,6 +3610,7 @@ impl Bridge {
             },
             quoteText: self.store.named_mentions(&m.quote_text).into(),
             quoteId: m.quote_id.clone().into(),
+            quoteJid: quote_chat(m).into(),
         }
     }
 
@@ -3476,11 +3650,12 @@ impl Bridge {
         {
             return;
         }
-        let quote = self.reply_to.take().and_then(|id| {
-            let m = self.find_message(&id)?;
+        let quote = self.reply_to.take().and_then(|(chat, id)| {
+            let m = self.store.messages_for(&chat).iter().find(|m| m.id == id)?;
             let raw = m.raw.clone()?;
             Some(QuoteRef {
                 id: m.id.clone(),
+                chat_jid: m.jid.clone(),
                 sender_jid: if m.from_me {
                     self.self_jid.clone()
                 } else {
@@ -3654,10 +3829,11 @@ impl Bridge {
             m.sender.clone()
         };
         let preview = preview_body(m);
-        self.reply_to = Some(id.to_string());
+        self.reply_to = Some((m.jid.clone(), id.to_string()));
         self.ui.set_reply_open(true);
         self.ui.set_reply_name(name.into());
         self.ui.set_reply_text(preview.into());
+        self.ui.invoke_focus_composer();
     }
 
     fn clear_reply(&mut self) {
@@ -3700,6 +3876,7 @@ impl Bridge {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
                 self.patch_avatar_everywhere(jid, &image);
+                self.refresh_message_details();
                 if jid == self.self_jid {
                     self.refresh_accounts();
                 }
@@ -4251,6 +4428,7 @@ impl Bridge {
         self.decoded_bytes += image_bytes(&image);
         self.decoded_order.push_back(id.to_string());
         self.decoded.insert(id.to_string(), (image, w, h));
+        self.refresh_message_details();
         // Evicting is cheap: the rows already on screen hold their own
         // reference to the image, so this only costs a re-decode the next
         // time the conversation is rebuilt.
@@ -4644,6 +4822,8 @@ impl Bridge {
 
     fn refresh_statuses(&mut self) {
         let authors = self.store.status_authors();
+        self.ui.set_statuses_unseen(self.store.statuses.values().flatten()
+            .any(|item| !item.from_me && !item.read_sent));
         let rows: Vec<ChatItem> = authors
             .iter()
             .map(|(jid, latest, _count)| {
@@ -4693,6 +4873,15 @@ impl Bridge {
         };
         let (count, idx_now) = (items.len(), *idx);
         let item = items[idx_now].clone();
+        if let Some(stored) = self.store.statuses.get_mut(&item.jid)
+            .and_then(|items| items.iter_mut().find(|stored| stored.id == item.id))
+            && !stored.read_sent
+        {
+            stored.read_sent = true;
+            self.store.statuses_dirty = true;
+            self.refresh_statuses();
+            self.schedule_save();
+        }
         self.ui.set_sv_name(self.store.chat_name(&item.jid).into());
         self.ui.set_sv_time(format_time(item.timestamp).into());
         self.ui.set_sv_text(item.text.clone().into());
@@ -4805,6 +4994,11 @@ impl Bridge {
     // ---- calls ----
 
     fn refresh_calls(&mut self) {
+        if self.ui.get_sidebar_view() == "calls" {
+            self.store.mark_calls_seen();
+            self.schedule_save();
+        }
+        self.ui.set_calls_unseen_count(self.store.unseen_calls());
         let rows: Vec<CallItem> = self
             .store
             .calls
@@ -5395,7 +5589,10 @@ impl Bridge {
         } else {
             "call.incomingVoice"
         });
-        crate::platform::toast(&name, &detail, None);
+        // The ring and the call window stay; only the banner obeys the setting.
+        if self.notifications {
+            crate::platform::toast(&name, &detail, crate::platform::ToastPayload::default());
+        }
         // Nobody home: stop ringing and file it as missed.
         let id = id.to_string();
         self.once(RING_TIMEOUT_MS, move |b| b.ring_timeout(&id));
@@ -5721,12 +5918,16 @@ impl Bridge {
     }
 
     fn close_chat(&mut self) {
+        self.ui.set_message_menu_open(false);
+        self.ui.set_details_open(false);
+        self.ui.set_message_dialog_open(false);
         self.select_end();
         self.ui.set_chat_menu_open(false);
         self.ui.set_chat_search_open(false);
         self.ui.set_info_open(false);
         self.ui.set_chat_open(false);
         self.ui.set_selected_jid("".into());
+        self.cancel_preview();
         self.current_jid = None;
         self.unread_boundary = None;
         self.messages_model.set_vec(Vec::new());
@@ -5819,6 +6020,8 @@ impl Bridge {
             snap.announce
         );
         self.store.set_members(&jid, snap.members);
+        self.refresh_message_details();
+        self.schedule_save();
         let admin = self.store.self_is_admin(&jid);
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.announce = snap.announce;
@@ -7411,8 +7614,11 @@ impl Bridge {
 
     // ---- notifications ----
 
-    fn push_notification(&mut self, title: String, text: String, jid: String) {
-        self.notify_queue.push((title, text, jid));
+    fn push_notification(&mut self, title: String, text: String, jid: String, msg_id: String) {
+        if !self.notifications {
+            return;
+        }
+        self.notify_queue.push((title, text, jid, msg_id));
         if !self.notify_queued {
             self.notify_queued = true;
             self.once(1200, |b| b.flush_notifications());
@@ -7425,40 +7631,212 @@ impl Bridge {
         match queue.len() {
             0 => {}
             1 => {
-                let (title, text, jid) = queue.into_iter().next().expect("one entry");
-                crate::platform::toast(&title, &text, Some(jid));
+                let (title, text, jid, msg_id) = queue.into_iter().next().expect("one entry");
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    self.clear_notification_sensitive_state();
+                    return;
+                }
+                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                let Some(chat) = self.store.chats.get(&jid) else { return };
+                if chat.is_muted() { return; }
+                let message = self.store.messages_for(&jid).iter().find(|message| message.id == msg_id).cloned();
+                let Some(message) = message else { return };
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    self.clear_notification_sensitive_state();
+                    return;
+                }
+                let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
+                let toast_title = if self.notify_previews { title.clone() } else { t("notify.appName") };
+                let mut payload = crate::platform::ToastPayload {
+                    token: Some(token.clone()),
+                    reply: true,
+                    ..Default::default()
+                };
+                let toast_body = if self.notify_previews {
+                    if let Some(raw) = message.raw.as_ref() {
+                        let inner = raw.get_base_message();
+                        let view_once = raw.is_view_once();
+                        let thumbnail = if view_once {
+                            None
+                        } else {
+                            inner.image_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref())
+                                .or_else(|| inner.video_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref()))
+                                .or_else(|| inner.sticker_message.as_option().and_then(|v| v.context_info.quoted_message.image_message.as_option().and_then(|image| image.jpeg_thumbnail.as_deref())))
+                        };
+                        payload.thumbnail = thumbnail.and_then(crate::media::notification_thumbnail);
+                        payload.play = !view_once
+                            && inner.audio_message.as_option().is_some()
+                            && self.media_path.contains_key(&message.id);
+                    }
+                    text
+                } else {
+                    t("notify.newMessage")
+                };
+                if let Some(path) = &payload.thumbnail {
+                    self.notification_thumbnails.insert(token.clone(), path.clone());
+                }
+                crate::platform::toast(&toast_title, &toast_body, payload);
+                let expired_token = token.clone();
+                self.once(60_000, move |bridge| {
+                    bridge.notify_tokens.remove(&expired_token);
+                    if let Some(path) = bridge.notification_thumbnails.remove(&expired_token) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                });
             }
             n => {
-                // A burst becomes one summary, targeting the latest chat.
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) { return; }
                 let mut names: Vec<&str> = Vec::new();
-                for (title, _, _) in &queue {
-                    if !names.contains(&title.as_str()) {
-                        names.push(title);
-                        if names.len() == 3 {
-                            break;
+                if self.notify_previews {
+                    for (title, _, jid, _) in &queue {
+                        if self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted()) && !names.contains(&title.as_str()) {
+                            names.push(title);
+                            if names.len() == 3 { break; }
                         }
                     }
                 }
-                let text = if names.len() == 1 {
-                    ta("notify.fromOne", &[&n.to_string(), names[0]])
+                let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
+                if count == 0 || (self.notify_previews && names.is_empty()) { return; }
+                let text = if !self.notify_previews {
+                    ta("notify.newMessages", &[&count.to_string(), ""])
+                } else if names.len() == 1 {
+                    ta("notify.fromOne", &[&count.to_string(), names[0]])
                 } else {
-                    ta("notify.newMessages", &[&n.to_string(), &names.join(", ")])
+                    ta("notify.newMessages", &[&count.to_string(), &names.join(", ")])
                 };
-                let jid = queue.last().map(|(_, _, jid)| jid.clone());
-                crate::platform::toast(&t("notify.appName"), &text, jid);
+                crate::platform::toast(&t("notify.appName"), &text, crate::platform::ToastPayload::default());
             }
         }
     }
 
-    pub fn on_notification_activated(&mut self, jid: &str) {
-        let _ = self.ui.show();
-        crate::platform::focus_window();
-        // Locked: just surface the PIN screen; opening a chat would touch
-        // the (still empty) store.
-        if self.vault.as_ref().is_none_or(|v| v.locked()) {
+    fn clear_notification_sensitive_state(&mut self) {
+        self.notify_queue.clear();
+        self.notify_queued = false;
+        self.notify_tokens.clear();
+        for (_, path) in self.notification_thumbnails.drain() {
+            let _ = std::fs::remove_file(path);
+        }
+        crate::media::clean_notification_thumbnails();
+    }
+
+    fn register_notification_token(&mut self, jid: &str, msg_id: &str) -> Option<String> {
+        use rand::TryRngCore as _;
+        let mut bytes = [0u8; 16];
+        rand::rngs::OsRng.try_fill_bytes(&mut bytes).ok()?;
+        let token = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        self.expire_notification_tokens();
+        self.notify_tokens.insert(token.clone(), NotificationToken {
+            jid: jid.to_string(),
+            msg_id: msg_id.to_string(),
+            expires: SystemTime::now() + NOTIFICATION_TOKEN_TTL,
+        });
+        Some(token)
+    }
+
+    fn expire_notification_tokens(&mut self) {
+        let now = SystemTime::now();
+        self.notify_tokens.retain(|_, token| token.expires > now);
+        let expired: Vec<String> = self.notification_thumbnails.keys()
+            .filter(|token| !self.notify_tokens.contains_key(*token))
+            .cloned().collect();
+        for token in expired {
+            if let Some(path) = self.notification_thumbnails.remove(&token) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
+    fn take_notification_token(&mut self, token: &str) -> Option<NotificationToken> {
+        if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+            self.clear_notification_sensitive_state();
+            return None;
+        }
+        self.expire_notification_tokens();
+        let item = self.notify_tokens.remove(token)?;
+        if let Some(path) = self.notification_thumbnails.remove(token) {
+            let _ = std::fs::remove_file(path);
+        }
+        if item.expires <= SystemTime::now()
+            || !self.store.chats.contains_key(&item.jid)
+            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+        {
+            return None;
+        }
+        Some(item)
+    }
+
+    pub fn on_notification_activated(&mut self, token: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        self.open_dm(&item.jid, None);
+    }
+
+    pub fn on_notification_play(&mut self, token: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        let valid_audio = self.store.messages_for(&item.jid).iter()
+            .find(|message| message.id == item.msg_id)
+            .and_then(|message| message.raw.as_ref())
+            .is_some_and(|raw| !raw.is_view_once() && raw.get_base_message().audio_message.as_option().is_some());
+        if valid_audio && self.media_path.contains_key(&item.msg_id) {
+            self.toggle_audio_background(&item.jid, &item.msg_id);
+        }
+    }
+
+    pub fn on_notification_reply(&mut self, token: &str, text: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        let mut body: String = text.chars().filter(|ch| !ch.is_control() || *ch == '\n').collect();
+        body = body.trim_matches(|ch: char| ch != '\n' && ch.is_whitespace()).to_string();
+        if body.is_empty() { return; }
+        if body.len() > NOTIFICATION_REPLY_MAX_BYTES {
+            let mut end = NOTIFICATION_REPLY_MAX_BYTES;
+            while !body.is_char_boundary(end) { end -= 1; }
+            body.truncate(end);
+        }
+        if body.is_empty()
+            || !self.store.chats.contains_key(&item.jid)
+            || !self.store.chats.get(&item.jid).is_some_and(|chat| chat.can_send())
+            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+        {
             return;
         }
-        self.open_dm(jid, None);
+        self.wa.send(Cmd::SendText {
+            jid: item.jid.clone(), body, quote: None, mentions: Vec::new(), mention_all: None,
+        });
+        if self.ui.get_send_receipts() {
+            let message = self.store.messages_for(&item.jid).iter().find(|m| m.id == item.msg_id).cloned();
+            if let Some(message) = message {
+                self.wa.send(Cmd::MarkRead {
+                    jid: item.jid.clone(), sender: self.key_participant(&message), ids: vec![item.msg_id.clone()],
+                });
+                self.store.mark_read_sent(&item.jid, &[item.msg_id.clone()]);
+            }
+        }
+        self.schedule_save();
+    }
+
+    fn toggle_audio_background(&mut self, jid: &str, id: &str) {
+        if self.vault.as_ref().is_none_or(|vault| vault.locked())
+            || !self.media_path.contains_key(id)
+            || !self.store.messages_for(jid).iter().any(|message| message.id == id)
+        {
+            return;
+        }
+        if self.audio.as_ref().is_some_and(|audio| audio.id == id) {
+            self.toggle_audio(id);
+        } else {
+            self.start_audio_for_notification(jid, id);
+        }
+    }
+
+    fn start_audio_for_notification(&mut self, jid: &str, id: &str) {
+        let Some(message) = self.store.messages_for(jid).iter().find(|message| message.id == id) else { return };
+        let duration = message.duration_sec.max(1) as f64;
+        self.stop_audio();
+        self.audio = Some(AudioState {
+            id: id.to_string(), jid: jid.to_string(), duration,
+            paused: false, pending_offset: Some(0.0), player: None,
+        });
+        self.spin_audio_at(0.0);
+        self.sync_mini_player();
     }
 
     // ---- PIN ----
@@ -7654,6 +8032,159 @@ impl Bridge {
         self.ui.set_reactions_open(true);
     }
 
+    pub fn message_action_failed(&mut self, error: &str) {
+        self.ui.set_message_dialog_title("Message action failed".into());
+        self.ui.set_message_dialog_text(error.into());
+        self.ui.set_message_dialog_edit(false);
+        self.ui.set_message_dialog_open(true);
+    }
+
+    pub fn on_message_edit(&mut self, jid: &str, id: &str, content: &wa::Message, timestamp: i64) {
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        let content = content.get_base_message();
+        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+        let text = content.conversation.clone()
+            .or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()))
+            .or_else(|| content.image_message.as_option().and_then(|m| m.caption.clone()))
+            .or_else(|| content.video_message.as_option().and_then(|m| m.caption.clone()));
+        let Some(text) = text else { return };
+        let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return };
+        if !m.record_edit(text, timestamp) { return; }
+        let mut raw = m.raw.as_deref().cloned().unwrap_or_default();
+        if m.kind == MessageKind::Text { raw.conversation = Some(m.text.clone()); raw.extended_text_message = Default::default(); }
+        else if let Some(mut image) = raw.image_message.as_option().cloned() { image.caption = Some(m.text.clone()); raw.image_message = image.into(); }
+        else if let Some(mut video) = raw.video_message.as_option().cloned() { video.caption = Some(m.text.clone()); raw.video_message = video.into(); }
+        m.raw = Some(std::sync::Arc::new(raw));
+        m.link_url.clear();
+        m.link_title.clear();
+        m.link_desc.clear();
+        let updated = m.clone();
+        self.store.search.remove(&jid, id);
+        self.store.search.add(&jid, &updated);
+        if self.store.messages_for(&jid).last().is_some_and(|m| m.id == id) {
+            let preview = crate::store::compute_preview(&updated, &self.store);
+            if let Some(meta) = self.store.chats.get_mut(&jid) { meta.preview = preview; }
+        }
+        self.store.dirty_jids.insert(jid.clone());
+        if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+        self.schedule_save();
+        self.schedule_refresh_chats();
+    }
+
+    pub fn on_message_pin(&mut self, jid: &str, id: &str, until: i64) {
+        let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
+            m.pinned_until = until;
+            self.store.dirty_jids.insert(jid.clone());
+            if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+            self.schedule_save();
+        }
+    }
+
+    fn refresh_message_details(&mut self) {
+        if !self.ui.get_details_open() { return; }
+        let id = self.ui.get_details_id().to_string();
+        let Some(m) = self.find_message(&id).filter(|m| !m.deleted).cloned() else {
+            self.ui.set_details_open(false);
+            return;
+        };
+        self.ui.set_details_text(preview_body(&m).into());
+        let row = self.to_row(&m, None);
+        self.ui.set_details_image(row.picture.clone());
+        self.ui.set_details_has_image(self.decoded.contains_key(&m.id) || self.media_previews.contains_key(&m.id));
+        let mut rows = Vec::new();
+        let heading = |title: &str| DetailRow { kind: "heading".into(), title: title.into(), ..Default::default() };
+        let (known, participants) = self.store.receipt_participants(&m);
+        if m.from_me {
+            if is_group(&m.jid) && !known {
+                rows.push(DetailRow { kind: "note".into(), title: "Exibindo apenas confirmações disponíveis.".into(), ..Default::default() });
+            }
+            for (level, label) in [(4, "Lida por"), (3, "Entregue para"), (0, "Sem confirmação de entrega")] {
+                let group: Vec<_> = participants.iter().filter(|(_, r)| if level == 4 { r.status() >= 4 } else if level == 3 { r.status() == 3 } else { r.status() < 3 }).collect();
+                if group.is_empty() { continue; }
+                rows.push(DetailRow { kind: "participant-heading".into(), title: label.into(),
+                    ticks: if level >= 3 { "✓✓" } else { "✓" }.into(), blue: level == 4, ..Default::default() });
+                for (jid, receipt) in group {
+                    let name = self.store.members_of(&m.jid).iter().find(|member| self.store.canon(&member.jid) == jid)
+                        .filter(|member| !member.name.is_empty()).map(|member| member.name.clone()).unwrap_or_else(|| self.store.chat_name(jid));
+                    let avatar = self.avatar_for(jid);
+                    let timestamp = if level == 4 { receipt.read.or(receipt.played) } else { receipt.delivered };
+                    rows.push(DetailRow { kind: "person".into(), title: name.clone().into(),
+                        initial: initial_of(&name).into(), colorIdx: color_idx_of(jid), hasAvatar: avatar.is_some(),
+                        avatar: avatar.unwrap_or_default(), time: timestamp.map(format_stamp).unwrap_or_default().into(),
+                        ..Default::default() });
+                }
+            }
+        } else {
+            rows.push(DetailRow { kind: "note".into(), title: "Recibos dos demais destinatários não estão disponíveis para mensagens recebidas.".into(), ..Default::default() });
+        }
+        rows.push(heading("Histórico de edições"));
+        if m.edit_versions.is_empty() {
+            rows.push(DetailRow { kind: "version".into(), title: "Versão atual".into(), text: m.text.clone().into(),
+                time: if m.edited { "Edição anterior à observação; horário desconhecido".into() } else { format_stamp(m.timestamp).into() }, ..Default::default() });
+        } else {
+            for (index, version) in m.edit_versions.iter().enumerate().rev() {
+                rows.push(DetailRow { kind: "version".into(), title: if index + 1 == m.edit_versions.len() { "Versão atual".into() } else { format!("Versão {}", index + 1).into() },
+                    text: version.text.clone().into(), time: version.timestamp.map(format_stamp).unwrap_or_else(|| "Horário desconhecido".into()).into(), ..Default::default() });
+            }
+        }
+        rows.push(DetailRow { kind: "note".into(), title: format!("{} · {}", if m.from_me { t("reactions.you") } else { m.sender.clone() }, m.id).into(),
+            time: if m.pinned_until > now_secs() { format!("Fixada até {}", format_stamp(m.pinned_until)).into() } else { Default::default() }, ..Default::default() });
+        self.ui.set_details_rows(ModelRc::new(VecModel::from(rows)));
+    }
+
+    fn message_action(&mut self, id: &str, action: &str) {
+        let Some(m) = self.find_message(id).cloned() else { return };
+        if m.deleted || m.kind == MessageKind::System { return; }
+        match action {
+            "private" if is_group(&m.jid) && !m.from_me && !m.sender_jid.is_empty() => {
+                self.open_dm(&m.sender_jid, None);
+                self.reply_to = Some((m.jid.clone(), m.id.clone()));
+                self.ui.set_reply_open(true);
+                self.ui.set_reply_name(self.store.chat_name(&m.jid).into());
+                self.ui.set_reply_text(preview_body(&m).into());
+                self.ui.invoke_focus_composer();
+            }
+            "link" => {
+                let link = message_link(&m);
+                if !link.is_empty() {
+                    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(link)) { self.message_action_failed(&e.to_string()); }
+                }
+            }
+            "save" => {
+                let Some(cached) = self.media_path.get(id) else { self.request_manual_media(id); return };
+                let Some(path) = crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached)) else { return };
+                let name = if m.kind == MessageKind::Doc { sanitize_file_name(&m.text) } else { path.file_name().unwrap_or_default().to_string_lossy().into_owned() };
+                std::thread::spawn(move || {
+                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file() {
+                        if let Err(e) = std::fs::copy(path, target) { ui_apply(move |b| b.message_action_failed(&e.to_string())); }
+                    }
+                });
+            }
+            "pin" => self.wa.send(Cmd::PinMessage { jid: m.jid.clone(), id: m.id.clone(), from_me: m.from_me, participant: self.key_participant(&m), pin: m.pinned_until <= now_secs() }),
+            "unread" => { self.close_chat(); self.wa.send(Cmd::MarkUnread(m.jid)); }
+            "edit" if message_editable(&m) => {
+                self.ui.set_message_dialog_id(m.id.into());
+                self.ui.set_message_dialog_title("Edit message".into());
+                self.ui.set_message_dialog_text(m.text.into());
+                self.ui.set_message_dialog_edit(true);
+                self.ui.set_message_dialog_open(true);
+            }
+            "delete" => { self.select_start(id); self.confirm_delete_selected(); }
+            "details" => {
+                self.ui.set_details_id(m.id.clone().into());
+                self.ui.set_details_open(true);
+                self.refresh_message_details();
+                let (_, participants) = self.store.receipt_participants(&m);
+                for (jid, _) in participants { self.queue_avatar(&jid); }
+                self.request_automatic_media(&m);
+                if is_group(&m.jid) { self.ensure_group_meta(&m.jid); }
+            }
+            _ => {}
+        }
+    }
+
     fn toggle_star(&mut self, id: &str) {
         let Some(m) = self.find_message(id).cloned() else {
             return;
@@ -7775,6 +8306,9 @@ impl Bridge {
         if self.current_jid.is_none() {
             return;
         }
+        let jid = self.current_jid.clone();
+        let epoch = self.epoch;
+        let generation = self.preview_generation;
         std::thread::spawn(move || {
             let dialog = rfd::FileDialog::new();
             let dialog = match kind {
@@ -7788,7 +8322,11 @@ impl Bridge {
                 _ => dialog.add_filter(t("picker.all"), &["*"]),
             };
             if let Some(path) = dialog.pick_file() {
-                ui_apply(move |b| b.on_picked(kind, path));
+                ui_apply(move |b| {
+                    if b.current_jid == jid && b.epoch == epoch && b.preview_generation == generation {
+                        b.on_picked(kind, path);
+                    }
+                });
             }
         });
     }
@@ -7799,28 +8337,119 @@ impl Bridge {
         };
         match kind {
             // WhatsApp-style confirmation: caption field before sending.
-            "image" => self.wa.send(Cmd::PreviewImage { path }),
+            "image" => self.start_preview(path),
             "audio" => self.wa.send(Cmd::SendAudioFile { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
             _ => self.wa.send(Cmd::SendDocument { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
         }
     }
 
+    fn cancel_preview(&mut self) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        if let Some(path) = self.pending_image.take() {
+            if self.original_image.as_ref() != Some(&path) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        self.original_image = None;
+        self.preview_jid = None;
+        self.preview_busy = false;
+        self.ui.set_preview_busy(false);
+        self.ui.set_preview_open(false);
+    }
+
+    fn start_preview(&mut self, path: std::path::PathBuf) {
+        self.cancel_preview();
+        self.preview_jid = self.current_jid.clone();
+        self.original_image = Some(path.clone());
+        self.load_preview(path);
+    }
+
+    fn load_preview(&mut self, path: std::path::PathBuf) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let generation = self.preview_generation;
+        let epoch = self.epoch;
+        self.preview_busy = true;
+        self.ui.set_preview_busy(true);
+        std::thread::spawn(move || {
+            let image = std::fs::read(&path).ok().and_then(|bytes| crate::media::decode_bytes(&bytes, 1280));
+            ui_apply(move |b| {
+                if b.preview_generation != generation || b.epoch != epoch || b.current_jid != b.preview_jid {
+                    return;
+                }
+                b.preview_busy = false;
+                b.ui.set_preview_busy(false);
+                if let Some(image) = image {
+                    b.on_preview_ready(&path, image);
+                }
+            });
+        });
+    }
+
     pub fn on_preview_ready(&mut self, path: &std::path::Path, img: crate::media::Decoded) {
+        if self.current_jid.is_none() || self.current_jid != self.preview_jid || self.original_image.as_deref() != Some(path) {
+            return;
+        }
         self.pending_image = Some(path.to_path_buf());
         self.ui.set_preview_image(image_of(&img));
         self.ui.set_preview_open(true);
+        self.ui.invoke_focus_preview_caption();
+    }
+
+    fn reset_preview(&mut self) {
+        let Some(path) = self.original_image.clone() else { return; };
+        if let Some(edited) = self.pending_image.take() {
+            if edited != path {
+                let _ = std::fs::remove_file(edited);
+            }
+        }
+        self.load_preview(path);
+    }
+
+    fn edit_preview(&mut self, edit: crate::media::PreviewEdit) {
+        if self.preview_busy || !self.ui.get_preview_open() || self.current_jid != self.preview_jid {
+            return;
+        }
+        let Some(path) = self.pending_image.clone() else { return; };
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let generation = self.preview_generation;
+        let epoch = self.epoch;
+        self.preview_busy = true;
+        self.ui.set_preview_busy(true);
+        std::thread::spawn(move || {
+            let result = crate::media::edit_preview(&path, edit);
+            ui_apply(move |b| {
+                if b.preview_generation != generation || b.epoch != epoch || b.current_jid != b.preview_jid {
+                    if let Some((path, _)) = result { let _ = std::fs::remove_file(path); }
+                    return;
+                }
+                b.preview_busy = false;
+                b.ui.set_preview_busy(false);
+                if let Some((path, image)) = result {
+                    if let Some(previous) = b.pending_image.replace(path) {
+                        if b.original_image.as_ref() != Some(&previous) {
+                            let _ = std::fs::remove_file(previous);
+                        }
+                    }
+                    b.ui.set_preview_image(image_of(&image));
+                }
+            });
+        });
     }
 
     fn confirm_send_image(&mut self, caption: &str) {
+        if self.preview_busy || self.current_jid != self.preview_jid {
+            return;
+        }
         let path = self.pending_image.take();
-        self.ui.set_preview_open(false);
+        let origin = self.original_image.as_ref().map(|path| path.to_string_lossy().into_owned());
+        self.cancel_preview();
         let (Some(jid), Some(path)) = (self.current_jid.clone(), path) else {
             return;
         };
         let caption = caption.trim();
         self.wa.send(Cmd::SendImage {
             jid,
-            origin: Some(path.to_string_lossy().into_owned()),
+            origin,
             path,
             caption: (!caption.is_empty()).then(|| caption.to_string()),
         });
@@ -7856,7 +8485,7 @@ impl Bridge {
                 .unwrap_or(0)
         ));
         if image::DynamicImage::ImageRgba8(buffer).save(&path).is_ok() {
-            self.wa.send(Cmd::PreviewImage { path });
+            self.start_preview(path);
         }
     }
 
@@ -8034,8 +8663,8 @@ impl Bridge {
             self.stop_audio();
             return;
         }
-        let pos = (player.position_secs() * rate).min(a.duration);
-        let progress = (pos / a.duration).min(1.0) as f32;
+        let pos = (player.position_secs() * rate).clamp(0.0, a.duration);
+        let progress = (pos / a.duration).clamp(0.0, 1.0) as f32;
         let label = crate::store::format_duration(pos as u32);
         let (id, jid, paused) = (a.id.clone(), a.jid.clone(), a.paused);
         if Some(&jid) == self.current_jid.as_ref() {
@@ -8171,6 +8800,137 @@ impl Bridge {
 }
 
 // Whether a message has something to download or decode for its bubble.
+fn quote_chat(m: &StoredMessage) -> &str {
+    if m.quote_jid.is_empty() { &m.jid } else { &m.quote_jid }
+}
+
+fn message_link(m: &StoredMessage) -> String {
+    if !m.link_url.is_empty() { return m.link_url.clone(); }
+    static LINKS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r#"https?://[^\s<>\"]+"#).unwrap());
+    LINKS.find(&m.text).map(|v| v.as_str().trim_end_matches(['.', ',', ';', '!', ')', ']']).to_string()).unwrap_or_default()
+}
+
+fn document_type(m: &StoredMessage) -> String {
+    if m.kind != MessageKind::Doc {
+        return String::new();
+    }
+    if let Some((_, ext)) = m.text.trim().rsplit_once('.') {
+        if !ext.is_empty() && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return ext.to_ascii_uppercase();
+        }
+    }
+    match m.mimetype.split(';').next().unwrap_or_default().trim() {
+        "application/pdf" => "PDF",
+        "application/vnd.ms-excel" => "XLS",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "XLSX",
+        "application/msword" => "DOC",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "DOCX",
+        "application/vnd.ms-powerpoint" => "PPT",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "PPTX",
+        "text/plain" => "TXT",
+        "text/csv" => "CSV",
+        "application/zip" => "ZIP",
+        "application/x-7z-compressed" => "7Z",
+        "application/vnd.rar" | "application/x-rar-compressed" => "RAR",
+        _ => "FILE",
+    }.into()
+}
+
+fn message_editable(m: &StoredMessage) -> bool {
+    m.from_me && !m.deleted && !m.revoked && m.kind == MessageKind::Text
+        && !is_channel(&m.jid) && m.raw.is_some() && (0..900).contains(&(now_secs() - m.timestamp))
+}
+
+#[cfg(test)]
+mod message_action_tests {
+    use super::*;
+
+    #[test]
+    fn document_types_use_extension_and_mime_fallback() {
+        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "id", 1, "report.Xlsx".into());
+        m.kind = MessageKind::Doc;
+        assert_eq!(document_type(&m), "XLSX");
+        m.text = "report".into();
+        m.mimetype = "application/pdf".into();
+        assert_eq!(document_type(&m), "PDF");
+        m.text = "report.invalid/ext".into();
+        assert_eq!(document_type(&m), "PDF");
+        m.mimetype.clear();
+        assert_eq!(document_type(&m), "FILE");
+        m.kind = MessageKind::Text;
+        assert!(document_type(&m).is_empty());
+    }
+
+    #[test]
+    fn quotes_navigate_to_explicit_chat_not_author() {
+        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "id", 1, String::new());
+        m.quote_author = "author@s.whatsapp.net".into();
+        assert_eq!(quote_chat(&m), "peer@s.whatsapp.net");
+        m.quote_jid = "source@g.us".into();
+        assert_eq!(quote_chat(&m), "source@g.us");
+        m.quote_jid = m.jid.clone();
+        assert_eq!(quote_chat(&m), "peer@s.whatsapp.net");
+    }
+
+    #[test]
+    fn quote_context_round_trips_source_and_ordinary_replies() {
+        use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
+        let mut store = Store::default();
+        let sender = "author@s.whatsapp.net".parse().unwrap();
+        let target = "peer@s.whatsapp.net".parse().unwrap();
+        let meta = crate::wa_map::LiveMeta {
+            chat: "peer@s.whatsapp.net".into(), sender: "author@s.whatsapp.net".into(),
+            sender_alt: None, recipient_alt: None, id: "reply", from_me: false,
+            is_group: false, push_name: "", timestamp: 1,
+        };
+        for source in ["source@g.us", "peer@s.whatsapp.net"] {
+            let ctx = whatsapp_rust::proto_helpers::build_quote_context_with_info(
+                "original", &sender, &source.parse().unwrap(), &target,
+                &wa::Message::text("quoted"),
+            );
+            assert_eq!(ctx.remote_jid.as_deref(), (source != meta.chat).then_some(source));
+            let message = wa::Message::text_with_context("reply", ctx);
+            let stored = crate::wa_map::normalize(&mut store, &meta, &message, &HashMap::new(), 0).unwrap();
+            assert_eq!(stored.quote_id, "original");
+            assert_eq!(stored.quote_text, "quoted");
+            assert_eq!(stored.quote_author, "author@s.whatsapp.net");
+            assert_eq!(quote_chat(&stored), source);
+            let mut json = serde_json::to_value(&stored).unwrap();
+            let restored: StoredMessage = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(restored.quote_jid, stored.quote_jid);
+            json.as_object_mut().unwrap().remove("quote_jid");
+            let legacy: StoredMessage = serde_json::from_value(json).unwrap();
+            assert!(legacy.quote_jid.is_empty());
+            assert_eq!(quote_chat(&legacy), meta.chat);
+        }
+    }
+
+    #[test]
+    fn edit_requires_own_recent_live_text() {
+        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", "id", now_secs(), "hello".into());
+        m.kind = MessageKind::Text;
+        m.from_me = true;
+        m.raw = Some(std::sync::Arc::new(wa::Message::default()));
+        assert!(message_editable(&m));
+        m.timestamp -= 901;
+        assert!(!message_editable(&m));
+        m.timestamp = now_secs();
+        m.from_me = false;
+        assert!(!message_editable(&m));
+        m.from_me = true;
+        m.revoked = true;
+        assert!(!message_editable(&m));
+    }
+
+    #[test]
+    fn links_can_be_copied_without_a_preview() {
+        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", "id", 1, "See https://example.com/page.".into());
+        assert_eq!(message_link(&m), "https://example.com/page");
+        m.text = "no link".into();
+        assert!(message_link(&m).is_empty());
+    }
+}
+
 fn needs_media(m: &StoredMessage) -> bool {
     !m.deleted
         && (m.kind != MessageKind::Text && m.kind != MessageKind::System

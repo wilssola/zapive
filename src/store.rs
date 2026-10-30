@@ -49,6 +49,14 @@ pub struct StoredMessage {
     pub gif: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starred: bool,
+    #[serde(default)]
+    pub pinned_until: i64,
+    #[serde(default)]
+    pub edited: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edit_versions: Vec<EditVersion>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub receipts: HashMap<String, ParticipantReceipt>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sticker: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -58,6 +66,8 @@ pub struct StoredMessage {
     // The message this one replies to, as WhatsApp sends it inline.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quote_jid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote_author: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -89,7 +99,59 @@ pub struct StoredMessage {
     pub raw: Option<Arc<wa::Message>>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct EditVersion {
+    pub text: String,
+    pub timestamp: Option<i64>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct ParticipantReceipt {
+    #[serde(default)]
+    pub level: u32,
+    pub delivered: Option<i64>,
+    pub read: Option<i64>,
+    pub played: Option<i64>,
+}
+
+impl ParticipantReceipt {
+    pub fn promote(&mut self, status: u32, timestamp: i64) {
+        self.level = self.level.max(status);
+        let time = (timestamp > 0).then_some(timestamp);
+        for (enabled, slot) in [
+            (status == 3, &mut self.delivered),
+            (status == 4, &mut self.read),
+            (status == 5, &mut self.played),
+        ] {
+            if enabled && let Some(time) = time {
+                *slot = Some(slot.map_or(time, |old| old.min(time)));
+            }
+        }
+    }
+
+    pub fn status(&self) -> u32 {
+        self.level.max(if self.played.is_some() { 5 } else if self.read.is_some() { 4 }
+        else if self.delivered.is_some() { 3 } else { 0 })
+    }
+}
+
 impl StoredMessage {
+    pub fn record_edit(&mut self, text: String, timestamp: i64) -> bool {
+        if self.deleted || self.text == text { return false; }
+        let time = (timestamp > 0).then_some(timestamp);
+        if self.edit_versions.iter().any(|v| v.text == text && v.timestamp == time) { return false; }
+        if self.edit_versions.is_empty() {
+            self.edit_versions.push(EditVersion {
+                text: self.text.clone(), timestamp: (!self.edited).then_some(self.timestamp),
+            });
+        }
+        self.edit_versions.push(EditVersion { text, timestamp: time });
+        self.edit_versions.sort_by_key(|v| v.timestamp.unwrap_or(0));
+        self.text = self.edit_versions.last().unwrap().text.clone();
+        self.edited = true;
+        true
+    }
+
     pub fn is_voice_message(&self) -> bool {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         self.kind == MessageKind::Audio && self.raw.as_ref()
@@ -186,6 +248,8 @@ pub struct CallEntry {
     // could be placed still load.
     #[serde(default)]
     pub outgoing: bool,
+    #[serde(default)]
+    pub seen: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -896,6 +960,7 @@ impl Store {
             status: status.to_string(),
             timestamp: if timestamp > 0 { timestamp } else { now_secs() },
             outgoing,
+            seen: outgoing,
         };
         self.calls.insert(0, entry.clone());
         self.calls.truncate(100);
@@ -924,6 +989,38 @@ impl Store {
             list.retain(|m| fresh(m.timestamp));
             !list.is_empty()
         });
+    }
+
+    pub fn sidebar_unread_counts(&self) -> (i32, i32, i32) {
+        let (mut chats, mut channels, mut communities) = (0i32, 0i32, 0i32);
+        for chat in self.chats.values() {
+            let unread = i32::from(chat.unread > 0);
+            if is_channel(&chat.jid) {
+                channels = channels.saturating_add(unread);
+            } else {
+                if !chat.is_community {
+                    chats = chats.saturating_add(unread);
+                }
+                if chat.is_community || !chat.community.is_empty() {
+                    communities = communities.saturating_add(unread);
+                }
+            }
+        }
+        (chats, channels, communities)
+    }
+
+    pub fn unseen_calls(&self) -> i32 {
+        self.calls.iter().filter(|call| !call.outgoing && !call.seen && call.status == "timeout")
+            .count().min(i32::MAX as usize) as i32
+    }
+
+    pub fn mark_calls_seen(&mut self) {
+        for call in &mut self.calls {
+            if !call.seen && call.status == "timeout" {
+                call.seen = true;
+                self.calls_dirty = true;
+            }
+        }
     }
 
     pub fn status_authors(&mut self) -> Vec<(String, StoredMessage, usize)> {
@@ -1049,6 +1146,7 @@ impl Store {
         m.revoked = true;
         m.kind = MessageKind::Text;
         m.text = String::new();
+        m.edit_versions.clear();
         m.raw = None;
         self.dirty_jids.insert(jid.to_string());
         self.search.remove(jid, id);
@@ -1103,6 +1201,50 @@ impl Store {
     }
 
     // Updates the delivery status of an own message (monotonic).
+    pub fn receipt_participants(&self, m: &StoredMessage) -> (bool, Vec<(String, ParticipantReceipt)>) {
+        let known = !is_group(&m.jid) || self.members.contains_key(&m.jid);
+        let mut rows: HashMap<String, ParticipantReceipt> = HashMap::new();
+        let excluded = |jid: &str| self.self_jids.iter().any(|s| self.canon(s) == jid)
+            || (!m.sender_jid.is_empty() && self.canon(&m.sender_jid) == jid);
+        if m.from_me {
+            if is_group(&m.jid) {
+                for member in self.members_of(&m.jid) {
+                    let jid = self.canon_owned(&normalize_jid(&member.jid));
+                    if !excluded(&jid) { rows.entry(jid).or_default(); }
+                }
+            } else {
+                let jid = self.canon_owned(&m.jid);
+                if !excluded(&jid) {
+                    let row = rows.entry(jid).or_default();
+                    row.level = m.status;
+                }
+            }
+            for (jid, receipt) in &m.receipts {
+                let jid = self.canon_owned(&normalize_jid(jid));
+                if excluded(&jid) { continue; }
+                let row = rows.entry(jid).or_default();
+                row.level = row.level.max(receipt.status());
+                for (status, time) in [(3, receipt.delivered), (4, receipt.read), (5, receipt.played)] {
+                    if let Some(time) = time { row.promote(status, time); }
+                }
+            }
+        }
+        let mut rows: Vec<_> = rows.into_iter().collect();
+        rows.sort_by(|a, b| self.chat_name(&a.0).cmp(&self.chat_name(&b.0)));
+        (known, rows)
+    }
+
+    pub fn apply_receipt(&mut self, jid: &str, id: &str, participant: &str, status: u32, timestamp: i64) -> bool {
+        let participant = self.canon_owned(&normalize_jid(participant));
+        if participant.is_empty() || self.self_jids.iter().any(|s| self.canon(s) == participant) { return false; }
+        let Some(m) = self.messages.get_mut(jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return false; };
+        if !m.from_me { return false; }
+        m.receipts.entry(participant).or_default().promote(status, timestamp);
+        m.status = m.status.max(status);
+        self.dirty_jids.insert(jid.into());
+        true
+    }
+
     pub fn set_status(&mut self, jid: &str, id: &str, status: u32) -> bool {
         let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
         else {
@@ -1367,6 +1509,133 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_counts_include_archived_and_community_groups() {
+        let mut store = Store::default();
+        for (jid, unread, community, shell) in [
+            ("a@s.whatsapp.net", 3, "", false),
+            ("b@g.us", 5, "community@g.us", false),
+            ("community@g.us", 2, "", true),
+            ("c@newsletter", 7, "", false),
+        ] {
+            store.chats.insert(jid.into(), ChatMeta {
+                jid: jid.into(), unread, community: community.into(), is_community: shell,
+                archived: true, ..Default::default()
+            });
+        }
+        assert_eq!(store.sidebar_unread_counts(), (2, 1, 2));
+        store.chats.get_mut("a@s.whatsapp.net").unwrap().unread = u32::MAX;
+        assert_eq!(store.sidebar_unread_counts(), (2, 1, 2));
+        store.chats.get_mut("b@g.us").unwrap().unread = 0;
+        assert_eq!(store.sidebar_unread_counts(), (1, 1, 1));
+        for chat in store.chats.values_mut() {
+            chat.unread = 0;
+        }
+        assert_eq!(store.sidebar_unread_counts(), (0, 0, 0));
+    }
+
+    #[test]
+    fn missed_call_badge_clears_and_persists_seen_state() {
+        let mut store = Store::default();
+        store.upsert_call("incoming", "a@s.whatsapp.net", "offer", false, false, 1, false);
+        assert_eq!(store.unseen_calls(), 0);
+        store.upsert_call("incoming", "a@s.whatsapp.net", "timeout", false, false, 1, false);
+        store.upsert_call("outgoing", "a@s.whatsapp.net", "timeout", false, false, 1, true);
+        assert_eq!(store.unseen_calls(), 1);
+        store.mark_calls_seen();
+        assert_eq!(store.unseen_calls(), 0);
+        let restored: Vec<CallEntry> = serde_json::from_str(&serde_json::to_string(&store.calls).unwrap()).unwrap();
+        assert!(restored.iter().all(|call| call.seen));
+        let legacy: CallEntry = serde_json::from_str(r#"{"id":"old","jid":"a@s.whatsapp.net","video":false,"group":false,"status":"timeout","timestamp":1}"#).unwrap();
+        assert!(!legacy.seen);
+    }
+
+    #[test]
+    fn edit_versions_roundtrip_dedupe_and_out_of_order() {
+        let mut m = crate::wa_map::system_message("g@g.us", "edit", 100, "original".into());
+        assert!(m.record_edit("second".into(), 200));
+        assert!(!m.record_edit("second".into(), 201));
+        assert!(m.record_edit("current".into(), 400));
+        assert!(m.record_edit("middle".into(), 300));
+        assert_eq!(m.text, "current");
+        assert!(!m.record_edit("second".into(), 200));
+        let restored: StoredMessage = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
+        assert_eq!(restored.edit_versions.iter().map(|v| v.text.as_str()).collect::<Vec<_>>(), ["original", "second", "middle", "current"]);
+        assert_eq!(restored.edit_versions[0].timestamp, Some(100));
+        let mut value = serde_json::to_value(&m).unwrap();
+        value.as_object_mut().unwrap().remove("edit_versions");
+        value.as_object_mut().unwrap().remove("receipts");
+        let mut legacy: StoredMessage = serde_json::from_value(value).unwrap();
+        assert!(legacy.edit_versions.is_empty());
+        assert!(legacy.record_edit("observed".into(), 500));
+        assert_eq!(legacy.edit_versions[0].timestamp, None);
+    }
+
+    #[test]
+    fn receipts_promote_without_inventing_times_and_group_canonical_roster() {
+        let mut store = Store::default();
+        store.set_self(&["self@s.whatsapp.net"]);
+        store.learn_alias("person@lid", "person@s.whatsapp.net");
+        let mut m = crate::wa_map::system_message("g@g.us", "receipt", 100, "body".into());
+        m.from_me = true;
+        store.add_message(m);
+        assert!(!store.receipt_participants(&store.messages_for("g@g.us")[0]).0);
+        assert!(store.apply_receipt("g@g.us", "receipt", "person@lid", 4, 400));
+        assert!(store.apply_receipt("g@g.us", "receipt", "person@s.whatsapp.net", 3, 300));
+        assert!(store.apply_receipt("g@g.us", "receipt", "person@lid", 3, 350));
+        assert!(!store.apply_receipt("g@g.us", "receipt", "self@s.whatsapp.net", 4, 200));
+        store.set_members("g@g.us", ["person@s.whatsapp.net", "person@lid", "self@s.whatsapp.net", "other@s.whatsapp.net"].iter().map(|jid| Member {
+            jid: (*jid).into(), phone: String::new(), name: String::new(), admin: false,
+        }).collect());
+        let m = &store.messages_for("g@g.us")[0];
+        let (known, rows) = store.receipt_participants(m);
+        assert!(known);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.iter().find(|(jid, _)| jid == "person@s.whatsapp.net").unwrap().1.status(), 4);
+        assert_eq!(rows.iter().find(|(jid, _)| jid == "other@s.whatsapp.net").unwrap().1.status(), 0);
+        let restored: StoredMessage = serde_json::from_str(&serde_json::to_string(m).unwrap()).unwrap();
+        let receipt = &restored.receipts["person@s.whatsapp.net"];
+        assert_eq!(receipt.delivered, Some(300));
+        assert_eq!(receipt.read, Some(400));
+        assert_eq!(restored.status, 4);
+        let mut only_read = ParticipantReceipt::default();
+        only_read.promote(4, 500);
+        assert_eq!(only_read.status(), 4);
+        assert_eq!(only_read.delivered, None);
+        let mut no_time = ParticipantReceipt::default();
+        no_time.promote(3, 0);
+        assert_eq!(no_time.status(), 3);
+        assert_eq!(no_time.delivered, None);
+    }
+
+    #[test]
+    fn private_legacy_receipts_keep_status_without_fabricated_time() {
+        let store = Store::default();
+        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "private", 100, "body".into());
+        m.from_me = true;
+        m.status = 4;
+        let (known, rows) = store.receipt_participants(&m);
+        assert!(known);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1.status(), 4);
+        assert_eq!(rows[0].1.read, None);
+        assert_eq!(rows[0].1.delivered, None);
+        m.from_me = false;
+        assert!(store.receipt_participants(&m).1.is_empty());
+    }
+
+    #[test]
+    fn deleting_message_discards_observed_edit_bodies() {
+        let mut store = Store::default();
+        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "deleted", 100, "original".into());
+        m.record_edit("updated".into(), 200);
+        store.add_message(m);
+        assert!(store.mark_deleted("peer@s.whatsapp.net", "deleted"));
+        let m = &store.messages_for("peer@s.whatsapp.net")[0];
+        assert!(m.edit_versions.is_empty());
+        assert!(m.text.is_empty());
+    }
 
     fn audio_message(ptt: Option<bool>) -> StoredMessage {
         let raw = wa::Message {

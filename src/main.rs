@@ -34,6 +34,7 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn main() {
     paths::ensure_dirs();
+    media::clean_notification_thumbnails();
     logging::install();
     slint::BackendSelector::new()
         .backend_name("winit".into())
@@ -68,7 +69,7 @@ fn main() {
         return;
     }
 
-    let Some(_instance_guard) = single::claim_single_instance() else {
+    let Some(instance_guard) = single::claim_single_instance() else {
         return;
     };
 
@@ -118,6 +119,8 @@ fn main() {
 
     fonts::install_emoji();
     let ui = AppWindow::new().expect("failed to create the main window");
+    ui.set_native_backdrop(false);
+    apply_native_backdrop(&ui);
     ui.set_language_mode(language.as_str().into());
     ui.set_autostart(platform::autostart_enabled());
     // Both off by default: the current behaviour (no receipts sent, a
@@ -143,6 +146,46 @@ fn main() {
     // Theme: explicit modes win; "system" follows the OS with a slow poll.
     let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
     ui.set_theme_mode(theme.as_str().into());
+    let style = app_vault.setting_get("theme_style").unwrap_or_else(|| "glass".into());
+    ui.set_theme_style(if style == "opaque" { "opaque" } else { "glass" }.into());
+    ui.set_blur_names(app_vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
+    ui.set_blur_photos(app_vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
+    ui.set_blur_messages(app_vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
+    ui.set_blur_media(app_vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
+    {
+        use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::{WindowEvent, ElementState, MouseButton}};
+        let handle = ui.as_weak();
+        let mut cursor = None;
+        let mut right_press_consumed = false;
+        ui.window().on_winit_window_event(move |window, event| {
+            match event {
+                WindowEvent::CursorMoved { position, .. } => cursor = Some(*position),
+                WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => cursor = None,
+                WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
+                    if *state == ElementState::Released {
+                        if std::mem::take(&mut right_press_consumed) {
+                            return EventResult::PreventDefault;
+                        }
+                    } else if let (Some(ui), Some(position)) = (handle.upgrade(), cursor) {
+                        let p = position.to_logical::<f32>(f64::from(window.scale_factor()));
+                        right_press_consumed = ui.invoke_open_message_menu(p.x, p.y);
+                        if right_press_consumed {
+                            return EventResult::PreventDefault;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if let WindowEvent::Focused(focused) = event {
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_window_active(*focused);
+                    #[cfg(windows)]
+                    platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
+                }
+            }
+            EventResult::Propagate
+        });
+    }
     ui.set_dark_theme(match theme.as_str() {
         "light" => false,
         "system" => platform::system_dark(),
@@ -153,7 +196,7 @@ fn main() {
         let handle = ui.as_weak();
         slint::Timer::single_shot(std::time::Duration::ZERO, move || {
             if let Some(ui) = handle.upgrade() {
-                platform::set_title_bar_theme(ui.get_dark_theme());
+                platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
             }
         });
     }
@@ -164,12 +207,12 @@ fn main() {
             slint::TimerMode::Repeated,
             std::time::Duration::from_secs(15),
             move || {
-                if let Some(ui) = handle.upgrade()
-                    && ui.get_theme_mode() == "system"
-                {
-                    ui.set_dark_theme(platform::system_dark());
+                if let Some(ui) = handle.upgrade() {
+                    if ui.get_theme_mode() == "system" {
+                        ui.set_dark_theme(platform::system_dark());
+                    }
                     #[cfg(windows)]
-                    platform::set_title_bar_theme(ui.get_dark_theme());
+                    platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
                 }
             },
         );
@@ -258,6 +301,7 @@ fn main() {
                     if event.id() == &open_id {
                         raise_window(&handle);
                     } else if event.id() == &exit_id {
+                        media::clean_notification_thumbnails();
                         slint::quit_event_loop().ok();
                     }
                 }
@@ -316,6 +360,77 @@ fn main() {
         ui.run().expect("event loop failed");
     }
     wa.send(wa::Cmd::Shutdown);
+    // The lock goes first, or the relaunched instance sees this one still
+    // running and exits.
+    drop(instance_guard);
+    update::relaunch_if_requested();
+}
+
+// Asks the OS for a translucent backdrop behind the window. The UI only
+// goes see-through once the effect is actually applied; everywhere else it
+// keeps its opaque fallback.
+fn apply_native_backdrop(ui: &AppWindow) {
+    #[cfg(windows)]
+    {
+        use windows::Wdk::System::SystemServices::RtlGetVersion;
+        use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+        let mut version = OSVERSIONINFOW {
+            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
+            ..Default::default()
+        };
+        let supported = unsafe {
+            RtlGetVersion(&mut version).is_ok()
+                && version.dwMajorVersion >= 10
+                && version.dwBuildNumber >= 22_621
+        };
+        if !supported {
+            return;
+        }
+        let weak = ui.as_weak();
+        let _ = slint::spawn_local(async move {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            use slint::winit_030::WinitWindowAccessor;
+            use slint::winit_030::winit::platform::windows::{
+                BackdropType, WindowExtWindows,
+            };
+            if let Ok(window) = ui.window().winit_window().await {
+                window.set_system_backdrop(BackdropType::TransientWindow);
+                ui.set_native_backdrop(true);
+                #[cfg(windows)]
+                platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
+            }
+        });
+    }
+    #[cfg(unix)]
+    {
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            let is_kde_wayland = std::env::var("XDG_SESSION_TYPE")
+                .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
+                && std::env::var("XDG_CURRENT_DESKTOP")
+                    .is_ok_and(|desktop| desktop.to_ascii_uppercase().contains("KDE"));
+            if !is_kde_wayland {
+                return;
+            }
+        }
+        let weak = ui.as_weak();
+        let _ = slint::spawn_local(async move {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            use slint::winit_030::WinitWindowAccessor;
+            if let Ok(window) = ui.window().winit_window().await {
+                window.set_blur(true);
+                ui.set_native_backdrop(true);
+            }
+        });
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = ui;
+    }
 }
 
 // Coming back from the tray goes through Slint: the toolkit tracks the

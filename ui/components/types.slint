@@ -1,3 +1,16 @@
+export struct DetailRow {
+    kind: string,
+    title: string,
+    text: string,
+    time: string,
+    avatar: image,
+    hasAvatar: bool,
+    initial: string,
+    colorIdx: int,
+    blue: bool,
+    ticks: string,
+}
+
 export struct ChatItem {
     jid: string,
     name: string,
@@ -125,10 +138,14 @@ export struct MessageItem {
     // the whole bubble with "This message was deleted".
     revoked: bool,
     starred: bool,
+    pinned: bool,
+    editable: bool,
+    privateReply: bool,
     hasQuote: bool,
     quoteName: string,
     quoteText: string,
     quoteId: string,
+    quoteJid: string,
     time: string,
     picture: image,
     picW: int,
@@ -145,6 +162,7 @@ export struct MessageItem {
     mediaKind: string,
     // Formatted file size (KB / MB), empty when unavailable.
     mediaSize: string,
+    documentType: string,
     reactions: string,
     reactionCount: string,
     dayLabel: string,
