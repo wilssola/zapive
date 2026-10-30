@@ -8,12 +8,16 @@ export component SpecialMessage inherits Rectangle {
     property <bool> location: message.cardKind == "location" || message.cardKind == "live-location";
     property <bool> contact: message.cardKind == "contact";
     property <bool> poll: message.cardKind == "poll";
+    property <bool> view-once: message.cardKind == "view-once";
     property <color> surface: message.fromMe
         ? (Theme.dark ? #003c32 : #c9edc6)
         : (Theme.dark ? #182831 : #f3f6f5);
     height: card-layout.preferred-height;
     border-radius: 12px;
-    background: surface;
+    background: root.view-once
+        ? (Theme.dark ? #20343c : #e8f0f1) : surface;
+    border-width: root.view-once ? 1px : 0px;
+    border-color: Theme.dark ? #3b535c : #c3d4d8;
     clip: true;
     opacity: privacy-hidden ? 0.08 : 1;
     animate opacity { duration: 120ms; easing: ease-out; }
@@ -53,7 +57,7 @@ export component SpecialMessage inherits Rectangle {
             padding: 14px;
             spacing: 12px;
             Rectangle {
-                width: root.contact ? 54px : 42px;
+                width: root.contact || root.view-once ? 54px : 42px;
                 height: max(self.width, header-text.preferred-height);
                 Rectangle {
                     width: parent.width;
@@ -73,9 +77,9 @@ export component SpecialMessage inherits Rectangle {
                         source: root.poll ? @image-url("../icons/list-details.svg")
                             : root.location ? (root.message.cardKind == "live-location"
                                 ? @image-url("../icons/circle-dot.svg") : @image-url("../icons/pin.svg"))
-                            : root.message.cardKind == "view-once" ? @image-url("../icons/eye.svg")
+                            : root.view-once ? @image-url("../icons/view-once.svg")
                             : @image-url("../icons/file-text.svg");
-                        colorize: root.location || root.poll ? Theme.accent : Theme.icon;
+                        colorize: root.location || root.poll || root.view-once ? Theme.accent : Theme.icon;
                         width: 23px;
                         height: 23px;
                         x: (parent.width - self.width) / 2;
@@ -85,7 +89,7 @@ export component SpecialMessage inherits Rectangle {
             }
             Rectangle {
                 horizontal-stretch: 1;
-                height: max(root.contact ? 54px : 42px, header-text.preferred-height);
+                height: max(root.contact || root.view-once ? 54px : 42px, header-text.preferred-height);
                 header-text := VerticalLayout {
                     y: (parent.height - self.preferred-height) / 2;
                     height: self.preferred-height;
