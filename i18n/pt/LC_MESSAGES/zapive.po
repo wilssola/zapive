@@ -701,3 +701,53 @@ msgstr "Baixa documentos automaticamente."
 
 msgid "Download stickers automatically."
 msgstr "Baixa figurinhas automaticamente."
+
+
+msgid "Release history"
+msgstr "Histórico de versões"
+
+msgid "Release notes are shown in their original language."
+msgstr "As notas das versões são exibidas no idioma original."
+
+msgid "Refresh history"
+msgstr "Atualizar histórico"
+
+msgid "Load history"
+msgstr "Carregar histórico"
+
+msgid "No published releases yet."
+msgstr "Nenhuma versão publicada ainda."
+
+msgid "{} · Installed version"
+msgstr "{} · Versão instalada"
+
+msgid "No release notes available."
+msgstr "Notas desta versão não disponíveis."
+
+msgid "Load older releases"
+msgstr "Carregar versões anteriores"
+
+
+msgid "What's new"
+msgstr "Ver novidades"
+
+msgid "Changes in versions newer than the one installed are shown separately from your history."
+msgstr "As mudanças das versões mais recentes que a instalada aparecem separadas do seu histórico."
+
+msgid "New version available"
+msgstr "Nova versão disponível"
+
+msgid "Nothing new — you're up to date"
+msgstr "Nada novo — você está atualizado"
+
+msgid "Check what's new"
+msgstr "Consulte as novidades"
+
+msgid "Installed version: {}"
+msgstr "Versão instalada: {}"
+
+msgid "Release notes for version {} are not available yet."
+msgstr "As notas da versão {} ainda não estão disponíveis."
+
+msgid "New in {}"
+msgstr "Novidades da {}"

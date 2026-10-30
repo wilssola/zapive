@@ -1,6 +1,6 @@
 import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
+import { ReleaseItem, DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
 import { Avatar } from "avatar.slint";
 import { GreenLink } from "green-link.slint";
 import { IconButton } from "icon-button.slint";
@@ -368,6 +368,20 @@ export component AppWindow inherits Window {
     in-out property <string> update-version;
     in property <string> update-error;
     in-out property <string> app-version;
+    in property <[ReleaseItem]> releases;
+    in-out property <bool> changelog-loading: false;
+    in-out property <bool> changelog-loaded: false;
+    in-out property <bool> changelog-more: false;
+    in-out property <int> changelog-page: 1;
+    in-out property <string> changelog-error;
+    in-out property <bool> changelog-has-new: false;
+    in-out property <bool> changelog-verified: false;
+    in-out property <bool> whats-new-open: false;
+    function show-whats-new() {
+        root.whats-new-open = true;
+        root.changelog-load(true);
+    }
+    callback changelog-load(bool);
     callback update-check();
     callback update-apply();
     callback update-restart();
@@ -841,6 +855,7 @@ export component AppWindow inherits Window {
                 error: root.update-error;
                 apply-update => { root.update-apply(); }
                 restart => { root.update-restart(); }
+                view-news => { root.show-whats-new(); }
             }
         }
         HorizontalBox {
@@ -901,6 +916,7 @@ export component AppWindow inherits Window {
                 error: root.update-error;
                 apply-update => { root.update-apply(); }
                 restart => { root.update-restart(); }
+                view-news => { root.show-whats-new(); }
             }
         }
         HorizontalBox {
@@ -1100,7 +1116,8 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
-                if (root.video-open) { root.close-video(); }
+                if (root.whats-new-open) { root.whats-new-open = false; }
+                else if (root.video-open) { root.close-video(); }
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
                 else if (root.message-menu-open) { root.message-menu-open = false; }
@@ -1536,6 +1553,7 @@ export component AppWindow inherits Window {
                 error: root.update-error;
                     apply-update => { root.update-apply(); }
                     restart => { root.update-restart(); }
+                view-news => { root.show-whats-new(); }
                 }
 
                 // Filter chips scroll sideways once the lists add up.
@@ -5627,7 +5645,11 @@ export component AppWindow inherits Window {
                                     mouse-cursor: pointer;
                                     accessible-role: button;
                                     accessible-label: category.title;
-                                    clicked => { root.settings-section = category.key; root.settings-query = ""; }
+                                    clicked => {
+                                        root.settings-section = category.key;
+                                        root.settings-query = "";
+                                        if (category.key == "updates" && !root.changelog-loaded) { root.changelog-load(false); }
+                                    }
                                 }
                             }
                         }
@@ -6009,6 +6031,76 @@ export component AppWindow inherits Window {
                                         if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
                                         else if (root.update-state == 3) { root.update-restart(); }
                                         else if (root.update-state == 0) { root.update-check(); }
+                                    }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("What's new") + " " + @tr("Updates")))): SettingsCard {
+                            title: @tr("What's new");
+                            hint: @tr("Changes in versions newer than the one installed are shown separately from your history.");
+                            SettingsRow {
+                                label: root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
+                                    : root.changelog-has-new || root.update-state > 0 ? @tr("New version available")
+                                    : root.changelog-verified ? @tr("Nothing new — you're up to date") : @tr("Check what's new");
+                                detail: @tr("Installed version: {}", root.app-version);
+                                DialogButton {
+                                    label: @tr("What's new");
+                                    clicked => { root.show-whats-new(); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("Release history") + " changelog"))): SettingsCard {
+                            title: @tr("Release history");
+                            hint: @tr("Release notes are shown in their original language.");
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                alignment: start;
+                                HorizontalLayout {
+                                    alignment: start;
+                                    DialogButton {
+                                        label: root.changelog-loading ? @tr("Loading…") : root.changelog-loaded ? @tr("Refresh history") : @tr("Load history");
+                                        enabled: !root.changelog-loading;
+                                        clicked => { root.changelog-load(true); }
+                                    }
+                                }
+                                if root.changelog-error != "": Text {
+                                    text: root.changelog-error;
+                                    color: Theme.text-dim;
+                                    wrap: word-wrap;
+                                }
+                                if root.changelog-loaded && !root.changelog-loading && root.releases.length == 0 && root.changelog-error == "": Text {
+                                    text: @tr("No published releases yet.");
+                                    color: Theme.text-dim;
+                                    wrap: word-wrap;
+                                }
+                                for release in root.releases: VerticalLayout {
+                                    if !release.newer: VerticalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    Text {
+                                        text: release.installed ? @tr("{} · Installed version", release.tag) : release.tag;
+                                        color: Theme.text;
+                                        font-size: 15px;
+                                        font-weight: 700;
+                                        wrap: word-wrap;
+                                    }
+                                    Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
+                                    Text {
+                                        text: release.notes != "" ? release.notes : @tr("No release notes available.");
+                                        color: Theme.text;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
+                                    Rectangle { height: 1px; background: Theme.border; }
+                                    }
+                                }
+                                if root.changelog-more: HorizontalLayout {
+                                    alignment: start;
+                                    DialogButton {
+                                        label: @tr("Load older releases");
+                                        enabled: !root.changelog-loading;
+                                        clicked => { root.changelog-load(false); }
                                     }
                                 }
                             }
@@ -6457,5 +6549,81 @@ export component AppWindow inherits Window {
             clicked => { root.lightbox-open = false; }
         }
     }
+    }
+    if root.whats-new-open: Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.whats-new-open = false; } }
+        Rectangle {
+            width: min(640px, parent.width - 32px);
+            height: min(640px, parent.height - 32px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            TouchArea { }
+            news-focus := FocusScope {
+                width: parent.width;
+                height: parent.height;
+                init => { self.focus(); }
+                capture-key-pressed(event) => {
+                    if (event.text == Key.Escape) { root.whats-new-open = false; return accept; }
+                    reject
+                }
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+                    HorizontalLayout {
+                        Text { text: @tr("What's new"); color: Theme.text; font-size: 20px; font-weight: 700; }
+                        DialogButton { label: @tr("Close"); clicked => { root.whats-new-open = false; } }
+                    }
+                    Text { text: @tr("Installed version: {}", root.app-version); color: Theme.text-dim; }
+                    ScrollView {
+                        content-width: self.width;
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 12px;
+                            if root.changelog-loading: Text { text: @tr("Loading…"); color: Theme.text-dim; }
+                            if root.changelog-error != "": Text { text: root.changelog-error; color: Theme.text-dim; wrap: word-wrap; }
+                            if root.changelog-verified && !root.changelog-has-new && root.update-state == 0: Text {
+                                text: @tr("Nothing new — you're up to date");
+                                color: Theme.accent;
+                                font-size: 16px;
+                                wrap: word-wrap;
+                            }
+                            if !root.changelog-loading && !root.changelog-has-new && root.update-state > 0: Text {
+                                text: @tr("Release notes for version {} are not available yet.", root.update-version);
+                                color: Theme.text-dim;
+                                wrap: word-wrap;
+                            }
+                            for release in root.releases: VerticalLayout {
+                                if release.newer: VerticalLayout {
+                                    alignment: start;
+                                    spacing: 8px;
+                                    Text { text: @tr("New in {}", release.tag); color: Theme.accent; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+                                    Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
+                                    Text { text: release.notes != "" ? release.notes : @tr("No release notes available."); color: Theme.text; wrap: word-wrap; }
+                                    Rectangle { height: 1px; background: Theme.border; }
+                                }
+                            }
+                            if root.changelog-more && root.changelog-has-new: HorizontalLayout {
+                                alignment: start;
+                                DialogButton { label: @tr("Load older releases"); enabled: !root.changelog-loading; clicked => { root.changelog-load(false); } }
+                            }
+                        }
+                    }
+                    Text { text: @tr("Release notes are shown in their original language."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                    HorizontalLayout {
+                        alignment: end;
+                        if root.changelog-error != "": DialogButton { label: @tr("Try again"); enabled: !root.changelog-loading; clicked => { root.changelog-load(true); } }
+                        if root.update-state == 1 || root.update-state == 4: DialogButton {
+                            label: @tr("Update"); primary: true;
+                            clicked => { root.update-apply(); }
+                        }
+                        if root.update-state == 2: Text { text: @tr("Downloading update…"); color: Theme.text-dim; }
+                        if root.update-state == 3: DialogButton { label: @tr("Restart"); primary: true; clicked => { root.update-restart(); } }
+                    }
+                }
+            }
+        }
     }
 }

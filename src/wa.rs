@@ -1513,13 +1513,12 @@ async fn executor(
             }
             Cmd::CheckUpdate => {
                 tokio::spawn(async move {
-                    let found = tokio::task::spawn_blocking(crate::update::check)
+                    let result = tokio::task::spawn_blocking(crate::update::check)
                         .await
-                        .ok()
-                        .flatten();
+                        .unwrap_or_else(|_| Err("update check task failed".into()));
                     // Direct apply: the banner must show on the lock
                     // and login screens, not wait in the backlog.
-                    crate::bridge::ui_apply(move |b| b.on_update_checked(found));
+                    crate::bridge::ui_apply(move |b| b.on_update_checked(result));
                 });
             }
             Cmd::ApplyUpdate => {
