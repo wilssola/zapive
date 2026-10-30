@@ -53,10 +53,6 @@ const INDEX_KEY_LABEL: &[u8] = b"zapive/search-index/v1";
 // longer word still matches on its first 24 chars, already far more
 // specific than any real query needs.
 const MAX_TERM_CHARS: usize = 24;
-// Entries kept per chat; ties to the 300-message tail Store::save_to
-// persists (store.rs) -- indexing more would produce hits `open_hit`
-// cannot jump to once the chat goes cold and reloads from disk.
-const PER_CHAT_MAX: usize = 300;
 
 pub struct Hit {
     pub jid: String,
@@ -243,7 +239,7 @@ impl SearchIndex {
                 None => true,
             };
         if stale {
-            conn.execute_batch("DROP TABLE IF EXISTS fts; DROP TABLE IF EXISTS doc;")?;
+            conn.execute_batch("DROP TABLE IF EXISTS fts; DROP TABLE IF EXISTS doc; DELETE FROM meta WHERE k GLOB 'complete:*';")?;
         }
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS doc(
@@ -271,45 +267,33 @@ impl SearchIndex {
         Ok(())
     }
 
-    // Adds one message; a duplicate id is ignored.
     pub fn add(&mut self, jid: &str, m: &StoredMessage) {
         let Some(entry) = entry_of(m) else { return };
         let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else { return };
         let key = self.key.clone();
         let Some(db) = self.db.as_mut() else { return };
         let Ok(tx) = db.transaction() else { return };
-        let ok = insert_entry(&tx, &key, &index_key, jid, &entry)
-            .and_then(|_| trim_chat(&tx, jid, PER_CHAT_MAX));
-        if ok.is_ok() && tx.commit().is_ok() {
-            self.indexed.insert(jid.to_string());
-        }
+        let ok = insert_entry(&tx, &key, &index_key, jid, &entry);
+        if ok.is_ok() { let _ = tx.commit(); }
     }
 
-    // Replaces a chat's entries with what its full message list holds.
     pub fn rebuild(&mut self, jid: &str, messages: &[StoredMessage]) {
         let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else { return };
         let key = self.key.clone();
-        let mut entries: Vec<Entry> = messages.iter().filter_map(entry_of).collect();
-        if entries.len() > PER_CHAT_MAX {
-            let excess = entries.len() - PER_CHAT_MAX;
-            entries.drain(..excess);
-        }
+        let entries: Vec<Entry> = messages.iter().filter_map(entry_of).collect();
         let Some(db) = self.db.as_mut() else { return };
         let Ok(tx) = db.transaction() else { return };
         let res = (|| -> rusqlite::Result<()> {
-            tx.execute(
-                "DELETE FROM fts WHERE rowid IN (SELECT rowid FROM doc WHERE jid=?1)",
-                params![jid],
-            )?;
-            tx.execute("DELETE FROM doc WHERE jid=?1", params![jid])?;
+            for message in messages.iter().filter(|m| entry_of(m).is_none()) {
+                tx.execute("DELETE FROM fts WHERE rowid IN (SELECT rowid FROM doc WHERE jid=?1 AND msg_id=?2)", params![jid, message.id])?;
+                tx.execute("DELETE FROM doc WHERE jid=?1 AND msg_id=?2", params![jid, message.id])?;
+            }
             for e in &entries {
                 insert_entry(&tx, &key, &index_key, jid, e)?;
             }
             Ok(())
         })();
-        if res.is_ok() && tx.commit().is_ok() {
-            self.indexed.insert(jid.to_string());
-        }
+        if res.is_ok() { let _ = tx.commit(); }
     }
 
     pub fn remove(&mut self, jid: &str, id: &str) {
@@ -337,6 +321,7 @@ impl SearchIndex {
     pub fn remove_chat(&mut self, jid: &str) {
         self.indexed.remove(jid);
         let Some(db) = self.db.as_mut() else { return };
+        let _ = db.execute("DELETE FROM meta WHERE k=?1", [format!("complete:{jid}")]);
         let Ok(tx) = db.transaction() else { return };
         let ok = tx
             .execute(
@@ -346,6 +331,14 @@ impl SearchIndex {
             .and_then(|_| tx.execute("DELETE FROM doc WHERE jid=?1", params![jid]));
         if ok.is_ok() {
             let _ = tx.commit();
+        }
+    }
+
+    pub fn mark_complete(&mut self, jid: &str) {
+        if let Some(db) = &self.db {
+            if meta_set(db, &format!("complete:{jid}"), &[1]).is_ok() {
+                self.indexed.insert(jid.to_string());
+            }
         }
     }
 
@@ -454,8 +447,9 @@ fn insert_entry(
     let exists: Option<i64> = conn
         .query_row("SELECT rowid FROM doc WHERE jid=?1 AND msg_id=?2", params![jid, e.id], |r| r.get(0))
         .optional()?;
-    if exists.is_some() {
-        return Ok(());
+    if let Some(rowid) = exists {
+        conn.execute("DELETE FROM fts WHERE rowid=?1", params![rowid])?;
+        conn.execute("DELETE FROM doc WHERE rowid=?1", params![rowid])?;
     }
     let body = DocBody { text: e.text.clone(), sender: e.sender.clone(), sender_jid: e.sender_jid.clone() };
     let plain = serde_json::to_vec(&body).unwrap_or_default();
@@ -470,27 +464,10 @@ fn insert_entry(
     Ok(())
 }
 
-fn trim_chat(conn: &Connection, jid: &str, max: usize) -> rusqlite::Result<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM doc WHERE jid=?1", params![jid], |r| r.get(0))?;
-    let excess = count - max as i64;
-    if excess <= 0 {
-        return Ok(());
-    }
-    let rowids: Vec<i64> = {
-        let mut stmt = conn.prepare("SELECT rowid FROM doc WHERE jid=?1 ORDER BY ts ASC LIMIT ?2")?;
-        let rows = stmt.query_map(params![jid, excess], |r| r.get::<_, i64>(0))?;
-        rows.flatten().collect()
-    };
-    for rowid in rowids {
-        conn.execute("DELETE FROM fts WHERE rowid=?1", params![rowid])?;
-        conn.execute("DELETE FROM doc WHERE rowid=?1", params![rowid])?;
-    }
-    Ok(())
-}
 
 fn load_indexed(conn: &Connection) -> HashSet<String> {
     let mut out = HashSet::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT DISTINCT jid FROM doc")
+    if let Ok(mut stmt) = conn.prepare("SELECT substr(k,10) FROM meta WHERE k GLOB 'complete:*'")
         && let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0))
     {
         for jid in rows.flatten() {
@@ -576,6 +553,20 @@ mod tests {
         let mut index = SearchIndex::default();
         index.open_at(&vault, &search_path);
         TestIndex { index, _vault: vault, vault_path, search_path }
+    }
+
+    #[test]
+    fn durable_index_keeps_old_pages_and_updates_partial_cache() {
+        let mut t = test_index();
+        for n in 0..650 {
+            t.index.add("a@g.us", &msg(&n.to_string(), n, "needle original"));
+        }
+        assert_eq!(t.index.search("needle", None, 1000).len(), 650);
+        t.index.rebuild("a@g.us", &[msg("649", 649, "replacement")]);
+        assert_eq!(t.index.search("needle", None, 1000).len(), 649);
+        assert_eq!(t.index.search("replacement", None, 10).len(), 1);
+        t.index.open_at(&t._vault, &t.search_path);
+        assert_eq!(t.index.search("needle", None, 1000).len(), 649);
     }
 
     #[test]

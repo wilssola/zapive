@@ -883,9 +883,25 @@ fn wire_callbacks(ui: &AppWindow) {
     ui.on_load_older(|| defer(|b| b.handle_scroll_up_load()));
     ui.on_jump_latest(|| {
         defer(|b| {
-            if let Some(jid) = &b.current_jid {
-                let jid = jid.clone();
+            if let Some(jid) = b.current_jid.clone() {
+                if let Some(vault) = &b.vault {
+                    if let Err(error) = b.store.save_checked(vault) {
+                        eprintln!("[history] jump latest save failed: {error}");
+                        b.message_action_failed(&t("history.unavailable"));
+                        return;
+                    }
+                    b.store.evict(&jid);
+                    b.store.hydrate(vault, &jid);
+                    if !b.store.hydrated.contains(&jid) {
+                        b.message_action_failed(&t("history.unavailable"));
+                        return;
+                    }
+                }
                 b.scroll_pos.remove(&jid);
+                b.truncated.remove(&jid);
+                b.rebuild_conversation(&jid);
+                b.load_media_for_chat(&jid);
+                b.queue_row_avatars(&jid);
             }
             b.scroll_to_end();
         });
@@ -2134,11 +2150,12 @@ impl Bridge {
         let Some(vault) = self.vault.take() else {
             return;
         };
-        let pending: Vec<String> = vault
-            .keys("store:msgs:")
-            .into_iter()
-            .map(|k| k["store:msgs:".len()..].to_string())
-            .filter(|jid| !self.store.search.has_chat(jid))
+        let mut seen = HashSet::new();
+        let pending: Vec<String> = self.store.chats.keys().cloned()
+            .chain(vault.keys("store:msgs:").into_iter()
+                .map(|k| k["store:msgs:".len()..].to_string()))
+            .map(|jid| self.store.canon_owned(&jid))
+            .filter(|jid| seen.insert(jid.clone()) && !self.store.search.has_chat(jid))
             .take(6)
             .collect();
         for jid in &pending {
@@ -2192,6 +2209,7 @@ impl Bridge {
         for web in &chunk.messages {
             if let Some(stored) = crate::wa_map::from_history(&mut self.store, web) {
                 let jid = stored.jid.clone();
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
                 if self.store.add_message(stored) {
                     added += 1;
                     if Some(&jid) == self.current_jid.as_ref() {
@@ -2268,7 +2286,7 @@ impl Bridge {
                 && let Some(edited) = pm.edited_message.as_option()
             {
                 let jid = self.store.canon_owned(&normalize_jid(&chat));
-                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
                 let sender = self.store.canon_owned(&info.source.sender.to_non_ad_string());
                 let valid = self.store.messages_for(&jid).iter().find(|m| m.id == id).is_some_and(|m| {
                     m.from_me == info.source.is_from_me && (m.from_me || self.store.canon(&m.sender_jid) == sender)
@@ -2323,6 +2341,7 @@ impl Bridge {
                 && let Some(target) = pm.key.as_option().and_then(|k| k.id.clone())
             {
                 let chat_jid = self.store.canon_owned(&normalize_jid(&chat));
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, &target); }
                 let destructive = self.ui.get_apply_deletions() || info.source.is_from_me;
                 let changed = if destructive {
                     self.store.mark_deleted(&chat_jid, &target)
@@ -2364,6 +2383,7 @@ impl Bridge {
             };
             let jid = stored.jid.clone();
             let from_me = stored.from_me;
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
             let mentions_me = stored.mentions_me;
             let sender = stored.sender_jid.clone();
             if !self.store.add_message(stored) {
@@ -2410,9 +2430,9 @@ impl Bridge {
             else if alternate.ends_with("@lid") { self.store.learn_alias(alternate, participant); }
         }
         let jid = self.store.canon_owned(&normalize_jid(chat));
-        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
         let mut changed = Vec::new();
         for id in ids {
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
             if self.store.apply_receipt(&jid, id, participant, status, timestamp) {
                 changed.push(id.clone());
             }
@@ -2551,6 +2571,7 @@ impl Bridge {
 
     pub fn on_star(&mut self, jid: &str, id: &str, starred: bool) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         if self.store.set_starred(&jid, id, starred) && Some(&jid) == self.current_jid.as_ref() {
             self.patch_row(id, |row| row.starred = starred);
         }
@@ -2698,6 +2719,12 @@ impl Bridge {
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
+        if let Some(vault) = &self.vault {
+            if self.store.load_older(vault, &jid) {
+                self.prepend_older_rows(&jid);
+                return;
+            }
+        }
         // After a jump the list starts mid-conversation; the rows above it
         // are already in the store.
         if self.store.messages_for(&jid).len() > self.messages_model.row_count() {
@@ -2742,6 +2769,7 @@ impl Bridge {
         from_me: bool,
     ) {
         let chat_jid = self.store.canon_owned(&normalize_jid(remote_jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, target); }
         let updated = self.store.apply_reaction(&chat_jid, target, reactor, emoji);
         if updated && Some(&chat_jid) == self.current_jid.as_ref() {
             let summary = self
@@ -3232,12 +3260,17 @@ impl Bridge {
         self.apply_chat_settings_ui();
         self.refresh_labels();
         self.ensure_group_meta(jid);
+        let jump_loaded = jump_to.map(|target| {
+            self.vault.as_ref().is_some_and(|vault| self.store.load_around(vault, jid, target))
+        });
+        let at = jump_to.and_then(|target| self.store.messages_for(jid).iter().position(|m| m.id == target));
+        if jump_to.is_some() && (jump_loaded == Some(false) || at.is_none()) {
+            self.message_action_failed(&t("history.unavailable"));
+        }
         let list = self.store.messages_for(jid);
         // Jumping to a message means starting the list there: the row
         // lands at the top exactly, instead of chasing a pixel offset
         // inside a virtualized list that estimates unmeasured heights.
-        let at = jump_to
-            .and_then(|target| list.iter().position(|m| m.id == target));
         let from = at.unwrap_or(0);
         if at.is_some() {
             self.truncated.insert(jid.to_string());
@@ -3263,6 +3296,8 @@ impl Bridge {
         self.ui.set_scroll_armed(!anchored_top);
         let saved = if anchored_top {
             Some(0.0)
+        } else if jump_to.is_some() {
+            None
         } else {
             self.scroll_pos.get(jid).copied()
         };
@@ -8256,7 +8291,7 @@ impl Bridge {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let jid = self.store.canon_owned(&normalize_jid(jid));
         let content = content.get_base_message();
-        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         let text = content.conversation.clone()
             .or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()))
             .or_else(|| content.image_message.as_option().and_then(|m| m.caption.clone()))
@@ -8287,6 +8322,7 @@ impl Bridge {
 
     pub fn on_message_pin(&mut self, jid: &str, id: &str, until: i64) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
             m.pinned_until = until;
             self.store.dirty_jids.insert(jid.clone());
