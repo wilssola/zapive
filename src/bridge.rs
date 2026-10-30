@@ -491,8 +491,12 @@ fn apply_now(f: impl FnOnce(&mut Bridge)) {
 // scroll write triggering load-older); deferring one tick avoids the
 // re-entrant borrow.
 fn defer(f: impl FnOnce(&mut Bridge) + 'static) {
+    defer_after(Duration::ZERO, f);
+}
+
+fn defer_after(delay: Duration, f: impl FnOnce(&mut Bridge) + 'static) {
     let cell = RefCell::new(Some(f));
-    slint::Timer::single_shot(Duration::ZERO, move || {
+    slint::Timer::single_shot(delay, move || {
         if let Some(f) = cell.borrow_mut().take() {
             apply_now(f);
         }
@@ -1033,7 +1037,7 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_reset_preview(|| defer(|b| b.reset_preview()));
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
-    ui.on_picker_opened(|| defer(|b| b.load_sticker_panel()));
+    ui.on_picker_opened(|| defer_after(Duration::from_millis(200), |b| b.load_sticker_panel()));
     ui.on_picker_closed(|| defer(|_| {}));
     ui.on_sticker_send(|id| {
         let id = id.to_string();

@@ -947,8 +947,11 @@ impl Store {
     pub fn hydrate(&mut self, vault: &Vault, jid: &str) {
         let jid = self.canon_owned(jid);
         if self.hydrated.contains(&jid) { return; }
-        if self.flush_history(vault).is_err() { return; }
-        let Ok(disk) = vault.history_page(&jid, None, 100) else { return };
+        if let Err(e) = self.flush_history(vault) { eprintln!("[store] hydrate {jid} failed: {e}"); return; }
+        let disk = match vault.history_page(&jid, None, 100) {
+            Ok(disk) => disk,
+            Err(e) => { eprintln!("[store] hydrate {jid} failed: {e}"); return; }
+        };
         if let Some(first) = disk.first() {
             self.older_cursors.insert(jid.clone(), (first.timestamp, first.id.clone()));
         }
@@ -975,9 +978,9 @@ impl Store {
         let jid = self.canon_owned(jid);
         self.hydrate(vault, &jid);
         if !self.hydrated.contains(&jid) || self.older_exhausted.contains(&jid) { return false; }
-        if self.flush_history(vault).is_err() { return false; }
+        if let Err(e) = self.flush_history(vault) { eprintln!("[store] load_older {jid} failed: {e}"); return false; }
         let cursor = self.older_cursors.get(&jid).map(|(ts, id)| (*ts, id.as_str()));
-        let Ok(page) = vault.history_page(&jid, cursor, 100) else { return false };
+        let page = match vault.history_page(&jid, cursor, 100) { Ok(page) => page, Err(e) => { eprintln!("[store] load_older {jid} failed: {e}"); return false; } };
         if let Some(first) = page.first() {
             self.older_cursors.insert(jid.clone(), (first.timestamp, first.id.clone()));
         }
@@ -999,12 +1002,12 @@ impl Store {
 
     pub fn load_around(&mut self, vault: &Vault, jid: &str, id: &str) -> bool {
         let jid = self.canon_owned(jid);
-        if self.flush_history(vault).is_err() { return false; }
+        if let Err(e) = self.flush_history(vault) { eprintln!("[store] load_around {jid} failed: {e}"); return false; }
         self.hydrate(vault, &jid);
         if !self.hydrate_id(vault, &jid, id) { return false; }
         let Some(target) = self.messages_for(&jid).iter().find(|m| m.id == id) else { return false };
-        let Ok(mut page) = vault.history_page(&jid, Some((target.timestamp, &target.id)), 50) else { return false };
-        let Ok(after) = vault.history_after(&jid, target.timestamp, &target.id, 50) else { return false };
+        let mut page = match vault.history_page(&jid, Some((target.timestamp, &target.id)), 50) { Ok(page) => page, Err(e) => { eprintln!("[store] load_around {jid} failed: {e}"); return false; } };
+        let after = match vault.history_after(&jid, target.timestamp, &target.id, 50) { Ok(after) => after, Err(e) => { eprintln!("[store] load_around {jid} failed: {e}"); return false; } };
         page.extend(after);
         self.merge_page(&jid, page);
         true
@@ -1753,8 +1756,8 @@ mod tests {
         let legacy: Vec<_> = (0..610).map(|n| history_message("chat", n)).collect();
         vault.set_checked("store:msgs:chat", &to_json(&legacy)).unwrap();
         vault.set_checked("store:msgs:broken", "invalid json").unwrap();
-        let failure = vault.history_commit(&[history_message("chat", 900)], &["broken".into()], &[], &[]);
-        assert!(failure.is_err());
+        vault.history_commit(&[history_message("broken", 900)], &["broken".into()], &[], &[]).unwrap();
+        assert_eq!(vault.history_page("broken", None, 1000).unwrap().len(), 1);
         assert!(vault.get("store:msgs:chat").is_some());
         assert!(vault.get("store:msgs:broken").is_some());
         let mut store = Store::default();

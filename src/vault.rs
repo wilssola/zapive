@@ -7,6 +7,7 @@
 //   this account;
 // - the PIN itself is never stored; changing it only re-wraps the DK.
 use crate::paths::vault_path;
+#[cfg(not(test))]
 use crate::platform::{unwrap_secret, wrap_secret};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -19,6 +20,20 @@ use sha2::Sha256;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use zeroize::Zeroizing;
+
+// Tests never touch the OS keyring: the real data key lives in a single
+// global slot that a test vault would overwrite.
+#[cfg(test)]
+fn wrap_secret(inner: &str) -> String {
+    format!("raw:{}", B64.encode(inner.as_bytes()))
+}
+
+#[cfg(test)]
+fn unwrap_secret(stored: &str) -> Result<String, String> {
+    let b64 = stored.strip_prefix("raw:").ok_or("unexpected secret format")?;
+    let bytes = B64.decode(b64).map_err(|e| e.to_string())?;
+    String::from_utf8(bytes).map_err(|e| e.to_string())
+}
 
 const FILE_MAGIC: &[u8; 5] = b"ZENC1";
 
@@ -411,13 +426,26 @@ impl Vault {
             .execute("DELETE FROM kv WHERE k LIKE ?1", [format!("{}{prefix}%", self.scope())]);
     }
 
+    // Ok(None): the row cannot be opened with the current key (or is not valid
+    // JSON). The caller skips it and leaves it in the database.
+    fn open_row<T: serde::de::DeserializeOwned>(&self, label: &str, raw: &str) -> Result<Option<T>, String> {
+        self.key.with(|key| {
+            let key = key.ok_or_else(|| "vault is locked".to_string())?;
+            let opened = decrypt_str(raw, key)
+                .and_then(|plain| serde_json::from_str::<T>(&plain).map_err(|e| e.to_string()));
+            match opened {
+                Ok(value) => Ok(Some(value)),
+                Err(why) => { note_skipped(label, &why); Ok(None) }
+            }
+        })
+    }
+
     fn history_import(&self, conn: &Connection, jid: &str) -> Result<(), String> {
         let k = format!("{}store:msgs:{jid}", self.scope());
         let raw: Option<String> = conn.query_row("SELECT v FROM kv WHERE k=?1", [&k], |r| r.get(0))
             .optional().map_err(|e| e.to_string())?;
         if let Some(raw) = raw {
-            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
-            let messages: Vec<crate::store::StoredMessage> = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
+            let Some(messages) = self.open_row::<Vec<crate::store::StoredMessage>>(&k, &raw)? else { return Ok(()) };
             for mut message in messages {
                 message.jid = jid.to_string();
                 self.history_put(conn, &message, false)?;
@@ -452,16 +480,18 @@ impl Vault {
             tx.execute("DELETE FROM history WHERE account=?1 AND jid=?2", params![self.account(), jid]).map_err(|e| e.to_string())?;
         }
         for (from, into) in merges {
-            let mut stmt = tx.prepare("SELECT payload FROM history WHERE account=?1 AND jid=?2").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(params![self.account(), from], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
-            for row in rows {
-                let raw = row.map_err(|e| e.to_string())?;
-                let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
-                let mut message: crate::store::StoredMessage = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
+            let rows: Vec<(String, String)> = {
+                let mut stmt = tx.prepare("SELECT id, payload FROM history WHERE account=?1 AND jid=?2").map_err(|e| e.to_string())?;
+                let mapped = stmt.query_map(params![self.account(), from], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
+                let collected: Result<Vec<_>, _> = mapped.collect();
+                collected.map_err(|e| e.to_string())?
+            };
+            for (id, raw) in rows {
+                let Some(mut message) = self.open_row::<crate::store::StoredMessage>(&format!("history:{from}:{id}"), &raw)? else { continue };
                 message.jid = into.clone();
                 self.history_put(&tx, &message, false)?;
+                tx.execute("DELETE FROM history WHERE account=?1 AND jid=?2 AND id=?3", params![self.account(), from, id]).map_err(|e| e.to_string())?;
             }
-            tx.execute("DELETE FROM history WHERE account=?1 AND jid=?2", params![self.account(), from]).map_err(|e| e.to_string())?;
         }
         for message in messages { self.history_put(&tx, message, true)?; }
         for (jid, id) in removals {
@@ -475,13 +505,13 @@ impl Vault {
         let tx = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
         self.history_import(&tx, jid)?;
         tx.commit().map_err(|e| e.to_string())?;
-        let mut stmt = self.conn.prepare("SELECT payload FROM history WHERE account=?1 AND jid=?2 AND (?3 IS NULL OR (timestamp,id)<(?3,?4)) ORDER BY timestamp DESC,id DESC LIMIT ?5").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![self.account(), jid, before.map(|v| v.0), before.map(|v| v.1), limit as i64], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let mut stmt = self.conn.prepare("SELECT id, payload FROM history WHERE account=?1 AND jid=?2 AND (?3 IS NULL OR (timestamp,id)<(?3,?4)) ORDER BY timestamp DESC,id DESC LIMIT ?5").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![self.account(), jid, before.map(|v| v.0), before.map(|v| v.1), limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
         let mut messages = Vec::new();
         for row in rows {
-            let raw = row.map_err(|e| e.to_string())?;
-            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
-            messages.push(serde_json::from_str(&plain).map_err(|e| e.to_string())?);
+            let (id, raw) = row.map_err(|e| e.to_string())?;
+            let Some(message) = self.open_row(&format!("history:{jid}:{id}"), &raw)? else { continue };
+            messages.push(message);
         }
         messages.reverse();
         Ok(messages)
@@ -489,13 +519,13 @@ impl Vault {
 
     pub fn history_after(&self, jid: &str, timestamp: i64, id: &str, limit: usize) -> Result<Vec<crate::store::StoredMessage>, String> {
         self.history_page(jid, None, 0)?;
-        let mut stmt = self.conn.prepare("SELECT payload FROM history WHERE account=?1 AND jid=?2 AND (timestamp,id)>(?3,?4) ORDER BY timestamp,id LIMIT ?5").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![self.account(), jid, timestamp, id, limit as i64], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let mut stmt = self.conn.prepare("SELECT id, payload FROM history WHERE account=?1 AND jid=?2 AND (timestamp,id)>(?3,?4) ORDER BY timestamp,id LIMIT ?5").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![self.account(), jid, timestamp, id, limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
         let mut messages = Vec::new();
         for row in rows {
-            let raw = row.map_err(|e| e.to_string())?;
-            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
-            messages.push(serde_json::from_str(&plain).map_err(|e| e.to_string())?);
+            let (id, raw) = row.map_err(|e| e.to_string())?;
+            let Some(message) = self.open_row(&format!("history:{jid}:{id}"), &raw)? else { continue };
+            messages.push(message);
         }
         Ok(messages)
     }
@@ -503,10 +533,10 @@ impl Vault {
     pub fn history_id(&self, jid: &str, id: &str) -> Result<Option<crate::store::StoredMessage>, String> {
         self.history_page(jid, None, 0)?;
         let raw: Option<String> = self.conn.query_row("SELECT payload FROM history WHERE account=?1 AND jid=?2 AND id=?3", params![self.account(), jid, id], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
-        raw.map(|raw| {
-            let plain = self.key.with(|key| decrypt_str(&raw, key.ok_or("vault is locked")?))?;
-            serde_json::from_str(&plain).map_err(|e| e.to_string())
-        }).transpose()
+        match raw {
+            Some(raw) => self.open_row(&format!("history:{jid}:{id}"), &raw),
+            None => Ok(None),
+        }
     }
 
     // Keys come back the way the caller wrote them, without the scope.
@@ -575,6 +605,14 @@ fn decrypt_str(stored: &str, key: &[u8; 32]) -> Result<String, String> {
         .decrypt(Nonce::from_slice(&iv), Payload::from(ct.as_slice()))
         .map_err(|_| "decryption failed".to_string())?;
     String::from_utf8(plain).map_err(|e| e.to_string())
+}
+
+fn note_skipped(label: &str, why: &str) {
+    static SKIPPED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    let seen = SKIPPED.get_or_init(Default::default);
+    if seen.lock().map(|mut s| s.insert(label.to_string())).unwrap_or(false) {
+        eprintln!("[vault] skipping undecryptable row {label}: {why}");
+    }
 }
 
 fn hex_encode(data: &[u8]) -> String {
@@ -739,5 +777,47 @@ mod tests {
         // An id that is gone falls back to the first account.
         v.set_active_account("missing");
         assert_eq!(v.active_account(), "");
+    }
+
+    #[test]
+    fn undecryptable_history_is_skipped_and_kept() {
+        let t = temp_vault("skip_history");
+        let v = &t.vault;
+        v.history_commit(&[crate::wa_map::system_message("chat", "a", 1, "ok".into())], &[], &[], &[]).unwrap();
+        v.conn.execute("INSERT INTO history(account,jid,id,timestamp,payload) VALUES('','chat','b',2,?1)", [encrypt_str("{}", &[9u8; 32])]).unwrap();
+        let page = v.history_page("chat", None, 100).unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, "a");
+        let after = v.history_after("chat", 0, "", 100).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, "a");
+        assert!(v.history_id("chat", "b").unwrap().is_none());
+        let n: i64 = v.conn.query_row("SELECT count(*) FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn undecryptable_legacy_row_is_kept_on_import() {
+        let t = temp_vault("skip_legacy");
+        let v = &t.vault;
+        v.conn.execute("INSERT INTO kv(k,v) VALUES('store:msgs:old', ?1)", [encrypt_str("[]", &[9u8; 32])]).unwrap();
+        v.history_commit(&[crate::wa_map::system_message("new", "x", 1, "hi".into())], &[], &[], &[("old".into(), "new".into())]).unwrap();
+        let n: i64 = v.conn.query_row("SELECT count(*) FROM kv WHERE k='store:msgs:old'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(v.history_page("new", None, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn merge_moves_readable_rows_and_keeps_unreadable_ones() {
+        let t = temp_vault("merge_skip");
+        let v = &t.vault;
+        v.history_commit(&[crate::wa_map::system_message("old", "good", 1, "ok".into())], &[], &[], &[]).unwrap();
+        v.conn.execute("INSERT INTO history(account,jid,id,timestamp,payload) VALUES('','old','bad',2,?1)", [encrypt_str("{}", &[9u8; 32])]).unwrap();
+        v.history_commit(&[], &[], &[], &[("old".into(), "new".into())]).unwrap();
+        let new = v.history_page("new", None, 100).unwrap();
+        assert_eq!(new.len(), 1);
+        assert_eq!(new[0].id, "good");
+        let n: i64 = v.conn.query_row("SELECT count(*) FROM history WHERE jid='old'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
     }
 }
