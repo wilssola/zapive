@@ -7028,7 +7028,7 @@ impl Bridge {
         self.ui.set_pdf_total_w(0.0);
         self.ui.set_pdf_engine_missing(false);
         self.ui.set_pdf_installing(false);
-        self.ui.set_pdf_status(t("pdf.loading").into());
+        self.ui.set_pdf_status(t("pdf.opening").into());
         self.ui.set_pdf_zoom_label("100%".into());
         self.ui.set_pdf_open(true);
         self.pdf.send(crate::pdf::PdfReq::Open {

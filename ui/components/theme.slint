@@ -1,6 +1,10 @@
 export global Theme {
     in-out property <bool> dark: true;
 
+    out property <duration> motion-fast: 120ms;
+    out property <duration> motion-normal: 200ms;
+    out property <duration> motion-slow: 300ms;
+
     out property <color> bg: dark ? #111b21 : #f0f2f5;
     out property <color> panel: dark ? #202c33 : #ffffff;
     out property <color> header: dark ? #202c33 : #f0f2f5;

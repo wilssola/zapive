@@ -1,425 +1,353 @@
-// Rust-side translations (UI strings produced outside .slint, e.g.
-// connection status, previews, notifications). Slint markup strings use
-// @tr() with the bundled catalog compiled from i18n/ instead.
-use std::sync::atomic::{AtomicBool, Ordering};
+// Shared catalogs: i18n/{en_US,pt}/LC_MESSAGES/zapive.po. Slint bundles the same
+// files (build.rs, DefaultTranslationContext::None), so an entry is keyed by
+// `msgid` alone -- the semantic id -- with no `msgctxt`.
+//
+// Plurals: `msgid = "<base>.one"`, `msgid_plural = "<base>.other"`. Slint reads
+// them with `@tr("<base>.one" | "<base>.other" % n)`; Rust asks for the base id
+// with `tp("<base>", n, ..)`. `{n}` is the count.
+use rspolib::pofile;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-static PT: AtomicBool = AtomicBool::new(false);
+static CURRENT_LOCALE: AtomicU8 = AtomicU8::new(0);
+static CATALOGS: OnceLock<Catalogs> = OnceLock::new();
+#[cfg(test)]
+pub(crate) static LOCALE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+struct Catalogs { en: HashMap<&'static str, Entry>, pt: HashMap<&'static str, Entry> }
+struct Entry { forms: Vec<&'static str>, plural: bool, placeholders: Vec<&'static str> }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Locale {
-    En,
-    Pt,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Locale { En, Pt }
+pub fn set_locale(locale: Locale) { CURRENT_LOCALE.store((locale == Locale::Pt) as u8, Ordering::Relaxed); }
+pub fn current_locale() -> Locale { if CURRENT_LOCALE.load(Ordering::Relaxed) == 1 { Locale::Pt } else { Locale::En } }
+
+pub fn t(id: &str) -> String { ta(id, &[]) }
+
+// Positional `{0}`, `{1}` arguments.
+pub fn ta(id: &str, args: &[&str]) -> String {
+    let Some(entry) = localized_entry(id) else { return missing(id) };
+    validate_args(id, &entry.placeholders, args.len());
+    format_message(entry.forms[0], args, None)
 }
 
-pub fn set_locale(locale: Locale) {
-    PT.store(locale == Locale::Pt, Ordering::Relaxed);
+// Plural message: `{n}` is `count`; any other placeholder is a named argument.
+pub fn tp(id: &str, count: i64, args: &[(&str, &str)]) -> String {
+    let Some(entry) = localized_entry(id) else { return missing(id) };
+    let expected = entry.placeholders.iter().copied().filter(|name| *name != "n").collect::<std::collections::HashSet<_>>();
+    let actual = args.iter().map(|(name, _)| *name).collect::<std::collections::HashSet<_>>();
+    assert_eq!(actual, expected, "wrong named arguments for {id}");
+    let template = entry.forms.get(usize::from(count != 1)).or(entry.forms.first()).copied().unwrap_or_default();
+    let mut output = format_message(template, &[], Some(count));
+    for (name, value) in args { output = output.replace(&format!("{{{name}}}"), value); }
+    output
 }
 
-pub fn current_locale() -> Locale {
-    if PT.load(Ordering::Relaxed) { Locale::Pt } else { Locale::En }
+fn missing(id: &str) -> String {
+    debug_assert!(false, "missing i18n id: {id}");
+    String::new()
 }
 
-fn en(key: &str) -> &'static str {
-    match key {
-        "status.connecting" => "Connecting...",
-        "status.connected" => "Connected",
-        "status.scanQr" => "Scan the QR code with WhatsApp on your phone",
-        "status.sessionEnded" => "Session ended. Generating a new QR...",
-        "status.reconnecting" => "Connection lost. Reconnecting...",
-        "status.connectFailed" => "Failed to connect: {0}",
-        "status.pairingHint" => "Enter the code on your phone: Linked devices → Link with phone number",
-        "status.loggingOut" => "Disconnecting...",
-        "logout.title" => "Log out of this account?",
-        "logout.body" => "You can keep the conversations on this computer. Linking the same number again then picks up where you left off, without downloading everything once more.",
-        "logout.keep" => "Keep conversations",
-        "logout.wipe" => "Erase everything",
-        "forget.title" => "Erase saved conversations?",
-        "forget.body" => "The conversations kept from the last session will be removed from this computer. They stay on your phone.",
-        "forget.action" => "Erase",
-        "account.new" => "New account",
-        "account.inCall" => "End the call before switching accounts",
-        "account.removeTitle" => "Remove {0}?",
-        "account.removeBody" => "Its conversations will be erased from this computer. To unlink the device as well, remove it under Linked devices on your phone.",
-        "account.removeAction" => "Remove",
-        "pairing.generating" => "Generating...",
-        "pairing.failed" => "Failed to generate code",
-        "error.invalidNumber" => "Invalid phone number",
-        "error.stillConnecting" => "Still connecting, try again",
-        "error.notConnected" => "Not connected",
-        "pin.wrong" => "Wrong PIN",
-        "pin.wrongCurrent" => "Current PIN is incorrect",
-        "pin.format" => "PIN must be 4 to 10 digits",
-        "pin.saved" => "PIN saved. Local data is now protected by it.",
-        "pin.removed" => "PIN removed. Local data stays encrypted via your Windows account.",
-        "media.unavailable" => "Media unavailable",
-        "media.imageUnavailable" => "Image unavailable",
-        "media.typeImage" => "Image",
-        "media.typeVideo" => "Video",
-        "media.typeAudio" => "Audio",
-        "media.typeDoc" => "Document",
-        "media.typeFile" => "File",
-        "preview.photo" => "📷 Photo",
-        "preview.audio" => "🎵 Audio",
-        "preview.voice" => "🎤 Voice message",
-        "audio.fallbackName" => "Audio file",
-        "preview.document" => "📄 {0}",
-        "doc.fallbackName" => "Document",
-        "day.today" => "Today",
-        "day.yesterday" => "Yesterday",
-        "presence.typing" => "typing...",
-        "presence.recording" => "recording audio...",
-        "presence.online" => "online",
-        "sync.older" => "Syncing older messages. Click to see progress.",
-        "sync.body" => "Keep WhatsApp open on your phone while syncing older messages. To see your full chat history, check your phone.",
-        "sync.progress" => "{0} batches fetched · {1} messages synced",
-        "sync.complete" => "Older messages are synced. Anything further back stays on your phone.",
-        "sync.idle" => "Nothing is syncing right now. Scroll up in a chat to fetch its older messages.",
-        "notice.and" => "and",
-        "notice.someone" => "Someone",
-        "notice.addedYou" => "{0} added you",
-        "notice.youAdded" => "You added {0}",
-        "notice.added" => "{0} added {1}",
-        "notice.joinedLink" => "{0} joined using this group's invite link",
-        "notice.joinedLinkShare" => "{0} joined via an invite link. Click to share group history.",
-        "notice.historyShared" => "You shared the group's recent messages with {0}",
-        "notice.youLeft" => "You left",
-        "notice.left" => "{0} left",
-        "notice.removedYou" => "{0} removed you",
-        "notice.youRemoved" => "You removed {0}",
-        "notice.removed" => "{0} removed {1}",
-        "notice.youAdmin" => "You're now an admin",
-        "notice.promoted" => "{0} is now an admin",
-        "notice.youNotAdmin" => "You're no longer an admin",
-        "notice.demoted" => "{0} is no longer an admin",
-        "notice.subject" => "{0} changed the group name to \"{1}\"",
-        "notice.description" => "{0} changed the group description",
-        "notice.icon" => "{0} changed this group's icon",
-        "notice.created" => "{0} created group \"{1}\"",
-        "notice.announce" => "{0} changed this group's settings to allow only admins to send messages",
-        "notice.notAnnounce" => "{0} changed this group's settings to allow all members to send messages",
-        "notice.locked" => "{0} changed this group's settings to allow only admins to edit group info",
-        "notice.unlocked" => "{0} changed this group's settings to allow all members to edit group info",
-        "notice.ephemeralOn" => "{0} turned on disappearing messages. New messages will disappear from this chat {1} after they're sent.",
-        "notice.ephemeralOff" => "{0} turned off disappearing messages",
-        "notice.deleted" => "This group was deleted",
-        "notice.missedVoice" => "Missed voice call",
-        "notice.missedVideo" => "Missed video call",
-        "notice.membersChanged" => "Group members have changed. Click to view",
-        "ephemeral.off" => "Off",
-        "ephemeral.day" => "24 hours",
-        "ephemeral.week" => "7 days",
-        "ephemeral.quarter" => "90 days",
-        "ephemeral.days" => "{0} days",
-        "ephemeral.hours" => "{0} hours",
-        "ephemeral.minutes" => "{0} minutes",
-        "mention.all" => "all",
-        "mention.allHint" => "Mention all members in this chat",
-        "mute.always" => "Muted always",
-        "mute.until" => "Muted until {0}",
-        "confirm.clearTitle" => "Clear this chat?",
-        "confirm.clearBody" => "The messages are removed from this device and from your phone.",
-        "confirm.clear" => "Clear chat",
-        "confirm.deleteChatTitle" => "Delete this chat?",
-        "confirm.deleteChatBody" => "The chat and its messages are removed from this device and from your phone.",
-        "confirm.delete" => "Delete chat",
-        "confirm.exitTitle" => "Exit \"{0}\"?",
-        "confirm.exitBody" => "Only group admins will be notified that you left the group.",
-        "confirm.exit" => "Exit",
-        "confirm.deleteTitle" => "Delete {0} message(s)?",
-        "confirm.deleteBody" => "\"Delete for everyone\" removes them for every participant; \"Delete for me\" removes them here and on your phone.",
-        "confirm.deleteEveryone" => "Delete for everyone",
-        "confirm.deleteMe" => "Delete for me",
-        "forward.count" => "{0} messages",
-        "members.addFailed" => "Could not add: {0}",
-        "search.results" => "{0} messages found",
-        "search.none" => "No messages found",
-        "export.mediaOmitted" => "<Media omitted>",
-        "pdf.loading" => "Opening document…",
-        "pdf.engineMissing" => "The PDF viewer needs a small rendering engine (pdfium) that is downloaded once, about 7 MB.",
-        "pdf.installing" => "Downloading the PDF engine…",
-        "pdf.installFailed" => "The PDF engine could not be downloaded: {0}",
-        "pdf.failed" => "This document could not be opened: {0}",
-        "notify.newMessages" => "{0} new messages ({1})",
-        "notify.newMessage" => "New message",
-        "notify.reply" => "Reply",
-        "notify.replyPlaceholder" => "Reply",
-        "notify.play" => "Play",
-        "notify.fromOne" => "{0} new messages from {1}",
-        "notify.appName" => "Zapive",
-        "picker.images" => "Images",
-        "picker.audio" => "Audio",
-        "picker.all" => "All files",
-        "lang.restart" => "Language saved. Restart Zapive to apply.",
-        "update.checking" => "Checking for updates…",
-        "update.latest" => "You are on the latest version.",
-        "autostart.failed" => "Could not change the startup setting: {0}",
-        "msg.deleted" => "This message was deleted",
-        "msg.forwarded" => "Forwarded",
-        "tray.open" => "Open Zapive",
-        "tray.exit" => "Quit",
-        "preview.sticker" => "🩵 Sticker",
-        "preview.video" => "🎬 Video",
-        "rec.noMic" => "No microphone found",
-        "info.members" => "{0} participants",
-        "gif.noResults" => "No GIFs found",
-        "fav.empty" => "Star a sticker on your phone to keep it here",
-        "call.incomingVoice" => "Incoming voice call",
-        "call.incomingVideo" => "Incoming video call",
-        "call.answered" => "Answered",
-        "call.elsewhere" => "Answered on another device",
-        "call.declined" => "Declined",
-        "call.missed" => "Missed call",
-        "call.noAnswer" => "No answer",
-        "call.ended" => "Call ended",
-        "call.ringing" => "Ringing",
-        "call.calling" => "Calling\u{2026}",
-        "call.connecting" => "Connecting\u{2026}",
-        "call.inCall" => "In call",
-        "call.video" => "Video call",
-        "call.voice" => "Voice call",
-        "call.in" => "Incoming",
-        "call.out" => "Outgoing",
-        "call.gone" => "That call is no longer ringing",
-        "call.noDevices" => "No microphone or speaker available",
-        "call.noCamera" => "The camera could not be opened",
-        "device.system" => "System default",
-        "call.failed" => "The call could not be connected",
-        "preview.gif" => "🎬 GIF",
-        "preview.reacted" => "Reacted {0} to: \"{1}\"",
-        "alert.conflictTitle" => "Session taken over",
-        "alert.conflictBody" => "WhatsApp was opened somewhere else with this account. Only one session stays connected at a time.",
-        "alert.reconnect" => "Use here",
-        "alert.offlineTitle" => "Cannot reach WhatsApp",
-        "alert.offlineBody" => "Zapive has been retrying without success. Check the connection and try again.",
-        "alert.retry" => "Try again",
-        "alert.close" => "Close",
-        "reactions.count" => "{0} reactions",
-        "reactions.you" => "You",
-        "forward.title" => "Forward message to",
-        "emoji.smileys" => "Smileys & Emotion",
-        "emoji.people" => "People & Body",
-        "emoji.animals" => "Animals & Nature",
-        "emoji.food" => "Food & Drink",
-        "emoji.activities" => "Activities",
-        "emoji.travel" => "Travel & Places",
-        "emoji.objects" => "Objects",
-        "emoji.symbols" => "Symbols",
-        "emoji.flags" => "Flags",
-        _ => key_missing(key),
+fn validate_args(id: &str, placeholders: &[&str], actual: usize) {
+    assert!(placeholders.iter().all(|name| name.parse::<usize>().is_ok()), "{id} has named placeholders; use tp");
+    let expected = placeholders.iter().filter_map(|name| name.parse::<usize>().ok()).max().map_or(0, |max| max + 1);
+    assert_eq!(actual, expected, "wrong argument count for {id}");
+}
+
+// The selected catalog first, English when the selected one lacks the id.
+fn localized_entry(id: &str) -> Option<&'static Entry> {
+    let catalogs = catalogs();
+    let selected = if current_locale() == Locale::Pt { &catalogs.pt } else { &catalogs.en };
+    selected.get(id).or_else(|| catalogs.en.get(id))
+}
+
+fn catalogs() -> &'static Catalogs {
+    CATALOGS.get_or_init(|| Catalogs {
+        en: load_catalog(include_str!("../i18n/en_US/LC_MESSAGES/zapive.po")),
+        pt: load_catalog(include_str!("../i18n/pt/LC_MESSAGES/zapive.po")),
+    })
+}
+
+fn load_catalog(source: &str) -> HashMap<&'static str, Entry> {
+    parse_catalog(source).into_iter().flat_map(|(msgid, entry)| {
+        let alias = entry.plural.then(|| msgid.strip_suffix(".one")).flatten();
+        let alias = alias.map(|base| (base, Entry { forms: entry.forms.clone(), plural: true, placeholders: entry.placeholders.clone() }));
+        [Some((msgid, entry)), alias]
+    }).flatten().collect()
+}
+
+// (msgid, entry) in file order; the header entry (empty msgid) is skipped.
+fn parse_catalog(source: &str) -> Vec<(&'static str, Entry)> {
+    pofile(source).expect("invalid embedded PO catalog").entries.into_iter()
+        .filter(|entry| !entry.msgid.is_empty())
+        .map(|entry| {
+            let plural = entry.msgid_plural.is_some();
+            let forms: Vec<&'static str> = if plural {
+                entry.msgstr_plural.into_iter().map(|s| &*Box::leak(s.into_boxed_str())).collect()
+            } else {
+                vec![&*Box::leak(entry.msgstr.unwrap_or_default().into_boxed_str())]
+            };
+            let placeholders = extract_placeholders(&forms);
+            (&*Box::leak(entry.msgid.into_boxed_str()), Entry { forms, plural, placeholders })
+        }).collect()
+}
+
+fn format_message(message: &str, args: &[&str], count: Option<i64>) -> String {
+    let mut output = String::with_capacity(message.len());
+    let mut remaining = message;
+    while let Some(start) = remaining.find('{') {
+        output.push_str(&remaining[..start]);
+        let Some(end) = remaining[start + 1..].find('}') else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let name = &remaining[start + 1..start + 1 + end];
+        let replacement = if name == "n" {
+            count.map(|value| value.to_string())
+        } else {
+            name.parse::<usize>().ok().and_then(|index| args.get(index).map(|value| (*value).to_string()))
+        };
+        if let Some(value) = replacement { output.push_str(&value); }
+        else { output.push_str(&remaining[start..start + end + 2]); }
+        remaining = &remaining[start + end + 2..];
     }
+    output.push_str(remaining);
+    output
 }
 
-fn pt(key: &str) -> &'static str {
-    match key {
-        "status.connecting" => "Conectando...",
-        "status.connected" => "Conectado",
-        "status.scanQr" => "Escaneie o QR code com o WhatsApp do celular",
-        "status.sessionEnded" => "Sessão encerrada. Gerando novo QR...",
-        "status.reconnecting" => "Conexão perdida. Reconectando...",
-        "status.connectFailed" => "Falha ao conectar: {0}",
-        "status.pairingHint" => "Digite o código no celular: Aparelhos conectados → Conectar com número",
-        "status.loggingOut" => "Desconectando...",
-        "logout.title" => "Sair desta conta?",
-        "logout.body" => "Você pode manter as conversas neste computador. Ao conectar o mesmo número de novo, o app continua de onde parou, sem baixar tudo outra vez.",
-        "logout.keep" => "Manter conversas",
-        "logout.wipe" => "Apagar tudo",
-        "forget.title" => "Apagar conversas salvas?",
-        "forget.body" => "As conversas guardadas da última sessão serão removidas deste computador. Elas continuam no seu celular.",
-        "forget.action" => "Apagar",
-        "account.new" => "Nova conta",
-        "account.inCall" => "Encerre a ligação antes de trocar de conta",
-        "account.removeTitle" => "Remover {0}?",
-        "account.removeBody" => "As conversas dela serão apagadas deste computador. Para desvincular o aparelho também, remova-o em Dispositivos conectados no celular.",
-        "account.removeAction" => "Remover",
-        "pairing.generating" => "Gerando...",
-        "pairing.failed" => "Falha ao gerar código",
-        "error.invalidNumber" => "Número de telefone inválido",
-        "error.stillConnecting" => "Ainda conectando, tente novamente",
-        "error.notConnected" => "Não conectado",
-        "pin.wrong" => "PIN incorreto",
-        "pin.wrongCurrent" => "PIN atual incorreto",
-        "pin.format" => "PIN deve ter de 4 a 10 dígitos",
-        "pin.saved" => "PIN salvo. Os dados locais agora são protegidos por ele.",
-        "pin.removed" => "PIN removido. Os dados locais seguem criptografados pela sua conta Windows.",
-        "media.unavailable" => "Mídia indisponível",
-        "media.imageUnavailable" => "Imagem indisponível",
-        "media.typeImage" => "Imagem",
-        "media.typeVideo" => "Vídeo",
-        "media.typeAudio" => "Áudio",
-        "media.typeDoc" => "Documento",
-        "media.typeFile" => "Arquivo",
-        "preview.photo" => "📷 Foto",
-        "preview.audio" => "🎵 Áudio",
-        "preview.voice" => "🎤 Mensagem de voz",
-        "audio.fallbackName" => "Arquivo de áudio",
-        "preview.document" => "📄 {0}",
-        "doc.fallbackName" => "Documento",
-        "day.today" => "Hoje",
-        "day.yesterday" => "Ontem",
-        "presence.typing" => "digitando...",
-        "presence.recording" => "gravando áudio...",
-        "presence.online" => "online",
-        "sync.older" => "Sincronizando mensagens antigas. Clique para ver o progresso.",
-        "sync.body" => "Mantenha o WhatsApp aberto no celular enquanto as mensagens antigas são sincronizadas. Para ver todo o histórico, use o celular.",
-        "sync.progress" => "{0} lotes recebidos · {1} mensagens sincronizadas",
-        "sync.complete" => "As mensagens antigas foram sincronizadas. O que é mais antigo fica só no celular.",
-        "sync.idle" => "Nada sendo sincronizado agora. Role uma conversa para cima para buscar as mensagens antigas dela.",
-        "notice.and" => "e",
-        "notice.someone" => "Alguém",
-        "notice.addedYou" => "{0} adicionou você",
-        "notice.youAdded" => "Você adicionou {0}",
-        "notice.added" => "{0} adicionou {1}",
-        "notice.joinedLink" => "{0} entrou usando o link de convite deste grupo",
-        "notice.joinedLinkShare" => "{0} entrou pelo link de convite. Clique para compartilhar o histórico do grupo.",
-        "notice.historyShared" => "Você compartilhou as mensagens recentes do grupo com {0}",
-        "notice.youLeft" => "Você saiu",
-        "notice.left" => "{0} saiu",
-        "notice.removedYou" => "{0} removeu você",
-        "notice.youRemoved" => "Você removeu {0}",
-        "notice.removed" => "{0} removeu {1}",
-        "notice.youAdmin" => "Agora você é admin",
-        "notice.promoted" => "{0} agora é admin",
-        "notice.youNotAdmin" => "Você não é mais admin",
-        "notice.demoted" => "{0} não é mais admin",
-        "notice.subject" => "{0} mudou o nome do grupo para \"{1}\"",
-        "notice.description" => "{0} mudou a descrição do grupo",
-        "notice.icon" => "{0} mudou a imagem deste grupo",
-        "notice.created" => "{0} criou o grupo \"{1}\"",
-        "notice.announce" => "{0} mudou as configurações para permitir que só admins enviem mensagens",
-        "notice.notAnnounce" => "{0} mudou as configurações para permitir que todos os membros enviem mensagens",
-        "notice.locked" => "{0} mudou as configurações para permitir que só admins editem os dados do grupo",
-        "notice.unlocked" => "{0} mudou as configurações para permitir que todos os membros editem os dados do grupo",
-        "notice.ephemeralOn" => "{0} ativou as mensagens temporárias. As novas mensagens desaparecerão desta conversa {1} depois de enviadas.",
-        "notice.ephemeralOff" => "{0} desativou as mensagens temporárias",
-        "notice.deleted" => "Este grupo foi apagado",
-        "notice.missedVoice" => "Chamada de voz perdida",
-        "notice.missedVideo" => "Chamada de vídeo perdida",
-        "notice.membersChanged" => "Os membros do grupo mudaram. Clique para ver",
-        "ephemeral.off" => "Desativadas",
-        "ephemeral.day" => "24 horas",
-        "ephemeral.week" => "7 dias",
-        "ephemeral.quarter" => "90 dias",
-        "ephemeral.days" => "{0} dias",
-        "ephemeral.hours" => "{0} horas",
-        "ephemeral.minutes" => "{0} minutos",
-        "mention.all" => "todos",
-        "mention.allHint" => "Mencionar todos os membros desta conversa",
-        "mute.always" => "Silenciado sempre",
-        "mute.until" => "Silenciado até {0}",
-        "confirm.clearTitle" => "Limpar esta conversa?",
-        "confirm.clearBody" => "As mensagens serão removidas deste computador e do celular.",
-        "confirm.clear" => "Limpar conversa",
-        "confirm.deleteChatTitle" => "Apagar esta conversa?",
-        "confirm.deleteChatBody" => "A conversa e as mensagens serão removidas deste computador e do celular.",
-        "confirm.delete" => "Apagar conversa",
-        "confirm.exitTitle" => "Sair de \"{0}\"?",
-        "confirm.exitBody" => "Só os admins do grupo serão avisados de que você saiu.",
-        "confirm.exit" => "Sair",
-        "confirm.deleteTitle" => "Apagar {0} mensagem(ns)?",
-        "confirm.deleteBody" => "\"Apagar para todos\" remove para todos os participantes; \"Apagar para mim\" remove aqui e no celular.",
-        "confirm.deleteEveryone" => "Apagar para todos",
-        "confirm.deleteMe" => "Apagar para mim",
-        "forward.count" => "{0} mensagens",
-        "members.addFailed" => "Não foi possível adicionar: {0}",
-        "search.results" => "{0} mensagens encontradas",
-        "search.none" => "Nenhuma mensagem encontrada",
-        "export.mediaOmitted" => "<Mídia omitida>",
-        "pdf.loading" => "Abrindo documento…",
-        "pdf.engineMissing" => "O visualizador de PDF precisa de um motor de renderização (pdfium) baixado uma única vez, cerca de 7 MB.",
-        "pdf.installing" => "Baixando o motor de PDF…",
-        "pdf.installFailed" => "Não foi possível baixar o motor de PDF: {0}",
-        "pdf.failed" => "Não foi possível abrir este documento: {0}",
-        "notify.newMessages" => "{0} novas mensagens ({1})",
-        "notify.newMessage" => "Nova mensagem",
-        "notify.reply" => "Responder",
-        "notify.replyPlaceholder" => "Responder",
-        "notify.play" => "Reproduzir",
-        "notify.fromOne" => "{0} novas mensagens de {1}",
-        "notify.appName" => "Zapive",
-        "picker.images" => "Imagens",
-        "picker.audio" => "Áudio",
-        "picker.all" => "Todos os arquivos",
-        "lang.restart" => "Idioma salvo. Reinicie o Zapive para aplicar.",
-        "update.checking" => "Verificando atualizações…",
-        "update.latest" => "Você já está na versão mais recente.",
-        "autostart.failed" => "Não foi possível alterar a inicialização automática: {0}",
-        "msg.deleted" => "Essa mensagem foi apagada",
-        "msg.forwarded" => "Encaminhada",
-        "tray.open" => "Abrir Zapive",
-        "tray.exit" => "Sair",
-        "preview.sticker" => "🩵 Figurinha",
-        "preview.video" => "🎬 Vídeo",
-        "rec.noMic" => "Nenhum microfone encontrado",
-        "info.members" => "{0} participantes",
-        "gif.noResults" => "Nenhum GIF encontrado",
-        "fav.empty" => "Marque uma figurinha com estrela no celular para guardá-la aqui",
-        "call.incomingVoice" => "Chamada de voz recebida",
-        "call.incomingVideo" => "Chamada de vídeo recebida",
-        "call.answered" => "Atendida",
-        "call.elsewhere" => "Atendida em outro aparelho",
-        "call.declined" => "Recusada",
-        "call.missed" => "Chamada perdida",
-        "call.noAnswer" => "Sem resposta",
-        "call.ended" => "Chamada encerrada",
-        "call.ringing" => "Tocando",
-        "call.calling" => "Chamando\u{2026}",
-        "call.connecting" => "Conectando\u{2026}",
-        "call.inCall" => "Em chamada",
-        "call.video" => "Chamada de vídeo",
-        "call.voice" => "Chamada de voz",
-        "call.in" => "Recebida",
-        "call.out" => "Efetuada",
-        "call.gone" => "Essa chamada não está mais tocando",
-        "call.noDevices" => "Nenhum microfone ou alto-falante disponível",
-        "call.noCamera" => "Não foi possível abrir a câmera",
-        "device.system" => "Padrão do sistema",
-        "call.failed" => "Não foi possível conectar a chamada",
-        "preview.gif" => "🎬 GIF",
-        "preview.reacted" => "Reagiu {0} a: \"{1}\"",
-        "alert.conflictTitle" => "Sessão assumida em outro lugar",
-        "alert.conflictBody" => "O WhatsApp foi aberto em outro lugar com esta conta. Apenas uma sessão fica conectada por vez.",
-        "alert.reconnect" => "Usar aqui",
-        "alert.offlineTitle" => "Não foi possível conectar",
-        "alert.offlineBody" => "O Zapive tentou reconectar várias vezes sem sucesso. Verifique a conexão e tente de novo.",
-        "alert.retry" => "Tentar de novo",
-        "alert.close" => "Fechar",
-        "reactions.count" => "{0} reações",
-        "reactions.you" => "Você",
-        "forward.title" => "Encaminhar mensagem para",
-        "emoji.smileys" => "Smileys e emoções",
-        "emoji.people" => "Pessoas e corpo",
-        "emoji.animals" => "Animais e natureza",
-        "emoji.food" => "Comidas e bebidas",
-        "emoji.activities" => "Atividades",
-        "emoji.travel" => "Viagens e lugares",
-        "emoji.objects" => "Objetos",
-        "emoji.symbols" => "Símbolos",
-        "emoji.flags" => "Bandeiras",
-        _ => key_missing(key),
-    }
-}
-
-fn key_missing(key: &str) -> &'static str {
-    debug_assert!(false, "missing i18n key: {key}");
-    ""
-}
-
-pub fn t(key: &str) -> String {
-    ta(key, &[])
-}
-
-// Positional {0}/{1} substitution, mirroring the Node build's t().
-pub fn ta(key: &str, args: &[&str]) -> String {
-    let raw = match current_locale() {
-        Locale::Pt => {
-            let s = pt(key);
-            if s.is_empty() { en(key) } else { s }
+// Names between braces across every form, sorted and unique. `{}` (Slint's
+// anonymous argument) has no name and is skipped.
+fn extract_placeholders(forms: &[&str]) -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for form in forms {
+        let mut remaining = *form;
+        while let Some(start) = remaining.find('{') {
+            let Some(end) = remaining[start + 1..].find('}') else { break };
+            let name = &remaining[start + 1..start + 1 + end];
+            if !name.is_empty() { names.push(&*Box::leak(name.to_string().into_boxed_str())); }
+            remaining = &remaining[start + end + 2..];
         }
-        Locale::En => en(key),
-    };
-    let mut out = if raw.is_empty() { key.to_string() } else { raw.to_string() };
-    for (i, arg) in args.iter().enumerate() {
-        out = out.replacen(&format!("{{{i}}}"), arg, 1);
     }
-    out
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::{Path, PathBuf};
+    // domain.area.item: two or more dot-separated segments, each starting with a
+    // lowercase letter (a digit is allowed after the first segment) and then letters,
+    // digits or '_': status.scanQr, account.backup.erase_action.
+    fn is_id(text: &str) -> bool {
+        let mut parts = 0;
+        for part in text.split('.') {
+            let mut chars = part.chars();
+            let ok = chars.next().is_some_and(|c| c.is_ascii_lowercase() || (parts > 0 && c.is_ascii_digit()))
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !ok { return false; }
+            parts += 1;
+        }
+        parts >= 2
+    }
+
+    fn files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
+        let mut entries = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() { files(&path, ext, out); }
+            else if path.extension().is_some_and(|e| e == ext) { out.push(path); }
+        }
+    }
+
+    // (file:line, first string literal) of every `name("literal"` call.
+    fn calls(dir: &str, ext: &str, pattern: &str, skip: &str) -> Vec<(String, String)> {
+        let re = regex::Regex::new(pattern).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut paths = Vec::new();
+        files(&root.join(dir), ext, &mut paths);
+        let mut found = Vec::new();
+        for path in paths {
+            if path.file_name().is_some_and(|n| n == skip) { continue; }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (index, line) in text.lines().enumerate() {
+                for caps in re.captures_iter(line) {
+                    let rel = path.strip_prefix(root).unwrap().display().to_string().replace('\\', "/");
+                    found.push((format!("{rel}:{}", index + 1), caps[1].to_string()));
+                }
+            }
+        }
+        found
+    }
+
+    fn rust_calls() -> Vec<(String, String, &'static str)> {
+        let mut found = Vec::new();
+        for (kind, pattern) in [("t", r#"\bt\(\s*"([^"]*)""#), ("ta", r#"\bta\(\s*"([^"]*)""#), ("tp", r#"\btp\(\s*"([^"]*)""#)] {
+            for (at, id) in calls("src", "rs", pattern, "i18n.rs") { found.push((at, id, kind)); }
+        }
+        found
+    }
+
+    fn slint_calls() -> Vec<(String, String)> {
+        calls("ui", "slint", r#"@tr\(\s*"((?:[^"\\]|\\.)*)""#, "")
+    }
+
+    // Plural usage in Slint: @tr("a.one" | "a.other" % n). The first literal is matched by
+    // slint_calls; this returns the second one (file:line, "a.other").
+    fn slint_plural_others() -> Vec<(String, String)> {
+        calls("ui", "slint", r#"@tr\(\s*"(?:[^"\\]|\\.)*"\s*\|\s*"((?:[^"\\]|\\.)*)""#, "")
+    }
+
+    fn catalog(path: &str) -> (Vec<(&'static str, Entry)>, String) {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let text = std::fs::read_to_string(root.join(path)).unwrap();
+        (parse_catalog(&text), text)
+    }
+
+    #[test]
+    fn catalogs_are_complete_context_free_and_in_step() {
+        let (en, en_text) = catalog("i18n/en_US/LC_MESSAGES/zapive.po");
+        let (pt, pt_text) = catalog("i18n/pt/LC_MESSAGES/zapive.po");
+        for (name, text) in [("en_US", &en_text), ("pt", &pt_text)] {
+            assert!(!text.lines().any(|l| l.starts_with("msgctxt")), "{name}: msgctxt is not allowed");
+            assert!(text.contains("Plural-Forms: nplurals=2; plural=(n != 1);"), "{name}: plural rule");
+        }
+        let ids = |entries: &[(&'static str, Entry)]| entries.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        for (name, entries) in [("en_US", &en), ("pt", &pt)] {
+            let all = ids(entries);
+            let unique = all.iter().collect::<BTreeSet<_>>();
+            assert_eq!(all.len(), unique.len(), "{name}: duplicate msgid");
+            for (id, entry) in entries {
+                assert!(entry.forms.iter().all(|form| !form.is_empty()), "{name}: empty msgstr for {id}");
+                if entry.plural {
+                    assert!(id.ends_with(".one") && is_id(id), "{name}: plural msgid must be <id>.one: {id}");
+                    assert_eq!(entry.forms.len(), 2, "{name}: {id} needs msgstr[0] and msgstr[1]");
+                }
+            }
+        }
+        for (id, entry) in &en {
+            if entry.plural {
+                let base = id.trim_end_matches(".one");
+                assert!(en_text.contains(&format!("msgid_plural \"{base}.other\"")), "en_US: {id} needs msgid_plural {base}.other");
+            }
+        }
+        let by_id = |entries: Vec<(&'static str, Entry)>| entries.into_iter().collect::<BTreeMap<_, _>>();
+        let (en, pt) = (by_id(en), by_id(pt));
+        assert_eq!(en.keys().collect::<Vec<_>>(), pt.keys().collect::<Vec<_>>(), "en_US and pt must hold the same ids");
+        for (id, en_entry) in &en {
+            let pt_entry = &pt[id];
+            assert_eq!(en_entry.plural, pt_entry.plural, "plural mismatch: {id}");
+            assert_eq!(en_entry.placeholders, pt_entry.placeholders, "placeholder mismatch: {id}");
+        }
+    }
+
+    #[test]
+    fn rust_calls_resolve_to_the_right_kind_of_entry_in_both_locales() {
+        let catalogs = catalogs();
+        let calls = rust_calls();
+        assert!(calls.len() > 100, "scanner found only {} calls", calls.len());
+        for (at, id, kind) in &calls {
+            assert!(is_id(id), "{at}: {kind}(\"{id}\") is not a semantic id");
+            for (name, map) in [("en_US", &catalogs.en), ("pt", &catalogs.pt)] {
+                let entry = map.get(id.as_str()).unwrap_or_else(|| panic!("{at}: {id} missing in {name}"));
+                assert_eq!(entry.plural, *kind == "tp", "{at}: {kind}(\"{id}\") against a {} entry", if entry.plural { "plural" } else { "singular" });
+                let numbered = entry.placeholders.iter().all(|p| p.parse::<usize>().is_ok());
+                assert!(*kind == "tp" || numbered, "{at}: {id} has named placeholders, use tp");
+            }
+        }
+    }
+
+    // Every id the code or UI can ask for. A Slint plural names two ids, "<id>.one" and
+    // "<id>.other"; the catalog stores them as one entry keyed by "<id>.one".
+    fn referenced_ids() -> BTreeSet<String> {
+        let mut used = BTreeSet::new();
+        for (_, id, _) in rust_calls() { used.insert(id); }
+        for id in ["preview.voice", "preview.audio"] { used.insert(id.to_string()); }
+        for (_, id) in slint_calls() { used.insert(id); }
+        for (_, id) in slint_plural_others() { used.insert(id); }
+        for key in ["emoji.smileys", "emoji.people", "emoji.animals", "emoji.food", "emoji.travel", "emoji.activities", "emoji.objects", "emoji.symbols", "emoji.flags"] {
+            used.insert(key.to_string());
+        }
+        used.insert("sync.progress".to_string());
+        used
+    }
+
+    #[test]
+    fn no_catalog_entry_is_orphaned_or_outside_the_id_pattern() {
+        let catalogs = catalogs();
+        let used = referenced_ids();
+        let (en, _) = catalog("i18n/en_US/LC_MESSAGES/zapive.po");
+        for (id, entry) in &en {
+            assert!(is_id(id), "catalog msgid is not a semantic id (transitional literal?): {id:?}");
+            let base = id.strip_suffix(".one").filter(|_| entry.plural);
+            let referenced = used.contains(*id) || base.is_some_and(|base| used.contains(base) || used.contains(&format!("{base}.other")));
+            assert!(referenced, "orphan id: {id} is not referenced by src/**/*.rs or ui/**/*.slint");
+        }
+        let pt_only = catalogs.pt.keys().filter(|id| !catalogs.en.contains_key(*id)).collect::<Vec<_>>();
+        assert!(pt_only.is_empty(), "ids only in pt: {pt_only:?}");
+    }
+
+    #[test]
+    fn every_slint_translation_is_an_id_present_in_both_catalogs() {
+        let catalogs = catalogs();
+        let calls = slint_calls();
+        assert!(calls.len() > 200, "scanner found only {} @tr calls", calls.len());
+        for (at, arg) in &calls {
+            assert!(is_id(arg), "{at}: @tr(\"{arg}\") is not a semantic id");
+            for (name, map) in [("en_US", &catalogs.en), ("pt", &catalogs.pt)] {
+                let entry = map.get(arg.as_str()).unwrap_or_else(|| panic!("{at}: @tr(\"{arg}\") missing in {name}"));
+                assert!(entry.forms.iter().all(|form| !form.is_empty()), "{at}: empty msgstr for {arg} in {name}");
+            }
+        }
+        for (at, other) in slint_plural_others() {
+            assert!(is_id(&other) && other.ends_with(".other"), "{at}: plural second form must be <id>.other: {other}");
+            let one = format!("{}.one", other.trim_end_matches(".other"));
+            assert!(calls.iter().any(|(site, id)| site == &at && id == &one), "{at}: {other} has no matching {one} on the same line");
+            for (name, map) in [("en_US", &catalogs.en), ("pt", &catalogs.pt)] {
+                let entry = map.get(one.as_str()).unwrap_or_else(|| panic!("{at}: {one} missing in {name}"));
+                assert!(entry.plural, "{at}: {one} must be a plural entry in {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn bundled_translation_runtime_selects_both_locales() {
+        let _lock = LOCALE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ui = crate::AppWindow::new().expect("create Slint component");
+        for locale in ["en_US", "pt"] {
+            slint::select_bundled_translation(locale).expect("bundled locale exists");
+        }
+        slint::select_bundled_translation("en_US").expect("restore English bundle");
+    }
+
+    #[test]
+    fn interpolation_preserves_argument_placeholders_literally() {
+        assert_eq!(format_message("{0} {1}", &["{1}", "second"], None), "{1} second");
+        assert_eq!(format_message("{n}: {name}", &[], Some(3)), "3: {name}");
+
+        let plural_template = catalogs().en.get("selection.messages.count").unwrap().forms[1];
+        assert_eq!(format_message(plural_template, &["{1}"], Some(2)), "2 selected");
+        assert_eq!(format_message("{n} {0}", &["{n}"], Some(2)), "2 {n}");
+    }
+
+    #[test]
+    fn plural_forms_follow_the_count_in_both_locales() {
+        let _lock = LOCALE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = current_locale();
+        struct Restore(Locale);
+        impl Drop for Restore { fn drop(&mut self) { set_locale(self.0); } }
+        let _restore = Restore(previous);
+        set_locale(Locale::En);
+        assert_eq!(tp("ephemeral.minutes", 1, &[]), "1 minute");
+        assert_eq!(tp("ephemeral.minutes", 5, &[]), "5 minutes");
+        assert_eq!(tp("ephemeral.days", 0, &[]), "0 days");
+        set_locale(Locale::Pt);
+        assert_eq!(tp("ephemeral.hours", 1, &[]), "1 hora");
+        assert_eq!(tp("ephemeral.hours", 3, &[]), "3 horas");
+        assert_eq!(ta("status.connectFailed", &["rede"]), "Falha ao conectar: rede");
+        set_locale(Locale::En);
+        assert_eq!(ta("status.connectFailed", &["net"]), "Failed to connect: net");
+    }
 }

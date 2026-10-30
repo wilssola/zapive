@@ -109,7 +109,7 @@ export component HomeScreen inherits Rectangle {
             y: brand.y + brand.height + 8px;
             width: parent.width;
             height: 36px;
-            text: @tr("Select a conversation to start");
+            text: @tr("chat.empty.select_conversation");
             color: Theme.text-dim;
             font-size: root.compact ? 14px : 16px;
             horizontal-alignment: center;
@@ -125,19 +125,19 @@ export component HomeScreen inherits Rectangle {
             spacing: 12px;
             HomeAction {
                 width: (content.width - 24px) / 3;
-                label: @tr("Your conversations");
+                label: @tr("home.stats.conversations");
                 icon: @image-url("../icons/message-circle.svg");
                 clicked => { root.conversations(); }
             }
             HomeAction {
                 width: (content.width - 24px) / 3;
-                label: @tr("Your groups");
+                label: @tr("home.stats.groups");
                 icon: @image-url("../icons/users-group.svg");
                 clicked => { root.groups(); }
             }
             HomeAction {
                 width: (content.width - 24px) / 3;
-                label: @tr("Settings");
+                label: @tr("navigation.settings");
                 icon: @image-url("../icons/settings.svg");
                 clicked => { root.settings(); }
             }

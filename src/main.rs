@@ -87,13 +87,7 @@ fn main() {
         .map(|l| l.to_lowercase().starts_with("pt"))
         .unwrap_or(false);
     let use_pt = language == "pt" || (language == "system" && system_pt);
-    if use_pt {
-        i18n::set_locale(i18n::Locale::Pt);
-        slint::select_bundled_translation("pt").ok();
-    } else {
-        i18n::set_locale(i18n::Locale::En);
-    }
-
+    i18n::set_locale(if use_pt { i18n::Locale::Pt } else { i18n::Locale::En });
     let rt = RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             // Two was enough for messaging, but a call adds the relay
@@ -119,6 +113,8 @@ fn main() {
 
     fonts::install_emoji();
     let ui = AppWindow::new().expect("failed to create the main window");
+    slint::select_bundled_translation(if use_pt { "pt" } else { "en_US" })
+        .expect("selected bundled locale must exist");
     ui.set_native_backdrop(false);
     apply_native_backdrop(&ui);
     ui.set_language_mode(language.as_str().into());

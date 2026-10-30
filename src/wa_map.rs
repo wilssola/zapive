@@ -5,7 +5,7 @@ use crate::store::{
     MessageKind, Store, StoredMessage, clean_text, display_id, format_duration,
     is_displayable_jid, normalize_jid, quoted_summary,
 };
-use crate::i18n::{t, ta};
+use crate::i18n::{t, ta, tp};
 use std::collections::HashMap;
 use std::sync::Arc;
 use whatsapp_rust::types::events::InboundMessage;
@@ -101,9 +101,9 @@ pub fn ephemeral_label(secs: u32) -> String {
         86_400 => t("ephemeral.day"),
         604_800 => t("ephemeral.week"),
         7_776_000 => t("ephemeral.quarter"),
-        s if s % 86_400 == 0 => ta("ephemeral.days", &[&(s / 86_400).to_string()]),
-        s if s % 3600 == 0 => ta("ephemeral.hours", &[&(s / 3600).to_string()]),
-        s => ta("ephemeral.minutes", &[&(s / 60).to_string()]),
+        s if s % 86_400 == 0 => crate::i18n::tp("ephemeral.days", (s / 86_400) as i64, &[]),
+        s if s % 3600 == 0 => crate::i18n::tp("ephemeral.hours", (s / 3600) as i64, &[]),
+        s => crate::i18n::tp("ephemeral.minutes", (s / 60) as i64, &[]),
     }
 }
 
@@ -583,4 +583,147 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         reactions: HashMap::new(),
         raw: Some(inbound.message.clone()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{LOCALE_TEST_LOCK, Locale, set_locale};
+
+    fn map(message: wa::Message) -> Option<StoredMessage> {
+        normalize(&mut Store::default(), &LiveMeta {
+            chat: "123@s.whatsapp.net".into(), sender: "123@s.whatsapp.net".into(),
+            sender_alt: None, recipient_alt: None, id: "m1", from_me: false,
+            is_group: false, push_name: "Alice", timestamp: 1234,
+        }, &message, &HashMap::new(), 5)
+    }
+
+    #[test]
+    fn text_metadata_and_empty_messages() {
+        assert!(map(wa::Message::default()).is_none());
+        let m = map(wa::Message { conversation: Some("hello".into()), ..Default::default() }).unwrap();
+        assert_eq!(m.text, "hello");
+        assert_eq!(m.jid, "123@s.whatsapp.net");
+        assert_eq!(m.id, "m1");
+        assert_eq!(m.timestamp, 1234);
+        assert_eq!(m.status, 0);
+        assert!(matches!(m.kind, MessageKind::Text));
+        assert!(m.raw.is_some());
+    }
+
+    #[test]
+    fn media_fields_and_defaults() {
+        let image = map(wa::Message { image_message: Some(wa::message::ImageMessage {
+            caption: Some("caption".into()), width: Some(640), height: Some(480),
+            mimetype: Some("image/png".into()), ..Default::default()
+        }).into(), ..Default::default() }).unwrap();
+        assert!(matches!(image.kind, MessageKind::Image));
+        assert_eq!((image.media_w, image.media_h), (640, 480));
+        assert_eq!(image.text, "caption");
+        assert_eq!(image.mimetype, "image/png");
+        let audio = map(wa::Message { audio_message: Some(wa::message::AudioMessage {
+            seconds: Some(65), ..Default::default()
+        }).into(), ..Default::default() }).unwrap();
+        assert!(matches!(audio.kind, MessageKind::Audio));
+        assert_eq!(audio.duration_sec, 65);
+        let video = map(wa::Message { video_message: Some(wa::message::VideoMessage {
+            gif_playback: Some(true), seconds: Some(9), ..Default::default()
+        }).into(), ..Default::default() }).unwrap();
+        assert!(matches!(video.kind, MessageKind::Video));
+        assert!(video.gif);
+        assert_eq!(video.duration_sec, 9);
+        let sticker = map(wa::Message { sticker_message: Some(wa::message::StickerMessage::default()).into(), ..Default::default() }).unwrap();
+        assert!(sticker.sticker);
+        assert!(matches!(sticker.kind, MessageKind::Image));
+        let doc = map(wa::Message { document_message: Some(wa::message::DocumentMessage {
+            file_name: Some("report.pdf".into()), title: Some("ignored".into()), ..Default::default()
+        }).into(), ..Default::default() }).unwrap();
+        assert!(matches!(doc.kind, MessageKind::Doc));
+        assert_eq!(doc.text, "report.pdf");
+    }
+
+    #[test]
+    fn extended_text_context_and_link_preview() {
+        let m = map(wa::Message { extended_text_message: Some(wa::message::ExtendedTextMessage {
+            text: Some("link".into()), title: Some("title".into()),
+            description: Some("description".into()), matched_text: Some("https://example.com".into()),
+            context_info: Some(wa::ContextInfo {
+                is_forwarded: Some(true), stanza_id: Some("quoted".into()),
+                mentioned_jid: vec!["456@s.whatsapp.net".into()],
+                ..Default::default()
+            }).into(), ..Default::default()
+        }).into(), ..Default::default() }).unwrap();
+        assert!(m.forwarded);
+        assert_eq!(m.quote_id, "");
+        assert_eq!(m.mentions, vec!["456@s.whatsapp.net"]);
+        assert_eq!(m.link_title, "title");
+        assert_eq!(m.link_desc, "description");
+        assert_eq!(m.link_url, "https://example.com");
+    }
+
+    #[test]
+    fn protocol_reaction_and_unknown_payloads_are_not_bubbles() {
+        assert!(map(wa::Message { reaction_message: Some(wa::message::ReactionMessage::default()).into(), ..Default::default() }).is_none());
+        assert!(map(wa::Message { protocol_message: Some(wa::message::ProtocolMessage::default()).into(), ..Default::default() }).is_none());
+    }
+
+    #[test]
+    fn history_requires_key_id_and_message() {
+        let mut store = Store::default();
+        assert!(from_history(&mut store, &wa::WebMessageInfo::default()).is_none());
+        let mut web = wa::WebMessageInfo {
+            key: Some(wa::MessageKey { id: Some("history".into()), remote_jid: Some("123@s.whatsapp.net".into()), from_me: Some(true), ..Default::default() }).into(),
+            message: Some(wa::Message { conversation: Some("old".into()), ..Default::default() }).into(),
+            message_timestamp: Some(99), starred: Some(true), ..Default::default()
+        };
+        let m = from_history(&mut store, &web).unwrap();
+        assert_eq!(m.timestamp, 99);
+        assert_eq!(m.status, 2);
+        assert!(m.from_me);
+        assert!(!m.starred);
+        web.key = Some(wa::MessageKey::default()).into();
+        assert!(from_history(&mut store, &web).is_none());
+    }
+
+    #[test]
+    fn history_normalizes_device_jids_and_defaults_timestamp() {
+        let web = wa::WebMessageInfo {
+            key: Some(wa::MessageKey {
+                remote_jid: Some("123:7@s.whatsapp.net".into()),
+                id: Some("device".into()), ..Default::default()
+            }).into(),
+            message: Some(wa::Message { conversation: Some("body".into()), ..Default::default() }).into(),
+            ..Default::default()
+        };
+        let m = from_history(&mut Store::default(), &web).unwrap();
+        assert_eq!(m.jid, "123@s.whatsapp.net");
+        assert_eq!(m.timestamp, 0);
+        assert_eq!(m.status, 0);
+        let mut invalid = web.clone();
+        invalid.key = Some(wa::MessageKey { remote_jid: Some("123@s.whatsapp.net".into()), id: Some(String::new()), ..Default::default() }).into();
+        assert!(from_history(&mut Store::default(), &invalid).is_none());
+    }
+
+    #[test]
+    fn system_defaults_and_duration_units() {
+        let _lock = LOCALE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = crate::i18n::current_locale();
+        struct Restore(Locale);
+        impl Drop for Restore { fn drop(&mut self) { set_locale(self.0); } }
+        let _restore = Restore(previous);
+        set_locale(Locale::En);
+        let m = system_message("chat", "notice", -1, "notice text".into());
+        assert!(matches!(m.kind, MessageKind::System));
+        assert_eq!(m.timestamp, -1);
+        assert!(m.raw.is_none());
+        assert!(!m.from_me);
+        assert!(!m.deleted);
+        assert_eq!(ephemeral_label(120), "2 minutes");
+        assert_eq!(ephemeral_label(7200), "2 hours");
+        assert_eq!(ephemeral_label(172800), "2 days");
+        assert_eq!(ephemeral_label(61), "1 minute");
+        assert_eq!(join_names(&[]), "");
+        assert_eq!(join_names(&["A".into()]), "A");
+        assert_eq!(join_names(&["A".into(), "B".into()]), "A and B");
+    }
 }

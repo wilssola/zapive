@@ -6,6 +6,7 @@ description = "Native WhatsApp desktop client"
 publish = false
 
 [dependencies]
+rspolib = "=0.1.2"
 slint = { git = "https://github.com/slint-ui/slint", rev = "e492aa764c83c5b5c2cd9b6f04c840d6039339c0", default-features = false, features = [
     "std",
     "backend-winit",

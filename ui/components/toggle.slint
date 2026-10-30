@@ -14,7 +14,7 @@ export component Toggle inherits TouchArea {
         height: parent.height;
         border-radius: 12px;
         background: root.on ? Theme.accent : (Theme.dark ? #3b4a54 : #c5ccd1);
-        animate background { duration: 150ms; }
+        animate background { duration: Theme.motion-normal; easing: ease-out; }
         Rectangle {
             width: 18px;
             height: 18px;

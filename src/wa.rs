@@ -2656,3 +2656,38 @@ fn wrap_view_once(inner: wa::Message) -> wa::Message {
 fn format_pair_code(code: &str) -> String {
     if code.len() == 8 { format!("{}-{}", &code[..4], &code[4..]) } else { code.to_string() }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_encoding_uses_form_spaces_and_utf8_bytes() {
+        assert_eq!(urlencode(""), "");
+        assert_eq!(urlencode("Az09-_.~"), "Az09-_.~");
+        assert_eq!(urlencode("a b+c/&"), "a+b%2Bc%2F%26");
+        assert_eq!(urlencode("é"), "%C3%A9");
+    }
+
+    #[test]
+    fn pairing_code_only_formats_eight_bytes() {
+        assert_eq!(format_pair_code("12345678"), "1234-5678");
+        assert_eq!(format_pair_code(""), "");
+        assert_eq!(format_pair_code("1234567"), "1234567");
+        assert_eq!(format_pair_code("123456789"), "123456789");
+    }
+
+    #[test]
+    fn view_once_wrapper_preserves_inner_content() {
+        let wrapped = wrap_view_once(wa::Message { conversation: Some("secret".into()), ..Default::default() });
+        assert!(wrapped.conversation.is_none());
+        let inner = wrapped.view_once_message_v2.as_option().unwrap().message.as_option().unwrap();
+        assert_eq!(inner.conversation.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn thumbnail_rejects_invalid_images() {
+        assert!(make_jpeg_thumb(&[]).is_none());
+        assert!(make_jpeg_thumb(b"not an image").is_none());
+    }
+}

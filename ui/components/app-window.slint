@@ -119,7 +119,7 @@ component MediaPlaceholder inherits TouchArea {
             }
         }
         if root.loading: Text {
-            text: root.progress < 0 ? @tr("Downloading…") : round(clamp(root.progress, 0, 100)) + "%";
+            text: root.progress < 0 ? @tr("media.download.downloading") : round(clamp(root.progress, 0, 100)) + "%";
             color: white;
             font-size: 11px;
             width: parent.width;
@@ -213,7 +213,7 @@ export component AppWindow inherits Window {
     changed screen => {
         if (self.screen == "main") { capture-scope.focus(); }
     }
-    in-out property <string> status-text: @tr("Connecting...");
+    in-out property <string> status-text: @tr("connection.status.connecting");
 
     // Lock screen
     in-out property <string> lock-error: "";
@@ -756,7 +756,7 @@ export component AppWindow inherits Window {
             }
         }
         Text {
-            text: @tr("Enter your PIN to unlock");
+            text: @tr("security.unlock.enter_pin_prompt");
             color: Theme.text-dim;
             font-size: 14px;
             horizontal-alignment: center;
@@ -766,11 +766,11 @@ export component AppWindow inherits Window {
             pin-input := LineEdit {
                 width: 220px;
                 input-type: password;
-                placeholder-text: @tr("PIN");
+                placeholder-text: @tr("security.unlock.pin_placeholder");
                 accepted => { root.unlock(self.text); self.text = ""; }
             }
             Button {
-                text: @tr("Unlock");
+                text: @tr("security.unlock.action");
                 primary: true;
                 clicked => { root.unlock(pin-input.text); pin-input.text = ""; }
             }
@@ -814,7 +814,7 @@ export component AppWindow inherits Window {
                         spacing: 22px;
                         horizontal-stretch: 1;
                         Text {
-                            text: @tr("Log in to WhatsApp");
+                            text: @tr("account.login.whatsapp.title");
                             color: Theme.text;
                             font-size: 24px;
                             font-weight: 700;
@@ -824,13 +824,13 @@ export component AppWindow inherits Window {
                             color: Theme.text-dim;
                             font-size: 13px;
                         }
-                        Text { text: @tr("1.  Open WhatsApp on your phone"); color: Theme.text; font-size: 15px; }
-                        Text { text: @tr("2.  Tap Menu and then Linked devices"); color: Theme.text; font-size: 15px; }
-                        Text { text: @tr("3.  Tap Link a device"); color: Theme.text; font-size: 15px; }
-                        Text { text: @tr("4.  Point your camera at this code"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("account.login.qr.step_open_whatsapp"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("account.login.qr.step_linked_devices"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("account.login.qr.step_link_device"); color: Theme.text; font-size: 15px; }
+                        Text { text: @tr("account.login.qr.step_scan_code"); color: Theme.text; font-size: 15px; }
                         Rectangle { height: 8px; }
                         GreenLink {
-                            label: @tr("Log in with phone number  ›");
+                            label: @tr("account.login.phone.open");
                             clicked => { root.pairing-mode = true; }
                         }
                     }
@@ -856,13 +856,13 @@ export component AppWindow inherits Window {
                     spacing: 20px;
                     alignment: start;
                     Text {
-                        text: @tr("Log in with phone number");
+                        text: @tr("account.login.phone.title");
                         color: Theme.text;
                         font-size: 24px;
                         font-weight: 700;
                     }
                     Text {
-                        text: @tr("Enter your number with the country code to receive a code to type on your phone.");
+                        text: @tr("account.login.phone.instructions");
                         color: Theme.text-dim;
                         font-size: 13px;
                         wrap: word-wrap;
@@ -871,10 +871,10 @@ export component AppWindow inherits Window {
                         spacing: 12px;
                         phone-input := LineEdit {
                             width: 300px;
-                            placeholder-text: @tr("E.g.: 5511999998888");
+                            placeholder-text: @tr("account.login.phone.number_placeholder");
                         }
                         Button {
-                            text: @tr("Get code");
+                            text: @tr("account.login.phone.request_code");
                             primary: true;
                             clicked => { root.request-pairing-code(phone-input.text); }
                         }
@@ -888,7 +888,7 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { vertical-stretch: 1; }
                     GreenLink {
-                        label: @tr("‹  Back to QR code");
+                        label: @tr("account.login.qr.back");
                         clicked => { root.pairing-mode = false; }
                     }
                 }
@@ -921,15 +921,15 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                         Text {
                             text: root.kept-number != ""
-                                ? @tr("Conversations of {} are saved on this computer", root.kept-number)
-                                : @tr("Conversations are saved on this computer");
+                                ? @tr("account.backup.saved_for_number", root.kept-number)
+                                : @tr("account.backup.saved");
                             color: Theme.text;
                             font-size: 14px;
                             font-weight: 600;
                             wrap: word-wrap;
                         }
                         Text {
-                            text: @tr("Link the same number and the app picks up where it left off, without downloading everything again. A different number starts clean.");
+                            text: @tr("account.backup.restore_explanation");
                             color: Theme.text-dim;
                             font-size: 12px;
                             wrap: word-wrap;
@@ -938,7 +938,7 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         DialogButton {
-                            label: @tr("Erase");
+                            label: @tr("account.backup.erase_action");
                             clicked => { root.forget-conversations(); }
                         }
                     }
@@ -956,7 +956,7 @@ export component AppWindow inherits Window {
                     padding: 10px;
                     spacing: 2px;
                     Text {
-                        text: @tr("Other accounts");
+                        text: @tr("account.menu.other_accounts");
                         color: Theme.text-dim;
                         font-size: 12px;
                         height: 24px;
@@ -1157,7 +1157,7 @@ export component AppWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         Text {
-                            text: @tr("Status");
+                            text: @tr("navigation.status");
                             color: Theme.text;
                             font-size: 21px;
                             font-weight: 700;
@@ -1167,7 +1167,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 if root.statuses.length == 0: Text {
-                    text: @tr("No recent updates");
+                    text: @tr("status.empty.recent_updates");
                     color: Theme.text-dim;
                     font-size: 13px;
                     horizontal-alignment: center;
@@ -1238,7 +1238,7 @@ export component AppWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         Text {
-                            text: @tr("Calls");
+                            text: @tr("navigation.calls");
                             color: Theme.text;
                             font-size: 21px;
                             font-weight: 700;
@@ -1248,7 +1248,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 if root.calls.length == 0: Text {
-                    text: @tr("No calls yet");
+                    text: @tr("calls.empty.list");
                     color: Theme.text-dim;
                     font-size: 13px;
                     horizontal-alignment: center;
@@ -1331,9 +1331,9 @@ export component AppWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         Text {
-                            text: root.sidebar-view == "channels" ? @tr("Channels")
-                                : root.sidebar-view == "communities" ? @tr("Communities")
-                                : @tr("Chats");
+                            text: root.sidebar-view == "channels" ? @tr("navigation.channels")
+                                : root.sidebar-view == "communities" ? @tr("navigation.communities")
+                                : @tr("navigation.chats");
                             color: Theme.text;
                             font-size: 21px;
                             font-weight: 700;
@@ -1382,7 +1382,7 @@ export component AppWindow inherits Window {
                                     edited => { root.search-changed(self.text); }
                                 }
                                 if search-box.text == "": Text {
-                                    text: @tr("Search chats");
+                                    text: @tr("chat.search.placeholder");
                                     color: Theme.text-dim;
                                     font-size: 12px;
                                     width: parent.width;
@@ -1439,28 +1439,28 @@ export component AppWindow inherits Window {
                         spacing: 5px;
                         alignment: start;
                         FilterChip {
-                            label: @tr("All");
+                            label: @tr("chat.filter.all");
                             active: root.chat-tab == "all";
                             clicked => { root.chat-tab = "all"; root.tab-changed("all"); }
                         }
                         FilterChip {
-                            label: @tr("Unread");
+                            label: @tr("chat.filter.unread");
                             count: root.chats-unread-count;
                             active: root.chat-tab == "unread";
                             clicked => { root.chat-tab = "unread"; root.tab-changed("unread"); }
                         }
                         FilterChip {
-                            label: @tr("Favorites");
+                            label: @tr("chat.filter.favorites");
                             active: root.chat-tab == "favorites";
                             clicked => { root.chat-tab = "favorites"; root.tab-changed("favorites"); }
                         }
                         FilterChip {
-                            label: @tr("Groups");
+                            label: @tr("chat.filter.groups");
                             active: root.chat-tab == "groups";
                             clicked => { root.chat-tab = "groups"; root.tab-changed("groups"); }
                         }
                         FilterChip {
-                            label: @tr("Archived");
+                            label: @tr("chat.filter.archived");
                             active: root.chat-tab == "archived";
                             clicked => { root.chat-tab = "archived"; root.tab-changed("archived"); }
                         }
@@ -1493,7 +1493,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         Text {
-                            text: @tr("Archived");
+                            text: @tr("chat.filter.archived");
                             color: Theme.text;
                             font-size: 14px;
                             vertical-alignment: center;
@@ -1527,7 +1527,7 @@ export component AppWindow inherits Window {
                 if root.search-hits.length > 0: Rectangle {
                     height: 28px;
                     Text {
-                        text: @tr("Chats");
+                        text: @tr("chat.search.chats_heading");
                         color: Theme.accent;
                         font-size: 13px;
                         font-weight: 700;
@@ -1694,7 +1694,7 @@ export component AppWindow inherits Window {
                 if root.search-hits.length > 0: Rectangle {
                     height: 28px;
                     Text {
-                        text: @tr("Messages");
+                        text: @tr("chat.search.messages_heading");
                         color: Theme.accent;
                         font-size: 13px;
                         font-weight: 700;
@@ -1855,6 +1855,8 @@ export component AppWindow inherits Window {
                 visible: root.chat-open;
                 width: 100%;
                 height: 100%;
+                opacity: root.chat-open ? 1 : 0;
+                animate opacity { duration: Theme.motion-normal; easing: ease-out; }
 
                 // The conversation and the day pill floating over it.
                 Rectangle {
@@ -2053,7 +2055,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 Text {
-                                    text: @tr("Unread messages");
+                                    text: @tr("chat.unread.separator");
                                     color: Theme.text-dim;
                                     font-size: 11px;
                                     horizontal-stretch: 0;
@@ -2232,7 +2234,7 @@ export component AppWindow inherits Window {
                                         y: 1px;
                                     }
                                     Text {
-                                        text: @tr("Forwarded");
+                                        text: @tr("message.forwarded.label");
                                         font-size: 11px;
                                         font-italic: true;
                                         color: Theme.text-dim;
@@ -2253,7 +2255,7 @@ export component AppWindow inherits Window {
                                         y: 1px;
                                     }
                                     Text {
-                                        text: @tr("Deleted by sender");
+                                        text: @tr("message.deleted_by_sender");
                                         font-size: 11px;
                                         font-italic: true;
                                         color: Theme.text-dim;
@@ -2448,7 +2450,7 @@ export component AppWindow inherits Window {
                                                 clicked => { root.doc-view(msg.id); }
                                             }
                                             Text {
-                                                text: msg.mediaReady ? @tr("View") : @tr("Download");
+                                                text: msg.mediaReady ? @tr("media.action.view") : @tr("media.action.download");
                                                 color: msg.mediaReady ? Theme.accent : Theme.text-dim;
                                                 font-size: 13px;
                                                 font-weight: 700;
@@ -2468,7 +2470,7 @@ export component AppWindow inherits Window {
                                                 clicked => { root.doc-save(msg.id); }
                                             }
                                             Text {
-                                                text: @tr("Save as...");
+                                                text: @tr("file.action.save_as");
                                                 color: msg.mediaReady ? Theme.accent : Theme.text-dim;
                                                 font-size: 13px;
                                                 font-weight: 700;
@@ -2513,7 +2515,7 @@ export component AppWindow inherits Window {
                                                 font-weight: 600;
                                             }
                                             Text {
-                                                text: @tr("Audio") + " · " + msg.text;
+                                                text: @tr("media.type.audio") + " · " + msg.text;
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 font-size: 11px;
                                             }
@@ -3192,7 +3194,7 @@ export component AppWindow inherits Window {
                             clicked => { root.select-cancel(); }
                         }
                         Text {
-                            text: @tr("{} selected", root.select-count);
+                            text: @tr("selection.messages.count.one" | "selection.messages.count.other" % root.select-count);
                             color: Theme.text;
                             font-size: 15px;
                             vertical-alignment: center;
@@ -3230,25 +3232,25 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         alignment: center;
                         if root.current-left: Text {
-                            text: @tr("You can't send messages to this group because you're no longer a member.");
+                            text: @tr("chat.composer.not_member");
                             color: Theme.text-dim;
                             font-size: 14px;
                             vertical-alignment: center;
                         }
                         if !root.current-left: Text {
-                            text: @tr("Only ");
+                            text: @tr("chat.composer.admins_only_prefix");
                             color: Theme.text-dim;
                             font-size: 14px;
                             vertical-alignment: center;
                         }
                         if !root.current-left: Text {
-                            text: @tr("admins");
+                            text: @tr("chat.composer.admins_only_highlight");
                             color: Theme.accent;
                             font-size: 14px;
                             vertical-alignment: center;
                         }
                         if !root.current-left: Text {
-                            text: @tr(" can send messages");
+                            text: @tr("chat.composer.admins_only_suffix");
                             color: Theme.text-dim;
                             font-size: 14px;
                             vertical-alignment: center;
@@ -3419,7 +3421,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 if message-input.text == "": Text {
-                                    text: @tr("Type a message");
+                                    text: @tr("chat.composer.placeholder");
                                     color: Theme.text-dim;
                                     font-size: 15px;
                                     x: 12px;
@@ -3482,19 +3484,25 @@ export component AppWindow inherits Window {
                         spacing: 12px;
                         VerticalLayout {
                             alignment: center;
-                            Avatar {
+                            Rectangle {
                                 width: 40px;
                                 height: 40px;
-                                src: root.current-avatar;
-                                has-image: root.current-avatar-has;
-                                initial: root.current-initial;
-                                color-idx: root.current-color-idx;
-                                privacy-blurred: root.blur-photos;
-                                privacy-reveal: header-avatar-touch.has-hover;
-                            }
-                            header-avatar-touch := TouchArea {
-                                width: 40px;
-                                height: 40px;
+                                Avatar {
+                                    x: 0;
+                                    y: 0;
+                                    width: 40px;
+                                    height: 40px;
+                                    src: root.current-avatar;
+                                    has-image: root.current-avatar-has;
+                                    initial: root.current-initial;
+                                    color-idx: root.current-color-idx;
+                                    privacy-blurred: root.blur-photos;
+                                    privacy-reveal: header-avatar-touch.has-hover;
+                                }
+                                header-avatar-touch := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                }
                             }
                         }
                         Rectangle {
@@ -3662,17 +3670,17 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         alignment: start;
                         FilterChip {
-                            label: @tr("Emoji");
+                            label: @tr("chat.picker.tab_emoji");
                             active: root.picker-tab == "emoji";
                             clicked => { root.picker-tab = "emoji"; }
                         }
                         FilterChip {
-                            label: @tr("Stickers");
+                            label: @tr("chat.picker.tab_stickers");
                             active: root.picker-tab == "sticker";
                             clicked => { root.picker-tab = "sticker"; }
                         }
                         FilterChip {
-                            label: @tr("Favorites");
+                            label: @tr("chat.picker.tab_favorites");
                             active: root.picker-tab == "fav";
                             clicked => { root.picker-tab = "fav"; }
                         }
@@ -3725,7 +3733,7 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             spacing: 6px;
                             gif-input := LineEdit {
-                                placeholder-text: @tr("Search GIFs");
+                                placeholder-text: @tr("chat.picker.search_gifs");
                                 accepted => { root.gif-search(self.text); }
                             }
                             IconButton {
@@ -3882,27 +3890,27 @@ export component AppWindow inherits Window {
                         spacing: 1px;
                         if root.current-is-group && !root.current-left: MenuRow {
                             icon: @image-url("../icons/user-plus.svg");
-                            label: @tr("Add member");
+                            label: @tr("chat.menu.add_member");
                             clicked => { root.menu-add-member(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/info-circle.svg");
-                            label: root.current-is-group ? @tr("Group info") : @tr("Contact info");
+                            label: root.current-is-group ? @tr("chat.menu.group_info") : @tr("chat.menu.contact_info");
                             clicked => { root.chat-menu-open = false; root.open-info(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/search.svg");
-                            label: @tr("Search");
+                            label: @tr("chat.menu.search");
                             clicked => { root.menu-search(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/checkbox.svg");
-                            label: @tr("Select messages");
+                            label: @tr("chat.menu.select_messages");
                             clicked => { root.select-start(""); }
                         }
                         MenuRow {
                             icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
-                            label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
+                            label: root.current-muted ? @tr("chat.menu.unmute") : @tr("chat.menu.mute");
                             detail: root.current-mute-label;
                             submenu: !root.current-muted;
                             clicked => {
@@ -3912,47 +3920,47 @@ export component AppWindow inherits Window {
                         }
                         if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
                             icon: @image-url("../icons/clock-pause.svg");
-                            label: @tr("Disappearing messages");
+                            label: @tr("chat.menu.disappearing");
                             detail: root.current-ephemeral-label;
                             submenu: true;
                             clicked => { root.chat-menu-sub = "ephemeral"; }
                         }
                         MenuRow {
                             icon: root.current-favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
-                            label: root.current-favorite ? @tr("Remove from Favorites") : @tr("Add to Favorites");
+                            label: root.current-favorite ? @tr("chat.menu.favorite_remove") : @tr("chat.menu.favorite_add");
                             clicked => { root.menu-favorite(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/list-details.svg");
-                            label: @tr("Add to list");
+                            label: @tr("chat.menu.add_to_list");
                             submenu: true;
                             clicked => { root.chat-menu-sub = "lists"; }
                         }
                         MenuRow {
                             icon: @image-url("../icons/download.svg");
-                            label: @tr("Export chat");
+                            label: @tr("chat.menu.export");
                             clicked => { root.menu-export(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/circle-x.svg");
-                            label: @tr("Close chat");
+                            label: @tr("chat.menu.close");
                             clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
                         MenuRow {
                             icon: @image-url("../icons/circle-minus.svg");
-                            label: @tr("Clear chat");
+                            label: @tr("chat.menu.clear");
                             clicked => { root.menu-clear(); }
                         }
                         if root.current-is-group && !root.current-left: MenuRow {
                             icon: @image-url("../icons/logout.svg");
-                            label: @tr("Exit group");
+                            label: @tr("chat.menu.exit_group");
                             tint: #f05d4d;
                             clicked => { root.menu-exit-group(); }
                         }
                         if !root.current-is-group || root.current-left: MenuRow {
                             icon: @image-url("../icons/trash.svg");
-                            label: @tr("Delete chat");
+                            label: @tr("chat.menu.delete");
                             tint: #f05d4d;
                             clicked => { root.menu-delete-chat(); }
                         }
@@ -3961,40 +3969,40 @@ export component AppWindow inherits Window {
                         spacing: 1px;
                         MenuRow {
                             icon: @image-url("../icons/arrow-left.svg");
-                            label: @tr("Mute notifications");
+                            label: @tr("chat.mute.title");
                             clicked => { root.chat-menu-sub = ""; }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
-                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("8 hours"); clicked => { root.menu-mute(8); } }
-                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("1 week"); clicked => { root.menu-mute(168); } }
-                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("Always"); clicked => { root.menu-mute(-1); } }
+                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_8h"); clicked => { root.menu-mute(8); } }
+                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_1w"); clicked => { root.menu-mute(168); } }
+                        MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_always"); clicked => { root.menu-mute(-1); } }
                     }
                     if root.chat-menu-sub == "ephemeral": VerticalLayout {
                         spacing: 1px;
                         MenuRow {
                             icon: @image-url("../icons/arrow-left.svg");
-                            label: @tr("Disappearing messages");
+                            label: @tr("chat.disappearing.title");
                             clicked => { root.chat-menu-sub = ""; }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
                         MenuRow {
                             icon: root.current-ephemeral == 86400 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                            label: @tr("24 hours");
+                            label: @tr("chat.disappearing.duration_24h");
                             clicked => { root.menu-ephemeral(86400); }
                         }
                         MenuRow {
                             icon: root.current-ephemeral == 604800 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                            label: @tr("7 days");
+                            label: @tr("chat.disappearing.duration_7d");
                             clicked => { root.menu-ephemeral(604800); }
                         }
                         MenuRow {
                             icon: root.current-ephemeral == 7776000 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                            label: @tr("90 days");
+                            label: @tr("chat.disappearing.duration_90d");
                             clicked => { root.menu-ephemeral(7776000); }
                         }
                         MenuRow {
                             icon: root.current-ephemeral == 0 ? @image-url("../icons/check.svg") : @image-url("../icons/circle-x.svg");
-                            label: @tr("Off");
+                            label: @tr("chat.disappearing.off");
                             clicked => { root.menu-ephemeral(0); }
                         }
                     }
@@ -4002,7 +4010,7 @@ export component AppWindow inherits Window {
                         spacing: 1px;
                         MenuRow {
                             icon: @image-url("../icons/arrow-left.svg");
-                            label: @tr("Add to list");
+                            label: @tr("chat.list.picker_title");
                             clicked => { root.chat-menu-sub = ""; }
                         }
                         Rectangle { height: 1px; background: Theme.border; }
@@ -4014,7 +4022,7 @@ export component AppWindow inherits Window {
                         }
                         MenuRow {
                             icon: @image-url("../icons/plus.svg");
-                            label: @tr("New list");
+                            label: @tr("chat.list.new_action");
                             clicked => { root.chat-menu-open = false; root.new-list-open = true; }
                         }
                     }
@@ -4036,22 +4044,22 @@ export component AppWindow inherits Window {
                     spacing: 2px;
                     MenuRow {
                         icon: @image-url("../icons/file-text.svg");
-                        label: @tr("Document");
+                        label: @tr("chat.attach.document");
                         clicked => { root.attach-open = false; root.attach-doc(); }
                     }
                     MenuRow {
                         icon: @image-url("../icons/photo.svg");
-                        label: @tr("Photos");
+                        label: @tr("chat.attach.photos");
                         clicked => { root.attach-open = false; root.attach-image(); }
                     }
                     MenuRow {
                         icon: @image-url("../icons/music.svg");
-                        label: @tr("Audio");
+                        label: @tr("chat.attach.audio");
                         clicked => { root.attach-open = false; root.attach-audio(); }
                     }
                     MenuRow {
                         icon: @image-url("../icons/sticker-2.svg");
-                        label: @tr("Sticker");
+                        label: @tr("chat.attach.sticker");
                         clicked => { root.attach-open = false; root.attach-sticker(); }
                     }
                 }
@@ -4099,7 +4107,7 @@ export component AppWindow inherits Window {
                         padding-right: 12px;
                         spacing: 8px;
                         Text {
-                            text: root.info-is-group ? @tr("Group info") : @tr("Contact info");
+                            text: root.info-is-group ? @tr("info.panel.group_title") : @tr("info.panel.contact_title");
                             color: Theme.text;
                             font-size: 14px;
                             font-weight: 600;
@@ -4185,24 +4193,24 @@ export component AppWindow inherits Window {
                                 spacing: 10px;
                                 InfoAction {
                                     icon: @image-url("../icons/phone.svg");
-                                    label: @tr("Call");
+                                    label: @tr("info.action.call");
                                     enabled: root.current-callable;
                                     clicked => { root.start-call(root.current-jid); }
                                 }
                                 InfoAction {
                                     icon: @image-url("../icons/video.svg");
-                                    label: @tr("Video");
+                                    label: @tr("info.action.video");
                                     enabled: root.current-callable;
                                     clicked => { root.start-video-call(root.current-jid); }
                                 }
                                 InfoAction {
                                     icon: @image-url("../icons/search.svg");
-                                    label: @tr("Search");
+                                    label: @tr("info.action.search");
                                     clicked => { root.close-info(); root.menu-search(); }
                                 }
                                 InfoAction {
                                     icon: @image-url("../icons/dots-vertical.svg");
-                                    label: @tr("More");
+                                    label: @tr("info.action.more");
                                     clicked => { info-panel.actions-expanded = !info-panel.actions-expanded; }
                                 }
                             }
@@ -4211,17 +4219,17 @@ export component AppWindow inherits Window {
                                 spacing: 0px;
                                 MenuRow {
                                     icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
-                                    label: root.current-muted ? @tr("Unmute notifications") : @tr("Mute notifications");
+                                    label: root.current-muted ? @tr("info.action.unmute") : @tr("info.action.mute");
                                     clicked => { root.menu-mute(root.current-muted ? 0 : -1); }
                                 }
                                 MenuRow {
                                     icon: @image-url("../icons/archive.svg");
-                                    label: root.info-archived ? @tr("Unarchive chat") : @tr("Archive chat");
+                                    label: root.info-archived ? @tr("info.action.unarchive") : @tr("info.action.archive");
                                     clicked => { root.toggle-archive(); }
                                 }
                                 MenuRow {
                                     icon: @image-url("../icons/trash.svg");
-                                    label: @tr("Clear messages on this device");
+                                    label: @tr("info.action.clear_local");
                                     clicked => { root.clear-chat(); }
                                 }
                                 Rectangle { height: 12px; }
@@ -4245,7 +4253,7 @@ export component AppWindow inherits Window {
                             }
                             MenuRow {
                                 icon: @image-url("../icons/photo.svg");
-                                label: @tr("Shared media");
+                                label: @tr("info.media.title");
                                 submenu: true;
                                 clicked => { info-panel.media-expanded = !info-panel.media-expanded; }
                             }
@@ -4254,7 +4262,7 @@ export component AppWindow inherits Window {
                                 padding-bottom: 12px;
                                 spacing: 6px;
                                 if root.info-media.length == 0: Text {
-                                    text: @tr("No media preview available");
+                                    text: @tr("info.media.empty");
                                     color: Theme.text-dim;
                                     font-size: 12px;
                                 }
@@ -4282,7 +4290,7 @@ export component AppWindow inherits Window {
                                 padding-bottom: 10px;
                                 spacing: 8px;
                                 Text {
-                                    text: root.info-members != "" ? root.info-members : @tr("Participants");
+                                    text: root.info-members != "" ? root.info-members : @tr("info.group.participants");
                                     color: Theme.text-dim;
                                     font-size: 12px;
                                     vertical-alignment: center;
@@ -4293,7 +4301,7 @@ export component AppWindow inherits Window {
                                     height: 24px;
                                     mouse-cursor: pointer;
                                     add-member-label := Text {
-                                        text: @tr("Add member");
+                                        text: @tr("info.group.add_member");
                                         color: Theme.accent;
                                         font-size: 12px;
                                         height: parent.height;
@@ -4306,14 +4314,14 @@ export component AppWindow inherits Window {
                                 padding-top: 16px;
                                 spacing: 8px;
                                 Text {
-                                    text: @tr("Groups in common") + (root.info-common-groups-state == "ready" ? " (" + root.info-common-groups.length + ")" : "");
+                                    text: @tr("info.common_groups.title") + (root.info-common-groups-state == "ready" ? " (" + root.info-common-groups.length + ")" : "");
                                     color: Theme.text-dim;
                                     font-size: 12px;
                                 }
                                 if root.info-common-groups-state != "ready" || root.info-common-groups.length == 0: Text {
-                                    text: root.info-common-groups-state == "loading" ? @tr("Loading groups…")
-                                        : root.info-common-groups-state == "error" ? @tr("Could not load groups in common")
-                                        : @tr("No groups in common");
+                                    text: root.info-common-groups-state == "loading" ? @tr("info.common_groups.loading")
+                                        : root.info-common-groups-state == "error" ? @tr("info.common_groups.error")
+                                        : @tr("info.common_groups.empty");
                                     color: Theme.text-dim;
                                     font-size: 12px;
                                     wrap: word-wrap;
@@ -4358,7 +4366,7 @@ export component AppWindow inherits Window {
                         clicked => { root.chat-search-close(); }
                     }
                     Text {
-                        text: @tr("Search messages");
+                        text: @tr("chat.in_chat_search.title");
                         color: Theme.text;
                         font-size: 16px;
                         font-weight: 700;
@@ -4382,7 +4390,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     padding: 10px;
                     chat-search-input := LineEdit {
-                        placeholder-text: @tr("Search");
+                        placeholder-text: @tr("chat.in_chat_search.placeholder");
                         init => { self.focus(); }
                         edited => { root.chat-search-changed(self.text); }
                         accepted => { root.chat-search-step(0); }
@@ -4396,7 +4404,7 @@ export component AppWindow inherits Window {
                 horizontal-alignment: center;
             }
             if chat-search-input.text == "": Text {
-                text: @tr("Search for messages in this chat");
+                text: @tr("chat.in_chat_search.hint");
                 color: Theme.text-dim;
                 font-size: 13px;
                 horizontal-alignment: center;
@@ -4427,7 +4435,7 @@ export component AppWindow inherits Window {
                 spacing: 14px;
                 width: parent.width;
                 Text {
-                    text: @tr("Syncing older messages");
+                    text: @tr("chat.history.syncing");
                     color: Theme.text;
                     font-size: 18px;
                     font-weight: 700;
@@ -4443,7 +4451,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: end;
                     DialogButton {
-                        label: "OK";
+                        label: @tr("common.action.ok");
                         primary: true;
                         clicked => { root.sync-open = false; }
                     }
@@ -4479,11 +4487,11 @@ export component AppWindow inherits Window {
                 Rectangle { height: 1px; background: Theme.border; }
                 if root.can-add-account: MenuRow {
                     icon: @image-url("../icons/user-plus.svg");
-                    label: @tr("Add account");
+                    label: @tr("account.menu.add");
                     clicked => { root.add-account(); }
                 }
                 if !root.can-add-account: Text {
-                    text: @tr("Up to 5 accounts");
+                    text: @tr("account.menu.limit_hint");
                     color: Theme.text-dim;
                     font-size: 12px;
                     height: 32px;
@@ -4492,7 +4500,7 @@ export component AppWindow inherits Window {
                 }
                 MenuRow {
                     icon: @image-url("../icons/logout.svg");
-                    label: @tr("Log out");
+                    label: @tr("account.menu.logout");
                     tint: #f05d4d;
                     clicked => {
                         root.account-menu-open = false;
@@ -4509,7 +4517,7 @@ export component AppWindow inherits Window {
         background: Theme.bg;
         TouchArea { }
         Text {
-            text: @tr("Switching accounts...");
+            text: @tr("account.switching.progress");
             color: Theme.text-dim;
             font-size: 15px;
             width: parent.width;
@@ -4542,92 +4550,92 @@ export component AppWindow inherits Window {
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/message-circle.svg");
-                        label: @tr("Reply");
+                        label: @tr("message.menu.reply");
                         clicked => { root.message-menu-open = false; root.request-reply(root.menu-message.id); }
                     }
                     if root.menu-message.privateReply: MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/users.svg");
-                        label: @tr("Reply privately");
+                        label: @tr("message.menu.reply_privately");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "private"); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/corner-up-right.svg");
-                        label: @tr("Forward");
+                        label: @tr("message.menu.forward");
                         clicked => { root.message-menu-open = false; root.request-forward(root.menu-message.id); }
                     }
                     if root.menu-message.text != "" && (root.menu-message.kind == "text" || root.menu-message.kind == "image" || root.menu-message.kind == "video"): MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/copy.svg");
-                        label: @tr("Copy text");
+                        label: @tr("message.menu.copy_text");
                         clicked => { root.message-menu-open = false; root.copy-text(root.menu-message.id); }
                     }
                     if root.menu-message.kind == "image" && root.menu-message.mediaReady: MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/photo.svg");
-                        label: @tr("Copy image");
+                        label: @tr("message.menu.copy_image");
                         clicked => { root.message-menu-open = false; root.copy-image(root.menu-message.id); }
                     }
                     if root.menu-message.linkUrl != "": MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/copy.svg");
-                        label: @tr("Copy link");
+                        label: @tr("message.menu.copy_link");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "link"); }
                     }
                     if root.menu-message.kind != "text" && root.menu-message.mediaReady: MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/download.svg");
-                        label: @tr("Save as…");
+                        label: @tr("message.menu.save_as");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "save"); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/mood-smile.svg");
-                        label: @tr("React");
+                        label: @tr("message.menu.react");
                         clicked => { root.message-menu-open = false; root.react-pick(root.menu-message.id); }
                     }
                     if root.menu-message.editable: MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/file-text.svg");
-                        label: @tr("Edit");
+                        label: @tr("message.menu.edit");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "edit"); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/pin.svg");
-                        label: root.menu-message.pinned ? @tr("Unpin") : @tr("Pin for 7 days");
+                        label: root.menu-message.pinned ? @tr("message.menu.unpin") : @tr("message.menu.pin");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "pin"); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/message-circle.svg");
-                        label: @tr("Mark conversation unread");
+                        label: @tr("message.menu.mark_unread");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "unread"); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/star.svg");
-                        label: root.menu-message.starred ? @tr("Unstar") : @tr("Star");
+                        label: root.menu-message.starred ? @tr("message.menu.unstar") : @tr("message.menu.star");
                         clicked => { root.message-menu-open = false; root.toggle-star(root.menu-message.id); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/checkbox.svg");
-                        label: @tr("Select");
+                        label: @tr("message.menu.select");
                         clicked => { root.message-menu-open = false; root.select-start(root.menu-message.id); }
                     }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/info-circle.svg");
-                        label: @tr("Details");
+                        label: @tr("message.menu.details");
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "details"); }
                     }
                     Rectangle { height: 1px; background: Theme.dark ? #ffffff18 : Theme.border; }
                     MenuRow {
                         height: 34px;
                         icon: @image-url("../icons/trash.svg");
-                        label: @tr("Delete");
+                        label: @tr("message.menu.delete");
                         tint: #f47783;
                         clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "delete"); }
                     }
@@ -4661,7 +4669,7 @@ export component AppWindow inherits Window {
                     background: Theme.header;
                     HorizontalLayout {
                         padding: 16px;
-                        Text { text: @tr("Detalhes da mensagem"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
+                        Text { text: @tr("message.details.title"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
                         Rectangle {
                             width: 28px;
                             Text { text: "×"; color: Theme.text-dim; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; }
@@ -4774,11 +4782,11 @@ export component AppWindow inherits Window {
                     alignment: end;
                     spacing: 8px;
                     DialogButton {
-                        label: @tr("Close");
+                        label: @tr("message.dialog.close");
                         clicked => { root.message-dialog-open = false; }
                     }
                     if root.message-dialog-edit: DialogButton {
-                        label: @tr("Save");
+                        label: @tr("message.dialog.save");
                         primary: true;
                         enabled: root.message-dialog-text != "";
                         clicked => { root.submit-edit(root.message-dialog-id, root.message-dialog-text); }
@@ -4823,7 +4831,7 @@ export component AppWindow inherits Window {
                     alignment: end;
                     spacing: 8px;
                     DialogButton {
-                        label: @tr("Cancel");
+                        label: @tr("message.confirm.cancel");
                         clicked => { root.confirm-open = false; }
                     }
                     if root.confirm-secondary != "": DialogButton {
@@ -4869,7 +4877,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 Text {
-                    text: @tr("Send message history to {}?", root.share-name);
+                    text: @tr("chat.history_share.title", root.share-name);
                     color: Theme.text;
                     font-size: 18px;
                     font-weight: 700;
@@ -4885,17 +4893,17 @@ export component AppWindow inherits Window {
                         font-size: 14px;
                     }
                     Text {
-                        text: @tr("will get");
+                        text: @tr("chat.history_share.prefix");
                         color: Theme.text;
                         font-size: 14px;
                     }
                     Text {
-                        text: @tr("recent messages");
+                        text: @tr("chat.history_share.highlight");
                         color: Theme.accent;
                         font-size: 14px;
                     }
                     Text {
-                        text: @tr("from this group.");
+                        text: @tr("chat.history_share.suffix");
                         color: Theme.text;
                         font-size: 14px;
                     }
@@ -4904,11 +4912,11 @@ export component AppWindow inherits Window {
                     alignment: end;
                     spacing: 8px;
                     DialogButton {
-                        label: @tr("Cancel");
+                        label: @tr("chat.history_share.cancel");
                         clicked => { root.share-cancel(); }
                     }
                     DialogButton {
-                        label: root.share-sending ? @tr("Sending…") : @tr("Send");
+                        label: root.share-sending ? @tr("chat.history_share.sending") : @tr("chat.history_share.send");
                         primary: true;
                         enabled: !root.share-sending;
                         clicked => { root.share-accept(); }
@@ -4935,20 +4943,20 @@ export component AppWindow inherits Window {
                 spacing: 14px;
                 width: parent.width;
                 Text {
-                    text: @tr("New list");
+                    text: @tr("chat.list.new_title");
                     color: Theme.text;
                     font-size: 17px;
                     font-weight: 700;
                 }
                 Text {
-                    text: @tr("Lists organize your chats. This chat is added to the new list.");
+                    text: @tr("chat.list.new_hint");
                     color: Theme.text-dim;
                     font-size: 13px;
                     wrap: word-wrap;
                     width: parent.width - 44px;
                 }
                 new-list-name := LineEdit {
-                    placeholder-text: @tr("List name");
+                    placeholder-text: @tr("chat.list.name_placeholder");
                     accepted => {
                         root.menu-new-list(self.text);
                         self.text = "";
@@ -4959,11 +4967,11 @@ export component AppWindow inherits Window {
                     alignment: end;
                     spacing: 8px;
                     DialogButton {
-                        label: @tr("Cancel");
+                        label: @tr("chat.list.new_cancel");
                         clicked => { root.new-list-open = false; }
                     }
                     DialogButton {
-                        label: @tr("Create");
+                        label: @tr("chat.list.create");
                         primary: true;
                         clicked => {
                             root.menu-new-list(new-list-name.text);
@@ -4993,7 +5001,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 HorizontalLayout {
                     Text {
-                        text: @tr("Add member");
+                        text: @tr("group.add_member.title");
                         color: Theme.text;
                         font-size: 17px;
                         font-weight: 700;
@@ -5006,7 +5014,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 LineEdit {
-                    placeholder-text: @tr("Search name or number");
+                    placeholder-text: @tr("group.add_member.search_placeholder");
                     edited => { root.member-search(self.text); }
                 }
                 ListView {
@@ -5020,14 +5028,14 @@ export component AppWindow inherits Window {
                     alignment: end;
                     spacing: 8px;
                     Text {
-                        text: @tr("{} selected", root.member-count);
+                        text: @tr("group.add_member.selected_count.one" | "group.add_member.selected_count.other" % root.member-count);
                         color: Theme.text-dim;
                         font-size: 13px;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
                     DialogButton {
-                        label: @tr("Add");
+                        label: @tr("group.add_member.confirm");
                         primary: true;
                         enabled: root.member-count > 0;
                         clicked => { root.member-confirm(); }
@@ -5181,7 +5189,7 @@ export component AppWindow inherits Window {
                             clicked => { root.alert-dismiss(); }
                         }
                         dismiss-text := Text {
-                            text: @tr("Close");
+                            text: @tr("common.action.close");
                             color: Theme.text-dim;
                             font-size: 14px;
                             width: parent.width;
@@ -5310,7 +5318,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 HorizontalLayout {
                     Text {
-                        text: @tr("Forward message to");
+                        text: @tr("message.forward.title");
                         color: Theme.text;
                         font-size: 17px;
                         font-weight: 700;
@@ -5349,7 +5357,7 @@ export component AppWindow inherits Window {
                         }
                     }
                     if fwd-search.text == "": Text {
-                        text: @tr("Search name or number");
+                        text: @tr("message.forward.search_placeholder");
                         color: Theme.text-dim;
                         font-size: 14px;
                         x: 40px;
@@ -5445,7 +5453,7 @@ export component AppWindow inherits Window {
                         padding-left: 24px;
                         padding-right: 14px;
                         Text {
-                            text: @tr("Settings");
+                            text: @tr("settings.title");
                             color: Theme.text;
                             font-size: 20px;
                             font-weight: 700;
@@ -5471,66 +5479,66 @@ export component AppWindow inherits Window {
                         padding-top: 18px;
                         spacing: 20px;
                         SettingsCard {
-                            title: @tr("Appearance");
+                            title: @tr("settings.appearance.title");
                             SettingsRow {
-                                label: @tr("Theme");
+                                label: @tr("settings.appearance.theme");
                                 HorizontalLayout {
                                     spacing: 6px;
                                     height: 30px;
                                     y: (parent.height - self.height) / 2;
                                     FilterChip {
-                                        label: @tr("Dark");
+                                        label: @tr("settings.appearance.theme_dark");
                                         active: root.theme-mode == "dark";
                                         clicked => { root.theme-mode = "dark"; root.theme-changed("dark"); }
                                     }
                                     FilterChip {
-                                        label: @tr("Light");
+                                        label: @tr("settings.appearance.theme_light");
                                         active: root.theme-mode == "light";
                                         clicked => { root.theme-mode = "light"; root.theme-changed("light"); }
                                     }
                                     FilterChip {
-                                        label: @tr("System");
+                                        label: @tr("settings.appearance.theme_system");
                                         active: root.theme-mode == "system";
                                         clicked => { root.theme-mode = "system"; root.theme-changed("system"); }
                                     }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Style");
+                                label: @tr("settings.appearance.style");
                                 HorizontalLayout {
                                     spacing: 6px;
                                     height: 30px;
                                     y: (parent.height - self.height) / 2;
                                     FilterChip {
-                                        label: @tr("Glass");
+                                        label: @tr("settings.appearance.style_glass");
                                         active: root.theme-style == "glass";
                                         clicked => { root.theme-style = "glass"; root.style-changed("glass"); }
                                     }
                                     FilterChip {
-                                        label: @tr("Opaque");
+                                        label: @tr("settings.appearance.style_opaque");
                                         active: root.theme-style == "opaque";
                                         clicked => { root.theme-style = "opaque"; root.style-changed("opaque"); }
                                     }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Language");
+                                label: @tr("settings.language.title");
                                 HorizontalLayout {
                                     spacing: 6px;
                                     height: 30px;
                                     y: (parent.height - self.height) / 2;
                                     FilterChip {
-                                        label: "Português";
+                                        label: @tr("settings.language.portuguese");
                                         active: root.language-mode == "pt";
                                         clicked => { root.language-mode = "pt"; root.language-changed("pt"); }
                                     }
                                     FilterChip {
-                                        label: "English";
+                                        label: @tr("settings.language.english");
                                         active: root.language-mode == "en";
                                         clicked => { root.language-mode = "en"; root.language-changed("en"); }
                                     }
                                     FilterChip {
-                                        label: @tr("System");
+                                        label: @tr("settings.language.system");
                                         active: root.language-mode == "system";
                                         clicked => { root.language-mode = "system"; root.language-changed("system"); }
                                     }
@@ -5538,9 +5546,9 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("General");
+                            title: @tr("settings.general.title");
                             SettingsRow {
-                                label: @tr("Open Zapive when I sign in");
+                                label: @tr("settings.general.launch_at_login");
                                 Toggle {
                                     on: root.autostart;
                                     y: (parent.height - self.height) / 2;
@@ -5549,10 +5557,10 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("Calls");
-                            hint: @tr("A device picked here is used for every call. Changes apply to the next call.");
+                            title: @tr("settings.calls.title");
+                            hint: @tr("settings.calls.devices_hint");
                             SettingsRow {
-                                label: @tr("Microphone");
+                                label: @tr("settings.calls.microphone");
                                 ComboBox {
                                     width: 200px;
                                     height: 34px;
@@ -5566,7 +5574,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Speaker");
+                                label: @tr("settings.calls.speaker");
                                 ComboBox {
                                     width: 200px;
                                     height: 34px;
@@ -5580,7 +5588,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Camera");
+                                label: @tr("settings.calls.camera");
                                 ComboBox {
                                     width: 200px;
                                     height: 34px;
@@ -5595,10 +5603,10 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("Privacy");
-                            hint: @tr("Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted.");
+                            title: @tr("settings.privacy.title");
+                            hint: @tr("settings.privacy.hint");
                             SettingsRow {
-                                label: @tr("Send read receipts");
+                                label: @tr("settings.privacy.read_receipts");
                                 Toggle {
                                     on: root.send-receipts;
                                     y: (parent.height - self.height) / 2;
@@ -5606,7 +5614,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Apply messages deleted by the sender");
+                                label: @tr("settings.privacy.apply_deletions");
                                 Toggle {
                                     on: root.apply-deletions;
                                     y: (parent.height - self.height) / 2;
@@ -5617,54 +5625,54 @@ export component AppWindow inherits Window {
                                 padding-left: 14px;
                                 padding-right: 14px;
                                 Text {
-                                    text: @tr("settings.privacyBlurHint");
+                                    text: @tr("settings.privacy.blur_hint");
                                     color: Theme.text-dim;
                                     font-size: 12px;
                                     wrap: word-wrap;
                                 }
                             }
                             SettingsRow {
-                                label: @tr("settings.blurNames");
+                                label: @tr("settings.privacy.blur_names");
                                 Toggle {
-                                    label: @tr("settings.blurNames");
+                                    label: @tr("settings.privacy.blur_names");
                                     on: root.blur-names;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.privacy-blur-changed("names", !root.blur-names); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("settings.blurPhotos");
+                                label: @tr("settings.privacy.blur_photos");
                                 Toggle {
-                                    label: @tr("settings.blurPhotos");
+                                    label: @tr("settings.privacy.blur_photos");
                                     on: root.blur-photos;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("settings.blurMessages");
+                                label: @tr("settings.privacy.blur_messages");
                                 Toggle {
-                                    label: @tr("settings.blurMessages");
+                                    label: @tr("settings.privacy.blur_messages");
                                     on: root.blur-messages;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("settings.blurMedia");
+                                label: @tr("settings.privacy.blur_media");
                                 Toggle {
-                                    label: @tr("settings.blurMedia");
+                                    label: @tr("settings.privacy.blur_media");
                                     on: root.blur-media;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.privacy-blur-changed("media", !root.blur-media); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("settings.notifyPreviews");
-                                detail: @tr("settings.notifyPreviewsHint");
+                                label: @tr("settings.notifications.previews");
+                                detail: @tr("settings.notifications.previews_hint");
                                 Toggle {
                                     accessible-role: button;
-                                    accessible-label: @tr("settings.notifyPreviews");
+                                    accessible-label: @tr("settings.notifications.previews");
                                     on: root.notify-previews;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.notify-previews-changed(!root.notify-previews); }
@@ -5672,15 +5680,15 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("Security");
+                            title: @tr("settings.security.title");
                             VerticalLayout {
                                 padding: 14px;
                                 padding-top: 10px;
                                 spacing: 10px;
                                 Text {
                                     text: root.pin-set
-                                        ? @tr("PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI).")
-                                        : @tr("Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch.");
+                                        ? @tr("settings.security.pin_enabled_hint")
+                                        : @tr("settings.security.pin_disabled_hint");
                                     color: Theme.text-dim;
                                     font-size: 13px;
                                     wrap: word-wrap;
@@ -5688,17 +5696,17 @@ export component AppWindow inherits Window {
                                 current-pin := LineEdit {
                                     visible: root.pin-set;
                                     input-type: password;
-                                    placeholder-text: @tr("Current PIN");
+                                    placeholder-text: @tr("settings.security.current_pin");
                                 }
                                 new-pin := LineEdit {
                                     input-type: password;
-                                    placeholder-text: @tr("New PIN (4 to 10 digits)");
+                                    placeholder-text: @tr("settings.security.new_pin");
                                 }
                                 HorizontalLayout {
                                     spacing: 10px;
                                     alignment: start;
                                     Button {
-                                        text: root.pin-set ? @tr("Change PIN") : @tr("Set PIN");
+                                        text: root.pin-set ? @tr("settings.security.change_pin") : @tr("settings.security.set_pin");
                                         primary: true;
                                         clicked => {
                                             root.save-pin(current-pin.text, new-pin.text);
@@ -5707,7 +5715,7 @@ export component AppWindow inherits Window {
                                     }
                                     Button {
                                         visible: root.pin-set;
-                                        text: @tr("Remove PIN");
+                                        text: @tr("settings.security.remove_pin");
                                         clicked => {
                                             root.remove-pin(current-pin.text);
                                             current-pin.text = "";
@@ -5717,44 +5725,44 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("Automatic downloads");
+                            title: @tr("settings.downloads.title");
                             HorizontalLayout {
                                 padding-left: 14px;
                                 padding-right: 14px;
                                 padding-top: 8px;
                                 padding-bottom: 4px;
-                                Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                                Text { text: @tr("settings.downloads.voice_hint"); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
                             }
                             SettingsRow {
-                                label: @tr("Photos");
+                                label: @tr("settings.downloads.photos");
                                 Toggle {
                                     on: root.auto-download-photos;
                                     clicked => { root.auto-download-photos-changed(!root.auto-download-photos); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Audio");
+                                label: @tr("settings.downloads.audio");
                                 Toggle {
                                     on: root.auto-download-audio;
                                     clicked => { root.auto-download-audio-changed(!root.auto-download-audio); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Videos");
+                                label: @tr("settings.downloads.videos");
                                 Toggle {
                                     on: root.auto-download-video;
                                     clicked => { root.auto-download-video-changed(!root.auto-download-video); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Documents");
+                                label: @tr("settings.downloads.documents");
                                 Toggle {
                                     on: root.auto-download-documents;
                                     clicked => { root.auto-download-documents-changed(!root.auto-download-documents); }
                                 }
                             }
                             SettingsRow {
-                                label: @tr("Stickers");
+                                label: @tr("settings.downloads.stickers");
                                 Toggle {
                                     on: root.auto-download-stickers;
                                     clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
@@ -5762,23 +5770,23 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("About");
+                            title: @tr("settings.about.title");
                             SettingsRow {
                                 label: "Zapive";
-                                detail: root.update-state == 1 ? @tr("Version {} is available", root.update-version)
-                                    : root.update-state == 2 ? @tr("Downloading update…")
-                                    : root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
-                                    : root.update-state == 4 ? @tr("Update failed: {}", root.update-error)
-                                    : @tr("Version {}", root.app-version);
+                                detail: root.update-state == 1 ? @tr("settings.about.update_available", root.update-version)
+                                    : root.update-state == 2 ? @tr("settings.about.update_downloading")
+                                    : root.update-state == 3 ? @tr("settings.about.update_restart_required", root.update-version)
+                                    : root.update-state == 4 ? @tr("settings.about.update_failed", root.update-error)
+                                    : @tr("settings.about.version", root.app-version);
                                 DialogButton {
                                     y: (parent.height - self.height) / 2;
                                     primary: root.update-state != 0;
                                     enabled: root.update-state != 2;
-                                    label: root.update-state == 1 ? @tr("Update")
-                                        : root.update-state == 2 ? @tr("Downloading update…")
-                                        : root.update-state == 3 ? @tr("Restart")
-                                        : root.update-state == 4 ? @tr("Try again")
-                                        : @tr("Check for updates");
+                                    label: root.update-state == 1 ? @tr("settings.about.update_action")
+                                        : root.update-state == 2 ? @tr("settings.about.update_downloading_button")
+                                        : root.update-state == 3 ? @tr("settings.about.restart_action")
+                                        : root.update-state == 4 ? @tr("settings.about.retry_action")
+                                        : @tr("settings.about.check_updates");
                                     clicked => {
                                         if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
                                         else if (root.update-state == 3) { root.update-restart(); }
@@ -5788,14 +5796,14 @@ export component AppWindow inherits Window {
                             }
                         }
                         SettingsCard {
-                            title: @tr("Account");
+                            title: @tr("settings.account.title");
                             SettingsRow {
-                                label: @tr("Log out of WhatsApp");
+                                label: @tr("settings.account.logout_description");
                                 DialogButton {
                                     y: (parent.height - self.height) / 2;
                                     primary: true;
                                     danger: true;
-                                    label: @tr("Log out");
+                                    label: @tr("settings.account.logout_action");
                                     clicked => { root.logout(); }
                                 }
                             }
@@ -5958,11 +5966,11 @@ export component AppWindow inherits Window {
                             alignment: center;
                             spacing: 8px;
                             DialogButton {
-                                label: @tr("Open with another app");
+                                label: @tr("pdf.engine.open_external");
                                 clicked => { root.pdf-open-external(); }
                             }
                             DialogButton {
-                                label: root.pdf-installing ? @tr("Downloading…") : @tr("Download viewer");
+                                label: root.pdf-installing ? @tr("pdf.engine.installing") : @tr("pdf.engine.install");
                                 primary: true;
                                 enabled: !root.pdf-installing;
                                 clicked => { root.pdf-install-engine(); }
@@ -6037,7 +6045,7 @@ export component AppWindow inherits Window {
             y: (parent.height - self.height) / 2;
             background: #000000b0;
             loading-text := Text {
-                text: @tr("Loading…");
+                text: @tr("pdf.loading");
                 color: white;
                 font-size: 13px;
                 width: parent.width;

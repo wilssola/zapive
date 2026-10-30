@@ -19,6 +19,8 @@ export component IconButton inherits TouchArea {
         height: parent.height;
         border-radius: root.radius;
         background: root.active ? root.active-background : root.has-hover ? Theme.hover : root.background;
+        opacity: root.pressed ? 0.82 : 1;
+        animate background, opacity { duration: Theme.motion-fast; easing: ease-out; }
         Image {
             source: root.icon;
             colorize: root.tint;
