@@ -14,6 +14,8 @@ rm -rf "$APP" build/zapive.iconset build/dmg
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
 
 cp target/release/zapive "$APP/Contents/MacOS/zapive"
+test -x target/release/translation/zapive-translate
+cp -R target/release/translation "$APP/Contents/MacOS/translation"
 sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 
 # .icns straight from the 1024px master.

@@ -1,6 +1,6 @@
 // Self-update against the GitHub releases the CI publishes on every
 // master build. The updater consumes the zapive-<target>.zip assets
-// holding just the binary, checks it against the release's SHA256SUMS.txt
+// holding the binary and translation runtime, checks SHA256SUMS.txt
 // and swaps it in for the running executable (see apply); the new version
 // starts on the next launch. The installer,
 // AppImage and DMG assets on the same release are for first installs.
@@ -111,6 +111,8 @@ pub fn check() -> Result<Option<String>, String> {
 // the write failed and nothing put the old one back, which left the
 // install directory with no executable at all.
 pub fn apply() -> Result<String, String> {
+    static APPLYING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _applying = APPLYING.try_lock().map_err(|_| "an update is already in progress")?;
     if std::env::var_os("FLATPAK_ID").is_some() {
         return Err("updates are managed by Flatpak".into());
     }
@@ -132,11 +134,16 @@ pub fn apply() -> Result<String, String> {
     // below cannot run out of space, and a directory that cannot be
     // written to says so before anything is touched.
     let stage = dir.join(STAGE_DIR);
-    let _ = std::fs::remove_dir_all(&stage);
-    std::fs::create_dir_all(&stage)
+    // Never recursively remove a pre-existing staging path (it may be a link).
+    std::fs::create_dir(&stage)
         .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
     let staged = stage_binary(&release, &zip_name, &zip_url, &stage);
-    let result = staged.and_then(|fresh| swap_in(&exe, &fresh));
+    let result = staged.and_then(|fresh| {
+        let guard = crate::translation::shutdown_for_update()?;
+        swap_bundle(&exe, &fresh)?;
+        guard.commit();
+        Ok(())
+    });
     let _ = std::fs::remove_dir_all(&stage);
     result.map(|()| release.version)
 }
@@ -345,7 +352,7 @@ fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
 }
 
 // Downloads the zip into `stage`, checks it against the release's
-// SHA256SUMS.txt and unpacks the binary. Returns the binary's path.
+// SHA256SUMS.txt and unpacks the complete validated bundle.
 fn stage_binary(
     release: &LatestRelease,
     zip_name: &str,
@@ -353,7 +360,23 @@ fn stage_binary(
     stage: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
     use sha2::Digest as _;
-    let bytes = download(zip_url, 512 * 1024 * 1024)?;
+    use std::io::{Read as _, Write as _};
+    let zip = stage.join("payload.zip");
+    let mut output = std::fs::File::create(&zip).map_err(|e| e.to_string())?;
+    let mut response = get(zip_url, "application/octet-stream")?;
+    let mut reader = response.body_mut().as_reader().take(MAX_DOWNLOAD + 1);
+    let mut hash = sha2::Sha256::new();
+    let mut total = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 { break; }
+        total += count as u64;
+        if total > MAX_DOWNLOAD { return Err("update download exceeds 2 GiB".into()); }
+        hash.update(&buffer[..count]);
+        output.write_all(&buffer[..count]).map_err(|e| e.to_string())?;
+    }
+    drop(output);
     // A download cut short is the other way to end up with a binary that
     // does not start. Every release carries the sums; one that somehow
     // does not is installed as before, unverified.
@@ -367,21 +390,30 @@ fn stage_binary(
                 .map(|(sum, _)| sum.trim().to_ascii_lowercase())
                 .ok_or(format!("{zip_name} is not listed in SHA256SUMS.txt"))?;
             let actual: String =
-                sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+                hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
             if actual != expected {
                 return Err("the download does not match its checksum".into());
             }
         }
         None => log::warn!("[update] release {} has no SHA256SUMS.txt", release.version),
     }
-    let zip = stage.join(zip_name);
-    std::fs::write(&zip, &bytes).map_err(|e| format!("cannot save the download: {e}"))?;
-    drop(bytes);
+    validate_archive(&zip)?;
+    let unpacked = stage.join("unpacked");
     self_update::Extract::from_source(&zip)
         .archive(self_update::ArchiveKind::Zip)
-        .extract_file(stage, BIN)
+        .extract_into(&unpacked)
         .map_err(|e| format!("cannot unpack the download: {e}"))?;
-    let fresh = stage.join(BIN);
+    // Preserve framework symlinks and their code signatures, but require every
+    // link to remain inside translation after it is moved out of staging.
+    validate_runtime_tree(&unpacked.join("translation"))?;
+    let fresh = unpacked.join(BIN);
+    let helper = unpacked.join("translation").join(HELPER);
+    for required in [&fresh, &helper] {
+        let metadata = std::fs::symlink_metadata(required).map_err(|e| format!("missing bundle executable: {e}"))?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return Err("bundle executables must be nonempty regular files".into());
+        }
+    }
     let size = std::fs::metadata(&fresh).map(|m| m.len()).unwrap_or(0);
     if size < 1024 * 1024 {
         return Err(format!("the unpacked binary is only {size} bytes"));
@@ -389,10 +421,168 @@ fn stage_binary(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| e.to_string())?;
+        for executable in [&fresh, &helper] {
+            std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(fresh)
+}
+
+const MAX_DOWNLOAD: u64 = 2 * 1024 * 1024 * 1024;
+const HELPER: &str = if cfg!(windows) { "zapive-translate.exe" } else { "zapive-translate" };
+
+// Inspect the central directory before the extractor writes anything. ZIP64,
+// encrypted and multi-volume archives fail explicitly rather than bypass limits.
+fn validate_archive(path: &std::path::Path) -> Result<(), String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let length = file.metadata().map_err(|e| e.to_string())?.len();
+    let tail_len = length.min(65557) as usize;
+    file.seek(SeekFrom::End(-(tail_len as i64))).map_err(|e| e.to_string())?;
+    let mut tail = vec![0; tail_len];
+    file.read_exact(&mut tail).map_err(|e| e.to_string())?;
+    let short = |b: &[u8], i| u16::from_le_bytes([b[i], b[i + 1]]) as u64;
+    let long = |b: &[u8], i| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as u64;
+    let end = (0..tail.len().saturating_sub(21)).rev().find(|&i| {
+        tail[i..].starts_with(b"PK\x05\x06") && i + 22 + short(&tail, i + 20) as usize == tail.len()
+    }).ok_or("invalid ZIP end record")?;
+    let end_record = &tail[end..];
+    let count = short(end_record, 10);
+    let size = long(end_record, 12);
+    let offset = long(end_record, 16);
+    if short(end_record, 4) != 0 || short(end_record, 6) != 0
+        || short(end_record, 8) != count || count == 0 || count > 30000
+        || size > 32 * 1024 * 1024 || offset + size != length - tail_len as u64 + end as u64 {
+        return Err("unsupported or oversized ZIP directory (ZIP64 is not supported)".into());
+    }
+    file.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+    let mut directory = vec![0; size as usize];
+    file.read_exact(&mut directory).map_err(|e| e.to_string())?;
+    let mut cursor = 0;
+    let mut total = 0u64;
+    let mut names = std::collections::HashSet::new();
+    let mut runtime_files = 0;
+    for _ in 0..count {
+        let header = directory.get(cursor..cursor + 46).ok_or("truncated ZIP entry")?;
+        if !header.starts_with(b"PK\x01\x02") || short(header, 8) & 1 != 0 {
+            return Err("invalid or encrypted ZIP entry".into());
+        }
+        let expanded = long(header, 24);
+        total += expanded;
+        if expanded > MAX_DOWNLOAD || total > 8 * 1024 * 1024 * 1024u64 {
+            return Err("unpacked update exceeds size limits".into());
+        }
+        let name_len = short(header, 28) as usize;
+        let next = cursor + 46 + name_len + short(header, 30) as usize + short(header, 32) as usize;
+        let name = directory.get(cursor + 46..cursor + 46 + name_len).ok_or("truncated ZIP name")?;
+        let name = std::str::from_utf8(name).map_err(|_| "non-UTF8 ZIP path")?;
+        validate_bundle_path(name)?;
+        if !names.insert(name.trim_end_matches('/').to_ascii_lowercase()) {
+            return Err("duplicate ZIP path".into());
+        }
+        let kind = (long(header, 38) >> 16) & 0o170000;
+        if name.starts_with("translation/_internal/") && !name.ends_with('/') && expanded > 0 {
+            runtime_files += 1;
+        }
+        if long(header, 20) == u32::MAX as u64 || long(header, 42) == u32::MAX as u64
+            || short(header, 34) != 0 {
+            return Err("ZIP64 or multi-volume entry is not supported".into());
+        }
+        if !matches!(kind, 0 | 0o100000 | 0o040000 | 0o120000) || (cfg!(windows) && kind == 0o120000) {
+            return Err("unsupported ZIP file type".into());
+        }
+        cursor = next;
+    }
+    if cursor != directory.len() || runtime_files == 0 || !names.contains(BIN) || !names.contains(&format!("translation/{HELPER}")) {
+        return Err("update must contain the executable and complete translation runtime; use the installer for legacy releases".into());
+    }
+    Ok(())
+}
+
+fn validate_bundle_path(name: &str) -> Result<(), String> {
+    let path = name.trim_end_matches('/');
+    if path.len() > 1024 || path.is_empty() || name.contains(['\\', ':', '\0', '<', '>', '|', '?', '*', '"'])
+        || path.split('/').any(|part| part.is_empty() || part == "." || part == ".."
+            || part.ends_with(['.', ' ']) || part.chars().any(|c| c.is_control()))
+        || !(path == BIN || path == "translation" || path.starts_with("translation/")) {
+        return Err(format!("unsafe or unexpected ZIP path: {name:?}"));
+    }
+    // Disallow Windows device aliases even when validating on another OS.
+    for part in path.split('/') {
+        let stem = part.split('.').next().unwrap_or_default().to_ascii_uppercase();
+        if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                && matches!(stem.as_bytes()[3], b'1'..=b'9')) {
+            return Err("reserved ZIP path".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_runtime_tree(root: &std::path::Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(root).map_err(|e| e.to_string())?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("translation runtime must be a regular directory".into());
+    }
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+            if metadata.file_type().is_symlink() {
+                let target = std::fs::read_link(&path).map_err(|e| e.to_string())?;
+                // Absolute links would still point into the deleted staging tree.
+                if target.is_absolute() || !path.canonicalize().map_err(|e| e.to_string())?.starts_with(&canonical_root) {
+                    return Err("translation symlink must resolve inside its runtime".into());
+                }
+            } else if metadata.is_dir() {
+                pending.push(path);
+            } else if !metadata.is_file() {
+                return Err("unsupported translation runtime file type".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn swap_bundle(exe: &std::path::Path, fresh: &std::path::Path) -> Result<(), String> {
+    let dir = exe.parent().ok_or("missing install directory")?;
+    let sidecar = dir.join("translation");
+    let backup = dir.join("translation.update-old");
+    if backup.try_exists().map_err(|e| e.to_string())? {
+        return Err(format!("previous runtime backup needs recovery: {}", backup.display()));
+    }
+    let existing = match std::fs::symlink_metadata(&sidecar) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => true,
+        Ok(_) => return Err("installed translation runtime is not a regular directory".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e.to_string()),
+    };
+    if existing {
+        std::fs::rename(&sidecar, &backup).map_err(|e| format!("cannot move translation runtime aside: {e}"))?;
+    }
+    let staged = fresh.parent().ok_or("missing staged directory")?.join("translation");
+    if let Err(e) = std::fs::rename(&staged, &sidecar) {
+        if existing {
+            std::fs::rename(&backup, &sidecar).map_err(|back| format!("runtime install failed ({e}); restore {} manually: {back}", backup.display()))?;
+        }
+        return Err(format!("cannot install translation runtime: {e}"));
+    }
+    if let Err(e) = swap_in(exe, fresh) {
+        std::fs::rename(&sidecar, &staged).map_err(|back| format!("{e}; cannot remove new runtime for rollback: {back}; backup: {}", backup.display()))?;
+        if existing {
+            std::fs::rename(&backup, &sidecar).map_err(|back| format!("{e}; cannot restore runtime: {back}; backup: {}", backup.display()))?;
+        }
+        return Err(e);
+    }
+    if existing {
+        if let Err(e) = std::fs::remove_dir_all(&backup) {
+            log::warn!("[update] cannot remove old runtime {}: {e}", backup.display());
+        }
+    }
+    Ok(())
 }
 
 // Old binary aside, new one in, and the old one back if that fails. A
@@ -434,13 +624,127 @@ fn apply_appimage(appimage: &str) -> Result<String, String> {
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
+    let guard = crate::translation::shutdown_for_update()?;
     std::fs::rename(&tmp, appimage).map_err(|e| e.to_string())?;
+    guard.commit();
     Ok(release.version)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundle_paths_reject_traversal_and_platform_aliases() {
+        for path in [BIN, "translation/", "translation/_internal/lib.so"] {
+            validate_bundle_path(path).unwrap();
+        }
+        for path in ["../zapive", "/zapive", "translation/../zapive", "translation/./x",
+            "translation//x", "translation\\x", "translation/C:stream", "translation/NUL.dll",
+            "translation/com1", "translation/x. ", "translation/x?", "other/file"] {
+            assert!(validate_bundle_path(path).is_err(), "{path}");
+        }
+    }
+
+    #[test]
+    fn archive_validation_requires_runtime_and_bounds_expansion() {
+        let dir = scratch("archive");
+        let path = dir.join("payload.zip");
+        // Minimal central-directory fixtures; extraction separately checks local records/CRC.
+        let archive = |entries: &[(&str, u32)]| {
+            let mut bytes = Vec::new();
+            for (name, size) in entries {
+                let mut header = [0u8; 46];
+                header[..4].copy_from_slice(b"PK\x01\x02");
+                header[24..28].copy_from_slice(&size.to_le_bytes());
+                header[28..30].copy_from_slice(&(name.len() as u16).to_le_bytes());
+                bytes.extend_from_slice(&header);
+                bytes.extend_from_slice(name.as_bytes());
+            }
+            let mut end = [0u8; 22];
+            end[..4].copy_from_slice(b"PK\x05\x06");
+            end[8..10].copy_from_slice(&(entries.len() as u16).to_le_bytes());
+            end[10..12].copy_from_slice(&(entries.len() as u16).to_le_bytes());
+            end[12..16].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&end);
+            bytes
+        };
+        let helper = format!("translation/{HELPER}");
+        let valid = [(BIN, 1), (helper.as_str(), 1), ("translation/_internal/lib.so", 1)];
+        std::fs::write(&path, archive(&valid)).unwrap();
+        validate_archive(&path).unwrap();
+        for entries in [vec![(BIN, 1)], vec![(BIN, 1), (&helper, 1)],
+            vec![(BIN, 1), (&helper, 1), ("translation/../escape", 1)],
+            vec![(BIN, 1), (&helper, 1), ("translation/_internal/lib.so", u32::MAX)],
+            vec![(BIN, 1), (&helper, 1), ("translation/_internal/x", 1), ("translation/_internal/X", 1)]] {
+            std::fs::write(&path, archive(&entries)).unwrap();
+            assert!(validate_archive(&path).is_err());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn runtime_tree_requires_a_real_directory() {
+        let dir = scratch("runtime_tree");
+        let runtime = dir.join("translation");
+        assert!(validate_runtime_tree(&runtime).is_err());
+        std::fs::write(&runtime, b"not a directory").unwrap();
+        assert!(validate_runtime_tree(&runtime).is_err());
+        std::fs::remove_file(&runtime).unwrap();
+        std::fs::create_dir_all(runtime.join("_internal")).unwrap();
+        std::fs::write(runtime.join("_internal/library"), b"library").unwrap();
+        validate_runtime_tree(&runtime).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_symlinks_preserve_framework_layout_and_reject_escapes() {
+        use std::os::unix::fs::symlink;
+        let dir = scratch("runtime_links");
+        let runtime = dir.join("translation");
+        let framework = runtime.join("_internal/Python.framework");
+        std::fs::create_dir_all(framework.join("Versions/A")).unwrap();
+        std::fs::write(framework.join("Versions/A/Python"), b"signed library").unwrap();
+        symlink("A", framework.join("Versions/Current")).unwrap();
+        symlink("Versions/Current/Python", framework.join("Python")).unwrap();
+        validate_runtime_tree(&runtime).unwrap();
+        symlink("../../../outside", framework.join("escape")).unwrap();
+        std::fs::write(dir.join("outside"), b"outside").unwrap();
+        assert!(validate_runtime_tree(&runtime).is_err());
+        std::fs::remove_file(framework.join("escape")).unwrap();
+        symlink(framework.join("Versions/A/Python"), framework.join("absolute")).unwrap();
+        assert!(validate_runtime_tree(&runtime).is_err());
+        std::fs::remove_file(framework.join("absolute")).unwrap();
+        symlink("missing", framework.join("broken")).unwrap();
+        assert!(validate_runtime_tree(&runtime).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bundle_swap_restores_runtime_when_binary_install_fails() {
+        let dir = scratch("bundle_rollback");
+        let exe = dir.join(BIN);
+        let fresh = dir.join(STAGE_DIR).join(BIN);
+        let installed = dir.join("translation");
+        let staged = fresh.parent().unwrap().join("translation");
+        std::fs::write(&exe, b"old binary").unwrap();
+        std::fs::create_dir(&installed).unwrap();
+        std::fs::write(installed.join("old"), b"old runtime").unwrap();
+        std::fs::create_dir(&staged).unwrap();
+        std::fs::write(staged.join("new"), b"new runtime").unwrap();
+        assert!(swap_bundle(&exe, &fresh).is_err());
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old binary");
+        assert_eq!(std::fs::read(installed.join("old")).unwrap(), b"old runtime");
+        assert!(!installed.join("new").exists());
+        std::fs::write(&fresh, b"new binary").unwrap();
+        swap_bundle(&exe, &fresh).unwrap();
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new binary");
+        assert!(installed.join("new").exists());
+        assert!(!installed.join("old").exists());
+        assert!(!dir.join("translation.update-old").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn release_versions_use_semver_ordering() {

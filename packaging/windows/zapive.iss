@@ -40,6 +40,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\..\target\release\zapive.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\translation\*"; DestDir: "{app}\translation"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Zapive"; Filename: "{app}\zapive.exe"

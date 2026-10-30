@@ -9,6 +9,8 @@ APPDIR=build/AppDir
 
 rm -rf "$APPDIR"
 install -Dm755 target/release/zapive "$APPDIR/usr/bin/zapive"
+test -x target/release/translation/zapive-translate
+cp -a target/release/translation "$APPDIR/usr/bin/translation"
 install -Dm644 "packaging/linux/$APP_ID.desktop" "$APPDIR/usr/share/applications/$APP_ID.desktop"
 install -Dm644 "packaging/linux/$APP_ID.metainfo.xml" "$APPDIR/usr/share/metainfo/$APP_ID.metainfo.xml"
 install -Dm644 ui/zapive.png "$APPDIR/usr/share/icons/hicolor/1024x1024/apps/$APP_ID.png"

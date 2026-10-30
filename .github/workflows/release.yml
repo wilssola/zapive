@@ -140,6 +140,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --locked
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build translation runtime
+        run: python packaging/translation/build.py
 
       # ---- Windows: sign, then wrap the exe in an installer that creates
       # ---- the Start Menu (and optional Desktop) shortcuts.
@@ -161,7 +166,9 @@ jobs:
       - name: Sign binary (self-signed)
         if: runner.os == 'Windows' && env.WINDOWS_PFX_BASE64 != ''
         shell: pwsh
-        run: packaging\windows\sign.ps1 -Path target\release\zapive.exe
+        run: |
+          packaging\windows\sign.ps1 -Path target\release\zapive.exe
+          packaging\windows\sign.ps1 -Path target\release\translation\zapive-translate.exe
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -223,15 +230,19 @@ jobs:
           identity='-'
           [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
           codesign --force --identifier io.github.wilssola.Zapive --sign "$identity" target/release/zapive
+          rm -rf target/release/translation
+          cp -R build/Zapive.app/Contents/MacOS/translation target/release/translation
 
-      # The self-updater downloads this bare-binary zip; on Windows it is
-      # zipped after signing, so updated installs stay signed.
       - name: Updater payload
         shell: bash
         run: |
           mkdir -p dist
           cd target/release
-          7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" translation
+          else
+            zip -r -y "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" translation
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: zapive-${{ matrix.target }}
