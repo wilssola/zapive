@@ -378,12 +378,24 @@ pub fn format_time(timestamp: i64) -> String {
     if timestamp == 0 {
         return String::new();
     }
-    let d = local_date(timestamp);
-    let today = chrono::Local::now().date_naive();
-    if d.date_naive() == today {
-        d.format("%H:%M").to_string()
-    } else {
-        d.format("%d/%m").to_string()
+    format_time_at(local_date(timestamp).naive_local(), chrono::Local::now().date_naive())
+}
+
+fn format_time_at(d: chrono::NaiveDateTime, today: chrono::NaiveDate) -> String {
+    use chrono::Datelike as _;
+    match today.signed_duration_since(d.date()).num_days() {
+        0 => d.format("%H:%M").to_string(),
+        1 => t("day.yesterday"),
+        2..=6 => t(match d.weekday() {
+            chrono::Weekday::Mon => "day.monday",
+            chrono::Weekday::Tue => "day.tuesday",
+            chrono::Weekday::Wed => "day.wednesday",
+            chrono::Weekday::Thu => "day.thursday",
+            chrono::Weekday::Fri => "day.friday",
+            chrono::Weekday::Sat => "day.saturday",
+            chrono::Weekday::Sun => "day.sunday",
+        }),
+        _ => d.format("%d/%m").to_string(),
     }
 }
 
@@ -466,9 +478,17 @@ pub fn format_duration(seconds: u32) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct Draft {
+    pub text: String,
+    pub mentions: Vec<(String, String)>,
+    pub promoted: u64,
+}
+
 #[derive(Default)]
 pub struct Store {
     pub chats: HashMap<String, ChatMeta>,
+    pub drafts: HashMap<String, Draft>,
     // Our own identities (phone jid and lid).
     pub self_jids: HashSet<String>,
     pub messages: HashMap<String, Vec<StoredMessage>>,
@@ -524,6 +544,13 @@ impl Store {
     }
 
     fn merge_jid(&mut self, from: &str, into: &str) {
+        if let Some(src) = self.drafts.remove(from) {
+            if self.drafts.get(into).is_none_or(|dst| {
+                (!src.text.trim().is_empty(), src.promoted) > (!dst.text.trim().is_empty(), dst.promoted)
+            }) {
+                self.drafts.insert(into.to_string(), src);
+            }
+        }
         if let Some(src) = self.chats.remove(from) {
             let dst = self.chats.get(into);
             let merged = ChatMeta {
@@ -673,7 +700,14 @@ impl Store {
             if pa > 0 {
                 return pb.cmp(&pa);
             }
-            b.timestamp.cmp(&a.timestamp)
+            let promotion = |chat: &ChatMeta| {
+                self.drafts.get(&chat.jid)
+                    .filter(|draft| !draft.text.trim().is_empty())
+                    .map(|draft| draft.promoted)
+                    .unwrap_or(0)
+            };
+            promotion(b).cmp(&promotion(a))
+                .then_with(|| b.timestamp.cmp(&a.timestamp))
         });
         list
     }
@@ -803,6 +837,7 @@ impl Store {
     pub fn delete_chat(&mut self, jid: &str) {
         self.clear_messages(jid);
         self.chats.remove(jid);
+        self.drafts.remove(jid);
         for set in self.label_chats.values_mut() {
             set.remove(jid);
         }
@@ -1279,6 +1314,7 @@ impl Store {
 
     pub fn save_to(&mut self, vault: &Vault) {
         vault.set("store:chats", &to_json(&self.chats));
+        vault.set("store:drafts", &to_json(&self.drafts));
         vault.set("store:contacts", &to_json(&self.contacts));
         vault.set("store:pushnames", &to_json(&self.push_names));
         vault.set("store:saved", &to_json(&self.saved_contacts));
@@ -1380,6 +1416,9 @@ impl Store {
         }
         if let Some(v) = read(vault, "store:chats") {
             self.chats = v;
+        }
+        if let Some(v) = read(vault, "store:drafts") {
+            self.drafts = v;
         }
         if let Some(v) = read(vault, "store:contacts") {
             self.contacts = v;
@@ -1509,6 +1548,135 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_time_uses_calendar_day_boundaries() {
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
+        let at = |year, month, day, hour, minute| {
+            chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap()
+                .and_hms_opt(hour, minute, 0).unwrap()
+        };
+        assert_eq!(format_time(0), "");
+        assert_eq!(format_time_at(at(2026, 1, 2, 9, 5), now), "09:05");
+        assert_eq!(format_time_at(at(2026, 1, 1, 23, 59), now), t("day.yesterday"));
+        for (day, key) in [(31, "day.wednesday"), (30, "day.tuesday"),
+            (29, "day.monday"), (28, "day.sunday"), (27, "day.saturday")] {
+            assert_eq!(format_time_at(at(2025, 12, day, 23, 59), now), t(key));
+        }
+        assert_eq!(format_time_at(at(2025, 12, 26, 23, 59), now), "26/12");
+        assert_eq!(format_time_at(at(2025, 1, 2, 9, 5), now), "02/01");
+        assert_eq!(format_time_at(at(2026, 1, 3, 9, 5), now), "03/01");
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 4).unwrap();
+        assert_eq!(format_time_at(at(2026, 1, 2, 0, 0), now), t("day.friday"));
+        assert_eq!(format_time_at(at(2026, 1, 1, 0, 0), now), t("day.thursday"));
+    }
+
+    #[test]
+    fn sidebar_time_uses_local_dates_across_offset_changes() {
+        for (message, now, key) in [
+            ("2026-03-07T23:30:00-05:00", "2026-03-09T00:15:00-04:00", "day.saturday"),
+            ("2026-10-31T00:15:00-04:00", "2026-11-01T23:30:00-05:00", "day.yesterday"),
+        ] {
+            let message = chrono::DateTime::parse_from_rfc3339(message).unwrap();
+            let now = chrono::DateTime::parse_from_rfc3339(now).unwrap();
+            assert_eq!(format_time_at(message.naive_local(), now.date_naive()), t(key));
+        }
+    }
+
+    #[test]
+    fn draft_sorting_preserves_pinned_precedence() {
+        let mut store = Store::default();
+        for (jid, timestamp, pinned, text, promoted) in [
+            ("pin-new", 1, 20, "", 0),
+            ("pin-old", 2, 10, "draft", 999),
+            ("draft-new", 3, 0, "draft", 200),
+            ("draft-old", 4, 0, "draft", 100),
+            ("normal", 50, 0, "", 0),
+            ("blank", 40, 0, " \n\t", 999),
+            ("unpromoted", 30, 0, "draft", 0),
+        ] {
+            store.chats.insert(jid.into(), ChatMeta {
+                jid: jid.into(), timestamp, pinned, ..Default::default()
+            });
+            store.drafts.insert(jid.into(), Draft {
+                text: text.into(), promoted, ..Default::default()
+            });
+        }
+        assert_eq!(store.sorted_chats().iter().map(|chat| chat.jid.as_str()).collect::<Vec<_>>(),
+            ["pin-new", "pin-old", "draft-new", "draft-old", "normal", "blank", "unpromoted"]);
+        assert_eq!(store.chats["draft-new"].timestamp, 3);
+        assert_eq!(store.chats["draft-old"].timestamp, 4);
+    }
+
+    #[test]
+    fn draft_removal_restores_timestamp_order() {
+        let mut store = Store::default();
+        for (jid, timestamp) in [("older", 10), ("newer", 20)] {
+            store.chats.insert(jid.into(), ChatMeta {
+                jid: jid.into(), timestamp, ..Default::default()
+            });
+        }
+        store.drafts.insert("older".into(), Draft {
+            text: "draft".into(), promoted: 1, ..Default::default()
+        });
+        assert_eq!(store.sorted_chats()[0].jid, "older");
+        store.drafts.remove("older");
+        assert_eq!(store.sorted_chats().iter().map(|chat| chat.jid.as_str()).collect::<Vec<_>>(), ["newer", "older"]);
+        assert_eq!(store.chats["older"].timestamp, 10);
+        assert_eq!(store.chats["newer"].timestamp, 20);
+    }
+
+    #[test]
+    fn draft_serialization_preserves_mentions() {
+        let draft = Draft {
+            text: "Hello @Alice and @Bob 👋".into(),
+            mentions: vec![("Alice".into(), "1@s.whatsapp.net".into()), ("Bob".into(), "2@lid".into())],
+            promoted: u64::MAX,
+        };
+        let drafts = HashMap::from([("group@g.us".to_string(), draft.clone())]);
+        let restored: HashMap<String, Draft> = serde_json::from_str(&to_json(&drafts)).unwrap();
+        assert_eq!(restored["group@g.us"].text, draft.text);
+        assert_eq!(restored["group@g.us"].mentions, draft.mentions);
+        assert_eq!(restored["group@g.us"].promoted, draft.promoted);
+    }
+
+    #[test]
+    fn draft_merge_keeps_newest_nonblank_draft_and_mentions() {
+        let mut store = Store::default();
+        for (source_text, source_promoted, target_text, target_promoted, expected) in [
+            ("source", 20, "target", 10, "source"),
+            ("source", 10, "target", 20, "target"),
+            ("source", 10, "target", 10, "target"),
+            (" \t", 30, "target", 20, "target"),
+            ("source", 0, "", 20, "source"),
+        ] {
+            for (jid, text, promoted) in [("from", source_text, source_promoted), ("into", target_text, target_promoted)] {
+                store.drafts.insert(jid.into(), Draft {
+                    text: text.into(), mentions: vec![(text.into(), jid.into())], promoted,
+                });
+            }
+            store.merge_jid("from", "into");
+            assert!(!store.drafts.contains_key("from"));
+            assert_eq!(store.drafts["into"].text, expected);
+            assert_eq!(store.drafts["into"].mentions[0].0, expected);
+        }
+        store.drafts.remove("into");
+        store.drafts.insert("from".into(), Draft {
+            text: "only source".into(), ..Default::default()
+        });
+        store.merge_jid("from", "into");
+        assert_eq!(store.drafts["into"].text, "only source");
+    }
+
+    #[test]
+    fn delete_chat_removes_draft() {
+        let mut store = Store::default();
+        store.chats.insert("chat".into(), ChatMeta { jid: "chat".into(), ..Default::default() });
+        store.drafts.insert("chat".into(), Draft { text: "draft".into(), ..Default::default() });
+        store.delete_chat("chat");
+        assert!(!store.chats.contains_key("chat"));
+        assert!(!store.drafts.contains_key("chat"));
+    }
 
     #[test]
     fn sidebar_counts_include_archived_and_community_groups() {

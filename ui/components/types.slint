@@ -1,3 +1,11 @@
+export struct ReleaseItem {
+    tag: string,
+    date: string,
+    notes: string,
+    installed: bool,
+    newer: bool,
+}
+
 export struct DetailRow {
     kind: string,
     title: string,
@@ -15,6 +23,8 @@ export struct ChatItem {
     jid: string,
     name: string,
     preview: string,
+    typing: bool,
+    draft: bool,
     ticks: string,
     ticksBlue: bool,
     time: string,

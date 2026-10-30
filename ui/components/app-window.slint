@@ -1,6 +1,6 @@
 import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
+import { ReleaseItem, DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
 import { Avatar } from "avatar.slint";
 import { GreenLink } from "green-link.slint";
 import { IconButton } from "icon-button.slint";
@@ -173,6 +173,86 @@ component InfoAction inherits TouchArea {
     }
 }
 
+component TypingBubbles inherits Rectangle {
+    in property <[MemberItem]> members;
+    in property <int> extra;
+    in property <bool> privacy-blurred;
+    property <int> avatar-count: min(root.members.length, 5) + (root.extra > 0 ? 1 : 0);
+    property <int> bounce-phase: 0;
+    width: root.avatar-count * 22px + 54px;
+    height: 32px;
+    Timer {
+        interval: 160ms;
+        running: root.members.length > 0;
+        triggered => { root.bounce-phase = mod(root.bounce-phase + 1, 8); }
+    }
+    for member[index] in root.members: Rectangle {
+        visible: index < 5;
+        x: index * 22px;
+        y: 1px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.conv-bg;
+        typing-hover := TouchArea { enabled: false; }
+        Avatar {
+            x: 2px;
+            y: 2px;
+            width: 26px;
+            height: 26px;
+            src: member.avatar;
+            has-image: member.hasAvatar;
+            initial: member.initial;
+            color-idx: member.colorIdx;
+            privacy-blurred: root.privacy-blurred;
+            privacy-reveal: typing-hover.has-hover;
+        }
+    }
+    if root.extra > 0: Rectangle {
+        x: min(root.members.length, 5) * 22px;
+        y: 1px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        border-width: 2px;
+        border-color: Theme.conv-bg;
+        background: Theme.chip-bg;
+        Text {
+            text: "+" + root.extra;
+            color: Theme.text;
+            font-size: 10px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle {
+        x: root.avatar-count * 22px + 12px;
+        y: 1px;
+        width: 42px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.bubble-in;
+        Rectangle {
+            x: 1px;
+            y: 21px;
+            width: 8px;
+            height: 7px;
+            border-bottom-right-radius: 7px;
+            background: Theme.bubble-in;
+        }
+        for index in 3: Rectangle {
+            x: 11px + index * 8px;
+            y: root.bounce-phase == index + 1 || root.bounce-phase == index + 2 ? 9px : 14px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.dark ? #ad93ff : #7654d6;
+            animate y { duration: 240ms; easing: ease-in-out; }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Zapive";
     icon: @image-url("../zapive.png");
@@ -290,6 +370,20 @@ export component AppWindow inherits Window {
     in-out property <string> update-version;
     in property <string> update-error;
     in-out property <string> app-version;
+    in property <[ReleaseItem]> releases;
+    in-out property <bool> changelog-loading: false;
+    in-out property <bool> changelog-loaded: false;
+    in-out property <bool> changelog-more: false;
+    in-out property <int> changelog-page: 1;
+    in-out property <string> changelog-error;
+    in-out property <bool> changelog-has-new: false;
+    in-out property <bool> changelog-verified: false;
+    in-out property <bool> whats-new-open: false;
+    function show-whats-new() {
+        root.whats-new-open = true;
+        root.changelog-load(true);
+    }
+    callback changelog-load(bool);
     callback update-check();
     callback update-apply();
     callback update-restart();
@@ -308,6 +402,8 @@ export component AppWindow inherits Window {
     in-out property <string> current-initial: "";
     in-out property <int> current-color-idx: 0;
     in-out property <[MessageItem]> messages;
+    in-out property <[MemberItem]> typing-members;
+    in-out property <int> typing-extra: 0;
     in-out property <bool> attach-open: false;
     in-out property <bool> stick-bottom: true;
     // Kept invisible until the host anchors it, so opening a chat never
@@ -590,6 +686,10 @@ export component AppWindow inherits Window {
     in-out property <bool> sv-video-ready: false;
     callback status-play();
 
+    public function clear-sidebar-search() {
+        search-box.text = "";
+    }
+
     public function focus-composer() {
         if (root.screen == "main" && root.chat-open && root.current-can-send && !root.select-mode
             && !root.message-menu-open && !root.message-dialog-open && !root.details-open && !root.confirm-open
@@ -622,6 +722,23 @@ export component AppWindow inherits Window {
 
     // Settings
     in-out property <bool> settings-open: false;
+    property <string> settings-section: "general";
+    property <string> settings-query: "";
+    property <[{ key: string, title: string, detail: string, icon: image }]> settings-categories: [
+        { key: "account", title: @tr("Account"), detail: @tr("Manage your accounts"), icon: @image-url("../icons/users.svg") },
+        { key: "general", title: @tr("General"), detail: @tr("Application and behavior"), icon: @image-url("../icons/settings.svg") },
+        { key: "appearance", title: @tr("Appearance"), detail: @tr("Theme, language and visual style"), icon: @image-url("../icons/eye.svg") },
+        { key: "notifications", title: @tr("Notifications"), detail: @tr("Messages and calls"), icon: @image-url("../icons/bell.svg") },
+        { key: "privacy", title: @tr("Privacy"), detail: @tr("Read receipts, visibility and data"), icon: @image-url("../icons/lock.svg") },
+        { key: "calls", title: @tr("Calls"), detail: @tr("Audio, video and devices"), icon: @image-url("../icons/phone.svg") },
+        { key: "downloads", title: @tr("Automatic downloads"), detail: @tr("Media and files"), icon: @image-url("../icons/download.svg") },
+        { key: "security", title: @tr("Security"), detail: @tr("PIN and app protection"), icon: @image-url("../icons/lock.svg") },
+        { key: "updates", title: @tr("Updates"), detail: @tr("Version and updates"), icon: @image-url("../icons/refresh.svg") }
+    ];
+    pure callback settings-search(string, string) -> bool;
+    pure function settings-matches(text: string) -> bool {
+        return root.settings-search(text, root.settings-query);
+    }
     in-out property <bool> pin-set: false;
     in-out property <bool> autostart: false;
     in-out property <string> settings-status: "";
@@ -740,6 +857,7 @@ export component AppWindow inherits Window {
                 error: root.update-error;
                 apply-update => { root.update-apply(); }
                 restart => { root.update-restart(); }
+                view-news => { root.show-whats-new(); }
             }
         }
         HorizontalBox {
@@ -800,6 +918,7 @@ export component AppWindow inherits Window {
                 error: root.update-error;
                 apply-update => { root.update-apply(); }
                 restart => { root.update-restart(); }
+                view-news => { root.show-whats-new(); }
             }
         }
         HorizontalBox {
@@ -999,7 +1118,8 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
-                if (root.video-open) { root.close-video(); }
+                if (root.whats-new-open) { root.whats-new-open = false; }
+                else if (root.video-open) { root.close-video(); }
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
                 else if (root.message-menu-open) { root.message-menu-open = false; }
@@ -1022,9 +1142,15 @@ export component AppWindow inherits Window {
                 else if (root.select-mode) { root.select-cancel(); }
                 else if (root.info-open) { root.close-info(); }
                 else if (root.chat-search-open) { root.chat-search-close(); }
+                else if (root.chat-tab == "archived") {
+                    root.chat-tab = "all";
+                    root.tab-changed("all");
+                    search-box.text = "";
+                    root.search-changed("");
+                }
                 else {
                     root.menu-close-chat();
-                    root.sidebar-view = "chats";
+                    root.settings-open = false; root.sidebar-view = "chats";
                     root.view-changed("chats");
                     search-box.text = "";
                     root.search-changed("");
@@ -1056,7 +1182,7 @@ export component AppWindow inherits Window {
                     badge-count: root.chats-unread-count;
                     active: root.sidebar-view == "chats";
                     clicked => {
-                        root.sidebar-view = "chats";
+                        root.settings-open = false; root.sidebar-view = "chats";
                         root.view-changed("chats");
                     }
                 }
@@ -1067,7 +1193,7 @@ export component AppWindow inherits Window {
                     badge-border: Theme.dark ? #1c2c35 : Theme.header;
                     badge-dot: root.statuses-unseen;
                     active: root.sidebar-view == "status";
-                    clicked => { root.sidebar-view = "status"; }
+                    clicked => { root.settings-open = false; root.sidebar-view = "status"; }
                 }
                 IconButton {
                     icon: @image-url("../icons/phone.svg");
@@ -1076,7 +1202,7 @@ export component AppWindow inherits Window {
                     badge-border: Theme.dark ? #1c2c35 : Theme.header;
                     badge-count: root.calls-unseen-count;
                     active: root.sidebar-view == "calls";
-                    clicked => { root.sidebar-view = "calls"; root.view-changed("calls"); }
+                    clicked => { root.settings-open = false; root.sidebar-view = "calls"; root.view-changed("calls"); }
                 }
                 IconButton {
                     icon: @image-url("../icons/speakerphone.svg");
@@ -1086,7 +1212,7 @@ export component AppWindow inherits Window {
                     badge-count: root.channels-unread-count;
                     active: root.sidebar-view == "channels";
                     clicked => {
-                        root.sidebar-view = "channels";
+                        root.settings-open = false; root.sidebar-view = "channels";
                         root.view-changed("channels");
                     }
                 }
@@ -1098,7 +1224,7 @@ export component AppWindow inherits Window {
                     badge-count: root.communities-unread-count;
                     active: root.sidebar-view == "communities";
                     clicked => {
-                        root.sidebar-view = "communities";
+                        root.settings-open = false; root.sidebar-view = "communities";
                         root.view-changed("communities");
                     }
                 }
@@ -1114,9 +1240,10 @@ export component AppWindow inherits Window {
                 Rectangle { height: 1px; background: Theme.border; }
                 IconButton {
                     icon: @image-url("../icons/settings.svg");
+                    active: root.settings-open;
                     clicked => {
                         root.settings-status = "";
-                        root.settings-open = true;
+                        root.settings-open = !root.settings-open;
                         root.settings-opened();
                     }
                 }
@@ -1428,6 +1555,7 @@ export component AppWindow inherits Window {
                 error: root.update-error;
                     apply-update => { root.update-apply(); }
                     restart => { root.update-restart(); }
+                view-news => { root.show-whats-new(); }
                 }
 
                 // Filter chips scroll sideways once the lists add up.
@@ -1616,7 +1744,7 @@ export component AppWindow inherits Window {
                                     }
                                     Text {
                                         text: chat.preview;
-                                        color: Theme.text-dim;
+                                        color: chat.draft ? #d99028 : chat.typing ? Theme.accent : Theme.text-dim;
                                         opacity: root.blur-messages && !touch.has-hover ? 0.08 : 1;
                                         animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 13px;
@@ -1832,7 +1960,7 @@ export component AppWindow inherits Window {
                 width: 100%;
                 height: 100%;
                 conversations => {
-                    root.sidebar-view = "chats";
+                    root.settings-open = false; root.sidebar-view = "chats";
                     root.view-changed("chats");
                     root.chat-tab = "all";
                     root.tab-changed("all");
@@ -1841,7 +1969,7 @@ export component AppWindow inherits Window {
                     search-box.focus();
                 }
                 groups => {
-                    root.sidebar-view = "chats";
+                    root.settings-open = false; root.sidebar-view = "chats";
                     root.view-changed("chats");
                     root.chat-tab = "groups";
                     root.tab-changed("groups");
@@ -1870,6 +1998,23 @@ export component AppWindow inherits Window {
                         running: false;
                         triggered => { root.scrolling = false; self.running = false; }
                     }
+                    typing-restick := Timer {
+                        interval: 1ms;
+                        running: false;
+                        triggered => {
+                            self.running = false;
+                            if (root.conv-ready && root.stick-bottom) {
+                                root.scroll-conversation-end();
+                            }
+                        }
+                    }
+                    if root.messages.length == 0 && msg-list.typing-space > 0px && root.conv-ready: TypingBubbles {
+                        x: 48px + (root.select-mode ? 30px : 0px);
+                        y: contact-header.height + 4px;
+                        members: root.typing-members;
+                        extra: root.typing-extra;
+                        privacy-blurred: root.blur-photos;
+                    }
                 msg-list := ListView {
                     width: parent.width;
                     height: parent.height;
@@ -1878,6 +2023,10 @@ export component AppWindow inherits Window {
                         duration: 160ms;
                         easing: ease-out;
                         enabled: root.conv-ready;
+                    }
+                    property <length> typing-space: root.current-is-group && root.typing-members.length > 0 ? 40px : 0px;
+                    changed typing-space => {
+                        typing-restick.running = root.conv-ready && root.stick-bottom;
                     }
                     changed viewport-height => {
                         root.conv-viewport-h = self.viewport-height;
@@ -2073,13 +2222,19 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        height: (msg.kind == "system"
+                        property <length> message-height: msg.kind == "system"
                             ? sys-pill.height + 12px + self.day-offset
-                                + (i == root.messages.length - 1 ? root.composer-tail-space : 0px)
                             : bubble.height + (msg.firstOfRun ? 16px : 6px)
-                                + (msg.reactions != "" ? 14px : 0) + self.day-offset)
-                                + (i == root.messages.length - 1 && msg.kind != "system"
-                                    ? root.composer-tail-space : 0px);
+                                + (msg.reactions != "" ? 14px : 0) + self.day-offset;
+                        height: self.message-height + (i == root.messages.length - 1
+                            ? msg-list.typing-space + root.composer-tail-space : 0px);
+                        if i == root.messages.length - 1 && msg-list.typing-space > 0px: TypingBubbles {
+                            x: 48px + (root.select-mode ? 30px : 0px);
+                            y: msg-row.message-height + 4px;
+                            members: root.typing-members;
+                            extra: root.typing-extra;
+                            privacy-blurred: root.blur-photos;
+                        }
                         if msg.dayLabel != "": Rectangle {
                             y: 8px + msg-row.header-offset;
                             x: (parent.width - self.width) / 2;
@@ -3484,9 +3639,10 @@ export component AppWindow inherits Window {
                         padding-left: 18px;
                         padding-right: 14px;
                         spacing: 12px;
-                        VerticalLayout {
-                            alignment: center;
+                        Rectangle {
+                            width: 40px;
                             Avatar {
+                                y: (parent.height - self.height) / 2;
                                 width: 40px;
                                 height: 40px;
                                 src: root.current-avatar;
@@ -3497,8 +3653,8 @@ export component AppWindow inherits Window {
                                 privacy-reveal: header-avatar-touch.has-hover;
                             }
                             header-avatar-touch := TouchArea {
-                                width: 40px;
-                                height: 40px;
+                                mouse-cursor: pointer;
+                                clicked => { root.open-info(); }
                             }
                         }
                         Rectangle {
@@ -3525,6 +3681,10 @@ export component AppWindow inherits Window {
                                     text: root.current-status;
                                     color: Theme.text-dim;
                                     font-size: 11px;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                    opacity: root.blur-names && !head-touch.has-hover ? 0.08 : 1;
+                                    animate opacity { duration: 120ms; easing: ease-out; }
                                 }
                             }
                         }
@@ -5514,418 +5674,579 @@ export component AppWindow inherits Window {
         }
     }
 
-    // ---------- Settings overlay ----------
+    // ---------- Settings ----------
     settings-layer := ModalLayer {
         open: root.settings-open;
-        scrim: #000000aa;
-        dismiss => { root.settings-open = false; }
+        scrim: transparent;
+        dismissible: false;
+        x: 61px;
+        width: parent.width - self.x;
+        height: parent.height;
         if settings-layer.mounted: Rectangle {
-            width: min(500px, parent.width - 32px);
-            // Never taller than the window: the body scrolls instead, so
-            // the sections can keep growing.
-            height: min(780px, parent.height - 48px);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 14px;
-            drop-shadow-blur: 24px;
-            drop-shadow-color: #00000066;
-            clip: true;
+            width: 100%;
+            height: 100%;
+            x: (1 - settings-layer.progress) * 16px;
             opacity: settings-layer.progress;
-            transform-scale: 0.96 + 0.04 * settings-layer.progress;
+            background: Theme.dark ? #091419 : Theme.sidebar;
             TouchArea { }
-            VerticalLayout {
-                padding: 0;
+            HorizontalLayout {
                 spacing: 0;
                 Rectangle {
-                    height: 64px;
-                    HorizontalLayout {
-                        padding-left: 24px;
-                        padding-right: 14px;
+                    width: min(280px, root.width * 0.3);
+                    background: Theme.dark ? #081217 : Theme.sidebar;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 12px;
                         Text {
-                            text: @tr("Settings");
-                            color: Theme.text;
-                            font-size: 20px;
-                            font-weight: 700;
+                            height: 42px;
+                            text: @tr("Settings"); color: Theme.text;
+                            font-size: 20px; font-weight: 700;
                             vertical-alignment: center;
-                            horizontal-stretch: 1;
                         }
-                        IconButton {
-                            icon: @image-url("../icons/x.svg");
-                            y: (parent.height - self.height) / 2;
-                            clicked => { root.settings-open = false; }
+                        LineEdit {
+                            height: 36px;
+                            placeholder-text: @tr("Search settings…");
+                            text <=> root.settings-query;
+                            accessible-label: @tr("Search settings…");
                         }
-                    }
-                    Rectangle {
-                        y: parent.height - 1px;
-                        height: 1px;
-                        background: Theme.border;
+                        ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                for category in root.settings-categories: Rectangle {
+                                    height: 62px;
+                                    border-radius: 8px;
+                                    background: root.settings-section == category.key ? Theme.accent.with-alpha(0.2)
+                                        : category-touch.has-hover ? Theme.hover : transparent;
+                                    Rectangle {
+                                        x: 0px; width: 2px; y: 9px; height: parent.height - 18px;
+                                        background: root.settings-section == category.key ? Theme.accent : transparent;
+                                    }
+                                    HorizontalLayout {
+                                        padding: 8px; spacing: 12px;
+                                        Rectangle {
+                                            width: 38px; height: 38px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 19px;
+                                            background: Theme.hover;
+                                            Image {
+                                                x: 9px; y: 9px; width: 20px; height: 20px;
+                                                source: category.icon;
+                                                colorize: root.settings-section == category.key ? Theme.accent : Theme.icon;
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center; spacing: 4px;
+                                            Text { text: category.title; color: Theme.text; font-size: 14px; overflow: elide; }
+                                            Text { text: category.detail; color: Theme.text-dim; font-size: 11px; overflow: elide; }
+                                        }
+                                    }
+                                    category-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        accessible-role: button;
+                                        accessible-label: category.title;
+                                        clicked => {
+                                            root.settings-section = category.key;
+                                            root.settings-query = "";
+                                            if (category.key == "updates" && !root.changelog-loaded) { root.changelog-load(false); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                ScrollView {
-                    vertical-stretch: 1;
+                Rectangle { width: 1px; background: Theme.border; }
+                Rectangle {
+                    horizontal-stretch: 1;
                     VerticalLayout {
-                        padding: 24px;
-                        padding-top: 18px;
-                        spacing: 20px;
-                        SettingsCard {
-                            title: @tr("Appearance");
-                            SettingsRow {
-                                label: @tr("Theme");
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    height: 30px;
-                                    y: (parent.height - self.height) / 2;
-                                    FilterChip {
-                                        label: @tr("Dark");
-                                        active: root.theme-mode == "dark";
-                                        clicked => { root.theme-mode = "dark"; root.theme-changed("dark"); }
-                                    }
-                                    FilterChip {
-                                        label: @tr("Light");
-                                        active: root.theme-mode == "light";
-                                        clicked => { root.theme-mode = "light"; root.theme-changed("light"); }
-                                    }
-                                    FilterChip {
-                                        label: @tr("System");
-                                        active: root.theme-mode == "system";
-                                        clicked => { root.theme-mode = "system"; root.theme-changed("system"); }
-                                    }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Style");
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    height: 30px;
-                                    y: (parent.height - self.height) / 2;
-                                    FilterChip {
-                                        label: @tr("Glass");
-                                        active: root.theme-style == "glass";
-                                        clicked => { root.theme-style = "glass"; root.style-changed("glass"); }
-                                    }
-                                    FilterChip {
-                                        label: @tr("Opaque");
-                                        active: root.theme-style == "opaque";
-                                        clicked => { root.theme-style = "opaque"; root.style-changed("opaque"); }
-                                    }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Language");
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    height: 30px;
-                                    y: (parent.height - self.height) / 2;
-                                    FilterChip {
-                                        label: "Português";
-                                        active: root.language-mode == "pt";
-                                        clicked => { root.language-mode = "pt"; root.language-changed("pt"); }
-                                    }
-                                    FilterChip {
-                                        label: "English";
-                                        active: root.language-mode == "en";
-                                        clicked => { root.language-mode = "en"; root.language-changed("en"); }
-                                    }
-                                    FilterChip {
-                                        label: @tr("System");
-                                        active: root.language-mode == "system";
-                                        clicked => { root.language-mode = "system"; root.language-changed("system"); }
-                                    }
-                                }
-                            }
-                        }
-                        SettingsCard {
-                            title: @tr("General");
-                            SettingsRow {
-                                label: @tr("Open Zapive when I sign in");
-                                Toggle {
-                                    on: root.autostart;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.autostart-changed(!root.autostart); }
-                                }
-                            }
-                        }
-                        SettingsCard {
-                            title: @tr("Calls");
-                            hint: @tr("A device picked here is used for every call. Changes apply to the next call.");
-                            SettingsRow {
-                                label: @tr("Microphone");
-                                ComboBox {
-                                    width: 200px;
-                                    height: 34px;
-                                    y: (parent.height - self.height) / 2;
-                                    model: root.mic-devices;
-                                    current-value: root.mic-device;
-                                    selected(value) => {
-                                        root.mic-device = value;
-                                        root.device-changed("mic", value);
-                                    }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Speaker");
-                                ComboBox {
-                                    width: 200px;
-                                    height: 34px;
-                                    y: (parent.height - self.height) / 2;
-                                    model: root.speaker-devices;
-                                    current-value: root.speaker-device;
-                                    selected(value) => {
-                                        root.speaker-device = value;
-                                        root.device-changed("speaker", value);
-                                    }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Camera");
-                                ComboBox {
-                                    width: 200px;
-                                    height: 34px;
-                                    y: (parent.height - self.height) / 2;
-                                    model: root.camera-devices;
-                                    current-value: root.camera-device;
-                                    selected(value) => {
-                                        root.camera-device = value;
-                                        root.device-changed("camera", value);
-                                    }
-                                }
-                            }
-                        }
-                        SettingsCard {
-                            title: @tr("Privacy");
-                            hint: @tr("Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted.");
-                            SettingsRow {
-                                label: @tr("Send read receipts");
-                                Toggle {
-                                    on: root.send-receipts;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.send-receipts-changed(!root.send-receipts); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Apply messages deleted by the sender");
-                                Toggle {
-                                    on: root.apply-deletions;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.apply-deletions-changed(!root.apply-deletions); }
-                                }
-                            }
+                        spacing: 0;
+                        Rectangle {
+                            height: 78px;
                             HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-                                Text {
-                                    text: @tr("settings.privacyBlurHint");
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
+                                padding-left: 20px; padding-right: 12px;
+                                VerticalLayout {
+                                    alignment: center; spacing: 4px;
+                                    Text {
+                                        text: root.settings-query != "" ? @tr("Search results") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : 1].title;
+                                        color: Theme.text; font-size: 20px; font-weight: 700;
+                                    }
+                                    Text {
+                                        text: root.settings-query != "" ? @tr("Settings matching your search") : @tr("Customize your Zapive experience");
+                                        color: Theme.text-dim; font-size: 12px;
+                                    }
+                                }
+                                IconButton {
+                                    icon: @image-url("../icons/arrow-left.svg");
+                                    clicked => { root.settings-open = false; }
                                 }
                             }
-                            SettingsRow {
-                                label: @tr("settings.blurNames");
-                                Toggle {
-                                    label: @tr("settings.blurNames");
-                                    on: root.blur-names;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.privacy-blur-changed("names", !root.blur-names); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("settings.blurPhotos");
-                                Toggle {
-                                    label: @tr("settings.blurPhotos");
-                                    on: root.blur-photos;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("settings.blurMessages");
-                                Toggle {
-                                    label: @tr("settings.blurMessages");
-                                    on: root.blur-messages;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("settings.blurMedia");
-                                Toggle {
-                                    label: @tr("settings.blurMedia");
-                                    on: root.blur-media;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.privacy-blur-changed("media", !root.blur-media); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Show notifications");
-                                detail: @tr("When turned off, no banners appear for messages or calls. Unread counts still update.");
-                                Toggle {
-                                    accessible-role: button;
-                                    accessible-label: @tr("Show notifications");
-                                    on: root.notifications;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.notifications-changed(!root.notifications); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("settings.notifyPreviews");
-                                detail: @tr("settings.notifyPreviewsHint");
-                                Toggle {
-                                    accessible-role: button;
-                                    accessible-label: @tr("settings.notifyPreviews");
-                                    on: root.notify-previews;
-                                    y: (parent.height - self.height) / 2;
-                                    clicked => { root.notify-previews-changed(!root.notify-previews); }
-                                }
-                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
                         }
-                        SettingsCard {
-                            title: @tr("Security");
-                            VerticalLayout {
-                                padding: 14px;
-                                padding-top: 10px;
-                                spacing: 10px;
-                                Text {
-                                    text: root.pin-set
-                                        ? @tr("PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI).")
-                                        : @tr("Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch.");
-                                    color: Theme.text-dim;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: 20px;
+                            padding-top: 18px;
+                            spacing: 20px;
+                            alignment: start;
+                            if ((root.settings-query == "" && (root.settings-section == "general")) || (root.settings-query != "" && root.settings-matches(@tr("Startup") + " " + @tr("Open Zapive when I sign in")))): SettingsCard {
+                                title: @tr("Startup");
+                                SettingsRow {
+                                    label: @tr("Open Zapive when I sign in");
+                                    detail: @tr("Start the app automatically when you sign in.");
+                                    icon: @image-url("../icons/settings.svg");
+                                    Toggle {
+                                        on: root.autostart;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.autostart-changed(!root.autostart); }
+                                    }
                                 }
-                                current-pin := LineEdit {
-                                    visible: root.pin-set;
-                                    input-type: password;
-                                    placeholder-text: @tr("Current PIN");
+                            }
+                            if ((root.settings-query == "" && (root.settings-section == "appearance")) || (root.settings-query != "" && root.settings-matches(@tr("Appearance") + " " + @tr("Theme") + " " + @tr("Style") + " " + @tr("Language")))): SettingsCard {
+                                title: @tr("Appearance");
+                                SettingsRow {
+                                    label: @tr("Theme");
+                                    detail: @tr("Choose a light, dark or system theme.");
+                                    icon: @image-url("../icons/eye.svg");
+                                    ComboBox {
+                                        width: min(210px, root.width * 0.25);
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        model: [@tr("Dark"), @tr("Light"), @tr("System")];
+                                        current-value: root.theme-mode == "dark" ? @tr("Dark") : root.theme-mode == "light" ? @tr("Light") : @tr("System");
+                                        selected(value) => {
+                                            root.theme-mode = value == @tr("Dark") ? "dark" : value == @tr("Light") ? "light" : "system";
+                                            root.theme-changed(root.theme-mode);
+                                        }
+                                    }
                                 }
-                                new-pin := LineEdit {
-                                    input-type: password;
-                                    placeholder-text: @tr("New PIN (4 to 10 digits)");
+                                SettingsRow {
+                                    label: @tr("Style");
+                                    detail: @tr("Choose a translucent or opaque interface.");
+                                    icon: @image-url("../icons/list-details.svg");
+                                    ComboBox {
+                                        width: min(210px, root.width * 0.25);
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        model: [@tr("Glass"), @tr("Opaque")];
+                                        current-value: root.theme-style == "glass" ? @tr("Glass") : @tr("Opaque");
+                                        selected(value) => {
+                                            root.theme-style = value == @tr("Glass") ? "glass" : "opaque";
+                                            root.style-changed(root.theme-style);
+                                        }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Language");
+                                    detail: @tr("Choose the language used by the app.");
+                                    icon: @image-url("../icons/users.svg");
+                                    ComboBox {
+                                        width: min(210px, root.width * 0.25);
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        model: ["Português", "English", @tr("System")];
+                                        current-value: root.language-mode == "pt" ? "Português" : root.language-mode == "en" ? "English" : @tr("System");
+                                        selected(value) => {
+                                            root.language-mode = value == "Português" ? "pt" : value == "English" ? "en" : "system";
+                                            root.language-changed(root.language-mode);
+                                        }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && (root.settings-section == "calls")) || (root.settings-query != "" && root.settings-matches(@tr("Calls") + " " + @tr("Microphone") + " " + @tr("Speaker") + " " + @tr("Camera")))): SettingsCard {
+                                title: @tr("Calls");
+                                hint: @tr("A device picked here is used for every call. Changes apply to the next call.");
+                                SettingsRow {
+                                    label: @tr("Microphone");
+                                    icon: @image-url("../icons/microphone.svg");
+                                    ComboBox {
+                                        width: 200px;
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        model: root.mic-devices;
+                                        current-value: root.mic-device;
+                                        selected(value) => {
+                                            root.mic-device = value;
+                                            root.device-changed("mic", value);
+                                        }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Speaker");
+                                    icon: @image-url("../icons/volume.svg");
+                                    ComboBox {
+                                        width: 200px;
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        model: root.speaker-devices;
+                                        current-value: root.speaker-device;
+                                        selected(value) => {
+                                            root.speaker-device = value;
+                                            root.device-changed("speaker", value);
+                                        }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Camera");
+                                    icon: @image-url("../icons/video.svg");
+                                    ComboBox {
+                                        width: 200px;
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        model: root.camera-devices;
+                                        current-value: root.camera-device;
+                                        selected(value) => {
+                                            root.camera-device = value;
+                                            root.device-changed("camera", value);
+                                        }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && (root.settings-section == "privacy")) || (root.settings-query != "" && root.settings-matches(@tr("Privacy") + " " + @tr("Send read receipts") + " " + @tr("Apply messages deleted by the sender") + " " + @tr("Blur contact names") + " " + @tr("Blur profile photos") + " " + @tr("Blur message text") + " " + @tr("Blur media previews")))): SettingsCard {
+                                title: @tr("Privacy");
+                                hint: @tr("Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted.");
+                                SettingsRow {
+                                    label: @tr("Send read receipts");
+                                    detail: @tr("Let others know when you read messages or play voice notes.");
+                                    icon: @image-url("../icons/check.svg");
+                                    Toggle {
+                                        on: root.send-receipts;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.send-receipts-changed(!root.send-receipts); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Apply messages deleted by the sender");
+                                    detail: @tr("Remove messages here when the sender deletes them for everyone.");
+                                    icon: @image-url("../icons/trash.svg");
+                                    Toggle {
+                                        on: root.apply-deletions;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.apply-deletions-changed(!root.apply-deletions); }
+                                    }
                                 }
                                 HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: @tr("Choose which content to blur. Hover or keyboard focus reveals only that item.");
+                                        color: Theme.text-dim;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Blur contact names");
+                                    detail: @tr("Hide contact and group names until revealed.");
+                                    Toggle {
+                                        label: @tr("Blur contact names");
+                                        on: root.blur-names;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.privacy-blur-changed("names", !root.blur-names); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Blur profile photos");
+                                    detail: @tr("Hide profile photos until revealed.");
+                                    Toggle {
+                                        label: @tr("Blur profile photos");
+                                        on: root.blur-photos;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Blur message text");
+                                    detail: @tr("Hide message text until revealed.");
+                                    Toggle {
+                                        label: @tr("Blur message text");
+                                        on: root.blur-messages;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Blur media previews");
+                                    detail: @tr("Hide photos, videos and other media previews until revealed.");
+                                    Toggle {
+                                        label: @tr("Blur media previews");
+                                        on: root.blur-media;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.privacy-blur-changed("media", !root.blur-media); }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("Notifications") + " " + @tr("Show notifications") + " " + @tr("Show message previews")))): SettingsCard {
+                                title: @tr("Notifications");
+                                SettingsRow {
+                                    label: @tr("Show notifications");
+                                    icon: @image-url("../icons/bell.svg");
+                                    detail: @tr("When turned off, no banners appear for messages or calls. Unread counts still update.");
+                                    Toggle {
+                                        accessible-role: button;
+                                        accessible-label: @tr("Show notifications");
+                                        on: root.notifications;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.notifications-changed(!root.notifications); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Show message previews");
+                                    icon: @image-url("../icons/message-circle.svg");
+                                    detail: @tr("Turn off to hide message content and media in notifications.");
+                                    Toggle {
+                                        accessible-role: button;
+                                        accessible-label: @tr("Show message previews");
+                                        on: root.notify-previews;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.notify-previews-changed(!root.notify-previews); }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && (root.settings-section == "security")) || (root.settings-query != "" && root.settings-matches(@tr("Security") + " " + @tr("PIN")))): SettingsCard {
+                                title: @tr("Security");
+                                VerticalLayout {
+                                    padding: 14px;
+                                    padding-top: 10px;
                                     spacing: 10px;
                                     alignment: start;
-                                    Button {
-                                        text: root.pin-set ? @tr("Change PIN") : @tr("Set PIN");
-                                        primary: true;
-                                        clicked => {
-                                            root.save-pin(current-pin.text, new-pin.text);
-                                            new-pin.text = "";
-                                        }
+                                    Text {
+                                        text: root.pin-set
+                                            ? @tr("PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI).")
+                                            : @tr("Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch.");
+                                        color: Theme.text-dim;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
                                     }
-                                    Button {
+                                    current-pin := LineEdit {
+                                        height: root.pin-set ? 36px : 0px;
                                         visible: root.pin-set;
-                                        text: @tr("Remove PIN");
-                                        clicked => {
-                                            root.remove-pin(current-pin.text);
-                                            current-pin.text = "";
+                                        input-type: password;
+                                        placeholder-text: @tr("Current PIN");
+                                    }
+                                    new-pin := LineEdit {
+                                        height: 36px;
+                                        input-type: password;
+                                        placeholder-text: @tr("New PIN (4 to 10 digits)");
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        alignment: start;
+                                        Button {
+                                            height: 34px;
+                                            text: root.pin-set ? @tr("Change PIN") : @tr("Set PIN");
+                                            primary: true;
+                                            clicked => {
+                                                root.save-pin(current-pin.text, new-pin.text);
+                                                new-pin.text = "";
+                                            }
+                                        }
+                                        Button {
+                                            visible: root.pin-set;
+                                            height: 34px;
+                                            text: @tr("Remove PIN");
+                                            clicked => {
+                                                root.remove-pin(current-pin.text);
+                                                current-pin.text = "";
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        SettingsCard {
-                            title: @tr("Automatic downloads");
-                            HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-                                padding-top: 8px;
-                                padding-bottom: 4px;
-                                Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
-                            }
-                            SettingsRow {
-                                label: @tr("Photos");
-                                Toggle {
-                                    on: root.auto-download-photos;
-                                    clicked => { root.auto-download-photos-changed(!root.auto-download-photos); }
+                            if ((root.settings-query == "" && (root.settings-section == "downloads")) || (root.settings-query != "" && root.settings-matches(@tr("Automatic downloads") + " " + @tr("Photos") + " " + @tr("Audio") + " " + @tr("Videos") + " " + @tr("Documents") + " " + @tr("Stickers")))): SettingsCard {
+                                title: @tr("Automatic downloads");
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    padding-top: 8px;
+                                    padding-bottom: 4px;
+                                    Text { text: @tr("Voice messages are always downloaded automatically."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                                }
+                                SettingsRow {
+                                    label: @tr("Photos");
+                                    detail: @tr("Download photos automatically.");
+                                    icon: @image-url("../icons/photo.svg");
+                                    Toggle {
+                                        on: root.auto-download-photos;
+                                        clicked => { root.auto-download-photos-changed(!root.auto-download-photos); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Audio");
+                                    detail: @tr("Download audio files automatically.");
+                                    icon: @image-url("../icons/music.svg");
+                                    Toggle {
+                                        on: root.auto-download-audio;
+                                        clicked => { root.auto-download-audio-changed(!root.auto-download-audio); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Videos");
+                                    detail: @tr("Download videos automatically.");
+                                    icon: @image-url("../icons/video.svg");
+                                    Toggle {
+                                        on: root.auto-download-video;
+                                        clicked => { root.auto-download-video-changed(!root.auto-download-video); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Documents");
+                                    detail: @tr("Download documents automatically.");
+                                    icon: @image-url("../icons/file-text.svg");
+                                    Toggle {
+                                        on: root.auto-download-documents;
+                                        clicked => { root.auto-download-documents-changed(!root.auto-download-documents); }
+                                    }
+                                }
+                                SettingsRow {
+                                    label: @tr("Stickers");
+                                    detail: @tr("Download stickers automatically.");
+                                    icon: @image-url("../icons/sticker-2.svg");
+                                    Toggle {
+                                        on: root.auto-download-stickers;
+                                        clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
+                                    }
                                 }
                             }
-                            SettingsRow {
-                                label: @tr("Audio");
-                                Toggle {
-                                    on: root.auto-download-audio;
-                                    clicked => { root.auto-download-audio-changed(!root.auto-download-audio); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Videos");
-                                Toggle {
-                                    on: root.auto-download-video;
-                                    clicked => { root.auto-download-video-changed(!root.auto-download-video); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Documents");
-                                Toggle {
-                                    on: root.auto-download-documents;
-                                    clicked => { root.auto-download-documents-changed(!root.auto-download-documents); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("Stickers");
-                                Toggle {
-                                    on: root.auto-download-stickers;
-                                    clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
-                                }
-                            }
-                        }
-                        SettingsCard {
-                            title: @tr("About");
-                            SettingsRow {
-                                label: "Zapive";
-                                detail: root.update-state == 1 ? @tr("Version {} is available", root.update-version)
-                                    : root.update-state == 2 ? @tr("Downloading update…")
-                                    : root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
-                                    : root.update-state == 4 ? @tr("Update failed: {}", root.update-error)
-                                    : @tr("Version {}", root.app-version);
-                                DialogButton {
-                                    y: (parent.height - self.height) / 2;
-                                    primary: root.update-state != 0;
-                                    enabled: root.update-state != 2;
-                                    label: root.update-state == 1 ? @tr("Update")
+                            if ((root.settings-query == "" && (root.settings-section == "updates")) || (root.settings-query != "" && root.settings-matches(@tr("About") + " " + @tr("Updates")))): SettingsCard {
+                                title: @tr("About");
+                                SettingsRow {
+                                    label: "Zapive";
+                                    detail: root.update-state == 1 ? @tr("Version {} is available", root.update-version)
                                         : root.update-state == 2 ? @tr("Downloading update…")
-                                        : root.update-state == 3 ? @tr("Restart")
-                                        : root.update-state == 4 ? @tr("Try again")
-                                        : @tr("Check for updates");
-                                    clicked => {
-                                        if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
-                                        else if (root.update-state == 3) { root.update-restart(); }
-                                        else if (root.update-state == 0) { root.update-check(); }
+                                        : root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
+                                        : root.update-state == 4 ? @tr("Update failed: {}", root.update-error)
+                                        : @tr("Version {}", root.app-version);
+                                    DialogButton {
+                                        y: (parent.height - self.height) / 2;
+                                        primary: root.update-state != 0;
+                                        enabled: root.update-state != 2;
+                                        label: root.update-state == 1 ? @tr("Update")
+                                            : root.update-state == 2 ? @tr("Downloading update…")
+                                            : root.update-state == 3 ? @tr("Restart")
+                                            : root.update-state == 4 ? @tr("Try again")
+                                            : @tr("Check for updates");
+                                        clicked => {
+                                            if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
+                                            else if (root.update-state == 3) { root.update-restart(); }
+                                            else if (root.update-state == 0) { root.update-check(); }
+                                        }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("What's new") + " " + @tr("Updates")))): SettingsCard {
+                                title: @tr("What's new");
+                                hint: @tr("Changes in versions newer than the one installed are shown separately from your history.");
+                                SettingsRow {
+                                    label: root.update-state == 3 ? @tr("Restart to use version {}", root.update-version)
+                                        : root.changelog-has-new || root.update-state > 0 ? @tr("New version available")
+                                        : root.changelog-verified ? @tr("Nothing new — you're up to date") : @tr("Check what's new");
+                                    detail: @tr("Installed version: {}", root.app-version);
+                                    DialogButton {
+                                        label: @tr("What's new");
+                                        clicked => { root.show-whats-new(); }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("Release history") + " changelog"))): SettingsCard {
+                                title: @tr("Release history");
+                                hint: @tr("Release notes are shown in their original language.");
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 12px;
+                                    alignment: start;
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        DialogButton {
+                                            label: root.changelog-loading ? @tr("Loading…") : root.changelog-loaded ? @tr("Refresh history") : @tr("Load history");
+                                            enabled: !root.changelog-loading;
+                                            clicked => { root.changelog-load(true); }
+                                        }
+                                    }
+                                    if root.changelog-error != "": Text {
+                                        text: root.changelog-error;
+                                        color: Theme.text-dim;
+                                        wrap: word-wrap;
+                                    }
+                                    if root.changelog-loaded && !root.changelog-loading && root.releases.length == 0 && root.changelog-error == "": Text {
+                                        text: @tr("No published releases yet.");
+                                        color: Theme.text-dim;
+                                        wrap: word-wrap;
+                                    }
+                                    for release in root.releases: VerticalLayout {
+                                        if !release.newer: VerticalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Text {
+                                            text: release.installed ? @tr("{} · Installed version", release.tag) : release.tag;
+                                            color: Theme.text;
+                                            font-size: 15px;
+                                            font-weight: 700;
+                                            wrap: word-wrap;
+                                        }
+                                        Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
+                                        Text {
+                                            text: release.notes != "" ? release.notes : @tr("No release notes available.");
+                                            color: Theme.text;
+                                            font-size: 13px;
+                                            wrap: word-wrap;
+                                        }
+                                        Rectangle { height: 1px; background: Theme.border; }
+                                        }
+                                    }
+                                    if root.changelog-more: HorizontalLayout {
+                                        alignment: start;
+                                        DialogButton {
+                                            label: @tr("Load older releases");
+                                            enabled: !root.changelog-loading;
+                                            clicked => { root.changelog-load(false); }
+                                        }
+                                    }
+                                }
+                            }
+                            if ((root.settings-query == "" && (root.settings-section == "account")) || (root.settings-query != "" && root.settings-matches(@tr("Account") + " " + @tr("Log out")))): SettingsCard {
+                                title: @tr("Account");
+                                for acc in root.accounts: AccountRow {
+                                    account: acc;
+                                    clicked => { if (!acc.active) { root.switch-account(acc.id); } }
+                                    remove => { root.remove-account(acc.id); }
+                                }
+                                if root.can-add-account: MenuRow {
+                                    icon: @image-url("../icons/user-plus.svg");
+                                    label: @tr("Add account");
+                                    clicked => { root.add-account(); }
+                                }
+                                SettingsRow {
+                                    label: @tr("Log out of WhatsApp");
+                                    DialogButton {
+                                        y: (parent.height - self.height) / 2;
+                                        primary: true;
+                                        danger: true;
+                                        label: @tr("Log out");
+                                        clicked => { root.logout(); }
                                     }
                                 }
                             }
                         }
-                        SettingsCard {
-                            title: @tr("Account");
-                            SettingsRow {
-                                label: @tr("Log out of WhatsApp");
-                                DialogButton {
-                                    y: (parent.height - self.height) / 2;
-                                    primary: true;
-                                    danger: true;
-                                    label: @tr("Log out");
-                                    clicked => { root.logout(); }
-                                }
-                            }
+                    }
+                    if root.settings-status != "": Rectangle {
+                        height: status-text.preferred-height + 20px;
+                        background: #ffbc38.with-alpha(0.12);
+                        status-text := Text {
+                            x: 24px;
+                            y: 10px;
+                            width: parent.width - 48px;
+                            text: root.settings-status;
+                            color: #ffbc38;
+                            font-size: 13px;
+                            wrap: word-wrap;
                         }
                     }
                 }
-                // Feedback from the host (PIN saved, restart to apply a
-                // language, update check result), pinned under the body.
-                if root.settings-status != "": Rectangle {
-                    height: status-text.preferred-height + 20px;
-                    background: #ffbc38.with-alpha(0.12);
-                    status-text := Text {
-                        x: 24px;
-                        y: 10px;
-                        width: parent.width - 48px;
-                        text: root.settings-status;
-                        color: #ffbc38;
-                        font-size: 13px;
-                        wrap: word-wrap;
-                    }
-                }
+            }
             }
         }
     }
@@ -6345,5 +6666,84 @@ export component AppWindow inherits Window {
             }
         }
     }
+    }
+    whats-new-layer := ModalLayer {
+        open: root.whats-new-open;
+        scrim: #00000088;
+        dismiss => { root.whats-new-open = false; }
+        if whats-new-layer.mounted: Rectangle {
+            width: min(640px, parent.width - 32px);
+            height: min(640px, parent.height - 32px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.panel;
+            border-radius: 12px;
+            opacity: whats-new-layer.progress;
+            transform-scale: 0.96 + 0.04 * whats-new-layer.progress;
+            TouchArea { }
+            news-focus := FocusScope {
+                width: parent.width;
+                height: parent.height;
+                init => { self.focus(); }
+                capture-key-pressed(event) => {
+                    if (event.text == Key.Escape) { root.whats-new-open = false; return accept; }
+                    reject
+                }
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+                    HorizontalLayout {
+                        Text { text: @tr("What's new"); color: Theme.text; font-size: 20px; font-weight: 700; }
+                        DialogButton { label: @tr("Close"); clicked => { root.whats-new-open = false; } }
+                    }
+                    Text { text: @tr("Installed version: {}", root.app-version); color: Theme.text-dim; }
+                    ScrollView {
+                        content-width: self.width;
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 12px;
+                            if root.changelog-loading: Text { text: @tr("Loading…"); color: Theme.text-dim; }
+                            if root.changelog-error != "": Text { text: root.changelog-error; color: Theme.text-dim; wrap: word-wrap; }
+                            if root.changelog-verified && !root.changelog-has-new && root.update-state == 0: Text {
+                                text: @tr("Nothing new — you're up to date");
+                                color: Theme.accent;
+                                font-size: 16px;
+                                wrap: word-wrap;
+                            }
+                            if !root.changelog-loading && !root.changelog-has-new && root.update-state > 0: Text {
+                                text: @tr("Release notes for version {} are not available yet.", root.update-version);
+                                color: Theme.text-dim;
+                                wrap: word-wrap;
+                            }
+                            for release in root.releases: VerticalLayout {
+                                if release.newer: VerticalLayout {
+                                    alignment: start;
+                                    spacing: 8px;
+                                    Text { text: @tr("New in {}", release.tag); color: Theme.accent; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+                                    Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
+                                    Text { text: release.notes != "" ? release.notes : @tr("No release notes available."); color: Theme.text; wrap: word-wrap; }
+                                    Rectangle { height: 1px; background: Theme.border; }
+                                }
+                            }
+                            if root.changelog-more && root.changelog-has-new: HorizontalLayout {
+                                alignment: start;
+                                DialogButton { label: @tr("Load older releases"); enabled: !root.changelog-loading; clicked => { root.changelog-load(false); } }
+                            }
+                        }
+                    }
+                    Text { text: @tr("Release notes are shown in their original language."); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                    HorizontalLayout {
+                        alignment: end;
+                        if root.changelog-error != "": DialogButton { label: @tr("Try again"); enabled: !root.changelog-loading; clicked => { root.changelog-load(true); } }
+                        if root.update-state == 1 || root.update-state == 4: DialogButton {
+                            label: @tr("Update"); primary: true;
+                            clicked => { root.update-apply(); }
+                        }
+                        if root.update-state == 2: Text { text: @tr("Downloading update…"); color: Theme.text-dim; }
+                        if root.update-state == 3: DialogButton { label: @tr("Restart"); primary: true; clicked => { root.update-restart(); } }
+                    }
+                }
+            }
+        }
     }
 }

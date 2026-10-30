@@ -14,7 +14,7 @@ use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
     DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
-    MessageItem, PdfPage, ReactionItem, SearchHit, StickerCell,
+    MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -92,6 +92,9 @@ pub struct Bridge {
     // Bumped whenever the typing line changes hands, so an expiry timer
     // armed for an older "composing" does nothing.
     typing_gen: u64,
+    chat_typing: HashMap<String, HashMap<String, (u64, String)>>,
+    presence_subscribed: HashSet<String>,
+    draft_sequence: u64,
     // WhatsApp events that arrived before the vault was open (the client
     // connects while the PIN screen is still up); replayed by boot.
     locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
@@ -554,6 +557,9 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         accounts_model: accounts_model.clone(),
         peer_online: false,
         typing_gen: 0,
+        chat_typing: HashMap::new(),
+        presence_subscribed: HashSet::new(),
+        draft_sequence: 0,
         locked_backlog: Vec::new(),
         avatars: HashMap::new(),
         requested_avatars: HashSet::new(),
@@ -812,6 +818,9 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.chat_hover(&jid));
     });
     ui.set_app_version(crate::update::current_version().into());
+    ui.on_changelog_load(|refresh| {
+        defer(move |b| b.load_changelog(refresh));
+    });
     ui.on_update_check(|| {
         defer(|b| {
             b.update_manual = true;
@@ -932,6 +941,7 @@ fn wire_callbacks(ui: &AppWindow) {
                 b.send_reaction(&target, &emoji);
             } else {
                 b.ui.invoke_append_composer(emoji.into());
+                b.save_composer(false);
             }
         });
     });
@@ -1063,6 +1073,9 @@ fn wire_callbacks(ui: &AppWindow) {
     // Enumerating devices touches the audio and camera stacks, so it waits
     // until the user actually opens Settings.
     ui.on_settings_opened(|| defer(|b| b.refresh_devices()));
+    ui.on_settings_search(|text, query| {
+        text.to_lowercase().contains(&query.to_lowercase())
+    });
     ui.on_start_video_call(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.start_video_call(&jid));
@@ -1700,9 +1713,16 @@ impl Bridge {
 
     // Whatever is on screen belongs to a session that just ended.
     fn close_session_views(&mut self) {
+        self.chat_typing.clear();
+        self.presence_subscribed.clear();
+        self.ui.invoke_set_composer("".into(), 0);
+        self.mentions.clear();
+        self.ui.set_mention_open(false);
         self.ui.set_details_open(false);
         self.cancel_preview();
         self.current_jid = None;
+        self.ui.set_typing_members(ModelRc::default());
+        self.ui.set_typing_extra(0);
         self.unread_boundary = None;
         self.groups_fetched = false;
         self.ui.set_chat_open(false);
@@ -1718,6 +1738,8 @@ impl Bridge {
         self.ui.set_details_open(false);
         self.cancel_preview();
         self.current_jid = None;
+        self.ui.set_typing_members(ModelRc::default());
+        self.ui.set_typing_extra(0);
         self.unread_boundary = None;
         self.ui.set_chat_open(false);
         self.clear_store_state();
@@ -1741,6 +1763,10 @@ impl Bridge {
     fn clear_store_state(&mut self) {
         self.clear_notification_sensitive_state();
         self.store = Store::default();
+        self.chat_typing.clear();
+        self.presence_subscribed.clear();
+        self.typing_gen += 1;
+        self.ui.invoke_set_composer("".into(), 0);
         self.self_jid.clear();
         self.chats_model.set_vec(Vec::new());
         self.messages_model.set_vec(Vec::new());
@@ -2339,16 +2365,14 @@ impl Bridge {
             let jid = stored.jid.clone();
             let from_me = stored.from_me;
             let mentions_me = stored.mentions_me;
+            let sender = stored.sender_jid.clone();
             if !self.store.add_message(stored) {
                 continue;
             }
+            if !from_me {
+                self.clear_participant_typing(&jid, &sender);
+            }
             if Some(&jid) == self.current_jid.as_ref() {
-                // The message they were typing has arrived. In a group
-                // someone else may still be at it; their next refresh
-                // puts the line back.
-                if !from_me {
-                    self.clear_typing();
-                }
                 self.push_message_row(&jid);
                 self.send_view_receipts(&jid);
             } else if !from_me {
@@ -2420,13 +2444,12 @@ impl Bridge {
         self.schedule_save();
     }
 
-    pub fn on_chat_presence(&mut self, chat: &str, state: &str, media: &str) {
+    pub fn on_chat_presence(&mut self, chat: &str, sender: &str, state: &str, media: &str) {
         let jid = self.store.canon_owned(&normalize_jid(chat));
-        if Some(&jid) != self.current_jid.as_ref() {
-            return;
-        }
+        let sender = self.store.canon_owned(&normalize_jid(sender));
+        if sender.is_empty() || self.store.self_jids.contains(&sender) { return; }
         if !state.contains("Composing") {
-            self.clear_typing();
+            self.clear_participant_typing(&jid, &sender);
             return;
         }
         let text = if media.contains("Audio") {
@@ -2434,49 +2457,95 @@ impl Bridge {
         } else {
             t("presence.typing")
         };
-        self.ui.set_current_status(text.into());
-        // A "composing" is only good for a while: the peer's client
-        // refreshes it as long as they keep going, and the "paused" that
-        // should end it is routinely lost (the app is killed, the network
-        // drops, the phone sleeps). WhatsApp's own clients age it out
-        // after about 25s, so this one does too.
         self.typing_gen += 1;
         let generation = self.typing_gen;
+        self.chat_typing.entry(jid.clone()).or_default().insert(sender.clone(), (generation, text));
+        self.update_typing_status();
+        self.schedule_refresh_chats();
         self.once(25_000, move |b| {
-            if b.typing_gen == generation {
-                b.clear_typing();
+            if b.chat_typing.get(&jid).and_then(|members| members.get(&sender)).is_some_and(|(token, _)| *token == generation) {
+                b.clear_participant_typing(&jid, &sender);
             }
         });
     }
 
-    // Back from typing/recording to what is known of the contact.
-    fn clear_typing(&mut self) {
-        self.typing_gen += 1;
-        self.ui.set_current_status(if self.peer_online {
-            t("presence.online").into()
+    fn update_typing_status(&mut self) {
+        let text = if let Some(jid) = self.current_jid.as_ref().filter(|jid| is_group(jid)) {
+            let typing = self.chat_typing.get(jid);
+            if let Some(members) = typing.filter(|members| !members.is_empty()) {
+                let (participants, extra) = typing_participants(members);
+                let names: Vec<_> = participants.iter().map(|jid| self.store.chat_name(jid)).collect();
+                group_typing_status(&names, extra > 0)
+            } else {
+                self.store.members_of(jid).iter().map(|member| {
+                    let canon = self.store.canon(&member.jid);
+                    let name = self.store.chat_name(canon);
+                    if name == display_id(canon) && !member.name.trim().is_empty() {
+                        clean_text(&member.name)
+                    } else { name }
+                }).collect::<Vec<_>>().join(", ")
+            }
         } else {
-            "".into()
-        });
+            self.current_jid.as_ref()
+            .and_then(|jid| self.chat_typing.get(jid))
+            .and_then(|members| members.values().max_by_key(|(token, _)| token))
+            .map(|(_, text)| text.clone())
+            .unwrap_or_else(|| if self.peer_online { t("presence.online") } else { String::new() })
+        };
+        self.ui.set_current_status(text.into());
+        self.refresh_typing_members();
+    }
+
+    fn refresh_typing_members(&mut self) {
+        let (participants, extra) = self.current_jid.as_ref().filter(|jid| is_group(jid))
+            .and_then(|jid| self.chat_typing.get(jid))
+            .map(typing_participants).unwrap_or_default();
+        let mut rows = Vec::new();
+        for jid in participants.into_iter().take(5) {
+            let name = self.store.chat_name(&jid);
+            rows.push(self.to_member_row(&jid, &name, "", false, false));
+            self.queue_avatar(&jid);
+        }
+        self.ui.set_typing_members(ModelRc::new(VecModel::from(rows)));
+        self.ui.set_typing_extra(extra);
+    }
+
+    fn clear_participant_typing(&mut self, jid: &str, sender: &str) {
+        let sender = self.store.canon_owned(&normalize_jid(sender));
+        if let Some(members) = self.chat_typing.get_mut(jid) {
+            members.remove(&sender);
+            if members.is_empty() { self.chat_typing.remove(jid); }
+        }
+        self.schedule_refresh_chats();
+        self.update_typing_status();
+    }
+
+    fn clear_chat_typing(&mut self, jid: &str) {
+        if self.chat_typing.remove(jid).is_some() {
+            self.schedule_refresh_chats();
+        }
+        self.update_typing_status();
     }
 
     pub fn on_presence(&mut self, from: &str, available: bool) {
         let jid = self.store.canon_owned(&normalize_jid(from));
-        if Some(&jid) != self.current_jid.as_ref() {
-            return;
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.peer_online = available;
         }
-        self.peer_online = available;
-        // Someone who just went offline is not typing either; their
-        // "paused" will never come.
-        let current = self.ui.get_current_status();
-        if !available || current.is_empty() || current == t("presence.online").as_str() {
-            self.clear_typing();
+        if !available {
+            let groups: Vec<_> = self.chat_typing.iter()
+                .filter(|(chat, members)| is_group(chat) && members.contains_key(&jid))
+                .map(|(chat, _)| chat.clone()).collect();
+            for group in groups { self.clear_participant_typing(&group, &jid); }
+            self.clear_chat_typing(&jid);
+        } else {
+            self.update_typing_status();
         }
     }
 
     pub fn on_chat_flag(&mut self, jid: &str, pinned: Option<i64>, archived: Option<bool>) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        self.store
-            .upsert_chat(&jid, None, 0, None, pinned, archived);
+        self.store.upsert_chat(&jid, None, 0, None, pinned, archived);
         self.schedule_refresh_chats();
     }
 
@@ -2504,6 +2573,7 @@ impl Bridge {
     pub fn on_contact(&mut self, jid: &str, name: &str) {
         self.store
             .upsert_contact(&normalize_jid(jid), Some(name), None);
+        self.update_typing_status();
         self.schedule_refresh_chats();
     }
 
@@ -2735,6 +2805,11 @@ impl Bridge {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
         let meta = self.store.chats.get(jid);
+        let activity = self.chat_typing.get(jid).and_then(|members| members.values().max_by_key(|(token, _)| token)).map(|(_, text)| text.as_str());
+        let draft = self.store.drafts.get(jid)
+            .filter(|draft| self.current_jid.as_deref() != Some(jid) && !draft.text.trim().is_empty());
+        let draft_preview = draft.map(|draft| format!("{} {}", t("preview.draft"), clean_text(&draft.text)));
+        let preview = draft_preview.as_deref().or(activity).unwrap_or(preview);
         let (preview, ticks, ticks_blue) = if let Some(body) = preview.strip_prefix("✓ ") {
             let (ticks, blue) = self.store.messages.get(jid)
                 .and_then(|messages| messages.iter().max_by_key(|m| m.timestamp))
@@ -2749,6 +2824,8 @@ impl Bridge {
             jid: jid.into(),
             name: name.clone().into(),
             preview: preview.into(),
+            typing: activity.is_some() && draft.is_none(),
+            draft: draft.is_some(),
             ticks: ticks.into(),
             ticksBlue: ticks_blue,
             time: format_time(timestamp).into(),
@@ -2787,14 +2864,10 @@ impl Bridge {
                     // in their own tabs.
                     return false;
                 }
-                if self.tab == "archived" {
-                    if !meta.archived {
-                        return false;
-                    }
-                } else {
-                    if meta.archived {
-                        return false;
-                    }
+                if !chat_matches_archive(meta.archived, &self.tab, !search.is_empty()) {
+                    return false;
+                }
+                if self.tab != "archived" {
                     match self.tab.as_str() {
                         "unread" if meta.unread == 0 => return false,
                         "favorites" if !meta.favorite => return false,
@@ -2866,6 +2939,12 @@ impl Bridge {
                 self.to_chat_row(jid, preview, *ts, *unread, *mentioned)
             })
             .collect();
+        for row in &rows {
+            let jid = row.jid.as_str();
+            if !is_group(jid) && !is_channel(jid) && self.presence_subscribed.insert(jid.to_string()) {
+                self.wa.send(Cmd::SubscribePresence(jid.to_string()));
+            }
+        }
         let model = &self.chats_model;
         let common = model.row_count().min(rows.len());
         for (i, next) in rows.iter().take(common).enumerate() {
@@ -2875,6 +2954,10 @@ impl Bridge {
                     cur.jid != next.jid
                         || cur.name != next.name
                         || cur.preview != next.preview
+                        || cur.typing != next.typing
+                        || cur.draft != next.draft
+                        || cur.ticks != next.ticks
+                        || cur.ticksBlue != next.ticksBlue
                         || cur.time != next.time
                         || cur.unread != next.unread
                         || cur.mentioned != next.mentioned
@@ -3024,6 +3107,7 @@ impl Bridge {
             .set_current_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_current_initial(initial_of(&name).into());
         self.ui.set_current_color_idx(color_idx_of(jid));
+        self.update_typing_status();
     }
 
     // Opens (or starts) the conversation with a jid; used by the chat list
@@ -3078,6 +3162,11 @@ impl Bridge {
     }
 
     fn open_jid(&mut self, jid: &str, jump_to: Option<&str>) {
+        self.ui.invoke_clear_sidebar_search();
+        if !self.search_text.is_empty() {
+            self.search_text.clear();
+            self.refresh_chats();
+        }
         self.ui.set_message_menu_open(false);
         self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
@@ -3095,7 +3184,9 @@ impl Bridge {
             self.truncated.remove(&current);
             self.clear_reply();
         }
-        if self.current_jid.as_deref() != Some(jid) {
+        let switching_chat = self.current_jid.as_deref() != Some(jid);
+        if switching_chat {
+            self.save_composer(true);
             self.cancel_preview();
             let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
             self.unread_boundary = if unread > 0 {
@@ -3120,6 +3211,12 @@ impl Bridge {
             self.mentions.clear();
         }
         self.current_jid = Some(jid.to_string());
+        if switching_chat {
+            let draft = self.store.drafts.get(jid).cloned().unwrap_or_default();
+            self.mentions = draft.mentions;
+            let cursor = draft.text.len() as i32;
+            self.ui.invoke_set_composer(draft.text.into(), cursor);
+        }
         self.ui.set_selected_jid(jid.into());
         self.ui.set_stick_bottom(true);
         self.ui.set_chat_menu_open(false);
@@ -3129,8 +3226,7 @@ impl Bridge {
         }
         self.send_view_receipts(jid);
         self.peer_online = false;
-        self.typing_gen += 1;
-        self.ui.set_current_status("".into());
+        self.update_typing_status();
         self.wa.send(Cmd::SubscribePresence(jid.to_string()));
         self.apply_header(jid);
         self.apply_chat_settings_ui();
@@ -3633,6 +3729,34 @@ impl Bridge {
 
     // ---- composing ----
 
+    fn save_draft(&mut self, text: &str, promote: bool) {
+        let Some(jid) = self.current_jid.clone() else { return; };
+        if text.is_empty() {
+            if self.store.drafts.remove(&jid).is_some() {
+                self.schedule_refresh_chats();
+            }
+            return;
+        }
+        if !self.store.chats.contains_key(&jid) { return; }
+        let previous = self.store.drafts.get(&jid).map_or(0, |draft| draft.promoted);
+        let promoted = if promote && !text.trim().is_empty() {
+            self.draft_sequence = self.draft_sequence
+                .max(self.store.drafts.values().map(|draft| draft.promoted).max().unwrap_or(0)) + 1;
+            self.draft_sequence
+        } else if text.trim().is_empty() { 0 } else { previous };
+        self.store.drafts.insert(jid, crate::store::Draft {
+            text: text.to_string(),
+            mentions: self.mentions.clone(),
+            promoted,
+        });
+        self.schedule_refresh_chats();
+    }
+
+    fn save_composer(&mut self, promote: bool) {
+        let text = self.ui.get_composer_text().to_string();
+        self.save_draft(&text, promote);
+    }
+
     fn handle_send_text(&mut self, text: &str) {
         let mut body = text.trim().to_string();
         let Some(jid) = self.current_jid.clone() else {
@@ -3688,6 +3812,8 @@ impl Bridge {
                 }
             }
         }
+        self.store.drafts.remove(&jid);
+        self.schedule_refresh_chats();
         self.wa.send(Cmd::SendText {
             jid,
             body,
@@ -3702,6 +3828,7 @@ impl Bridge {
     // Called on every composer edit with the cursor's byte offset: an
     // "@word" right before the cursor opens the member list.
     fn composer_changed(&mut self, text: &str, cursor: usize) {
+        self.save_draft(text, false);
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
@@ -3789,6 +3916,7 @@ impl Bridge {
         let cursor = (at + insert.len()) as i32;
         self.mentions.retain(|(l, _)| l != &label);
         self.mentions.push((label, row.jid.to_string()));
+        self.save_draft(&next, false);
         self.ui.invoke_set_composer(next.into(), cursor);
     }
 
@@ -3877,6 +4005,7 @@ impl Bridge {
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
                 self.patch_avatar_everywhere(jid, &image);
                 self.refresh_message_details();
+                self.refresh_typing_members();
                 if jid == self.self_jid {
                     self.refresh_accounts();
                 }
@@ -5918,6 +6047,12 @@ impl Bridge {
     }
 
     fn close_chat(&mut self) {
+        self.save_composer(true);
+        self.ui.invoke_set_composer("".into(), 0);
+        self.clear_reply();
+        self.mentions.clear();
+        self.ui.set_mention_open(false);
+        self.schedule_refresh_chats();
         self.ui.set_message_menu_open(false);
         self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
@@ -5929,6 +6064,8 @@ impl Bridge {
         self.ui.set_selected_jid("".into());
         self.cancel_preview();
         self.current_jid = None;
+        self.ui.set_typing_members(ModelRc::default());
+        self.ui.set_typing_extra(0);
         self.unread_boundary = None;
         self.messages_model.set_vec(Vec::new());
         self.sync_mini_player();
@@ -6030,6 +6167,7 @@ impl Bridge {
             meta.left = false;
         }
         if Some(&jid) == self.current_jid.as_ref() {
+            self.apply_header(&jid);
             self.apply_chat_settings_ui();
             if self.ui.get_info_open() {
                 self.ui.set_info_desc(snap.desc.clone().into());
@@ -7571,6 +7709,77 @@ impl Bridge {
 
     // ---- self-update ----
 
+    fn load_changelog(&mut self, refresh: bool) {
+        if self.ui.get_changelog_loading() {
+            return;
+        }
+        if !self.ui.get_changelog_loaded() {
+            if let Some(cached) = self.vault.as_ref().and_then(|v| v.get("release-history")) {
+                if let Ok((releases, page, more)) = serde_json::from_str::<(Vec<crate::update::ReleaseNote>, i32, bool)>(&cached) {
+                    self.set_changelog(releases);
+                    self.ui.set_changelog_page(page.max(1));
+                    self.ui.set_changelog_more(more);
+                }
+            }
+        }
+        let page = if refresh || !self.ui.get_changelog_loaded() {
+            1
+        } else {
+            self.ui.get_changelog_page().max(1) as u32
+        };
+        if page == 1 { self.ui.set_changelog_verified(false); }
+        self.ui.set_changelog_loading(true);
+        self.ui.set_changelog_error("".into());
+        std::thread::spawn(move || {
+            let result = crate::update::release_notes(page);
+            ui_apply(move |b| {
+                b.ui.set_changelog_loading(false);
+                match result {
+                    Ok(result) => {
+                        let mut releases = if page == 1 { Vec::new() } else { b.changelog_entries() };
+                        for release in result.releases {
+                            if !releases.iter().any(|existing| existing.tag == release.tag) {
+                                releases.push(release);
+                            }
+                        }
+                        let next_page = page.saturating_add(1).min(i32::MAX as u32) as i32;
+                        if let Some(vault) = &b.vault {
+                            if let Ok(cache) = serde_json::to_string(&(&releases, next_page, result.has_more)) {
+                                vault.set("release-history", &cache);
+                            }
+                        }
+                        b.set_changelog(releases);
+                        b.ui.set_changelog_page(next_page);
+                        b.ui.set_changelog_more(result.has_more);
+                        b.ui.set_changelog_loaded(true);
+                        if page == 1 { b.ui.set_changelog_verified(true); }
+                    }
+                    Err(_) => b.ui.set_changelog_error(t("changelog.failed").into()),
+                }
+            });
+        });
+    }
+
+    fn changelog_entries(&self) -> Vec<crate::update::ReleaseNote> {
+        self.ui.get_releases().iter().map(|release| crate::update::ReleaseNote {
+            tag: release.tag.to_string(),
+            date: release.date.to_string(),
+            notes: release.notes.to_string(),
+        }).collect()
+    }
+
+    fn set_changelog(&self, releases: Vec<crate::update::ReleaseNote>) {
+        let items: Vec<ReleaseItem> = releases.into_iter().map(|release| ReleaseItem {
+            installed: release.tag.trim_start_matches('v') == crate::update::current_version(),
+            newer: crate::update::is_newer_release(&release.tag),
+            tag: release.tag.into(),
+            date: release.date.into(),
+            notes: release.notes.into(),
+        }).collect();
+        self.ui.set_changelog_has_new(items.iter().any(|item| item.newer));
+        self.ui.set_releases(ModelRc::new(VecModel::from(items)));
+    }
+
     fn update_tick(&mut self) {
         self.wa.send(Cmd::CheckUpdate);
         // Check again every hour while the app stays open: a release
@@ -7578,10 +7787,10 @@ impl Bridge {
         self.once(3_600_000, |b| b.update_tick());
     }
 
-    pub fn on_update_checked(&mut self, found: Option<String>) {
+    pub fn on_update_checked(&mut self, result: Result<Option<String>, String>) {
         let manual = std::mem::take(&mut self.update_manual);
-        match found {
-            Some(version) => {
+        match result {
+            Ok(Some(version)) => {
                 self.ui.set_update_version(version.into());
                 if self.ui.get_update_state() == 0 {
                     self.ui.set_update_state(1);
@@ -7590,8 +7799,12 @@ impl Bridge {
                     self.ui.set_settings_status("".into());
                 }
             }
-            None if manual => self.ui.set_settings_status(t("update.latest").into()),
-            None => {}
+            Ok(None) => {
+                if manual { self.ui.set_settings_status(t("update.latest").into()); }
+            }
+            Err(_) => {
+                if manual { self.ui.set_settings_status(t("changelog.failed").into()); }
+            }
         }
     }
 
@@ -8800,6 +9013,29 @@ impl Bridge {
 }
 
 // Whether a message has something to download or decode for its bubble.
+fn chat_matches_archive(archived: bool, tab: &str, searching: bool) -> bool {
+    if tab == "archived" {
+        archived
+    } else {
+        !archived || searching
+    }
+}
+
+fn group_typing_status(names: &[String], overflow: bool) -> String {
+    if overflow { return t("presence.groupMany"); }
+    let first_names = names.iter().take(5)
+        .filter_map(|name| name.split_whitespace().next()).collect::<Vec<_>>().join(", ");
+    ta(if names.len() == 1 { "presence.groupOne" } else { "presence.groupSome" }, &[&first_names])
+}
+
+fn typing_participants(members: &HashMap<String, (u64, String)>) -> (Vec<String>, i32) {
+    let mut participants: Vec<_> = members.keys().cloned().collect();
+    participants.sort();
+    let extra = participants.len().saturating_sub(5).min(i32::MAX as usize) as i32;
+    participants.truncate(5);
+    (participants, extra)
+}
+
 fn quote_chat(m: &StoredMessage) -> &str {
     if m.quote_jid.is_empty() { &m.jid } else { &m.quote_jid }
 }
@@ -8844,6 +9080,55 @@ fn message_editable(m: &StoredMessage) -> bool {
 #[cfg(test)]
 mod message_action_tests {
     use super::*;
+
+    #[test]
+    fn sidebar_search_includes_archived_chats_without_changing_archive_filter() {
+        for tab in ["all", "unread", "favorites", "groups", "label:work"] {
+            assert!(chat_matches_archive(false, tab, false));
+            assert!(!chat_matches_archive(true, tab, false));
+            assert!(chat_matches_archive(false, tab, true));
+            assert!(chat_matches_archive(true, tab, true));
+        }
+        for searching in [false, true] {
+            assert!(chat_matches_archive(true, "archived", searching));
+            assert!(!chat_matches_archive(false, "archived", searching));
+        }
+    }
+
+    #[test]
+    fn group_header_typing_uses_first_names_and_plural_forms() {
+        let names = vec!["Ana Silva".to_string(), "  Bruno Costa".to_string()];
+        assert_eq!(group_typing_status(&names[..1], false), ta("presence.groupOne", &["Ana"]));
+        assert_eq!(group_typing_status(&names, false), ta("presence.groupSome", &["Ana, Bruno"]));
+        assert_eq!(group_typing_status(&names, true), t("presence.groupMany"));
+        let names = vec!["Ana Silva".to_string(); 5];
+        assert_eq!(group_typing_status(&names, false), ta("presence.groupSome", &["Ana, Ana, Ana, Ana, Ana"]));
+    }
+
+    #[test]
+    fn typing_bubbles_limit_avatars_and_count_remaining_people() {
+        for count in [0, 1, 5, 6, 12] {
+            let members = (0..count).rev().map(|i| {
+                (format!("{i:02}@s.whatsapp.net"), (i as u64, String::new()))
+            }).collect();
+            let (visible, extra) = typing_participants(&members);
+            assert_eq!(visible.len(), count.min(5));
+            assert_eq!(extra, count.saturating_sub(5) as i32);
+            assert!(visible.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+    }
+
+    #[test]
+    fn typing_members_refresh_independently() {
+        let mut members = HashMap::from([
+            ("a".to_string(), (1, String::new())),
+            ("b".to_string(), (2, String::new())),
+        ]);
+        members.insert("a".into(), (3, String::new()));
+        assert_eq!(members.len(), 2);
+        members.remove("a");
+        assert_eq!(typing_participants(&members).0, vec!["b".to_string()]);
+    }
 
     #[test]
     fn document_types_use_extension_and_mime_fallback() {

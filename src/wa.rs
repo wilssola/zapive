@@ -811,9 +811,10 @@ impl EventHandler for Pump {
             }
             Event::ChatPresence(update) => {
                 let chat = update.source.chat.to_non_ad_string();
+                let sender = update.source.sender.to_non_ad_string();
                 let state = format!("{:?}", update.state);
                 let media = format!("{:?}", update.media);
-                ui_apply(move |b| b.on_chat_presence(&chat, &state, &media));
+                ui_apply(move |b| b.on_chat_presence(&chat, &sender, &state, &media));
             }
             Event::Presence(update) => {
                 let from = update.from.to_non_ad_string();
@@ -1512,13 +1513,12 @@ async fn executor(
             }
             Cmd::CheckUpdate => {
                 tokio::spawn(async move {
-                    let found = tokio::task::spawn_blocking(crate::update::check)
+                    let result = tokio::task::spawn_blocking(crate::update::check)
                         .await
-                        .ok()
-                        .flatten();
+                        .unwrap_or_else(|_| Err("update check task failed".into()));
                     // Direct apply: the banner must show on the lock
                     // and login screens, not wait in the backlog.
-                    crate::bridge::ui_apply(move |b| b.on_update_checked(found));
+                    crate::bridge::ui_apply(move |b| b.on_update_checked(result));
                 });
             }
             Cmd::ApplyUpdate => {

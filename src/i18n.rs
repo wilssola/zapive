@@ -66,7 +66,18 @@ fn en(key: &str) -> &'static str {
         "doc.fallbackName" => "Document",
         "day.today" => "Today",
         "day.yesterday" => "Yesterday",
+        "day.monday" => "Monday",
+        "day.tuesday" => "Tuesday",
+        "day.wednesday" => "Wednesday",
+        "day.thursday" => "Thursday",
+        "day.friday" => "Friday",
+        "day.saturday" => "Saturday",
+        "day.sunday" => "Sunday",
+        "preview.draft" => "Draft:",
         "presence.typing" => "typing...",
+        "presence.groupOne" => "{0} is typing...",
+        "presence.groupSome" => "{0} are typing...",
+        "presence.groupMany" => "Several people are typing...",
         "presence.recording" => "recording audio...",
         "presence.online" => "online",
         "sync.older" => "Syncing older messages. Click to see progress.",
@@ -150,6 +161,7 @@ fn en(key: &str) -> &'static str {
         "picker.audio" => "Audio",
         "picker.all" => "All files",
         "lang.restart" => "Language saved. Restart Zapive to apply.",
+        "changelog.failed" => "Could not load release history. Check your connection and repository access, then try again. Previously loaded notes remain available.",
         "update.checking" => "Checking for updates…",
         "update.latest" => "You are on the latest version.",
         "autostart.failed" => "Could not change the startup setting: {0}",
@@ -256,7 +268,18 @@ fn pt(key: &str) -> &'static str {
         "doc.fallbackName" => "Documento",
         "day.today" => "Hoje",
         "day.yesterday" => "Ontem",
+        "day.monday" => "Segunda",
+        "day.tuesday" => "Terça",
+        "day.wednesday" => "Quarta",
+        "day.thursday" => "Quinta",
+        "day.friday" => "Sexta",
+        "day.saturday" => "Sábado",
+        "day.sunday" => "Domingo",
+        "preview.draft" => "Rascunho:",
         "presence.typing" => "digitando...",
+        "presence.groupOne" => "{0} está digitando...",
+        "presence.groupSome" => "{0} estão digitando...",
+        "presence.groupMany" => "Várias pessoas estão digitando...",
         "presence.recording" => "gravando áudio...",
         "presence.online" => "online",
         "sync.older" => "Sincronizando mensagens antigas. Clique para ver o progresso.",
@@ -340,6 +363,7 @@ fn pt(key: &str) -> &'static str {
         "picker.audio" => "Áudio",
         "picker.all" => "Todos os arquivos",
         "lang.restart" => "Idioma salvo. Reinicie o Zapive para aplicar.",
+        "changelog.failed" => "Não foi possível carregar o histórico. Verifique a conexão e o acesso ao repositório e tente novamente. As notas carregadas anteriormente continuam disponíveis.",
         "update.checking" => "Verificando atualizações…",
         "update.latest" => "Você já está na versão mais recente.",
         "autostart.failed" => "Não foi possível alterar a inicialização automática: {0}",
@@ -402,6 +426,28 @@ fn pt(key: &str) -> &'static str {
 fn key_missing(key: &str) -> &'static str {
     debug_assert!(false, "missing i18n key: {key}");
     ""
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_day_labels_are_localized() {
+        for (key, english, portuguese) in [
+            ("day.yesterday", "Yesterday", "Ontem"),
+            ("day.monday", "Monday", "Segunda"),
+            ("day.tuesday", "Tuesday", "Terça"),
+            ("day.wednesday", "Wednesday", "Quarta"),
+            ("day.thursday", "Thursday", "Quinta"),
+            ("day.friday", "Friday", "Sexta"),
+            ("day.saturday", "Saturday", "Sábado"),
+            ("day.sunday", "Sunday", "Domingo"),
+        ] {
+            assert_eq!(en(key), english);
+            assert_eq!(pt(key), portuguese);
+        }
+    }
 }
 
 pub fn t(key: &str) -> String {
