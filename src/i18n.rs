@@ -28,7 +28,7 @@ pub fn t(id: &str) -> String { ta(id, &[]) }
 pub fn ta(id: &str, args: &[&str]) -> String {
     let Some(entry) = localized_entry(id) else { return missing(id) };
     validate_args(id, &entry.placeholders, args.len());
-    format_message(entry.forms[0], args, None)
+    format_message(entry.forms[0], args, None, &[])
 }
 
 // Plural message: `{n}` is `count`; any other placeholder is a named argument.
@@ -38,9 +38,7 @@ pub fn tp(id: &str, count: i64, args: &[(&str, &str)]) -> String {
     let actual = args.iter().map(|(name, _)| *name).collect::<std::collections::HashSet<_>>();
     assert_eq!(actual, expected, "wrong named arguments for {id}");
     let template = entry.forms.get(usize::from(count != 1)).or(entry.forms.first()).copied().unwrap_or_default();
-    let mut output = format_message(template, &[], Some(count));
-    for (name, value) in args { output = output.replace(&format!("{{{name}}}"), value); }
-    output
+    format_message(template, &[], Some(count), args)
 }
 
 fn missing(id: &str) -> String {
@@ -92,7 +90,7 @@ fn parse_catalog(source: &str) -> Vec<(&'static str, Entry)> {
         }).collect()
 }
 
-fn format_message(message: &str, args: &[&str], count: Option<i64>) -> String {
+fn format_message(message: &str, args: &[&str], count: Option<i64>, named_args: &[(&str, &str)]) -> String {
     let mut output = String::with_capacity(message.len());
     let mut remaining = message;
     while let Some(start) = remaining.find('{') {
@@ -104,6 +102,8 @@ fn format_message(message: &str, args: &[&str], count: Option<i64>) -> String {
         let name = &remaining[start + 1..start + 1 + end];
         let replacement = if name == "n" {
             count.map(|value| value.to_string())
+        } else if let Some((_, value)) = named_args.iter().find(|(key, _)| *key == name) {
+            Some((*value).to_string())
         } else {
             name.parse::<usize>().ok().and_then(|index| args.get(index).map(|value| (*value).to_string()))
         };
@@ -324,12 +324,13 @@ mod tests {
 
     #[test]
     fn interpolation_preserves_argument_placeholders_literally() {
-        assert_eq!(format_message("{0} {1}", &["{1}", "second"], None), "{1} second");
-        assert_eq!(format_message("{n}: {name}", &[], Some(3)), "3: {name}");
+        assert_eq!(format_message("{0} {1}", &["{1}", "second"], None, &[]), "{1} second");
+        assert_eq!(format_message("{n}: {name}", &[], Some(3), &[]), "3: {name}");
 
         let plural_template = catalogs().en.get("selection.messages.count").unwrap().forms[1];
-        assert_eq!(format_message(plural_template, &["{1}"], Some(2)), "2 selected");
-        assert_eq!(format_message("{n} {0}", &["{n}"], Some(2)), "2 {n}");
+        assert_eq!(format_message(plural_template, &["{1}"], Some(2), &[]), "2 selected");
+        assert_eq!(format_message("{n} {0}", &["{n}"], Some(2), &[]), "2 {n}");
+        assert_eq!(format_message("{name} {n}", &[], Some(4), &[("name", "{n}")]), "{n} 4");
     }
 
     #[test]
