@@ -751,3 +751,7 @@ msgstr "As notas da versão {} ainda não estão disponíveis."
 
 msgid "New in {}"
 msgstr "Novidades da {}"
+
+
+msgid "Copy to composer"
+msgstr "Copiar para o campo de mensagem"

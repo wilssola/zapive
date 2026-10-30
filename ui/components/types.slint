@@ -133,6 +133,9 @@ export struct StickerCell {
 }
 
 export struct MessageItem {
+    sendState: string,
+    sendPending: bool,
+    sendRetry: bool,
     id: string,
     kind: string,          // "text" | "image" | "audio" | "doc"
     text: string,          // body, caption, filename or audio duration

@@ -31,7 +31,18 @@ component Ticks {
     property <length> mark-size: 14px;
     width: mark-size;
     height: mark-size;
-    if ticks != "": Path {
+    if ticks == "pending": Rectangle {
+        width: 11px;
+        height: 11px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.time-out;
+        Rectangle { x: 5px; y: 2px; width: 1px; height: 4px; background: Theme.time-out; }
+        Rectangle { x: 5px; y: 5px; width: 3px; height: 1px; background: Theme.time-out; }
+    }
+    if ticks != "" && ticks != "pending": Path {
         commands: ticks == "✓✓"
             ? "M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"
             : "M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z";
@@ -3562,7 +3573,6 @@ export component AppWindow inherits Window {
                                                     root.mention-pick(0);
                                                 } else {
                                                     root.send-message(self.text);
-                                                    self.text = "";
                                                     composer-scroll.viewport-y = 0;
                                                 }
                                                 return accept;
@@ -3603,7 +3613,6 @@ export component AppWindow inherits Window {
                                 y: parent.height - self.height - 8px;
                                 clicked => {
                                     root.send-message(message-input.text);
-                                    message-input.text = "";
                                     composer-scroll.viewport-y = 0;
                                 }
                             }
@@ -4701,6 +4710,30 @@ export component AppWindow inherits Window {
                 height: parent.height - 12px;
                 message-menu-items := VerticalLayout {
                     spacing: 1px;
+                    if root.menu-message.sendPending: Text {
+                        text: root.menu-message.sendState;
+                        color: Theme.text-dim;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    if root.menu-message.sendRetry: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/refresh.svg");
+                        label: @tr("Try again");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "retry"); }
+                    }
+                    if root.menu-message.sendRetry && root.menu-message.kind == "text": MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/copy.svg");
+                        label: @tr("Copy to composer");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "recover"); }
+                    }
+                    if root.menu-message.sendPending && !root.menu-message.sendRetry: MenuRow {
+                        height: 32px;
+                        icon: @image-url("../icons/x.svg");
+                        label: @tr("Cancel");
+                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "cancel"); }
+                    }
                     MenuRow {
                         height: 32px;
                         icon: @image-url("../icons/message-circle.svg");
