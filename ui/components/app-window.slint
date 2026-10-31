@@ -3631,6 +3631,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                    }
                 }
                 }
             }
@@ -3833,6 +3834,28 @@ export component AppWindow inherits Window {
                     transform-rotation: 90deg;
                 }
             }
+
+            // "@" mention list above the composer.
+            if root.mention-open && root.chat-open && !root.select-mode: Rectangle {
+                x: 12px;
+                y: parent.height - self.height - composer-dock.height - 8px;
+                width: 360px;
+                height: min(320px, mention-col.preferred-height + 12px);
+                background: Theme.panel;
+                border-radius: 10px;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000055;
+                clip: true;
+                mention-col := VerticalLayout {
+                    padding: 6px;
+                    spacing: 0;
+                    for m[i] in root.mention-rows: MemberRow {
+                        item: m;
+                        clicked => { root.mention-pick(i); }
+                    }
+                }
+            }
+
 
             preview-layer := ModalLayer {
                 open: root.preview-open && root.chat-open;
@@ -5707,7 +5730,8 @@ export component AppWindow inherits Window {
         open: root.settings-open;
         scrim: transparent;
         dismissible: false;
-        width: parent.width - 61px;
+        x: 61px;
+        width: parent.width - self.x;
         height: parent.height;
         if settings-layer.mounted: Rectangle {
             width: 100%;
@@ -6773,5 +6797,4 @@ export component AppWindow inherits Window {
             }
         }
     }
-}
 }
