@@ -43,20 +43,20 @@ export component UpdateBanner inherits Rectangle {
                 spacing: 2px;
                 horizontal-stretch: 1;
                 Text {
-                    text: root.state == 1 ? @tr("Update available")
-                        : root.state == 2 ? @tr("Downloading update…")
-                        : root.state == 4 ? @tr("Update failed")
-                        : @tr("Update installed");
+                    text: root.state == 1 ? @tr("update.status.available")
+                        : root.state == 2 ? @tr("update.status.downloading")
+                        : root.state == 4 ? @tr("update.status.failed")
+                        : @tr("update.status.installed");
                     color: Theme.text;
                     font-size: 13px;
                     font-weight: 700;
                     overflow: elide;
                 }
                 Text {
-                    text: root.state == 1 ? @tr("Version {} is available", root.version)
-                        : root.state == 2 ? @tr("Version {}", root.version)
+                    text: root.state == 1 ? @tr("update.version.available", root.version)
+                        : root.state == 2 ? @tr("update.version.downloading", root.version)
                         : root.state == 4 ? root.error
-                        : @tr("Restart to use version {}", root.version);
+                        : @tr("update.version.restart_required", root.version);
                     color: Theme.text-dim;
                     font-size: 12px;
                     overflow: elide;
@@ -65,10 +65,10 @@ export component UpdateBanner inherits Rectangle {
                     height: 24px;
                     mouse-cursor: pointer;
                     accessible-role: button;
-                    accessible-label: @tr("What's new");
+                    accessible-label: @tr("update.whats_new.title");
                     clicked => { root.view-news(); }
                     Text {
-                        text: @tr("What's new");
+                        text: @tr("update.whats_new.title");
                         color: Theme.accent;
                         font-size: 12px;
                         vertical-alignment: center;
@@ -82,9 +82,9 @@ export component UpdateBanner inherits Rectangle {
                 border-radius: 15px;
                 background: update-touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent;
                 update-btn-text := Text {
-                    text: root.state == 1 ? @tr("Update")
-                        : root.state == 4 ? @tr("Try again")
-                        : @tr("Restart");
+                    text: root.state == 1 ? @tr("update.action.install")
+                        : root.state == 4 ? @tr("update.action.retry")
+                        : @tr("update.action.restart");
                     color: white;
                     font-size: 13px;
                     font-weight: 700;

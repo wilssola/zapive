@@ -699,7 +699,7 @@ impl EventHandler for Pump {
             }
             Event::LoggedOut(_) => {
                 self.stopped.store(true, Ordering::Relaxed);
-                ui_apply(|b| b.on_status(&t("status.sessionEnded")));
+                ui_apply(|b| b.on_status(&t("status.session_ended")));
                 let _ = self.cmd_tx.send(Cmd::ResetSession);
             }
             Event::ConnectFailure(f) => {
@@ -1649,7 +1649,7 @@ async fn executor(
                         if let Err(e) = client.voip().reject(&offer).await {
                             log::warn!("[wa] call reject failed: {e}");
                         }
-                        fail_call(&t("call.noDevices"));
+                        fail_call(&t("call.no_devices"));
                         return;
                     };
                     // Answering an audio-only offer with video is not on
@@ -1684,7 +1684,7 @@ async fn executor(
                         return;
                     };
                     let Some(audio) = open_audio().await else {
-                        fail_call(&t("call.noDevices"));
+                        fail_call(&t("call.no_devices"));
                         return;
                     };
                     let vision = match video {
@@ -1692,7 +1692,7 @@ async fn executor(
                         false => None,
                     };
                     if video && vision.is_none() {
-                        fail_call(&t("call.noCamera"));
+                        fail_call(&t("call.no_camera"));
                         return;
                     }
                     let voip = client.voip();
@@ -1762,7 +1762,7 @@ async fn executor(
                         return;
                     }
                     let Some((camera, sink)) = open_video() else {
-                        fail_call(&t("call.noCamera"));
+                        fail_call(&t("call.no_camera"));
                         return;
                     };
                     // A parked request from the peer has to be answered with
@@ -1779,7 +1779,7 @@ async fn executor(
                     };
                     if let Err(e) = started {
                         log::error!("[wa] starting video failed: {e}");
-                        fail_call(&t("call.noCamera"));
+                        fail_call(&t("call.no_camera"));
                         return;
                     }
                     if let Ok(mut live) = LIVE_CALL.lock()
@@ -2597,7 +2597,7 @@ async fn executor(
                     }
                     Err(e) => {
                         eprintln!("[wa] session rebuild failed: {e}");
-                        let msg = t("status.connectFailed");
+                        let msg = t("status.connect_failed");
                         crate::bridge::ui_apply(move |b| b.on_status(&msg));
                         return;
                     }
@@ -2617,7 +2617,7 @@ async fn executor(
                     }
                     Err(e) => {
                         eprintln!("[wa] session rebuild failed: {e}");
-                        let msg = t("status.connectFailed");
+                        let msg = t("status.connect_failed");
                         ui_apply(move |b| b.on_status(&msg));
                         return;
                     }
@@ -2708,4 +2708,39 @@ fn wrap_view_once(inner: wa::Message) -> wa::Message {
 
 fn format_pair_code(code: &str) -> String {
     if code.len() == 8 { format!("{}-{}", &code[..4], &code[4..]) } else { code.to_string() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_encoding_uses_form_spaces_and_utf8_bytes() {
+        assert_eq!(urlencode(""), "");
+        assert_eq!(urlencode("Az09-_.~"), "Az09-_.~");
+        assert_eq!(urlencode("a b+c/&"), "a+b%2Bc%2F%26");
+        assert_eq!(urlencode("é"), "%C3%A9");
+    }
+
+    #[test]
+    fn pairing_code_only_formats_eight_bytes() {
+        assert_eq!(format_pair_code("12345678"), "1234-5678");
+        assert_eq!(format_pair_code(""), "");
+        assert_eq!(format_pair_code("1234567"), "1234567");
+        assert_eq!(format_pair_code("123456789"), "123456789");
+    }
+
+    #[test]
+    fn view_once_wrapper_preserves_inner_content() {
+        let wrapped = wrap_view_once(wa::Message { conversation: Some("secret".into()), ..Default::default() });
+        assert!(wrapped.conversation.is_none());
+        let inner = wrapped.view_once_message_v2.as_option().unwrap().message.as_option().unwrap();
+        assert_eq!(inner.conversation.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn thumbnail_rejects_invalid_images() {
+        assert!(make_jpeg_thumb(&[]).is_none());
+        assert!(make_jpeg_thumb(b"not an image").is_none());
+    }
 }

@@ -169,7 +169,7 @@ impl StoredMessage {
             .filter(|doc| doc.mimetype.as_deref().unwrap_or(&self.mimetype).starts_with("audio/"))
             .and_then(|doc| doc.file_name.as_deref())
             .filter(|name| !name.trim().is_empty());
-        original.or(document).map(clean_text).unwrap_or_else(|| t("audio.fallbackName"))
+        original.or(document).map(clean_text).unwrap_or_else(|| t("audio.fallback_name"))
     }
 }
 
@@ -1546,7 +1546,7 @@ pub fn normalize_jid(jid: &str) -> String {
 // the reply.
 pub fn quoted_summary(quoted: &wa::Message) -> String {
     use whatsapp_rust::proto_helpers::MessageExt as _;
-    if quoted.is_view_once() { return t("compat.viewOnce"); }
+    if quoted.is_view_once() { return t("compat.view_once"); }
     if let Some(card) = crate::wa_map::compatibility_card(quoted.get_base_message()) {
         return card.chars().take(120).collect();
     }
@@ -2096,7 +2096,7 @@ mod tests {
         let mut stored = audio_message(Some(false));
         assert_eq!(stored.audio_filename(Some(r"D:\Music\original song.mp3")), "original song.mp3");
         assert_eq!(stored.audio_filename(Some("/music/original.flac")), "original.flac");
-        assert_eq!(stored.audio_filename(None), t("audio.fallbackName"));
+        assert_eq!(stored.audio_filename(None), t("audio.fallback_name"));
         stored.kind = MessageKind::Doc;
         stored.raw = Some(Arc::new(wa::Message {
             document_message: wa::message::DocumentMessage {

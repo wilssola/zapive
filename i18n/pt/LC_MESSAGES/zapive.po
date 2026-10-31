@@ -1,760 +1,1618 @@
 msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
-"Language: pt_BR\n"
+"Language: pt\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "View details"
-msgstr "Ver detalhes"
+# Keys are msgid = semantic id (no msgctxt). Plurals: msgid "<id>.one" / msgid_plural "<id>.other".
 
-msgid "Connecting..."
-msgstr "Conectando..."
+msgid "logout.title"
+msgstr "Sair desta conta?"
 
-msgid "Enter your PIN to unlock"
-msgstr "Digite seu PIN para desbloquear"
+msgid "logout.body"
+msgstr "Você pode manter as conversas neste computador. Ao conectar o mesmo número de novo, o app continua de onde parou, sem baixar tudo outra vez."
 
-msgid "PIN"
-msgstr "PIN"
+msgid "logout.keep"
+msgstr "Manter conversas"
 
-msgid "Unlock"
-msgstr "Entrar"
+msgid "logout.wipe"
+msgstr "Apagar tudo"
 
-msgid "Log in to WhatsApp"
-msgstr "Entrar no WhatsApp"
+msgid "forget.title"
+msgstr "Apagar conversas salvas?"
 
-msgid "1.  Open WhatsApp on your phone"
-msgstr "1.  Abra o WhatsApp no seu celular"
+msgid "forget.body"
+msgstr "As conversas guardadas da última sessão serão removidas deste computador. Elas continuam no seu celular."
 
-msgid "2.  Tap Menu and then Linked devices"
-msgstr "2.  Toque em Menu e depois em Aparelhos conectados"
+msgid "forget.action"
+msgstr "Apagar conversas"
 
-msgid "3.  Tap Link a device"
-msgstr "3.  Toque em Conectar aparelho"
+msgid "pin.saved"
+msgstr "PIN salvo. Os dados locais agora são protegidos por ele."
 
-msgid "4.  Point your camera at this code"
-msgstr "4.  Aponte a câmera para este código"
+msgid "pin.removed"
+msgstr "PIN removido. Os dados locais seguem criptografados pela sua conta Windows."
 
-msgid "Log in with phone number  ›"
-msgstr "Entrar com número de telefone  ›"
+msgid "pin.wrong"
+msgstr "PIN incorreto"
 
-msgid "Log in with phone number"
-msgstr "Entrar com número de telefone"
+msgid "pin.wrong_current"
+msgstr "PIN incorreto"
 
-msgid "Enter your number with the country code to receive a code to type on your phone."
-msgstr "Digite seu número com o código do país para receber um código e inseri-lo no celular."
+msgid "pin.format"
+msgstr "O PIN deve ter de 4 a 10 dígitos"
 
-msgid "E.g.: 5511999998888"
-msgstr "Ex.: 5511999998888"
+msgid "preview.photo"
+msgstr "📷 Foto"
 
-msgid "Get code"
-msgstr "Gerar código"
+msgid "preview.audio"
+msgstr "🎵 Áudio"
 
-msgid "‹  Back to QR code"
-msgstr "‹  Voltar para o QR code"
+msgid "preview.voice"
+msgstr "🎙 Mensagem de voz"
 
-msgid "Chats"
-msgstr "Conversas"
+msgid "emoji.smileys"
+msgstr "Carinhas e emoções"
 
-msgid "Search chats"
-msgstr "Pesquisar conversa"
+msgid "emoji.people"
+msgstr "Pessoas e corpo"
 
-msgid "All"
-msgstr "Tudo"
+msgid "emoji.animals"
+msgstr "Animais e natureza"
 
-msgid "Unread"
-msgstr "Não lidas"
+msgid "emoji.food"
+msgstr "Comida e bebida"
 
-msgid "Archived"
-msgstr "Arquivadas"
+msgid "emoji.travel"
+msgstr "Viagens e lugares"
 
-msgid "Select a conversation to start"
-msgstr "Selecione uma conversa para começar"
+msgid "emoji.activities"
+msgstr "Atividades"
 
-msgid "Your conversations"
-msgstr "Suas conversas"
+msgid "emoji.objects"
+msgstr "Objetos"
 
-msgid "Your groups"
-msgstr "Seus grupos"
+msgid "emoji.symbols"
+msgstr "Símbolos"
 
-msgid "Forwarded"
-msgstr "Encaminhada"
+msgid "emoji.flags"
+msgstr "Bandeiras"
 
-msgid "Loading image..."
-msgstr "Carregando imagem..."
 
-msgid "Copy"
-msgstr "Copiar"
+msgid "audio.fallback_name"
+msgstr "Arquivo de áudio"
 
-msgid "Forward"
-msgstr "Encaminhar"
+msgid "preview.document"
+msgstr "📄 {0}"
 
-msgid "Type a message"
-msgstr "Digite uma mensagem"
-
-msgid "Send"
-msgstr "Enviar"
-
-msgid "Document"
+msgid "doc.fallback_name"
 msgstr "Documento"
 
-msgid "Photos"
-msgstr "Fotos"
+msgid "day.today"
+msgstr "Hoje"
 
-msgid "Audio"
-msgstr "Áudio"
+msgid "day.yesterday"
+msgstr "Ontem"
 
-msgid "Forward message to"
-msgstr "Encaminhar mensagem para"
+msgid "presence.typing"
+msgstr "digitando..."
 
-msgid "Settings"
-msgstr "Configurações"
+msgid "presence.recording"
+msgstr "gravando áudio..."
 
-msgid "Appearance"
-msgstr "Aparência"
+msgid "presence.online"
+msgstr "online"
 
-msgid "Dark"
-msgstr "Escuro"
+msgid "sync.older"
+msgstr "Sincronizando mensagens antigas. Clique para ver o progresso."
 
-msgid "Light"
-msgstr "Claro"
+msgid "sync.body"
+msgstr "Mantenha o WhatsApp aberto no celular enquanto as mensagens antigas são sincronizadas. Para ver todo o histórico, use o celular."
 
-msgid "System"
-msgstr "Sistema"
+msgid "sync.complete"
+msgstr "As mensagens antigas foram sincronizadas. O que é mais antigo fica só no celular."
 
-msgid "Language"
-msgstr "Idioma"
+msgid "sync.idle"
+msgstr "Nada sendo sincronizado agora. Role uma conversa para cima para buscar as mensagens antigas dela."
 
-msgid "Security"
-msgstr "Segurança"
+msgid "notice.and"
+msgstr "e"
 
-msgid "PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI)."
-msgstr "PIN ativo: a chave do cofre exige seu PIN e está vinculada à sua conta Windows (DPAPI)."
+msgid "notice.someone"
+msgstr "Alguém"
 
-msgid "Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch."
-msgstr "Os dados locais são sempre criptografados (chave protegida pela sua conta Windows). Defina um PIN para exigir desbloqueio ao abrir o app."
+msgid "notice.added_you"
+msgstr "{0} adicionou você"
 
-msgid "Current PIN"
-msgstr "PIN atual"
+msgid "notice.you_added"
+msgstr "Você adicionou {0}"
 
-msgid "New PIN (4 to 10 digits)"
-msgstr "Novo PIN (4 a 10 dígitos)"
+msgid "notice.added"
+msgstr "{0} adicionou {1}"
 
-msgid "Change PIN"
-msgstr "Alterar PIN"
+msgid "notice.joined_link"
+msgstr "{0} entrou usando o link de convite deste grupo"
 
-msgid "Set PIN"
-msgstr "Ativar PIN"
+msgid "notice.joined_link_share"
+msgstr "{0} entrou pelo link de convite. Clique para compartilhar o histórico do grupo."
 
-msgid "Remove PIN"
-msgstr "Remover PIN"
+msgid "notice.history_shared"
+msgstr "Você compartilhou as mensagens recentes do grupo com {0}"
 
-msgid "Account"
-msgstr "Conta"
+msgid "notice.you_left"
+msgstr "Você saiu"
 
-msgid "Log out of WhatsApp"
-msgstr "Sair do WhatsApp"
+msgid "notice.left"
+msgstr "{0} saiu"
 
-msgid "Add a caption"
-msgstr "Adicione uma legenda"
+msgid "notice.removed_you"
+msgstr "{0} removeu você"
 
-msgid "Crop"
-msgstr "Cortar"
+msgid "notice.you_removed"
+msgstr "Você removeu {0}"
 
-msgid "Pencil"
-msgstr "Lápis"
+msgid "notice.removed"
+msgstr "{0} removeu {1}"
 
-msgid "Reset image"
-msgstr "Restaurar imagem"
+msgid "notice.you_admin"
+msgstr "Agora você é admin"
 
-msgid "Thin"
-msgstr "Fino"
+msgid "notice.promoted"
+msgstr "{0} agora é admin"
 
-msgid "Thick"
-msgstr "Grosso"
+msgid "notice.you_not_admin"
+msgstr "Você não é mais admin"
 
-msgid "Text"
-msgstr "Texto"
+msgid "notice.demoted"
+msgstr "{0} não é mais admin"
 
-msgid "Apply"
-msgstr "Aplicar"
+msgid "notice.subject"
+msgstr "{0} mudou o nome do grupo para \"{1}\""
 
-msgid "Drag over the image to select the crop"
-msgstr "Arraste sobre a imagem para selecionar o recorte"
+msgid "notice.description"
+msgstr "{0} mudou a descrição do grupo"
 
-msgid "Write text, then click the image to position it"
-msgstr "Escreva e clique na imagem para posicionar o texto"
+msgid "notice.icon"
+msgstr "{0} mudou a imagem deste grupo"
 
-msgid "Status"
-msgstr "Status"
+msgid "notice.created"
+msgstr "{0} criou o grupo \"{1}\""
 
-msgid "No recent updates"
-msgstr "Nenhuma atualização recente"
+msgid "notice.announce"
+msgstr "{0} mudou as configurações para permitir que só admins enviem mensagens"
 
-msgid "Emoji"
-msgstr "Emoji"
+msgid "notice.not_announce"
+msgstr "{0} mudou as configurações para permitir que todos os membros enviem mensagens"
 
-msgid "Stickers"
-msgstr "Figurinhas"
+msgid "notice.locked"
+msgstr "{0} mudou as configurações para permitir que só admins editem os dados do grupo"
 
-msgid "Sticker"
-msgstr "Figurinha"
+msgid "notice.unlocked"
+msgstr "{0} mudou as configurações para permitir que todos os membros editem os dados do grupo"
 
-msgid "Contact info"
-msgstr "Dados do contato"
+msgid "notice.ephemeral_on"
+msgstr "{0} ativou as mensagens temporárias. As novas mensagens desaparecerão desta conversa {1} depois de enviadas."
 
-msgid "Group info"
-msgstr "Dados do grupo"
+msgid "notice.ephemeral_off"
+msgstr "{0} desativou as mensagens temporárias"
 
-msgid "About"
-msgstr "Recado"
+msgid "notice.deleted"
+msgstr "Este grupo foi apagado"
 
-msgid "Description"
-msgstr "Descrição"
+msgid "notice.missed_voice"
+msgstr "Chamada de voz perdida"
 
-msgid "Shared media"
-msgstr "Mídia compartilhada"
+msgid "notice.missed_video"
+msgstr "Chamada de vídeo perdida"
 
-msgid "Groups in common"
-msgstr "Grupos em comum"
+msgid "notice.members_changed"
+msgstr "Os membros do grupo mudaram. Clique para ver"
 
-msgid "Loading groups…"
-msgstr "Carregando grupos…"
+msgid "ephemeral.off"
+msgstr "Desativadas"
 
-msgid "Could not load groups in common"
-msgstr "Não foi possível carregar os grupos em comum"
+msgid "ephemeral.day"
+msgstr "24 horas"
 
-msgid "No groups in common"
-msgstr "Nenhum grupo em comum"
+msgid "ephemeral.week"
+msgstr "7 dias"
 
-msgid "Call"
-msgstr "Ligar"
+msgid "ephemeral.quarter"
+msgstr "90 dias"
 
-msgid "Video"
-msgstr "Vídeo"
+msgid "ephemeral.days.one"
+msgid_plural "ephemeral.days.other"
+msgstr[0] "{n} dia"
+msgstr[1] "{n} dias"
 
-msgid "More"
-msgstr "Mais"
+msgid "ephemeral.hours.one"
+msgid_plural "ephemeral.hours.other"
+msgstr[0] "{n} hora"
+msgstr[1] "{n} horas"
 
-msgid "No media preview available"
-msgstr "Nenhuma prévia de mídia disponível"
+msgid "ephemeral.minutes.one"
+msgid_plural "ephemeral.minutes.other"
+msgstr[0] "{n} minuto"
+msgstr[1] "{n} minutos"
 
-msgid "Archive chat"
-msgstr "Arquivar conversa"
+msgid "mention.all"
+msgstr "todos"
 
-msgid "Unarchive chat"
-msgstr "Desarquivar conversa"
+msgid "mention.all_hint"
+msgstr "Mencionar todos os membros desta conversa"
 
-msgid "Clear messages on this device"
-msgstr "Limpar mensagens neste dispositivo"
+msgid "mute.always"
+msgstr "Silenciado sempre"
 
-msgid "Channels"
-msgstr "Canais"
+msgid "mute.until"
+msgstr "Silenciado até {0}"
 
-msgid "Communities"
-msgstr "Comunidades"
+msgid "confirm.clear_title"
+msgstr "Limpar esta conversa?"
 
-msgid "Calls"
-msgstr "Chamadas"
+msgid "confirm.clear_body"
+msgstr "As mensagens serão removidas deste computador e do celular."
 
-msgid "No calls yet"
-msgstr "Nenhuma chamada ainda"
+msgid "confirm.clear"
+msgstr "Limpar conversa"
 
-msgid "Answer on your phone — desktop calls are not supported"
-msgstr "Atenda pelo celular — chamadas no desktop não são suportadas"
+msgid "confirm.delete_chat_title"
+msgstr "Apagar esta conversa?"
 
-msgid "Decline"
-msgstr "Recusar"
+msgid "confirm.delete_chat_body"
+msgstr "A conversa e as mensagens serão removidas deste computador e do celular."
 
-msgid "Dismiss"
-msgstr "Ignorar"
+msgid "confirm.delete"
+msgstr "Apagar conversa"
 
-msgid "Favorites"
-msgstr "Favoritas"
+msgid "confirm.exit_title"
+msgstr "Sair de \"{0}\"?"
 
-msgid "Search GIFs"
-msgstr "Buscar GIFs"
+msgid "confirm.exit_body"
+msgstr "Só os admins do grupo serão avisados de que você saiu."
 
-msgid "GIF search"
-msgstr "Busca de GIFs"
+msgid "confirm.exit"
+msgstr "Sair"
 
-msgid "Giphy API key (optional)"
-msgstr "Chave da API do Giphy (opcional)"
+msgid "confirm.delete_title"
+msgstr "Apagar {0} mensagem(ns)?"
 
-msgid "Save"
-msgstr "Salvar"
+msgid "confirm.delete_body"
+msgstr "\"Apagar para todos\" remove para todos os participantes; \"Apagar para mim\" remove aqui e no celular."
 
-msgid "Reply"
-msgstr "Responder"
+msgid "confirm.delete_me"
+msgstr "Apagar para mim"
 
-msgid "Star"
-msgstr "Favoritar"
 
-msgid "Unstar"
-msgstr "Desfavoritar"
+msgid "status.connecting"
+msgstr "Conectando..."
 
-msgid "Delete"
-msgstr "Apagar"
+msgid "forward.count"
+msgstr "{0} mensagens"
 
-msgid "Search name or number"
-msgstr "Pesquisar nome ou número"
+msgid "members.add_failed"
+msgstr "Não foi possível adicionar: {0}"
 
-msgid "Close"
-msgstr "Fechar"
+msgid "search.results"
+msgstr "{0} mensagens encontradas"
 
-msgid "Version {} is available"
-msgstr "Versão {} disponível"
+msgid "search.none"
+msgstr "Nenhuma mensagem encontrada"
 
-msgid "Downloading update…"
-msgstr "Baixando atualização…"
+msgid "export.media_omitted"
+msgstr "<Mídia omitida>"
 
-msgid "Update installed"
-msgstr "Atualização instalada"
+msgid "pdf.opening"
+msgstr "Abrindo documento…"
 
-msgid "Update"
-msgstr "Atualizar"
+msgid "pdf.engine_missing"
+msgstr "O visualizador de PDF precisa de um motor de renderização (pdfium) baixado uma única vez, cerca de 7 MB."
 
-msgid "Restart"
-msgstr "Reiniciar"
+msgid "pdf.installing"
+msgstr "Baixando o motor de PDF…"
 
-msgid "Startup"
-msgstr "Inicialização"
+msgid "pdf.install_failed"
+msgstr "Não foi possível baixar o motor de PDF: {0}"
 
-msgid "Open Zapive when I sign in"
-msgstr "Abrir o Zapive ao entrar no sistema"
+msgid "pdf.failed"
+msgstr "Não foi possível abrir este documento: {0}"
 
-msgid "Privacy"
-msgstr "Privacidade"
+msgid "notify.new_messages"
+msgstr "{0} novas mensagens ({1})"
 
-msgid "settings.privacyBlur"
-msgstr "Desfocar conteúdo privado"
-
-msgid "settings.privacyBlurHint"
-msgstr "Escolha o conteúdo a desfocar. Passe o mouse ou use o foco do teclado para revelar cada item."
-
-msgid "settings.blurNames"
-msgstr "Nomes"
-
-msgid "settings.blurPhotos"
-msgstr "Fotos"
-
-msgid "settings.blurMessages"
-msgstr "Mensagens"
-
-msgid "settings.blurMedia"
-msgstr "Mídias"
+msgid "notify.new_message"
+msgstr "New message"
 
 msgid "notify.reply"
 msgstr "Reply"
 
-msgid "notify.replyPlaceholder"
-msgstr "Type a reply"
-
 msgid "notify.play"
 msgstr "Play"
 
-msgid "notify.newMessage"
-msgstr "New message"
+msgid "notify.from_one"
+msgstr "{0} novas mensagens de {1}"
 
-msgid "Show notifications"
-msgstr "Mostrar notificações"
+msgid "notify.app_name"
+msgstr "Zapive"
 
-msgid "When turned off, no banners appear for messages or calls. Unread counts still update."
-msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
+msgid "picker.images"
+msgstr "Imagens"
 
-msgid "settings.notifyPreviews"
-msgstr "Mostrar prévias das mensagens nas notificações"
+msgid "picker.audio"
+msgstr "Áudio"
 
-msgid "settings.notifyPreviewsHint"
-msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
+msgid "picker.all"
+msgstr "Todos os arquivos"
 
-msgid "Send read receipts"
-msgstr "Enviar confirmação de leitura"
+msgid "lang.restart"
+msgstr "Idioma salvo. Reinicie o Zapive para aplicar."
 
-msgid "Apply messages deleted by the sender"
-msgstr "Aplicar mensagens apagadas pelo remetente"
+msgid "update.checking"
+msgstr "Verificando atualizações…"
 
-msgid "Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted."
-msgstr "Ambas ficam desativadas por padrão: ninguém é avisado quando você lê uma mensagem, e uma mensagem apagada por alguém continua visível aqui, marcada como apagada."
+msgid "update.latest"
+msgstr "Você já está na versão mais recente."
 
-msgid "Deleted by sender"
-msgstr "Apagada pelo remetente"
+msgid "autostart.failed"
+msgstr "Não foi possível alterar a inicialização automática: {0}"
 
-msgid "Groups"
-msgstr "Grupos"
+msgid "msg.deleted"
+msgstr "Essa mensagem foi apagada"
 
-msgid "Messages"
-msgstr "Mensagens"
+msgid "tray.open"
+msgstr "Abrir Zapive"
 
-msgid "Group admin"
-msgstr "Admin do grupo"
-
-msgid "{} selected"
-msgstr "{} selecionada(s)"
-
-msgid "You can't send messages to this group because you're no longer a member."
-msgstr "Você não pode enviar mensagens para este grupo porque não é mais participante."
-
-msgid "Only "
-msgstr "Somente "
-
-msgid "admins"
-msgstr "admins"
-
-msgid " can send messages"
-msgstr " podem enviar mensagens"
-
-msgid "Select"
-msgstr "Selecionar"
-
-msgid "Add member"
-msgstr "Adicionar membro"
-
-msgid "Search"
-msgstr "Pesquisar"
-
-msgid "Select messages"
-msgstr "Selecionar mensagens"
-
-msgid "Unmute notifications"
-msgstr "Reativar notificações"
-
-msgid "Mute notifications"
-msgstr "Silenciar notificações"
-
-msgid "Disappearing messages"
-msgstr "Mensagens temporárias"
-
-msgid "Remove from Favorites"
-msgstr "Remover dos favoritos"
-
-msgid "Add to Favorites"
-msgstr "Adicionar aos favoritos"
-
-msgid "Add to list"
-msgstr "Adicionar à lista"
-
-msgid "Export chat"
-msgstr "Exportar conversa"
-
-msgid "Close chat"
-msgstr "Fechar conversa"
-
-msgid "Clear chat"
-msgstr "Limpar conversa"
-
-msgid "Exit group"
-msgstr "Sair do grupo"
-
-msgid "Delete chat"
-msgstr "Apagar conversa"
-
-msgid "8 hours"
-msgstr "8 horas"
-
-msgid "1 week"
-msgstr "1 semana"
-
-msgid "Always"
-msgstr "Sempre"
-
-msgid "24 hours"
-msgstr "24 horas"
-
-msgid "7 days"
-msgstr "7 dias"
-
-msgid "90 days"
-msgstr "90 dias"
-
-msgid "Off"
-msgstr "Desativadas"
-
-msgid "New list"
-msgstr "Nova lista"
-
-msgid "Participants"
-msgstr "Participantes"
-
-msgid "Search messages"
-msgstr "Pesquisar mensagens"
-
-msgid "Search for messages in this chat"
-msgstr "Pesquise mensagens nesta conversa"
-
-msgid "Syncing older messages"
-msgstr "Sincronizando mensagens antigas"
-
-msgid "Cancel"
-msgstr "Cancelar"
-
-msgid "Lists organize your chats. This chat is added to the new list."
-msgstr "As listas organizam suas conversas. Esta conversa entra na nova lista."
-
-msgid "List name"
-msgstr "Nome da lista"
-
-msgid "Create"
-msgstr "Criar"
-
-msgid "Add"
-msgstr "Adicionar"
-
-msgid "View"
-msgstr "Ver"
-
-msgid "Save as..."
-msgstr "Salvar como..."
-
-msgid "Open with another app"
-msgstr "Abrir com outro app"
-
-msgid "Downloading…"
-msgstr "Baixando…"
-
-msgid "Download viewer"
-msgstr "Baixar visualizador"
-
-msgid "Send message history to {}?"
-msgstr "Enviar o histórico de mensagens para {}?"
-
-msgid "will get"
-msgstr "vai receber as"
-
-msgid "recent messages"
-msgstr "mensagens recentes"
-
-msgid "from this group."
-msgstr "deste grupo."
-
-msgid "Sending…"
-msgstr "Enviando…"
-
-msgid "Theme"
-msgstr "Tema"
-
-msgid "General"
-msgstr "Geral"
-
-msgid "Version {}"
-msgstr "Versão {}"
-
-msgid "Check for updates"
-msgstr "Verificar atualizações"
-
-msgid "Update available"
-msgstr "Atualização disponível"
-
-msgid "Restart to use version {}"
-msgstr "Reinicie para usar a versão {}"
-
-msgid "Log out"
+msgid "tray.exit"
 msgstr "Sair"
 
-msgid "Conversations of {} are saved on this computer"
+msgid "preview.sticker"
+msgstr "🩵 Figurinha"
+
+msgid "preview.video"
+msgstr "🎬 Vídeo"
+
+msgid "rec.no_mic"
+msgstr "Nenhum microfone encontrado"
+
+msgid "info.members"
+msgstr "{0} participantes"
+
+msgid "gif.no_results"
+msgstr "Nenhum GIF encontrado"
+
+msgid "fav.empty"
+msgstr "Marque uma figurinha com estrela no celular para guardá-la aqui"
+
+
+
+
+
+
+
+
+
+
+
+msgid "device.system"
+msgstr "Padrão do sistema"
+
+msgid "preview.gif"
+msgstr "🎬 GIF"
+
+msgid "preview.reacted"
+msgstr "Reagiu {0} a: \"{1}\""
+
+
+
+
+
+
+
+
+msgid "reactions.count"
+msgstr "{0} reações"
+
+msgid "reactions.you"
+msgstr "Você"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+msgid "media.download.downloading"
+msgstr "Baixando…"
+
+msgid "connection.status.connecting"
+msgstr "Conectando..."
+
+msgid "security.unlock.enter_pin_prompt"
+msgstr "Digite seu PIN para desbloquear"
+
+msgid "security.unlock.pin_placeholder"
+msgstr "PIN"
+
+msgid "security.unlock.action"
+msgstr "Entrar"
+
+msgid "account.login.whatsapp.title"
+msgstr "Entrar no WhatsApp"
+
+msgid "account.login.qr.step_open_whatsapp"
+msgstr "1.  Abra o WhatsApp no seu celular"
+
+msgid "account.login.qr.step_linked_devices"
+msgstr "2.  Toque em Menu e depois em Aparelhos conectados"
+
+msgid "account.login.qr.step_link_device"
+msgstr "3.  Toque em Conectar aparelho"
+
+msgid "account.login.qr.step_scan_code"
+msgstr "4.  Aponte a câmera para este código"
+
+msgid "account.login.phone.open"
+msgstr "Entrar com número de telefone  ›"
+
+msgid "account.login.phone.title"
+msgstr "Entrar com número de telefone"
+
+msgid "account.login.phone.instructions"
+msgstr "Digite seu número com o código do país para receber um código e inseri-lo no celular."
+
+msgid "account.login.phone.number_placeholder"
+msgstr "Ex.: 5511999998888"
+
+msgid "account.login.phone.request_code"
+msgstr "Gerar código"
+
+msgid "account.login.qr.back"
+msgstr "‹  Voltar para o QR code"
+
+msgid "account.backup.saved_for_number"
 msgstr "As conversas de {} estão salvas neste computador"
 
-msgid "Conversations are saved on this computer"
+msgid "account.backup.saved"
 msgstr "Há conversas salvas neste computador"
 
-msgid "Link the same number and the app picks up where it left off, without downloading everything again. A different number starts clean."
+msgid "account.backup.restore_explanation"
 msgstr "Conecte o mesmo número e o app continua de onde parou, sem baixar tudo de novo. Um número diferente começa do zero."
 
-msgid "Erase"
+msgid "account.backup.erase_action"
 msgstr "Apagar"
 
-msgid "Other accounts"
+msgid "account.menu.other_accounts"
 msgstr "Outras contas"
 
-msgid "Add account"
+msgid "navigation.status"
+msgstr "Status"
+
+msgid "status.empty.recent_updates"
+msgstr "Nenhuma atualização recente"
+
+msgid "navigation.calls"
+msgstr "Chamadas"
+
+
+msgid "navigation.channels"
+msgstr "Canais"
+
+msgid "navigation.communities"
+msgstr "Comunidades"
+
+msgid "navigation.chats"
+msgstr "Conversas"
+
+
+msgid "chat.search.chats_heading"
+msgstr "Conversas"
+
+msgid "chat.search.messages_heading"
+msgstr "Mensagens"
+
+msgid "chat.unread.separator"
+msgstr "Mensagens não lidas"
+
+msgid "message.forwarded.label"
+msgstr "Encaminhada"
+
+msgid "message.deleted_by_sender"
+msgstr "Apagada pelo remetente"
+
+msgid "media.action.view"
+msgstr "Ver"
+
+msgid "media.action.download"
+msgstr "Baixar"
+
+msgid "file.action.save_as"
+msgstr "Salvar como..."
+
+msgid "media.type.audio"
+msgstr "Áudio"
+
+
+msgid "chat.picker.tab_emoji"
+msgstr "Emoji"
+
+
+msgid "chat.picker.tab_favorites"
+msgstr "Favoritas"
+
+msgid "chat.picker.search_gifs"
+msgstr "Buscar GIFs"
+
+
+
+
+msgid "chat.menu.select_messages"
+msgstr "Selecionar mensagens"
+
+
+
+msgid "chat.menu.favorite_remove"
+msgstr "Remover dos favoritos"
+
+
+
+
+
+
+
+
+msgid "info.panel.group_title"
+msgstr "Dados do grupo"
+
+msgid "info.panel.contact_title"
+msgstr "Dados do contato"
+
+msgid "info.action.call"
+msgstr "Ligar"
+
+msgid "info.action.video"
+msgstr "Vídeo"
+
+
+msgid "info.action.more"
+msgstr "Mais"
+
+msgid "info.action.unmute"
+msgstr "Reativar notificações"
+
+
+msgid "info.action.unarchive"
+msgstr "Desarquivar conversa"
+
+
+msgid "info.action.clear_local"
+msgstr "Limpar mensagens neste dispositivo"
+
+msgid "info.media.title"
+msgstr "Mídia compartilhada"
+
+msgid "info.media.empty"
+msgstr "Nenhuma prévia de mídia disponível"
+
+msgid "info.group.participants"
+msgstr "Participantes"
+
+msgid "info.group.add_member"
+msgstr "Adicionar membro"
+
+msgid "info.common_groups.title"
+msgstr "Grupos em comum"
+
+msgid "info.common_groups.loading"
+msgstr "Carregando grupos…"
+
+msgid "info.common_groups.error"
+msgstr "Não foi possível carregar os grupos em comum"
+
+msgid "info.common_groups.empty"
+msgstr "Nenhum grupo em comum"
+
+
+msgid "common.action.ok"
+msgstr "OK"
+
+msgid "account.menu.add"
 msgstr "Adicionar conta"
 
-msgid "Up to 5 accounts"
+msgid "account.menu.limit_hint"
 msgstr "Limite de 5 contas"
 
-msgid "Switching accounts..."
+msgid "account.menu.logout"
+msgstr "Sair"
+
+msgid "account.switching.progress"
 msgstr "Trocando de conta..."
 
-msgid "Loading…"
-msgstr "Carregando…"
+msgid "message.menu.reply"
+msgstr "Responder"
 
-msgid "Update failed"
-msgstr "A atualização falhou"
+msgid "message.menu.reply_privately"
+msgstr "Responder em particular"
 
-msgid "Update failed: {}"
-msgstr "A atualização falhou: {}"
+msgid "message.menu.forward"
+msgstr "Encaminhar"
 
-msgid "Try again"
-msgstr "Tentar de novo"
+msgid "message.menu.copy_text"
+msgstr "Copiar texto"
 
-msgid "Automatic downloads"
-msgstr "Transferências automáticas"
+msgid "message.menu.copy_image"
+msgstr "Copiar imagem"
 
-msgid "Voice messages are always downloaded automatically."
-msgstr "As mensagens de voz são sempre transferidas automaticamente."
+msgid "message.menu.copy_link"
+msgstr "Copiar link"
 
-msgid "Videos"
-msgstr "Vídeos"
+msgid "message.menu.save_as"
+msgstr "Salvar como…"
 
-msgid "Documents"
-msgstr "Documentos"
+msgid "message.menu.react"
+msgstr "Reagir"
 
-msgid "Manage your accounts"
-msgstr "Gerencie suas contas"
+msgid "message.menu.edit"
+msgstr "Editar"
 
-msgid "Application and behavior"
-msgstr "Aplicativo e comportamento"
+msgid "message.menu.unpin"
+msgstr "Desafixar"
 
-msgid "Theme, language and visual style"
-msgstr "Tema, idioma e estilo visual"
+msgid "message.menu.pin"
+msgstr "Fixar por 7 dias"
 
-msgid "Messages and calls"
-msgstr "Mensagens e chamadas"
+msgid "message.menu.mark_unread"
+msgstr "Marcar conversa como não lida"
 
-msgid "Read receipts, visibility and data"
-msgstr "Leitura, visibilidade e dados"
+msgid "message.menu.unstar"
+msgstr "Desfavoritar"
 
-msgid "Audio, video and devices"
-msgstr "Áudio, vídeo e dispositivos"
+msgid "message.menu.star"
+msgstr "Favoritar"
 
-msgid "Media and files"
-msgstr "Mídias e arquivos"
+msgid "message.menu.select"
+msgstr "Selecionar"
 
-msgid "PIN and app protection"
-msgstr "PIN e proteção do app"
+msgid "message.menu.details"
+msgstr "Detalhes"
 
-msgid "Updates"
-msgstr "Atualizações"
+msgid "message.menu.delete"
+msgstr "Apagar"
 
-msgid "Version and updates"
-msgstr "Versão e novas atualizações"
 
-msgid "Search settings…"
-msgstr "Buscar nas configurações…"
+msgid "message.dialog.save"
+msgstr "Salvar"
 
-msgid "Search results"
-msgstr "Resultados da busca"
+msgid "message.confirm.cancel"
+msgstr "Cancelar"
 
-msgid "Settings matching your search"
-msgstr "Configurações que correspondem à sua busca"
 
-msgid "Customize your Zapive experience"
-msgstr "Personalize sua experiência no Zapive"
 
-msgid "Choose which content to blur. Hover or keyboard focus reveals only that item."
-msgstr "Escolha o conteúdo a desfocar. Passe o mouse ou use o foco do teclado para revelar cada item."
 
-msgid "Blur contact names"
-msgstr "Desfocar nomes dos contatos"
 
-msgid "Blur profile photos"
-msgstr "Desfocar fotos de perfil"
 
-msgid "Blur message text"
-msgstr "Desfocar texto das mensagens"
 
-msgid "Blur media previews"
-msgstr "Desfocar prévias de mídia"
 
-msgid "Show message previews"
+msgid "group.add_member.title"
+msgstr "Adicionar membro"
+
+msgid "group.add_member.search_placeholder"
+msgstr "Pesquisar nome ou número"
+
+msgid "group.add_member.confirm"
+msgstr "Adicionar"
+
+msgid "common.action.close"
+msgstr "Fechar"
+
+msgid "message.forward.title"
+msgstr "Encaminhar mensagem para"
+
+msgid "message.forward.search_placeholder"
+msgstr "Pesquisar nome ou número"
+
+msgid "settings.title"
+msgstr "Configurações"
+
+msgid "settings.appearance.title"
+msgstr "Aparência"
+
+msgid "settings.appearance.theme"
+msgstr "Tema"
+
+msgid "settings.appearance.theme_dark"
+msgstr "Escuro"
+
+msgid "settings.appearance.theme_light"
+msgstr "Claro"
+
+
+msgid "settings.appearance.style"
+msgstr "Estilo"
+
+msgid "settings.appearance.style_glass"
+msgstr "Vidro"
+
+msgid "settings.appearance.style_opaque"
+msgstr "Opaco"
+
+msgid "settings.language.title"
+msgstr "Idioma"
+
+
+
+msgid "settings.language.system"
+msgstr "Sistema"
+
+
+msgid "settings.general.launch_at_login"
+msgstr "Abrir o Zapive ao entrar no sistema"
+
+msgid "settings.calls.title"
+msgstr "Chamadas"
+
+msgid "settings.calls.devices_hint"
+msgstr "O dispositivo escolhido aqui é usado em todas as chamadas. As alterações valem na próxima chamada."
+
+msgid "settings.calls.microphone"
+msgstr "Microfone"
+
+msgid "settings.calls.speaker"
+msgstr "Alto-falante"
+
+msgid "settings.calls.camera"
+msgstr "Câmera"
+
+msgid "settings.privacy.title"
+msgstr "Privacidade"
+
+msgid "settings.privacy.hint"
+msgstr "Ambas ficam desativadas por padrão: ninguém é avisado quando você lê uma mensagem, e uma mensagem apagada por alguém continua visível aqui, marcada como apagada."
+
+msgid "settings.privacy.read_receipts"
+msgstr "Enviar confirmação de leitura"
+
+msgid "settings.privacy.apply_deletions"
+msgstr "Aplicar mensagens apagadas pelo remetente"
+
+
+
+
+
+
+msgid "settings.notifications.previews"
 msgstr "Mostrar prévias das mensagens"
 
-msgid "Turn off to hide message content and media in notifications."
-msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
 
-msgid "Start the app automatically when you sign in."
-msgstr "Inicia o aplicativo automaticamente ao entrar no sistema."
+msgid "settings.security.title"
+msgstr "Segurança"
 
-msgid "Choose a light, dark or system theme."
-msgstr "Escolha o tema claro, escuro ou acompanhe o sistema."
+msgid "settings.security.pin_enabled_hint"
+msgstr "PIN ativo: a chave do cofre exige seu PIN e está vinculada à sua conta Windows (DPAPI)."
 
-msgid "Choose a translucent or opaque interface."
+msgid "settings.security.pin_disabled_hint"
+msgstr "Os dados locais são sempre criptografados (chave protegida pela sua conta Windows). Defina um PIN para exigir desbloqueio ao abrir o app."
+
+msgid "settings.security.current_pin"
+msgstr "PIN atual"
+
+msgid "settings.security.new_pin"
+msgstr "Novo PIN (4 a 10 dígitos)"
+
+msgid "settings.security.change_pin"
+msgstr "Alterar PIN"
+
+msgid "settings.security.set_pin"
+msgstr "Ativar PIN"
+
+msgid "settings.security.remove_pin"
+msgstr "Remover PIN"
+
+msgid "settings.downloads.title"
+msgstr "Transferências automáticas"
+
+msgid "settings.downloads.voice_hint"
+msgstr "As mensagens de voz são sempre transferidas automaticamente."
+
+msgid "settings.downloads.photos"
+msgstr "Fotos"
+
+msgid "settings.downloads.audio"
+msgstr "Áudio"
+
+msgid "settings.downloads.videos"
+msgstr "Vídeos"
+
+msgid "settings.downloads.documents"
+msgstr "Documentos"
+
+msgid "settings.downloads.stickers"
+msgstr "Figurinhas"
+
+msgid "settings.about.title"
+msgstr "Recado"
+
+msgid "settings.about.update_available"
+msgstr "Versão {} disponível"
+
+
+msgid "settings.about.update_restart_required"
+msgstr "Reinicie para usar a versão {}"
+
+msgid "settings.about.update_failed"
+msgstr "A atualização falhou: {}"
+
+msgid "settings.about.version"
+msgstr "Versão {}"
+
+msgid "settings.about.update_action"
+msgstr "Atualizar"
+
+msgid "settings.about.update_downloading_button"
+msgstr "Baixando atualização…"
+
+msgid "settings.about.restart_action"
+msgstr "Reiniciar"
+
+msgid "settings.about.retry_action"
+msgstr "Tentar de novo"
+
+msgid "settings.about.check_updates"
+msgstr "Verificar atualizações"
+
+msgid "settings.account.title"
+msgstr "Conta"
+
+msgid "settings.account.logout_description"
+msgstr "Sair do WhatsApp"
+
+msgid "settings.account.logout_action"
+msgstr "Sair"
+
+msgid "pdf.engine.open_external"
+msgstr "Abrir com outro app"
+
+msgid "pdf.engine.installing"
+msgstr "Baixando…"
+
+msgid "pdf.engine.install"
+msgstr "Baixar visualizador"
+
+msgid "pdf.loading"
+msgstr "Carregando…"
+
+
+
+
+msgid "home.stats.conversations"
+msgstr "Suas conversas"
+
+msgid "home.stats.groups"
+msgstr "Seus grupos"
+
+msgid "navigation.settings"
+msgstr "Configurações"
+
+msgid "image.edit.crop"
+msgstr "Cortar"
+
+msgid "image.edit.add_text"
+msgstr "Texto"
+
+msgid "image.edit.pencil"
+msgstr "Lápis"
+
+msgid "image.edit.reset"
+msgstr "Restaurar imagem"
+
+msgid "image.crop.drag_instruction"
+msgstr "Arraste sobre a imagem para selecionar o recorte"
+
+msgid "image.text.position_instruction"
+msgstr "Escreva e clique na imagem para posicionar o texto"
+
+msgid "image.text.stroke_thin"
+msgstr "Fino"
+
+msgid "image.text.stroke_thick"
+msgstr "Grosso"
+
+msgid "image.edit.apply"
+msgstr "Aplicar"
+
+msgid "image.caption.placeholder"
+msgstr "Adicione uma legenda"
+
+msgid "group.member.admin"
+msgstr "Admin do grupo"
+
+msgid "update.status.available"
+msgstr "Atualização disponível"
+
+msgid "update.status.downloading"
+msgstr "Baixando atualização…"
+
+msgid "update.status.failed"
+msgstr "A atualização falhou"
+
+msgid "update.status.installed"
+msgstr "Atualização instalada"
+
+msgid "update.version.available"
+msgstr "Versão {} disponível"
+
+msgid "update.version.downloading"
+msgstr "Versão {}"
+
+msgid "update.version.restart_required"
+msgstr "Reinicie para usar a versão {}"
+
+msgid "update.action.install"
+msgstr "Atualizar"
+
+msgid "update.action.retry"
+msgstr "Tentar de novo"
+
+msgid "update.action.restart"
+msgstr "Reiniciar"
+
+msgid "error.invalid_number"
+msgstr "Número de telefone inválido"
+
+msgid "pairing.generating"
+msgstr "Gerando código de emparelhamento…"
+
+msgid "selection.messages.count.one"
+msgid_plural "selection.messages.count.other"
+msgstr[0] "{n} selecionada"
+msgstr[1] "{n} selecionadas"
+
+msgid "status.scan_qr"
+msgstr "Escanear código QR"
+
+msgid "status.pairing_hint"
+msgstr "Use o WhatsApp no seu celular para escanear o código QR"
+
+msgid "pairing.failed"
+msgstr "Falha ao gerar código de emparelhamento"
+
+msgid "status.connected"
+msgstr "Conectado"
+
+msgid "status.logging_out"
+msgstr "Saindo…"
+
+msgid "calls.empty.list"
+msgstr "Nenhuma chamada ainda"
+
+msgid "account.new"
+msgstr "Nova conta"
+
+msgid "account.in_call"
+msgstr "Em uma chamada"
+
+msgid "account.remove_title"
+msgstr "Remover {0}?"
+
+msgid "account.remove_body"
+msgstr "Isso removerá a conta deste computador. Suas mensagens continuam no celular."
+
+msgid "account.remove_action"
+msgstr "Remover conta"
+
+msgid "status.session_ended"
+msgstr "Sessão encerrada"
+
+msgid "group.add_member.selected_count.one"
+msgid_plural "group.add_member.selected_count.other"
+msgstr[0] "{n} selecionado"
+msgstr[1] "{n} selecionados"
+
+msgid "chat.search.placeholder"
+msgstr "Pesquisar conversa"
+
+msgid "chat.filter.all"
+msgstr "Tudo"
+
+msgid "chat.filter.unread"
+msgstr "Não lidas"
+
+msgid "chat.filter.favorites"
+msgstr "Favoritas"
+
+msgid "chat.filter.groups"
+msgstr "Grupos"
+
+msgid "chat.filter.archived"
+msgstr "Arquivadas"
+
+msgid "chat.composer.not_member"
+msgstr "Você não pode enviar mensagens para este grupo porque não é mais participante."
+
+msgid "chat.composer.admins_only_prefix"
+msgstr "Somente "
+
+msgid "chat.composer.admins_only_highlight"
+msgstr "admins"
+
+msgid "chat.composer.admins_only_suffix"
+msgstr " podem enviar mensagens"
+
+msgid "chat.composer.placeholder"
+msgstr "Digite uma mensagem"
+
+
+
+
+
+
+
+msgid "chat.menu.favorite_add"
+msgstr "Adicionar aos favoritos"
+
+
+msgid "chat.menu.export"
+msgstr "Exportar conversa"
+
+msgid "chat.menu.close"
+msgstr "Fechar conversa"
+
+msgid "chat.menu.clear"
+msgstr "Limpar conversa"
+
+msgid "chat.menu.exit_group"
+msgstr "Sair do grupo"
+
+msgid "chat.menu.delete"
+msgstr "Apagar conversa"
+
+msgid "chat.disappearing.title"
+msgstr "Mensagens temporárias"
+
+msgid "chat.disappearing.duration_24h"
+msgstr "24 horas"
+
+msgid "chat.disappearing.duration_7d"
+msgstr "7 dias"
+
+msgid "chat.disappearing.duration_90d"
+msgstr "90 dias"
+
+msgid "chat.disappearing.off"
+msgstr "Desativadas"
+
+msgid "chat.list.picker_title"
+msgstr "Adicionar à lista"
+
+
+
+
+
+
+msgid "info.action.search"
+msgstr "Pesquisar"
+
+msgid "info.action.mute"
+msgstr "Silenciar notificações"
+
+msgid "info.action.archive"
+msgstr "Arquivar conversa"
+
+
+
+
+msgid "chat.history.syncing"
+msgstr "Sincronizando mensagens antigas"
+
+msgid "chat.history_share.title"
+msgstr "Enviar o histórico de mensagens para {}?"
+
+msgid "chat.history_share.prefix"
+msgstr "vai receber as"
+
+msgid "chat.history_share.highlight"
+msgstr "mensagens recentes"
+
+msgid "chat.history_share.suffix"
+msgstr "deste grupo."
+
+msgid "chat.history_share.cancel"
+msgstr "Cancelar"
+
+msgid "chat.history_share.sending"
+msgstr "Enviando…"
+
+msgid "chat.history_share.send"
+msgstr "Enviar"
+
+msgid "chat.list.new_title"
+msgstr "Nova lista"
+
+msgid "chat.list.new_hint"
+msgstr "As listas organizam suas conversas. Esta conversa entra na nova lista."
+
+msgid "chat.list.name_placeholder"
+msgstr "Nome da lista"
+
+msgid "chat.list.new_cancel"
+msgstr "Cancelar"
+
+msgid "chat.list.create"
+msgstr "Criar"
+
+
+
+msgid "settings.privacy.blur_hint"
+msgstr "Escolha o conteúdo a desfocar. Passe o mouse ou use o foco do teclado para revelar cada item."
+
+msgid "settings.privacy.blur_names"
+msgstr "Desfocar nomes dos contatos"
+
+msgid "settings.privacy.blur_photos"
+msgstr "Desfocar fotos de perfil"
+
+msgid "settings.privacy.blur_messages"
+msgstr "Desfocar texto das mensagens"
+
+msgid "settings.privacy.blur_media"
+msgstr "Desfocar prévias de mídia"
+
+msgid "call.incoming.decline"
+msgstr "Recusar"
+
+msgid "call.incoming.accept"
+msgstr "Aceitar"
+
+msgid "call.controls.stop_video"
+msgstr "Parar vídeo"
+
+msgid "call.controls.video"
+msgstr "Vídeo"
+
+msgid "call.controls.unmute"
+msgstr "Ativar som"
+
+msgid "call.controls.mute"
+msgstr "Silenciar"
+
+msgid "call.controls.end"
+msgstr "Encerrar"
+
+msgid "chat.empty.select_conversation"
+msgstr "Selecione uma conversa para começar"
+
+msgid "call.failed"
+msgstr "Falha na chamada"
+
+msgid "call.gone"
+msgstr "Chamada encerrada"
+
+msgid "call.no_camera"
+msgstr "Nenhuma câmera disponível"
+
+msgid "call.no_devices"
+msgstr "Nenhum dispositivo de áudio disponível"
+
+msgid "status.connect_failed"
+msgstr "Falha ao conectar: {0}"
+
+msgid "status.reconnecting"
+msgstr "Reconectando…"
+
+msgid "sync.progress"
+msgstr "Sincronizando {0} de {1}"
+
+
+
+
+
+
+
+
+
+msgid "day.monday"
+msgstr "Segunda"
+
+msgid "day.tuesday"
+msgstr "Terça"
+
+msgid "day.wednesday"
+msgstr "Quarta"
+
+msgid "day.thursday"
+msgstr "Quinta"
+
+msgid "day.friday"
+msgstr "Sexta"
+
+msgid "day.saturday"
+msgstr "Sábado"
+
+msgid "day.sunday"
+msgstr "Domingo"
+
+msgid "preview.draft"
+msgstr "Rascunho:"
+
+msgid "presence.group_one"
+msgstr "{0} está digitando..."
+
+msgid "presence.group_some"
+msgstr "{0} estão digitando..."
+
+msgid "presence.group_many"
+msgstr "Várias pessoas estão digitando..."
+
+
+
+
+msgid "confirm.delete_everyone"
+msgstr "Apagar para todos"
+
+msgid "notify.reply_placeholder"
+msgstr "Responder"
+
+msgid "changelog.failed"
+msgstr "Não foi possível carregar o histórico. Verifique a conexão e o acesso ao repositório e tente novamente. As notas carregadas anteriormente continuam disponíveis."
+
+msgid "outbox.storage_failed"
+msgstr "Não foi possível salvar a mensagem. Seu texto foi preservado. Verifique o espaço em disco e tente novamente."
+
+msgid "outbox.preparing"
+msgstr "Preparando anexo"
+
+msgid "outbox.queued"
+msgstr "Aguardando conexão"
+
+msgid "outbox.sending"
+msgstr "Enviando — aguardando confirmação"
+
+msgid "outbox.uncertain"
+msgstr "Envio não confirmado. Tentar novamente usa o mesmo identificador."
+
+msgid "outbox.failed"
+msgstr "Falha ao enviar. Tente novamente."
+
+msgid "outbox.cannot_cancel"
+msgstr "Esta mensagem pode já ter sido transmitida e não pode ser cancelada com segurança."
+
+msgid "history.unavailable"
+msgstr "Esta mensagem não está disponível no histórico local."
+
+msgid "card.contacts"
+msgstr "Contatos"
+
+msgid "card.live_location"
+msgstr "Localização em tempo real"
+
+msgid "card.live_location_detail"
+msgstr "Apenas a última posição compartilhada. Atualizações em tempo real não estão disponíveis aqui."
+
+msgid "card.view_once"
+msgstr "Mensagem de visualização única"
+
+msgid "card.view_once_body"
+msgstr "Abra esta mensagem no celular."
+
+msgid "card.unsupported"
+msgstr "Mensagem não suportada"
+
+msgid "card.unsupported_body"
+msgstr "Este tipo de mensagem não pode ser exibido aqui. Consulte no celular."
+
+msgid "compat.contact"
+msgstr "Contato"
+
+msgid "compat.location"
+msgstr "Localização"
+
+msgid "compat.live_location"
+msgstr "Localização em tempo real — apenas última posição; sem atualização aqui"
+
+msgid "compat.invalid_location"
+msgstr "Coordenadas indisponíveis ou inválidas"
+
+msgid "compat.poll"
+msgstr "Enquete"
+
+msgid "compat.poll_phone"
+msgstr "Consulte os resultados e vote pelo celular. A votação criptografada ainda não está integrada aqui."
+
+msgid "compat.view_once"
+msgstr "Mensagem de visualização única — abra no celular"
+
+msgid "compat.unsupported"
+msgstr "Mensagem não suportada — consulte no celular"
+
+msgid "call.incoming_voice"
+msgstr "Chamada de voz recebida"
+
+msgid "call.incoming_video"
+msgstr "Chamada de vídeo recebida"
+
+msgid "call.answered"
+msgstr "Atendida"
+
+msgid "call.elsewhere"
+msgstr "Atendida em outro aparelho"
+
+msgid "call.declined"
+msgstr "Recusada"
+
+msgid "call.missed"
+msgstr "Chamada perdida"
+
+msgid "call.no_answer"
+msgstr "Sem resposta"
+
+msgid "call.ended"
+msgstr "Chamada encerrada"
+
+msgid "call.ringing"
+msgstr "Tocando"
+
+msgid "call.calling"
+msgstr "Chamando…"
+
+msgid "call.connecting"
+msgstr "Conectando…"
+
+msgid "call.in_call"
+msgstr "Em chamada"
+
+msgid "call.video"
+msgstr "Chamada de vídeo"
+
+msgid "call.voice"
+msgstr "Chamada de voz"
+
+msgid "call.in"
+msgstr "Recebida"
+
+msgid "call.out"
+msgstr "Efetuada"
+
+msgid "alert.conflict_title"
+msgstr "Sessão assumida em outro lugar"
+
+msgid "alert.conflict_body"
+msgstr "O WhatsApp foi aberto em outro lugar com esta conta. Apenas uma sessão fica conectada por vez."
+
+msgid "alert.reconnect"
+msgstr "Usar aqui"
+
+msgid "alert.offline_title"
+msgstr "Não foi possível conectar"
+
+msgid "alert.offline_body"
+msgstr "O Zapive tentou reconectar várias vezes sem sucesso. Verifique a conexão e tente de novo."
+
+msgid "alert.retry"
+msgstr "Tentar de novo"
+
+
+msgid "message.action.copy_to_composer"
+msgstr "Copiar para o campo de mensagem"
+
+msgid "message.special.view_details"
+msgstr "Ver detalhes"
+
+msgid "settings.appearance.style.description"
 msgstr "Escolha uma interface translúcida ou opaca."
 
-msgid "Choose the language used by the app."
+msgid "settings.appearance.theme.description"
+msgstr "Escolha o tema claro, escuro ou acompanhe o sistema."
+
+msgid "settings.category.account.description"
+msgstr "Gerencie suas contas"
+
+msgid "settings.category.account.title"
+msgstr "Conta"
+
+msgid "settings.category.appearance.description"
+msgstr "Tema, idioma e estilo visual"
+
+msgid "settings.category.appearance.title"
+msgstr "Aparência"
+
+msgid "settings.category.calls.description"
+msgstr "Áudio, vídeo e dispositivos"
+
+msgid "settings.category.calls.title"
+msgstr "Chamadas"
+
+msgid "settings.category.downloads.description"
+msgstr "Mídias e arquivos"
+
+msgid "settings.category.downloads.title"
+msgstr "Transferências automáticas"
+
+msgid "settings.category.general.description"
+msgstr "Aplicativo e comportamento"
+
+msgid "settings.category.general.title"
+msgstr "Geral"
+
+msgid "settings.category.notifications.description"
+msgstr "Mensagens e chamadas"
+
+msgid "settings.category.notifications.title"
+msgstr "Notifications"
+
+msgid "settings.category.privacy.description"
+msgstr "Leitura, visibilidade e dados"
+
+msgid "settings.category.privacy.title"
+msgstr "Privacidade"
+
+msgid "settings.category.security.description"
+msgstr "PIN e proteção do app"
+
+msgid "settings.category.security.title"
+msgstr "Segurança"
+
+msgid "settings.category.updates.description"
+msgstr "Versão e novas atualizações"
+
+msgid "settings.category.updates.title"
+msgstr "Atualizações"
+
+msgid "settings.general.startup.description"
+msgstr "Inicia o aplicativo automaticamente ao entrar no sistema."
+
+msgid "settings.general.startup.title"
+msgstr "Inicialização"
+
+msgid "settings.language.description"
 msgstr "Escolha o idioma do aplicativo."
 
-msgid "Let others know when you read messages or play voice notes."
-msgstr "Avise outras pessoas quando você ler mensagens ou ouvir mensagens de voz."
+msgid "settings.notifications.enabled"
+msgstr "Mostrar notificações"
 
-msgid "Remove messages here when the sender deletes them for everyone."
+msgid "settings.notifications.enabled.description"
+msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
+
+msgid "settings.notifications.previews.description"
+msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
+
+msgid "settings.privacy.apply_deletions.description"
 msgstr "Remova mensagens daqui quando o remetente apagá-las para todos."
 
-msgid "Hide contact and group names until revealed."
-msgstr "Oculte nomes de contatos e grupos até revelá-los."
-
-msgid "Hide profile photos until revealed."
-msgstr "Oculte fotos de perfil até revelá-las."
-
-msgid "Hide message text until revealed."
-msgstr "Oculte o texto das mensagens até revelá-lo."
-
-msgid "Hide photos, videos and other media previews until revealed."
+msgid "settings.privacy.blur_media.description"
 msgstr "Oculte prévias de fotos, vídeos e outras mídias até revelá-las."
 
-msgid "Download photos automatically."
-msgstr "Baixa fotos automaticamente."
+msgid "settings.privacy.blur_messages.description"
+msgstr "Oculte o texto das mensagens até revelá-lo."
 
-msgid "Download audio files automatically."
-msgstr "Baixa arquivos de áudio automaticamente."
+msgid "settings.privacy.blur_names.description"
+msgstr "Oculte nomes de contatos e grupos até revelá-los."
 
-msgid "Download videos automatically."
-msgstr "Baixa vídeos automaticamente."
+msgid "settings.privacy.blur_photos.description"
+msgstr "Oculte fotos de perfil até revelá-las."
 
-msgid "Download documents automatically."
-msgstr "Baixa documentos automaticamente."
+msgid "settings.privacy.read_receipts.description"
+msgstr "Avise outras pessoas quando você ler mensagens ou ouvir mensagens de voz."
 
-msgid "Download stickers automatically."
-msgstr "Baixa figurinhas automaticamente."
+msgid "settings.search.default_subtitle"
+msgstr "Personalize sua experiência no Zapive"
 
+msgid "settings.search.placeholder"
+msgstr "Buscar nas configurações…"
 
-msgid "Release history"
-msgstr "Histórico de versões"
+msgid "settings.search.results_subtitle"
+msgstr "Configurações que correspondem à sua busca"
 
-msgid "Release notes are shown in their original language."
-msgstr "As notas das versões são exibidas no idioma original."
+msgid "settings.search.results_title"
+msgstr "Resultados da busca"
 
-msgid "Refresh history"
-msgstr "Atualizar histórico"
-
-msgid "Load history"
-msgstr "Carregar histórico"
-
-msgid "No published releases yet."
-msgstr "Nenhuma versão publicada ainda."
-
-msgid "{} · Installed version"
-msgstr "{} · Versão instalada"
-
-msgid "No release notes available."
-msgstr "Notas desta versão não disponíveis."
-
-msgid "Load older releases"
-msgstr "Carregar versões anteriores"
-
-
-msgid "What's new"
-msgstr "Ver novidades"
-
-msgid "Changes in versions newer than the one installed are shown separately from your history."
-msgstr "As mudanças das versões mais recentes que a instalada aparecem separadas do seu histórico."
-
-msgid "New version available"
-msgstr "Nova versão disponível"
-
-msgid "Nothing new — you're up to date"
-msgstr "Nada novo — você está atualizado"
-
-msgid "Check what's new"
+msgid "settings.updates.whats_new"
 msgstr "Consulte as novidades"
 
-msgid "Installed version: {}"
+msgid "update.release.empty_history"
+msgstr "Nenhuma versão publicada ainda."
+
+msgid "update.release.history.title"
+msgstr "Histórico de versões"
+
+msgid "update.release.installed_version"
 msgstr "Versão instalada: {}"
 
-msgid "Release notes for version {} are not available yet."
-msgstr "As notas da versão {} ainda não estão disponíveis."
+msgid "update.release.load_history"
+msgstr "Carregar histórico"
 
-msgid "New in {}"
+msgid "update.release.load_older"
+msgstr "Carregar versões anteriores"
+
+msgid "update.release.new_in"
 msgstr "Novidades da {}"
 
+msgid "update.release.newer_versions_hint"
+msgstr "As mudanças das versões mais recentes que a instalada aparecem separadas do seu histórico."
 
-msgid "Copy to composer"
-msgstr "Copiar para o campo de mensagem"
+msgid "update.release.notes_empty"
+msgstr "Notas desta versão não disponíveis."
+
+msgid "update.release.notes_unavailable"
+msgstr "As notas da versão {} ainda não estão disponíveis."
+
+msgid "update.release.original_language_hint"
+msgstr "As notas das versões são exibidas no idioma original."
+
+msgid "update.release.refresh_history"
+msgstr "Atualizar histórico"
+
+msgid "update.release.up_to_date"
+msgstr "Nada novo — você está atualizado"
+
+msgid "update.whats_new.title"
+msgstr "Ver novidades"
+
+
+
+msgid "chat.mute.duration_8h"
+msgstr "8 horas"
+
+msgid "chat.mute.duration_1w"
+msgstr "1 semana"
+
+msgid "chat.mute.duration_always"
+msgstr "Sempre"
+
+msgid "chat.in_chat_search.title"
+msgstr "Pesquisar mensagens"
+
+msgid "chat.in_chat_search.placeholder"
+msgstr "Pesquisar"
+
+msgid "chat.in_chat_search.hint"
+msgstr "Pesquise mensagens nesta conversa"
+
+msgid "chat.attach.sticker"
+msgstr "Figurinha"
+
+msgid "chat.attach.document"
+msgstr "Documento"
+
+msgid "update.release.installed_version_suffix"
+msgstr "{} · Versão instalada"
+
+msgid "update.version.available_title"
+msgstr "Nova versão disponível"
+
+msgid "chat.attach.audio"
+msgstr "Áudio"
+
+msgid "chat.attach.photos"
+msgstr "Fotos"
+
+msgid "chat.picker.tab_stickers"
+msgstr "Figurinhas"
+
+msgid "msg.details.title"
+msgstr "Detalhes da mensagem"
+
+msgid "settings.downloads.audio.description"
+msgstr "Baixa arquivos de áudio automaticamente."
+
+msgid "settings.downloads.documents.description"
+msgstr "Baixa documentos automaticamente."
+
+msgid "settings.downloads.photos.description"
+msgstr "Baixa fotos automaticamente."
+
+msgid "settings.downloads.stickers.description"
+msgstr "Baixa figurinhas automaticamente."
+
+msgid "settings.downloads.videos.description"
+msgstr "Baixa vídeos automaticamente."

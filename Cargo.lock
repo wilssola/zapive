@@ -9816,6 +9816,7 @@ dependencies = [
  "rand 0.9.5",
  "regex",
  "rfd",
+ "rspolib",
  "rusqlite",
  "scrypt",
  "self_update",

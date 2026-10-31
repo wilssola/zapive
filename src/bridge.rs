@@ -1360,8 +1360,8 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             if let Some(jid) = b.current_jid.clone() {
                 b.ask_confirm(
-                    t("confirm.clearTitle"),
-                    t("confirm.clearBody"),
+                    t("confirm.clear_title"),
+                    t("confirm.clear_body"),
                     t("confirm.clear"),
                     ConfirmAction::ClearChat(jid),
                 );
@@ -1372,8 +1372,8 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             if let Some(jid) = b.current_jid.clone() {
                 b.ask_confirm(
-                    t("confirm.deleteChatTitle"),
-                    t("confirm.deleteChatBody"),
+                    t("confirm.delete_chat_title"),
+                    t("confirm.delete_chat_body"),
                     t("confirm.delete"),
                     ConfirmAction::DeleteChat(jid),
                 );
@@ -1385,8 +1385,8 @@ fn wire_callbacks(ui: &AppWindow) {
             if let Some(jid) = b.current_jid.clone() {
                 let name = b.store.chat_name(&jid);
                 b.ask_confirm(
-                    ta("confirm.exitTitle", &[&name]),
-                    t("confirm.exitBody"),
+                    ta("confirm.exit_title", &[&name]),
+                    t("confirm.exit_body"),
                     t("confirm.exit"),
                     ConfirmAction::ExitGroup(jid),
                 );
@@ -1625,7 +1625,7 @@ impl Bridge {
     fn handle_pairing(&mut self, phone: &str) {
         let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
         if digits.len() < 8 {
-            self.ui.set_pairing_code(t("error.invalidNumber").into());
+            self.ui.set_pairing_code(t("error.invalid_number").into());
             return;
         }
         self.ui.set_pairing_code(t("pairing.generating").into());
@@ -1636,12 +1636,12 @@ impl Bridge {
 
     pub fn on_qr(&mut self, code: &str) {
         self.ui.set_qr_image(qr_image(code));
-        self.ui.set_status_text(t("status.scanQr").into());
+        self.ui.set_status_text(t("status.scan_qr").into());
     }
 
     pub fn on_pairing_code(&mut self, pretty: &str) {
         self.ui.set_pairing_code(pretty.into());
-        self.ui.set_status_text(t("status.pairingHint").into());
+        self.ui.set_status_text(t("status.pairing_hint").into());
     }
 
     pub fn on_pairing_failed(&mut self) {
@@ -1702,17 +1702,17 @@ impl Bridge {
         let conflict = kind == "conflict";
         self.ui.set_alert_title(
             t(if conflict {
-                "alert.conflictTitle"
+                "alert.conflict_title"
             } else {
-                "alert.offlineTitle"
+                "alert.offline_title"
             })
             .into(),
         );
         self.ui.set_alert_text(
             t(if conflict {
-                "alert.conflictBody"
+                "alert.conflict_body"
             } else {
-                "alert.offlineBody"
+                "alert.offline_body"
             })
             .into(),
         );
@@ -1749,7 +1749,7 @@ impl Bridge {
 
     fn logout(&mut self, wipe: bool) {
         self.wipe_on_logout = wipe;
-        self.ui.set_status_text(t("status.loggingOut").into());
+        self.ui.set_status_text(t("status.logging_out").into());
         self.wa.send(Cmd::Logout);
     }
 
@@ -1962,7 +1962,7 @@ impl Bridge {
         }
         // A call belongs to the account it runs on.
         if self.call.is_some() {
-            self.ui.set_status_text(t("account.inCall").into());
+            self.ui.set_status_text(t("account.in_call").into());
             return;
         }
         self.switching = true;
@@ -2010,9 +2010,9 @@ impl Bridge {
             t("account.new")
         };
         self.ask_confirm(
-            ta("account.removeTitle", &[&label]),
-            t("account.removeBody"),
-            t("account.removeAction"),
+            ta("account.remove_title", &[&label]),
+            t("account.remove_body"),
+            t("account.remove_action"),
             ConfirmAction::RemoveAccount(id.to_string()),
         );
     }
@@ -2648,7 +2648,7 @@ impl Bridge {
         let result = serde_json::to_string(&preparation).map_err(|e| e.to_string()).and_then(|json| {
             self.vault.as_ref().ok_or("vault unavailable".to_string())?.set_checked(&key, &json)
         });
-        if result.is_err() { self.message_action_failed(&t("outbox.storageFailed")); return false; }
+        if result.is_err() { self.message_action_failed(&t("outbox.storage_failed")); return false; }
         self.show_preparation(&preparation, "outbox.preparing");
         if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
         true
@@ -2689,7 +2689,7 @@ impl Bridge {
         entries.push(crate::outbox::Entry::new(id.to_string(), preparation.jid.clone(), std::sync::Arc::new(message.clone()), now_secs()));
         let json = match serde_json::to_string(&entries) { Ok(json) => json, Err(_) => return };
         let saved = self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[("store:outbox", &json)], &[&key]).is_ok());
-        if !saved { self.message_action_failed(&t("outbox.storageFailed")); return; }
+        if !saved { self.message_action_failed(&t("outbox.storage_failed")); return; }
         self.outbox = entries;
         self.preparation_states.remove(id);
         if let Some(messages) = self.store.messages.get_mut(&preparation.jid) { messages.retain(|message| message.id != id); }
@@ -2736,7 +2736,7 @@ impl Bridge {
         let mut entries = self.outbox.clone();
         entries.push(entry);
         if self.persist_outbox(&entries).is_err() {
-            self.message_action_failed(&t("outbox.storageFailed"));
+            self.message_action_failed(&t("outbox.storage_failed"));
             return false;
         }
         self.outbox = entries;
@@ -2753,7 +2753,7 @@ impl Bridge {
         let mut entries = self.outbox.clone();
         entries[index].state = State::Sending;
         if self.persist_outbox(&entries).is_err() {
-            self.message_action_failed(&t("outbox.storageFailed"));
+            self.message_action_failed(&t("outbox.storage_failed"));
             return;
         }
         self.outbox = entries;
@@ -3834,7 +3834,7 @@ impl Bridge {
             // The collapsed roster notice opens the group info on click;
             // an invite-link join offers to share the recent history.
             clickable: system
-                && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
+                && (m.text == t("notice.members_changed") || m.id.starts_with("sys:invite:")),
             // Saved contacts show their address-book name without the ~.
             senderLabel: if group && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid) {
                 format!("~ {}", self.store.chat_name(&sender_jid)).into()
@@ -4129,7 +4129,7 @@ impl Bridge {
             rows.push(MemberItem {
                 jid: "all".into(),
                 name: all_label.into(),
-                number: t("mention.allHint").into(),
+                number: t("mention.all_hint").into(),
                 hasAvatar: false,
                 avatar: empty_image(),
                 initial: "@".into(),
@@ -4640,7 +4640,7 @@ impl Bridge {
             && ok
         {
             let who = crate::wa_map::notice_name(&self.store, &member);
-            let body = ta("notice.historyShared", &[&who]);
+            let body = ta("notice.history_shared", &[&who]);
             self.add_system_message(
                 &group,
                 &format!("sys:shared:{}", now_secs()),
@@ -5421,7 +5421,7 @@ impl Bridge {
                     "reject" => "call.declined",
                     "timeout" => {
                         if call.outgoing {
-                            "call.noAnswer"
+                            "call.no_answer"
                         } else {
                             "call.missed"
                         }
@@ -5506,14 +5506,14 @@ impl Bridge {
         let detail = t(match state {
             "incoming" => {
                 if video {
-                    "call.incomingVideo"
+                    "call.incoming_video"
                 } else {
-                    "call.incomingVoice"
+                    "call.incoming_voice"
                 }
             }
             "outgoing" => "call.calling",
             "connecting" => "call.connecting",
-            "active" => "call.inCall",
+            "active" => "call.in_call",
             _ => "call.ended",
         });
         self.queue_avatar(&jid);
@@ -5994,9 +5994,9 @@ impl Bridge {
         self.set_ring(Some(crate::call::Ring::In));
         let name = self.store.chat_name(&jid);
         let detail = t(if video {
-            "call.incomingVideo"
+            "call.incoming_video"
         } else {
-            "call.incomingVoice"
+            "call.incoming_voice"
         });
         // The ring and the call window stay; only the banner obeys the setting.
         if self.notifications {
@@ -6563,7 +6563,7 @@ impl Bridge {
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.left = true;
         }
-        let body = t("notice.youLeft");
+        let body = t("notice.you_left");
         self.add_system_message(&jid, &format!("sys:left:{}", now_secs()), now_secs(), body);
         if Some(&jid) == self.current_jid.as_ref() {
             self.apply_chat_settings_ui();
@@ -6942,19 +6942,19 @@ impl Bridge {
             for_everyone: all_mine,
         });
         self.ui
-            .set_confirm_title(ta("confirm.deleteTitle", &[&count]).into());
-        self.ui.set_confirm_text(t("confirm.deleteBody").into());
+            .set_confirm_title(ta("confirm.delete_title", &[&count]).into());
+        self.ui.set_confirm_text(t("confirm.delete_body").into());
         self.ui.set_confirm_action(
             t(if all_mine {
-                "confirm.deleteEveryone"
+                "confirm.delete_everyone"
             } else {
-                "confirm.deleteMe"
+                "confirm.delete_me"
             })
             .into(),
         );
         self.ui.set_confirm_secondary(
             if all_mine {
-                t("confirm.deleteMe")
+                t("confirm.delete_me")
             } else {
                 String::new()
             }
@@ -7077,7 +7077,7 @@ impl Bridge {
         if !failed.is_empty() {
             let names: Vec<String> = failed.iter().map(|j| self.store.chat_name(j)).collect();
             self.ui
-                .set_status_text(ta("members.addFailed", &[&names.join(", ")]).into());
+                .set_status_text(ta("members.add_failed", &[&names.join(", ")]).into());
         }
     }
 
@@ -7361,7 +7361,7 @@ impl Bridge {
     pub fn on_gif_results(&mut self, results: Vec<(String, String, crate::media::Decoded)>) {
         self.gif_url_by_id.clear();
         if results.is_empty() {
-            self.ui.set_gif_hint(t("gif.noResults").into());
+            self.ui.set_gif_hint(t("gif.no_results").into());
             self.gif_model.set_vec(Vec::new());
             return;
         }
@@ -7467,7 +7467,7 @@ impl Bridge {
         self.ui.set_pdf_total_w(0.0);
         self.ui.set_pdf_engine_missing(false);
         self.ui.set_pdf_installing(false);
-        self.ui.set_pdf_status(t("pdf.loading").into());
+        self.ui.set_pdf_status(t("pdf.opening").into());
         self.ui.set_pdf_zoom_label("100%".into());
         self.ui.set_pdf_open(true);
         self.pdf.send(crate::pdf::PdfReq::Open {
@@ -7491,7 +7491,7 @@ impl Bridge {
             return;
         }
         self.ui.set_pdf_engine_missing(true);
-        self.ui.set_pdf_status(t("pdf.engineMissing").into());
+        self.ui.set_pdf_status(t("pdf.engine_missing").into());
     }
 
     pub fn on_pdf_engine_installed(&mut self, result: Result<(), String>) {
@@ -7507,7 +7507,7 @@ impl Bridge {
             }
             Err(e) => self
                 .ui
-                .set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
+                .set_pdf_status(ta("pdf.install_failed", &[&e]).into()),
         }
     }
 
@@ -8139,7 +8139,7 @@ impl Bridge {
                     return;
                 }
                 let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
-                let toast_title = if self.notify_previews { title.clone() } else { t("notify.appName") };
+                let toast_title = if self.notify_previews { title.clone() } else { t("notify.app_name") };
                 let mut payload = crate::platform::ToastPayload {
                     token: Some(token.clone()),
                     reply: true,
@@ -8163,7 +8163,7 @@ impl Bridge {
                     }
                     text
                 } else {
-                    t("notify.newMessage")
+                    t("notify.new_message")
                 };
                 if let Some(path) = &payload.thumbnail {
                     self.notification_thumbnails.insert(token.clone(), path.clone());
@@ -8191,13 +8191,13 @@ impl Bridge {
                 let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
                 if count == 0 || (self.notify_previews && names.is_empty()) { return; }
                 let text = if !self.notify_previews {
-                    ta("notify.newMessages", &[&count.to_string(), ""])
+                    ta("notify.new_messages", &[&count.to_string(), ""])
                 } else if names.len() == 1 {
-                    ta("notify.fromOne", &[&count.to_string(), names[0]])
+                    ta("notify.from_one", &[&count.to_string(), names[0]])
                 } else {
-                    ta("notify.newMessages", &[&count.to_string(), &names.join(", ")])
+                    ta("notify.new_messages", &[&count.to_string(), &names.join(", ")])
                 };
-                crate::platform::toast(&t("notify.appName"), &text, crate::platform::ToastPayload::default());
+                crate::platform::toast(&t("notify.app_name"), &text, crate::platform::ToastPayload::default());
             }
         }
     }
@@ -8340,7 +8340,7 @@ impl Bridge {
                 self.ui.set_pin_set(true);
                 t("pin.saved")
             }
-            Err(crate::vault::PinError::WrongPin) => t("pin.wrongCurrent"),
+            Err(crate::vault::PinError::WrongPin) => t("pin.wrong_current"),
             Err(crate::vault::PinError::BadFormat) => t("pin.format"),
         };
         self.ui.set_settings_status(status.into());
@@ -8353,7 +8353,7 @@ impl Bridge {
                 self.ui.set_pin_set(false);
                 t("pin.removed")
             }
-            Err(_) => t("pin.wrongCurrent"),
+            Err(_) => t("pin.wrong_current"),
         };
         self.ui.set_settings_status(status.into());
     }
@@ -8666,14 +8666,14 @@ impl Bridge {
             }
             if action == "cancel" {
                 if self.outbox[index].state != crate::outbox::State::Queued {
-                    self.message_action_failed(&t("outbox.cannotCancel"));
+                    self.message_action_failed(&t("outbox.cannot_cancel"));
                     return;
                 }
                 let entry = self.outbox[index].clone();
                 let mut entries = self.outbox.clone();
                 entries.remove(index);
                 if self.persist_outbox(&entries).is_err() {
-                    self.message_action_failed(&t("outbox.storageFailed"));
+                    self.message_action_failed(&t("outbox.storage_failed"));
                     return;
                 }
                 self.outbox = entries;
@@ -9295,7 +9295,7 @@ impl Bridge {
                     },
                 );
             }
-            None => self.ui.set_status_text(t("rec.noMic").into()),
+            None => self.ui.set_status_text(t("rec.no_mic").into()),
         }
     }
 
@@ -9356,10 +9356,10 @@ fn chat_matches_archive(archived: bool, tab: &str, searching: bool) -> bool {
 }
 
 fn group_typing_status(names: &[String], overflow: bool) -> String {
-    if overflow { return t("presence.groupMany"); }
+    if overflow { return t("presence.group_many"); }
     let first_names = names.iter().take(5)
         .filter_map(|name| name.split_whitespace().next()).collect::<Vec<_>>().join(", ");
-    ta(if names.len() == 1 { "presence.groupOne" } else { "presence.groupSome" }, &[&first_names])
+    ta(if names.len() == 1 { "presence.group_one" } else { "presence.group_some" }, &[&first_names])
 }
 
 fn typing_participants(members: &HashMap<String, (u64, String)>) -> (Vec<String>, i32) {
@@ -9432,11 +9432,11 @@ mod message_action_tests {
     #[test]
     fn group_header_typing_uses_first_names_and_plural_forms() {
         let names = vec!["Ana Silva".to_string(), "  Bruno Costa".to_string()];
-        assert_eq!(group_typing_status(&names[..1], false), ta("presence.groupOne", &["Ana"]));
-        assert_eq!(group_typing_status(&names, false), ta("presence.groupSome", &["Ana, Bruno"]));
-        assert_eq!(group_typing_status(&names, true), t("presence.groupMany"));
+        assert_eq!(group_typing_status(&names[..1], false), ta("presence.group_one", &["Ana"]));
+        assert_eq!(group_typing_status(&names, false), ta("presence.group_some", &["Ana, Bruno"]));
+        assert_eq!(group_typing_status(&names, true), t("presence.group_many"));
         let names = vec!["Ana Silva".to_string(); 5];
-        assert_eq!(group_typing_status(&names, false), ta("presence.groupSome", &["Ana, Ana, Ana, Ana, Ana"]));
+        assert_eq!(group_typing_status(&names, false), ta("presence.group_some", &["Ana, Ana, Ana, Ana, Ana"]));
     }
 
     #[test]
@@ -9567,10 +9567,10 @@ fn copy_body(m: &StoredMessage) -> String {
         MessageKind::Text | MessageKind::System => m.text.clone(),
         MessageKind::Image if m.sticker => t("preview.sticker"),
         MessageKind::Image | MessageKind::Video if !m.text.is_empty() => {
-            format!("{} {}", t("export.mediaOmitted"), m.text)
+            format!("{} {}", t("export.media_omitted"), m.text)
         }
-        MessageKind::Doc => format!("{} ({})", t("export.mediaOmitted"), m.text),
-        _ => t("export.mediaOmitted"),
+        MessageKind::Doc => format!("{} ({})", t("export.media_omitted"), m.text),
+        _ => t("export.media_omitted"),
     }
 }
 

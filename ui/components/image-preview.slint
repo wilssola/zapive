@@ -16,7 +16,8 @@ component PreviewTool inherits TouchArea {
         border-width: 1px;
         border-color: root.active ? Theme.accent : transparent;
         background: root.active ? Theme.accent.with-alpha(0.12) : root.has-hover ? Theme.hover : transparent;
-        animate background, border-color { duration: 120ms; }
+        opacity: root.pressed ? 0.84 : 1;
+        animate background, border-color, opacity { duration: Theme.motion-fast; easing: ease-out; }
         Path {
             x: 9px;
             y: 9px;
@@ -99,7 +100,7 @@ export component ImagePreview inherits Rectangle {
                     padding: 4px;
                     spacing: 8px;
                     PreviewTool {
-                        label: @tr("Crop");
+                        label: @tr("image.edit.crop");
                         glyph: "M 6 3 L 6 18 L 21 18 M 3 6 L 18 6 L 18 21";
                         active: root.tool == "crop";
                         enabled: !root.busy;
@@ -109,21 +110,21 @@ export component ImagePreview inherits Rectangle {
                         }
                     }
                     PreviewTool {
-                        label: @tr("Text");
+                        label: @tr("image.edit.add_text");
                         glyph: "M 5 6 L 5 4 L 19 4 L 19 6 M 12 4 L 12 20 M 8 20 L 16 20";
                         active: root.tool == "text";
                         enabled: !root.busy;
                         clicked => { root.tool = root.tool == "text" ? "" : "text"; annotation.focus(); }
                     }
                     PreviewTool {
-                        label: @tr("Pencil");
+                        label: @tr("image.edit.pencil");
                         glyph: "M 4 16 L 15 5 Q 17 3 19 5 Q 21 7 19 9 L 8 20 L 3 21 Z M 14 6 L 18 10 M 3 21 L 21 21";
                         active: root.tool == "pencil";
                         enabled: !root.busy;
                         clicked => { root.tool = root.tool == "pencil" ? "" : "pencil"; }
                     }
                     PreviewTool {
-                        label: @tr("Reset image");
+                        label: @tr("image.edit.reset");
                         glyph: "M 9 5 L 4 10 L 9 15 M 4 10 L 15 10 Q 20 10 20 15 Q 20 20 15 20 L 11 20";
                         enabled: !root.busy;
                         clicked => { root.reset(); }
@@ -139,7 +140,7 @@ export component ImagePreview inherits Rectangle {
                 spacing: 8px;
                 Text {
                     visible: root.tool == "crop";
-                    text: @tr("Drag over the image to select the crop");
+                    text: @tr("image.crop.drag_instruction");
                     color: Theme.text;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
@@ -147,7 +148,7 @@ export component ImagePreview inherits Rectangle {
                 }
                 annotation := LineEdit {
                     visible: root.tool == "text";
-                    placeholder-text: @tr("Write text, then click the image to position it");
+                    placeholder-text: @tr("image.text.position_instruction");
                     horizontal-stretch: 1;
                     accepted => {
                         if (self.text != "") { root.annotate(self.text, root.text-x, root.text-y); self.text = ""; }
@@ -166,19 +167,19 @@ export component ImagePreview inherits Rectangle {
                         TouchArea { enabled: !root.busy && !root.drawing; clicked => { root.ink = ink-color; } }
                     }
                     Button {
-                        text: @tr("Thin");
+                        text: @tr("image.text.stroke_thin");
                         primary: root.thickness == 0.008;
                         clicked => { root.thickness = 0.008; }
                     }
                     Button {
-                        text: @tr("Thick");
+                        text: @tr("image.text.stroke_thick");
                         primary: root.thickness == 0.02;
                         clicked => { root.thickness = 0.02; }
                     }
                 }
                 Button {
                     visible: root.tool != "pencil";
-                    text: @tr("Apply");
+                    text: @tr("image.edit.apply");
                     enabled: !root.busy && (root.tool == "crop" ? root.selected : annotation.text != "");
                     clicked => {
                         if (root.tool == "crop") {
@@ -283,7 +284,7 @@ export component ImagePreview inherits Rectangle {
             spacing: 12px;
             caption := LineEdit {
                 horizontal-stretch: 1;
-                placeholder-text: @tr("Add a caption");
+                placeholder-text: @tr("image.caption.placeholder");
                 accepted => { if (!root.busy) { root.send(self.text); } }
             }
             IconButton {

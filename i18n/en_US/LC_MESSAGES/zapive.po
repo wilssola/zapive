@@ -1,0 +1,1616 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en_US\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Keys are msgid = semantic id (no msgctxt). Plurals: msgid "<id>.one" / msgid_plural "<id>.other".
+
+msgid "logout.title"
+msgstr "Log out of this account?"
+
+msgid "logout.body"
+msgstr "You can keep the conversations on this computer. Linking the same number again then picks up where you left off, without downloading everything once more."
+
+msgid "logout.keep"
+msgstr "Keep conversations"
+
+msgid "logout.wipe"
+msgstr "Erase everything"
+
+msgid "forget.title"
+msgstr "Erase saved conversations?"
+
+msgid "forget.body"
+msgstr "The conversations kept from the last session will be removed from this computer. They stay on your phone."
+
+msgid "forget.action"
+msgstr "Erase conversations"
+
+msgid "pin.saved"
+msgstr "PIN saved. Local data is now protected by it."
+
+msgid "pin.removed"
+msgstr "PIN removed. Local data stays encrypted via your Windows account."
+
+msgid "pin.wrong"
+msgstr "Wrong PIN"
+
+msgid "pin.wrong_current"
+msgstr "Wrong PIN"
+
+msgid "pin.format"
+msgstr "PIN must be 4 to 10 digits"
+
+msgid "preview.photo"
+msgstr "📷 Photo"
+
+msgid "preview.audio"
+msgstr "🎵 Audio"
+
+msgid "preview.voice"
+msgstr "🎙 Voice message"
+
+msgid "emoji.smileys"
+msgstr "Smileys & Emotion"
+
+msgid "emoji.people"
+msgstr "People & Body"
+
+msgid "emoji.animals"
+msgstr "Animals & Nature"
+
+msgid "emoji.food"
+msgstr "Food & Drink"
+
+msgid "emoji.travel"
+msgstr "Travel & Places"
+
+msgid "emoji.activities"
+msgstr "Activities"
+
+msgid "emoji.objects"
+msgstr "Objects"
+
+msgid "emoji.symbols"
+msgstr "Symbols"
+
+msgid "emoji.flags"
+msgstr "Flags"
+
+
+msgid "audio.fallback_name"
+msgstr "Audio file"
+
+msgid "preview.document"
+msgstr "📄 {0}"
+
+msgid "doc.fallback_name"
+msgstr "Document"
+
+msgid "day.today"
+msgstr "Today"
+
+msgid "day.yesterday"
+msgstr "Yesterday"
+
+msgid "presence.typing"
+msgstr "typing..."
+
+msgid "presence.recording"
+msgstr "recording audio..."
+
+msgid "presence.online"
+msgstr "online"
+
+msgid "sync.older"
+msgstr "Syncing older messages. Click to see progress."
+
+msgid "sync.body"
+msgstr "Keep WhatsApp open on your phone while syncing older messages. To see your full chat history, check your phone."
+
+msgid "sync.complete"
+msgstr "Older messages are synced. Anything further back stays on your phone."
+
+msgid "sync.idle"
+msgstr "Nothing is syncing right now. Scroll up in a chat to fetch its older messages."
+
+msgid "notice.and"
+msgstr "and"
+
+msgid "notice.someone"
+msgstr "Someone"
+
+msgid "notice.added_you"
+msgstr "{0} added you"
+
+msgid "notice.you_added"
+msgstr "You added {0}"
+
+msgid "notice.added"
+msgstr "{0} added {1}"
+
+msgid "notice.joined_link"
+msgstr "{0} joined using this group's invite link"
+
+msgid "notice.joined_link_share"
+msgstr "{0} joined via an invite link. Click to share group history."
+
+msgid "notice.history_shared"
+msgstr "You shared the group's recent messages with {0}"
+
+msgid "notice.you_left"
+msgstr "You left"
+
+msgid "notice.left"
+msgstr "{0} left"
+
+msgid "notice.removed_you"
+msgstr "{0} removed you"
+
+msgid "notice.you_removed"
+msgstr "You removed {0}"
+
+msgid "notice.removed"
+msgstr "{0} removed {1}"
+
+msgid "notice.you_admin"
+msgstr "You're now an admin"
+
+msgid "notice.promoted"
+msgstr "{0} is now an admin"
+
+msgid "notice.you_not_admin"
+msgstr "You're no longer an admin"
+
+msgid "notice.demoted"
+msgstr "{0} is no longer an admin"
+
+msgid "notice.subject"
+msgstr "{0} changed the group name to \"{1}\""
+
+msgid "notice.description"
+msgstr "{0} changed the group description"
+
+msgid "notice.icon"
+msgstr "{0} changed this group's icon"
+
+msgid "notice.created"
+msgstr "{0} created group \"{1}\""
+
+msgid "notice.announce"
+msgstr "{0} changed this group's settings to allow only admins to send messages"
+
+msgid "notice.not_announce"
+msgstr "{0} changed this group's settings to allow all members to send messages"
+
+msgid "notice.locked"
+msgstr "{0} changed this group's settings to allow only admins to edit group info"
+
+msgid "notice.unlocked"
+msgstr "{0} changed this group's settings to allow all members to edit group info"
+
+msgid "notice.ephemeral_on"
+msgstr "{0} turned on disappearing messages. New messages will disappear from this chat {1} after they're sent."
+
+msgid "notice.ephemeral_off"
+msgstr "{0} turned off disappearing messages"
+
+msgid "notice.deleted"
+msgstr "This group was deleted"
+
+msgid "notice.missed_voice"
+msgstr "Missed voice call"
+
+msgid "notice.missed_video"
+msgstr "Missed video call"
+
+msgid "notice.members_changed"
+msgstr "Group members have changed. Click to view"
+
+msgid "ephemeral.off"
+msgstr "Off"
+
+msgid "ephemeral.day"
+msgstr "24 hours"
+
+msgid "ephemeral.week"
+msgstr "7 days"
+
+msgid "ephemeral.quarter"
+msgstr "90 days"
+
+msgid "ephemeral.days.one"
+msgid_plural "ephemeral.days.other"
+msgstr[0] "{n} day"
+msgstr[1] "{n} days"
+
+msgid "ephemeral.hours.one"
+msgid_plural "ephemeral.hours.other"
+msgstr[0] "{n} hour"
+msgstr[1] "{n} hours"
+
+msgid "ephemeral.minutes.one"
+msgid_plural "ephemeral.minutes.other"
+msgstr[0] "{n} minute"
+msgstr[1] "{n} minutes"
+
+msgid "mention.all"
+msgstr "all"
+
+msgid "mention.all_hint"
+msgstr "Mention all members in this chat"
+
+msgid "mute.always"
+msgstr "Muted always"
+
+msgid "mute.until"
+msgstr "Muted until {0}"
+
+msgid "confirm.clear_title"
+msgstr "Clear this chat?"
+
+msgid "confirm.clear_body"
+msgstr "The messages are removed from this device and from your phone."
+
+msgid "confirm.clear"
+msgstr "Clear chat"
+
+msgid "confirm.delete_chat_title"
+msgstr "Delete this chat?"
+
+msgid "confirm.delete_chat_body"
+msgstr "The chat and its messages are removed from this device and from your phone."
+
+msgid "confirm.delete"
+msgstr "Delete chat"
+
+msgid "confirm.exit_title"
+msgstr "Exit \"{0}\"?"
+
+msgid "confirm.exit_body"
+msgstr "Only group admins will be notified that you left the group."
+
+msgid "confirm.exit"
+msgstr "Exit"
+
+msgid "confirm.delete_title"
+msgstr "Delete {0} message(s)?"
+
+msgid "confirm.delete_body"
+msgstr "\"Delete for everyone\" removes them for every participant; \"Delete for me\" removes them here and on your phone."
+
+msgid "confirm.delete_me"
+msgstr "Delete for me"
+
+
+msgid "status.connecting"
+msgstr "Connecting..."
+
+msgid "forward.count"
+msgstr "{0} messages"
+
+msgid "members.add_failed"
+msgstr "Could not add: {0}"
+
+msgid "search.results"
+msgstr "{0} messages found"
+
+msgid "search.none"
+msgstr "No messages found"
+
+msgid "export.media_omitted"
+msgstr "<Media omitted>"
+
+msgid "pdf.opening"
+msgstr "Opening document…"
+
+msgid "pdf.engine_missing"
+msgstr "The PDF viewer needs a small rendering engine (pdfium) that is downloaded once, about 7 MB."
+
+msgid "pdf.installing"
+msgstr "Downloading the PDF engine…"
+
+msgid "pdf.install_failed"
+msgstr "The PDF engine could not be downloaded: {0}"
+
+msgid "pdf.failed"
+msgstr "This document could not be opened: {0}"
+
+msgid "notify.new_messages"
+msgstr "{0} new messages ({1})"
+
+msgid "notify.new_message"
+msgstr "New message"
+
+msgid "notify.reply"
+msgstr "notify.reply"
+
+msgid "notify.play"
+msgstr "notify.play"
+
+msgid "notify.from_one"
+msgstr "{0} new messages from {1}"
+
+msgid "notify.app_name"
+msgstr "Zapive"
+
+msgid "picker.images"
+msgstr "Images"
+
+msgid "picker.audio"
+msgstr "Audio"
+
+msgid "picker.all"
+msgstr "All files"
+
+msgid "lang.restart"
+msgstr "Language saved. Restart Zapive to apply."
+
+msgid "update.checking"
+msgstr "Checking for updates…"
+
+msgid "update.latest"
+msgstr "You are on the latest version."
+
+msgid "autostart.failed"
+msgstr "Could not change the startup setting: {0}"
+
+msgid "msg.deleted"
+msgstr "This message was deleted"
+
+msgid "tray.open"
+msgstr "Open Zapive"
+
+msgid "tray.exit"
+msgstr "Quit"
+
+msgid "preview.sticker"
+msgstr "🩵 Sticker"
+
+msgid "preview.video"
+msgstr "🎬 Video"
+
+msgid "rec.no_mic"
+msgstr "No microphone found"
+
+msgid "info.members"
+msgstr "{0} participants"
+
+msgid "gif.no_results"
+msgstr "No GIFs found"
+
+msgid "fav.empty"
+msgstr "Star a sticker on your phone to keep it here"
+
+
+
+
+
+
+
+
+
+
+
+msgid "device.system"
+msgstr "System default"
+
+msgid "preview.gif"
+msgstr "🎬 GIF"
+
+msgid "preview.reacted"
+msgstr "Reacted {0} to: \"{1}\""
+
+
+
+
+
+
+
+
+msgid "reactions.count"
+msgstr "{0} reactions"
+
+msgid "reactions.you"
+msgstr "You"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+msgid "media.download.downloading"
+msgstr "Downloading…"
+
+msgid "connection.status.connecting"
+msgstr "Connecting..."
+
+msgid "security.unlock.enter_pin_prompt"
+msgstr "Enter your PIN to unlock"
+
+msgid "security.unlock.pin_placeholder"
+msgstr "PIN"
+
+msgid "security.unlock.action"
+msgstr "Unlock"
+
+msgid "account.login.whatsapp.title"
+msgstr "Log in to WhatsApp"
+
+msgid "account.login.qr.step_open_whatsapp"
+msgstr "1.  Open WhatsApp on your phone"
+
+msgid "account.login.qr.step_linked_devices"
+msgstr "2.  Tap Menu and then Linked devices"
+
+msgid "account.login.qr.step_link_device"
+msgstr "3.  Tap Link a device"
+
+msgid "account.login.qr.step_scan_code"
+msgstr "4.  Point your camera at this code"
+
+msgid "account.login.phone.open"
+msgstr "Log in with phone number  ›"
+
+msgid "account.login.phone.title"
+msgstr "Log in with phone number"
+
+msgid "account.login.phone.instructions"
+msgstr "Enter your number with the country code to receive a code to type on your phone."
+
+msgid "account.login.phone.number_placeholder"
+msgstr "E.g.: 5511999998888"
+
+msgid "account.login.phone.request_code"
+msgstr "Get code"
+
+msgid "account.login.qr.back"
+msgstr "‹  Back to QR code"
+
+msgid "account.backup.saved_for_number"
+msgstr "Conversations of {} are saved on this computer"
+
+msgid "account.backup.saved"
+msgstr "Conversations are saved on this computer"
+
+msgid "account.backup.restore_explanation"
+msgstr "Link the same number and the app picks up where it left off, without downloading everything again. A different number starts clean."
+
+msgid "account.backup.erase_action"
+msgstr "Erase"
+
+msgid "account.menu.other_accounts"
+msgstr "Other accounts"
+
+msgid "navigation.status"
+msgstr "Status"
+
+msgid "status.empty.recent_updates"
+msgstr "No recent updates"
+
+msgid "navigation.calls"
+msgstr "Calls"
+
+
+msgid "navigation.channels"
+msgstr "Channels"
+
+msgid "navigation.communities"
+msgstr "Communities"
+
+msgid "navigation.chats"
+msgstr "Chats"
+
+
+msgid "chat.search.chats_heading"
+msgstr "Chats"
+
+msgid "chat.search.messages_heading"
+msgstr "Messages"
+
+msgid "chat.unread.separator"
+msgstr "Unread messages"
+
+msgid "message.forwarded.label"
+msgstr "Forwarded"
+
+msgid "message.deleted_by_sender"
+msgstr "Deleted by sender"
+
+msgid "media.action.view"
+msgstr "View"
+
+msgid "media.action.download"
+msgstr "Download"
+
+msgid "file.action.save_as"
+msgstr "Save as..."
+
+msgid "media.type.audio"
+msgstr "Audio"
+
+
+msgid "chat.picker.tab_emoji"
+msgstr "Emoji"
+
+
+msgid "chat.picker.tab_favorites"
+msgstr "Favorites"
+
+msgid "chat.picker.search_gifs"
+msgstr "Search GIFs"
+
+
+
+
+msgid "chat.menu.select_messages"
+msgstr "Select messages"
+
+
+
+msgid "chat.menu.favorite_remove"
+msgstr "Remove from Favorites"
+
+
+
+
+
+
+
+
+msgid "info.panel.group_title"
+msgstr "Group info"
+
+msgid "info.panel.contact_title"
+msgstr "Contact info"
+
+msgid "info.action.call"
+msgstr "Call"
+
+msgid "info.action.video"
+msgstr "Video"
+
+
+msgid "info.action.more"
+msgstr "More"
+
+msgid "info.action.unmute"
+msgstr "Unmute notifications"
+
+
+msgid "info.action.unarchive"
+msgstr "Unarchive chat"
+
+
+msgid "info.action.clear_local"
+msgstr "Clear messages on this device"
+
+msgid "info.media.title"
+msgstr "Shared media"
+
+msgid "info.media.empty"
+msgstr "No media preview available"
+
+msgid "info.group.participants"
+msgstr "Participants"
+
+msgid "info.group.add_member"
+msgstr "Add member"
+
+msgid "info.common_groups.title"
+msgstr "Groups in common"
+
+msgid "info.common_groups.loading"
+msgstr "Loading groups…"
+
+msgid "info.common_groups.error"
+msgstr "Could not load groups in common"
+
+msgid "info.common_groups.empty"
+msgstr "No groups in common"
+
+
+msgid "common.action.ok"
+msgstr "OK"
+
+msgid "account.menu.add"
+msgstr "Add account"
+
+msgid "account.menu.limit_hint"
+msgstr "Up to 5 accounts"
+
+msgid "account.menu.logout"
+msgstr "Log out"
+
+msgid "account.switching.progress"
+msgstr "Switching accounts..."
+
+msgid "message.menu.reply"
+msgstr "Reply"
+
+msgid "message.menu.reply_privately"
+msgstr "Reply privately"
+
+msgid "message.menu.forward"
+msgstr "Forward"
+
+msgid "message.menu.copy_text"
+msgstr "Copy text"
+
+msgid "message.menu.copy_image"
+msgstr "Copy image"
+
+msgid "message.menu.copy_link"
+msgstr "Copy link"
+
+msgid "message.menu.save_as"
+msgstr "Save as…"
+
+msgid "message.menu.react"
+msgstr "React"
+
+msgid "message.menu.edit"
+msgstr "Edit"
+
+msgid "message.menu.unpin"
+msgstr "Unpin"
+
+msgid "message.menu.pin"
+msgstr "Pin for 7 days"
+
+msgid "message.menu.mark_unread"
+msgstr "Mark conversation unread"
+
+msgid "message.menu.unstar"
+msgstr "Unstar"
+
+msgid "message.menu.star"
+msgstr "Star"
+
+msgid "message.menu.select"
+msgstr "Select"
+
+msgid "message.menu.details"
+msgstr "Details"
+
+msgid "message.menu.delete"
+msgstr "Delete"
+
+
+msgid "message.dialog.save"
+msgstr "Save"
+
+msgid "message.confirm.cancel"
+msgstr "Cancel"
+
+
+
+
+
+
+
+
+msgid "group.add_member.title"
+msgstr "Add member"
+
+msgid "group.add_member.search_placeholder"
+msgstr "Search name or number"
+
+msgid "group.add_member.confirm"
+msgstr "Add"
+
+msgid "common.action.close"
+msgstr "Close"
+
+msgid "message.forward.title"
+msgstr "Forward message to"
+
+msgid "message.forward.search_placeholder"
+msgstr "Search name or number"
+
+msgid "settings.title"
+msgstr "Settings"
+
+msgid "settings.appearance.title"
+msgstr "Appearance"
+
+msgid "settings.appearance.theme"
+msgstr "Theme"
+
+msgid "settings.appearance.theme_dark"
+msgstr "Dark"
+
+msgid "settings.appearance.theme_light"
+msgstr "Light"
+
+
+msgid "settings.appearance.style"
+msgstr "Style"
+
+msgid "settings.appearance.style_glass"
+msgstr "Glass"
+
+msgid "settings.appearance.style_opaque"
+msgstr "Opaque"
+
+msgid "settings.language.title"
+msgstr "Language"
+
+
+
+msgid "settings.language.system"
+msgstr "System"
+
+
+msgid "settings.general.launch_at_login"
+msgstr "Open Zapive when I sign in"
+
+msgid "settings.calls.title"
+msgstr "Calls"
+
+msgid "settings.calls.devices_hint"
+msgstr "A device picked here is used for every call. Changes apply to the next call."
+
+msgid "settings.calls.microphone"
+msgstr "Microphone"
+
+msgid "settings.calls.speaker"
+msgstr "Speaker"
+
+msgid "settings.calls.camera"
+msgstr "Camera"
+
+msgid "settings.privacy.title"
+msgstr "Privacy"
+
+msgid "settings.privacy.hint"
+msgstr "Both are off by default: nobody is told when you read a message, and a message someone deletes stays visible here, marked as deleted."
+
+msgid "settings.privacy.read_receipts"
+msgstr "Send read receipts"
+
+msgid "settings.privacy.apply_deletions"
+msgstr "Apply messages deleted by the sender"
+
+
+
+
+
+
+msgid "settings.notifications.previews"
+msgstr "Show message previews"
+
+
+msgid "settings.security.title"
+msgstr "Security"
+
+msgid "settings.security.pin_enabled_hint"
+msgstr "PIN enabled: the vault key requires your PIN and is bound to your Windows account (DPAPI)."
+
+msgid "settings.security.pin_disabled_hint"
+msgstr "Local data is always encrypted (key protected by your Windows account). Set a PIN to require unlocking on launch."
+
+msgid "settings.security.current_pin"
+msgstr "Current PIN"
+
+msgid "settings.security.new_pin"
+msgstr "New PIN (4 to 10 digits)"
+
+msgid "settings.security.change_pin"
+msgstr "Change PIN"
+
+msgid "settings.security.set_pin"
+msgstr "Set PIN"
+
+msgid "settings.security.remove_pin"
+msgstr "Remove PIN"
+
+msgid "settings.downloads.title"
+msgstr "Automatic downloads"
+
+msgid "settings.downloads.voice_hint"
+msgstr "Voice messages are always downloaded automatically."
+
+msgid "settings.downloads.photos"
+msgstr "Photos"
+
+msgid "settings.downloads.audio"
+msgstr "Audio"
+
+msgid "settings.downloads.videos"
+msgstr "Videos"
+
+msgid "settings.downloads.documents"
+msgstr "Documents"
+
+msgid "settings.downloads.stickers"
+msgstr "Stickers"
+
+msgid "settings.about.title"
+msgstr "About"
+
+msgid "settings.about.update_available"
+msgstr "Version {} is available"
+
+
+msgid "settings.about.update_restart_required"
+msgstr "Restart to use version {}"
+
+msgid "settings.about.update_failed"
+msgstr "Update failed: {}"
+
+msgid "settings.about.version"
+msgstr "Version {}"
+
+msgid "settings.about.update_action"
+msgstr "Update"
+
+msgid "settings.about.update_downloading_button"
+msgstr "Downloading update…"
+
+msgid "settings.about.restart_action"
+msgstr "Restart"
+
+msgid "settings.about.retry_action"
+msgstr "Try again"
+
+msgid "settings.about.check_updates"
+msgstr "Check for updates"
+
+msgid "settings.account.title"
+msgstr "Account"
+
+msgid "settings.account.logout_description"
+msgstr "Log out of WhatsApp"
+
+msgid "settings.account.logout_action"
+msgstr "Log out"
+
+msgid "pdf.engine.open_external"
+msgstr "Open with another app"
+
+msgid "pdf.engine.installing"
+msgstr "Downloading…"
+
+msgid "pdf.engine.install"
+msgstr "Download viewer"
+
+msgid "pdf.loading"
+msgstr "Loading…"
+
+
+
+
+msgid "home.stats.conversations"
+msgstr "Your conversations"
+
+msgid "home.stats.groups"
+msgstr "Your groups"
+
+msgid "navigation.settings"
+msgstr "Settings"
+
+msgid "image.edit.crop"
+msgstr "Crop"
+
+msgid "image.edit.add_text"
+msgstr "Text"
+
+msgid "image.edit.pencil"
+msgstr "Pencil"
+
+msgid "image.edit.reset"
+msgstr "Reset image"
+
+msgid "image.crop.drag_instruction"
+msgstr "Drag over the image to select the crop"
+
+msgid "image.text.position_instruction"
+msgstr "Write text, then click the image to position it"
+
+msgid "image.text.stroke_thin"
+msgstr "Thin"
+
+msgid "image.text.stroke_thick"
+msgstr "Thick"
+
+msgid "image.edit.apply"
+msgstr "Apply"
+
+msgid "image.caption.placeholder"
+msgstr "Add a caption"
+
+msgid "group.member.admin"
+msgstr "Group admin"
+
+msgid "update.status.available"
+msgstr "Update available"
+
+msgid "update.status.downloading"
+msgstr "Downloading update…"
+
+msgid "update.status.failed"
+msgstr "Update failed"
+
+msgid "update.status.installed"
+msgstr "Update installed"
+
+msgid "update.version.available"
+msgstr "Version {} is available"
+
+msgid "update.version.downloading"
+msgstr "Version {}"
+
+msgid "update.version.restart_required"
+msgstr "Restart to use version {}"
+
+msgid "update.action.install"
+msgstr "Update"
+
+msgid "update.action.retry"
+msgstr "Try again"
+
+msgid "update.action.restart"
+msgstr "Restart"
+
+msgid "error.invalid_number"
+msgstr "Invalid phone number"
+
+msgid "pairing.generating"
+msgstr "Generating pairing code…"
+
+msgid "selection.messages.count.one"
+msgid_plural "selection.messages.count.other"
+msgstr[0] "{n} selected"
+msgstr[1] "{n} selected"
+
+msgid "status.scan_qr"
+msgstr "Scan QR code"
+
+msgid "status.pairing_hint"
+msgstr "Use WhatsApp on your phone to scan the QR code"
+
+msgid "pairing.failed"
+msgstr "Failed to generate pairing code"
+
+msgid "status.connected"
+msgstr "Connected"
+
+msgid "status.logging_out"
+msgstr "Logging out…"
+
+msgid "calls.empty.list"
+msgstr "No calls yet"
+
+msgid "account.new"
+msgstr "New account"
+
+msgid "account.in_call"
+msgstr "In a call"
+
+msgid "account.remove_title"
+msgstr "Remove {0}?"
+
+msgid "account.remove_body"
+msgstr "This will remove the account from this computer. Your messages stay on your phone."
+
+msgid "account.remove_action"
+msgstr "Remove account"
+
+msgid "status.session_ended"
+msgstr "Session ended"
+
+msgid "group.add_member.selected_count.one"
+msgid_plural "group.add_member.selected_count.other"
+msgstr[0] "{n} selected"
+msgstr[1] "{n} selected"
+
+msgid "chat.search.placeholder"
+msgstr "Search chats"
+
+msgid "chat.filter.all"
+msgstr "All"
+
+msgid "chat.filter.unread"
+msgstr "Unread"
+
+msgid "chat.filter.favorites"
+msgstr "Favorites"
+
+msgid "chat.filter.groups"
+msgstr "Groups"
+
+msgid "chat.filter.archived"
+msgstr "Archived"
+
+msgid "chat.composer.not_member"
+msgstr "You can't send messages to this group because you're no longer a member."
+
+msgid "chat.composer.admins_only_prefix"
+msgstr "Only "
+
+msgid "chat.composer.admins_only_highlight"
+msgstr "admins"
+
+msgid "chat.composer.admins_only_suffix"
+msgstr " can send messages"
+
+msgid "chat.composer.placeholder"
+msgstr "Type a message"
+
+
+
+
+
+
+
+msgid "chat.menu.favorite_add"
+msgstr "Add to Favorites"
+
+
+msgid "chat.menu.export"
+msgstr "Export chat"
+
+msgid "chat.menu.close"
+msgstr "Close chat"
+
+msgid "chat.menu.clear"
+msgstr "Clear chat"
+
+msgid "chat.menu.exit_group"
+msgstr "Exit group"
+
+msgid "chat.menu.delete"
+msgstr "Delete chat"
+
+msgid "chat.disappearing.title"
+msgstr "Disappearing messages"
+
+msgid "chat.disappearing.duration_24h"
+msgstr "24 hours"
+
+msgid "chat.disappearing.duration_7d"
+msgstr "7 days"
+
+msgid "chat.disappearing.duration_90d"
+msgstr "90 days"
+
+msgid "chat.disappearing.off"
+msgstr "Off"
+
+msgid "chat.list.picker_title"
+msgstr "Add to list"
+
+
+
+
+
+
+msgid "info.action.search"
+msgstr "Search"
+
+msgid "info.action.mute"
+msgstr "Mute notifications"
+
+msgid "info.action.archive"
+msgstr "Archive chat"
+
+
+
+
+msgid "chat.history.syncing"
+msgstr "Syncing older messages"
+
+msgid "chat.history_share.title"
+msgstr "Send message history to {}?"
+
+msgid "chat.history_share.prefix"
+msgstr "will get"
+
+msgid "chat.history_share.highlight"
+msgstr "recent messages"
+
+msgid "chat.history_share.suffix"
+msgstr "from this group."
+
+msgid "chat.history_share.cancel"
+msgstr "Cancel"
+
+msgid "chat.history_share.sending"
+msgstr "Sending…"
+
+msgid "chat.history_share.send"
+msgstr "Send"
+
+msgid "chat.list.new_title"
+msgstr "New list"
+
+msgid "chat.list.new_hint"
+msgstr "Lists organize your chats. This chat is added to the new list."
+
+msgid "chat.list.name_placeholder"
+msgstr "List name"
+
+msgid "chat.list.new_cancel"
+msgstr "Cancel"
+
+msgid "chat.list.create"
+msgstr "Create"
+
+
+
+msgid "settings.privacy.blur_hint"
+msgstr "Choose which content to blur. Hover or keyboard focus reveals only that item."
+
+msgid "settings.privacy.blur_names"
+msgstr "Blur contact names"
+
+msgid "settings.privacy.blur_photos"
+msgstr "Blur profile photos"
+
+msgid "settings.privacy.blur_messages"
+msgstr "Blur message text"
+
+msgid "settings.privacy.blur_media"
+msgstr "Blur media previews"
+
+msgid "call.incoming.decline"
+msgstr "Decline"
+
+msgid "call.incoming.accept"
+msgstr "Accept"
+
+msgid "call.controls.stop_video"
+msgstr "Stop video"
+
+msgid "call.controls.video"
+msgstr "Video"
+
+msgid "call.controls.unmute"
+msgstr "Unmute"
+
+msgid "call.controls.mute"
+msgstr "Mute"
+
+msgid "call.controls.end"
+msgstr "End"
+
+msgid "chat.empty.select_conversation"
+msgstr "Select a conversation to start"
+
+msgid "call.failed"
+msgstr "Call failed"
+
+msgid "call.gone"
+msgstr "Call ended"
+
+msgid "call.no_camera"
+msgstr "No camera available"
+
+msgid "call.no_devices"
+msgstr "No audio devices available"
+
+msgid "status.connect_failed"
+msgstr "Failed to connect: {0}"
+
+msgid "status.reconnecting"
+msgstr "Reconnecting…"
+
+msgid "sync.progress"
+msgstr "Syncing {0} of {1}"
+
+
+
+
+
+
+
+
+
+msgid "day.monday"
+msgstr "Monday"
+
+msgid "day.tuesday"
+msgstr "Tuesday"
+
+msgid "day.wednesday"
+msgstr "Wednesday"
+
+msgid "day.thursday"
+msgstr "Thursday"
+
+msgid "day.friday"
+msgstr "Friday"
+
+msgid "day.saturday"
+msgstr "Saturday"
+
+msgid "day.sunday"
+msgstr "Sunday"
+
+msgid "preview.draft"
+msgstr "Draft:"
+
+msgid "presence.group_one"
+msgstr "{0} is typing..."
+
+msgid "presence.group_some"
+msgstr "{0} are typing..."
+
+msgid "presence.group_many"
+msgstr "Several people are typing..."
+
+
+
+
+msgid "confirm.delete_everyone"
+msgstr "Delete for everyone"
+
+msgid "notify.reply_placeholder"
+msgstr "Reply"
+
+msgid "changelog.failed"
+msgstr "Could not load release history. Check your connection and repository access, then try again. Previously loaded notes remain available."
+
+msgid "outbox.storage_failed"
+msgstr "Could not save the message. Your text has been preserved. Check available disk space and try again."
+
+msgid "outbox.preparing"
+msgstr "Preparing attachment"
+
+msgid "outbox.queued"
+msgstr "Waiting for connection"
+
+msgid "outbox.sending"
+msgstr "Sending — waiting for confirmation"
+
+msgid "outbox.uncertain"
+msgstr "Delivery not confirmed. Retrying reuses the same message ID."
+
+msgid "outbox.failed"
+msgstr "Sending failed. Try again."
+
+msgid "outbox.cannot_cancel"
+msgstr "This message may already have been transmitted and cannot be safely cancelled."
+
+msgid "history.unavailable"
+msgstr "This message is not available in the local history."
+
+msgid "card.contacts"
+msgstr "Contacts"
+
+msgid "card.live_location"
+msgstr "Live location"
+
+msgid "card.live_location_detail"
+msgstr "Last shared position only. Live updates are not available here."
+
+msgid "card.view_once"
+msgstr "View-once message"
+
+msgid "card.view_once_body"
+msgstr "Open this message on your phone."
+
+msgid "card.unsupported"
+msgstr "Unsupported message"
+
+msgid "card.unsupported_body"
+msgstr "This message type cannot be displayed here. View it on your phone."
+
+msgid "compat.contact"
+msgstr "Contact"
+
+msgid "compat.location"
+msgstr "Location"
+
+msgid "compat.live_location"
+msgstr "Live location — last position only; not updated here"
+
+msgid "compat.invalid_location"
+msgstr "Coordinates unavailable or invalid"
+
+msgid "compat.poll"
+msgstr "Poll"
+
+msgid "compat.poll_phone"
+msgstr "View results and vote on your phone. Encrypted voting is not integrated here yet."
+
+msgid "compat.view_once"
+msgstr "View-once message — open on your phone"
+
+msgid "compat.unsupported"
+msgstr "Unsupported message — view on your phone"
+
+msgid "call.incoming_voice"
+msgstr "Incoming voice call"
+
+msgid "call.incoming_video"
+msgstr "Incoming video call"
+
+msgid "call.answered"
+msgstr "Answered"
+
+msgid "call.elsewhere"
+msgstr "Answered on another device"
+
+msgid "call.declined"
+msgstr "Declined"
+
+msgid "call.missed"
+msgstr "Missed call"
+
+msgid "call.no_answer"
+msgstr "No answer"
+
+msgid "call.ended"
+msgstr "Call ended"
+
+msgid "call.ringing"
+msgstr "Ringing"
+
+msgid "call.calling"
+msgstr "Calling…"
+
+msgid "call.connecting"
+msgstr "Connecting…"
+
+msgid "call.in_call"
+msgstr "In call"
+
+msgid "call.video"
+msgstr "Video call"
+
+msgid "call.voice"
+msgstr "Voice call"
+
+msgid "call.in"
+msgstr "Incoming"
+
+msgid "call.out"
+msgstr "Outgoing"
+
+msgid "alert.conflict_title"
+msgstr "Session taken over"
+
+msgid "alert.conflict_body"
+msgstr "WhatsApp was opened somewhere else with this account. Only one session stays connected at a time."
+
+msgid "alert.reconnect"
+msgstr "Use here"
+
+msgid "alert.offline_title"
+msgstr "Cannot reach WhatsApp"
+
+msgid "alert.offline_body"
+msgstr "Zapive has been retrying without success. Check the connection and try again."
+
+msgid "alert.retry"
+msgstr "Try again"
+
+
+msgid "message.action.copy_to_composer"
+msgstr "Copy to composer"
+
+msgid "message.special.view_details"
+msgstr "View details"
+
+msgid "settings.appearance.style.description"
+msgstr "Choose a translucent or opaque interface."
+
+msgid "settings.appearance.theme.description"
+msgstr "Choose a light, dark or system theme."
+
+msgid "settings.category.account.description"
+msgstr "Manage your accounts"
+
+msgid "settings.category.account.title"
+msgstr "Account"
+
+msgid "settings.category.appearance.description"
+msgstr "Theme, language and visual style"
+
+msgid "settings.category.appearance.title"
+msgstr "Appearance"
+
+msgid "settings.category.calls.description"
+msgstr "Audio, video and devices"
+
+msgid "settings.category.calls.title"
+msgstr "Calls"
+
+msgid "settings.category.downloads.description"
+msgstr "Media and files"
+
+msgid "settings.category.downloads.title"
+msgstr "Automatic downloads"
+
+msgid "settings.category.general.description"
+msgstr "Application and behavior"
+
+msgid "settings.category.general.title"
+msgstr "General"
+
+msgid "settings.category.notifications.description"
+msgstr "Messages and calls"
+
+msgid "settings.category.notifications.title"
+msgstr "Notifications"
+
+msgid "settings.category.privacy.description"
+msgstr "Read receipts, visibility and data"
+
+msgid "settings.category.privacy.title"
+msgstr "Privacy"
+
+msgid "settings.category.security.description"
+msgstr "PIN and app protection"
+
+msgid "settings.category.security.title"
+msgstr "Security"
+
+msgid "settings.category.updates.description"
+msgstr "Version and updates"
+
+msgid "settings.category.updates.title"
+msgstr "Updates"
+
+msgid "settings.general.startup.description"
+msgstr "Start the app automatically when you sign in."
+
+msgid "settings.general.startup.title"
+msgstr "Startup"
+
+msgid "settings.language.description"
+msgstr "Choose the language used by the app."
+
+msgid "settings.notifications.enabled"
+msgstr "Show notifications"
+
+msgid "settings.notifications.enabled.description"
+msgstr "When turned off, no banners appear for messages or calls. Unread counts still update."
+
+msgid "settings.notifications.previews.description"
+msgstr "Turn off to hide message content and media in notifications."
+
+msgid "settings.privacy.apply_deletions.description"
+msgstr "Remove messages here when the sender deletes them for everyone."
+
+msgid "settings.privacy.blur_media.description"
+msgstr "Hide photos, videos and other media previews until revealed."
+
+msgid "settings.privacy.blur_messages.description"
+msgstr "Hide message text until revealed."
+
+msgid "settings.privacy.blur_names.description"
+msgstr "Hide contact and group names until revealed."
+
+msgid "settings.privacy.blur_photos.description"
+msgstr "Hide profile photos until revealed."
+
+msgid "settings.privacy.read_receipts.description"
+msgstr "Let others know when you read messages or play voice notes."
+
+msgid "settings.search.default_subtitle"
+msgstr "Customize your Zapive experience"
+
+msgid "settings.search.placeholder"
+msgstr "Search settings…"
+
+msgid "settings.search.results_subtitle"
+msgstr "Settings matching your search"
+
+msgid "settings.search.results_title"
+msgstr "Search results"
+
+msgid "settings.updates.whats_new"
+msgstr "Check what's new"
+
+msgid "update.release.empty_history"
+msgstr "No published releases yet."
+
+msgid "update.release.history.title"
+msgstr "Release history"
+
+msgid "update.release.installed_version"
+msgstr "Installed version: {}"
+
+msgid "update.release.load_history"
+msgstr "Load history"
+
+msgid "update.release.load_older"
+msgstr "Load older releases"
+
+msgid "update.release.new_in"
+msgstr "New in {}"
+
+msgid "update.release.newer_versions_hint"
+msgstr "Changes in versions newer than the one installed are shown separately from your history."
+
+msgid "update.release.notes_empty"
+msgstr "No release notes available."
+
+msgid "update.release.notes_unavailable"
+msgstr "Release notes for version {} are not available yet."
+
+msgid "update.release.original_language_hint"
+msgstr "Release notes are shown in their original language."
+
+msgid "update.release.refresh_history"
+msgstr "Refresh history"
+
+msgid "update.release.up_to_date"
+msgstr "Nothing new — you're up to date"
+
+msgid "update.whats_new.title"
+msgstr "What's new"
+
+msgid "chat.mute.duration_8h"
+msgstr "8 hours"
+
+msgid "chat.mute.duration_1w"
+msgstr "1 week"
+
+msgid "chat.mute.duration_always"
+msgstr "Always"
+
+msgid "chat.in_chat_search.title"
+msgstr "Search messages"
+
+msgid "chat.in_chat_search.placeholder"
+msgstr "Search"
+
+msgid "chat.in_chat_search.hint"
+msgstr "Search for messages in this chat"
+
+msgid "chat.attach.sticker"
+msgstr "Sticker"
+
+msgid "chat.attach.document"
+msgstr "Document"
+
+msgid "update.release.installed_version_suffix"
+msgstr "{} · Installed version"
+
+msgid "update.version.available_title"
+msgstr "New version available"
+
+msgid "chat.attach.audio"
+msgstr "Audio"
+
+msgid "chat.attach.photos"
+msgstr "Photos"
+
+msgid "chat.picker.tab_stickers"
+msgstr "Stickers"
+
+msgid "msg.details.title"
+msgstr "Message details"
+
+msgid "settings.downloads.audio.description"
+msgstr "Download audio files automatically."
+
+msgid "settings.downloads.documents.description"
+msgstr "Download documents automatically."
+
+msgid "settings.downloads.photos.description"
+msgstr "Download photos automatically."
+
+msgid "settings.downloads.stickers.description"
+msgstr "Download stickers automatically."
+
+msgid "settings.downloads.videos.description"
+msgstr "Download videos automatically."

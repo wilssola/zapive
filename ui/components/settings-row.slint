@@ -7,6 +7,12 @@ export component SettingsRow inherits Rectangle {
     in property <string> detail;
     in property <image> icon;
     height: max(46px, row.preferred-height);
+    hover := TouchArea {
+        width: parent.width;
+        height: parent.height;
+    }
+    background: hover.has-hover ? Theme.hover : transparent;
+    animate background { duration: Theme.motion-fast; easing: ease-out; }
     row := HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
