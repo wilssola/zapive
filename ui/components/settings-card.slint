@@ -6,16 +6,22 @@ export component SettingsCard inherits VerticalLayout {
     in property <string> title;
     in property <string> hint;
     spacing: 8px;
+    alignment: start;
+    vertical-stretch: 0;
     Text {
         text: root.title;
-        color: Theme.accent;
+        color: Theme.text;
         font-size: 13px;
         font-weight: 700;
     }
     Rectangle {
+        height: card-content.preferred-height;
         border-radius: 10px;
-        background: Theme.bg;
-        VerticalLayout {
+        background: Theme.dark ? #101f27 : Theme.panel;
+        border-width: 1px;
+        border-color: Theme.border;
+        card-content := VerticalLayout {
+            alignment: start;
             padding-top: 2px;
             padding-bottom: 2px;
             @children

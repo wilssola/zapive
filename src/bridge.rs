@@ -14,7 +14,7 @@ use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
     DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
-    MessageItem, PdfPage, ReactionItem, SearchHit, StickerCell,
+    MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -92,6 +92,9 @@ pub struct Bridge {
     // Bumped whenever the typing line changes hands, so an expiry timer
     // armed for an older "composing" does nothing.
     typing_gen: u64,
+    chat_typing: HashMap<String, HashMap<String, (u64, String)>>,
+    presence_subscribed: HashSet<String>,
+    draft_sequence: u64,
     // WhatsApp events that arrived before the vault was open (the client
     // connects while the PIN screen is still up); replayed by boot.
     locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
@@ -199,11 +202,16 @@ pub struct Bridge {
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String, String)>,
     notify_queued: bool,
+    notifications: bool,
     notify_previews: bool,
     notify_tokens: HashMap<String, NotificationToken>,
     notification_thumbnails: HashMap<String, std::path::PathBuf>,
     // A check the user asked for from Settings: it also reports "nothing
     // new", where the periodic one stays quiet.
+    preparation_states: HashMap<String, bool>,
+    preparations_active: HashSet<String>,
+    outbox: Vec<crate::outbox::Entry>,
+    outbox_connected: bool,
     update_manual: bool,
     // Status/stories, calls, channels and the info panel.
     status_model: Rc<VecModel<ChatItem>>,
@@ -317,8 +325,19 @@ fn image_of(d: &crate::media::Decoded) -> slint::Image {
     slint::Image::from_rgba8(buf)
 }
 
-// What an image costs in memory: Slint keeps decoded RGBA, so it is the
-// pixel count times four regardless of the size it is drawn at.
+fn card_thumbnail(bytes: &[u8]) -> Option<slint::Image> {
+    if bytes.len() > 2 * 1024 * 1024 { return None; }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(2048);
+    limits.max_image_height = Some(2048);
+    limits.max_alloc = Some(16 * 1024 * 1024);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.thumbnail(480, 320).to_rgba8();
+    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
+    Some(slint::Image::from_rgba8(buffer))
+}
+
 fn image_bytes(image: &slint::Image) -> usize {
     let size = image.size();
     size.width as usize * size.height as usize * 4
@@ -472,8 +491,12 @@ fn apply_now(f: impl FnOnce(&mut Bridge)) {
 // scroll write triggering load-older); deferring one tick avoids the
 // re-entrant borrow.
 fn defer(f: impl FnOnce(&mut Bridge) + 'static) {
+    defer_after(Duration::ZERO, f);
+}
+
+fn defer_after(delay: Duration, f: impl FnOnce(&mut Bridge) + 'static) {
     let cell = RefCell::new(Some(f));
-    slint::Timer::single_shot(Duration::ZERO, move || {
+    slint::Timer::single_shot(delay, move || {
         if let Some(f) = cell.borrow_mut().take() {
             apply_now(f);
         }
@@ -553,6 +576,9 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         accounts_model: accounts_model.clone(),
         peer_online: false,
         typing_gen: 0,
+        chat_typing: HashMap::new(),
+        presence_subscribed: HashSet::new(),
+        draft_sequence: 0,
         locked_backlog: Vec::new(),
         avatars: HashMap::new(),
         requested_avatars: HashSet::new(),
@@ -631,9 +657,14 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
+        notifications: true,
         notify_previews: false,
         notify_tokens: HashMap::new(),
         notification_thumbnails: HashMap::new(),
+        preparation_states: HashMap::new(),
+        preparations_active: HashSet::new(),
+        outbox: Vec::new(),
+        outbox_connected: false,
         update_manual: false,
         status_model,
         calls_model,
@@ -726,6 +757,7 @@ fn wire_callbacks(ui: &AppWindow) {
         let style = style.to_string();
         defer(move |b| b.handle_style(&style));
     });
+    ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
     ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
     ui.on_privacy_blur_changed(|category, enabled| {
         let category = category.to_string();
@@ -809,6 +841,9 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.chat_hover(&jid));
     });
     ui.set_app_version(crate::update::current_version().into());
+    ui.on_changelog_load(|refresh| {
+        defer(move |b| b.load_changelog(refresh));
+    });
     ui.on_update_check(|| {
         defer(|b| {
             b.update_manual = true;
@@ -866,14 +901,37 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_send_message(|text| {
         let text = text.to_string();
-        defer(move |b| b.handle_send_text(&text));
+        let context = BRIDGE.with(|cell| cell.borrow().as_ref().map(|b| (b.account.clone(), b.current_jid.clone(), b.reply_to.clone(), b.mentions.clone())));
+        defer(move |b| {
+            if let Some((account, jid, reply, mentions)) = context {
+                if b.account != account || b.current_jid != jid { return; }
+                if b.reply_to != reply || b.mentions != mentions || b.ui.get_composer_text().as_str() != text { return; }
+                b.handle_send_text(&text);
+            }
+        });
     });
     ui.on_load_older(|| defer(|b| b.handle_scroll_up_load()));
     ui.on_jump_latest(|| {
         defer(|b| {
-            if let Some(jid) = &b.current_jid {
-                let jid = jid.clone();
+            if let Some(jid) = b.current_jid.clone() {
+                if let Some(vault) = &b.vault {
+                    if let Err(error) = b.store.save_checked(vault) {
+                        eprintln!("[history] jump latest save failed: {error}");
+                        b.message_action_failed(&t("history.unavailable"));
+                        return;
+                    }
+                    b.store.evict(&jid);
+                    b.store.hydrate(vault, &jid);
+                    if !b.store.hydrated.contains(&jid) {
+                        b.message_action_failed(&t("history.unavailable"));
+                        return;
+                    }
+                }
                 b.scroll_pos.remove(&jid);
+                b.truncated.remove(&jid);
+                b.rebuild_conversation(&jid);
+                b.load_media_for_chat(&jid);
+                b.queue_row_avatars(&jid);
             }
             b.scroll_to_end();
         });
@@ -929,6 +987,7 @@ fn wire_callbacks(ui: &AppWindow) {
                 b.send_reaction(&target, &emoji);
             } else {
                 b.ui.invoke_append_composer(emoji.into());
+                b.save_composer(false);
             }
         });
     });
@@ -978,7 +1037,7 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_reset_preview(|| defer(|b| b.reset_preview()));
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
-    ui.on_picker_opened(|| defer(|b| b.load_sticker_panel()));
+    ui.on_picker_opened(|| defer_after(Duration::from_millis(200), |b| b.load_sticker_panel()));
     ui.on_picker_closed(|| defer(|_| {}));
     ui.on_sticker_send(|id| {
         let id = id.to_string();
@@ -1060,6 +1119,9 @@ fn wire_callbacks(ui: &AppWindow) {
     // Enumerating devices touches the audio and camera stacks, so it waits
     // until the user actually opens Settings.
     ui.on_settings_opened(|| defer(|b| b.refresh_devices()));
+    ui.on_settings_search(|text, query| {
+        text.to_lowercase().contains(&query.to_lowercase())
+    });
     ui.on_start_video_call(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.start_video_call(&jid));
@@ -1298,8 +1360,8 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             if let Some(jid) = b.current_jid.clone() {
                 b.ask_confirm(
-                    t("confirm.clearTitle"),
-                    t("confirm.clearBody"),
+                    t("confirm.clear_title"),
+                    t("confirm.clear_body"),
                     t("confirm.clear"),
                     ConfirmAction::ClearChat(jid),
                 );
@@ -1310,8 +1372,8 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             if let Some(jid) = b.current_jid.clone() {
                 b.ask_confirm(
-                    t("confirm.deleteChatTitle"),
-                    t("confirm.deleteChatBody"),
+                    t("confirm.delete_chat_title"),
+                    t("confirm.delete_chat_body"),
                     t("confirm.delete"),
                     ConfirmAction::DeleteChat(jid),
                 );
@@ -1323,8 +1385,8 @@ fn wire_callbacks(ui: &AppWindow) {
             if let Some(jid) = b.current_jid.clone() {
                 let name = b.store.chat_name(&jid);
                 b.ask_confirm(
-                    ta("confirm.exitTitle", &[&name]),
-                    t("confirm.exitBody"),
+                    ta("confirm.exit_title", &[&name]),
+                    t("confirm.exit_body"),
                     t("confirm.exit"),
                     ConfirmAction::ExitGroup(jid),
                 );
@@ -1429,6 +1491,9 @@ impl Bridge {
             self.video_volume = volume.clamp(0.0, 1.0);
         }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
+        // On unless turned off, so existing installs keep their banners.
+        self.notifications = vault.setting_get("notifications").as_deref() != Some("0");
+        self.ui.set_notifications(self.notifications);
         self.notify_previews = vault.setting_get("notify_previews").as_deref() == Some("1");
         self.ui.set_notify_previews(self.notify_previews);
         self.ui.set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
@@ -1436,6 +1501,7 @@ impl Bridge {
         self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
         self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
+        self.restore_outbox();
         self.expire_notification_tokens();
         println!(
             "[store] loaded chats={} msgChats={} total={}",
@@ -1495,6 +1561,18 @@ impl Bridge {
         crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
     }
 
+    fn handle_notifications(&mut self, enabled: bool) {
+        self.notifications = enabled;
+        self.ui.set_notifications(enabled);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("notifications", if enabled { "1" } else { "0" });
+        }
+        // Drop whatever is still waiting to flush.
+        if !enabled {
+            self.clear_notification_sensitive_state();
+        }
+    }
+
     fn handle_notify_previews(&mut self, enabled: bool) {
         self.notify_previews = enabled;
         self.ui.set_notify_previews(enabled);
@@ -1547,7 +1625,7 @@ impl Bridge {
     fn handle_pairing(&mut self, phone: &str) {
         let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
         if digits.len() < 8 {
-            self.ui.set_pairing_code(t("error.invalidNumber").into());
+            self.ui.set_pairing_code(t("error.invalid_number").into());
             return;
         }
         self.ui.set_pairing_code(t("pairing.generating").into());
@@ -1558,12 +1636,12 @@ impl Bridge {
 
     pub fn on_qr(&mut self, code: &str) {
         self.ui.set_qr_image(qr_image(code));
-        self.ui.set_status_text(t("status.scanQr").into());
+        self.ui.set_status_text(t("status.scan_qr").into());
     }
 
     pub fn on_pairing_code(&mut self, pretty: &str) {
         self.ui.set_pairing_code(pretty.into());
-        self.ui.set_status_text(t("status.pairingHint").into());
+        self.ui.set_status_text(t("status.pairing_hint").into());
     }
 
     pub fn on_pairing_failed(&mut self) {
@@ -1572,6 +1650,7 @@ impl Bridge {
 
     pub fn on_status(&mut self, text: &str) {
         self.ui.set_status_text(text.into());
+        self.outbox_connected = false;
     }
 
     pub fn on_open(&mut self, pn: &str, lid: &str, name: &str) {
@@ -1612,6 +1691,9 @@ impl Bridge {
         // pairing history payload arrives thin).
         self.once(8000, |b| b.pull_older_history());
         self.schedule_refresh_chats();
+        self.outbox_connected = true;
+        self.resume_preparations();
+        self.dispatch_outbox();
     }
 
     // Errors the user must act on get a modal instead of a silent retry
@@ -1620,17 +1702,17 @@ impl Bridge {
         let conflict = kind == "conflict";
         self.ui.set_alert_title(
             t(if conflict {
-                "alert.conflictTitle"
+                "alert.conflict_title"
             } else {
-                "alert.offlineTitle"
+                "alert.offline_title"
             })
             .into(),
         );
         self.ui.set_alert_text(
             t(if conflict {
-                "alert.conflictBody"
+                "alert.conflict_body"
             } else {
-                "alert.offlineBody"
+                "alert.offline_body"
             })
             .into(),
         );
@@ -1667,7 +1749,7 @@ impl Bridge {
 
     fn logout(&mut self, wipe: bool) {
         self.wipe_on_logout = wipe;
-        self.ui.set_status_text(t("status.loggingOut").into());
+        self.ui.set_status_text(t("status.logging_out").into());
         self.wa.send(Cmd::Logout);
     }
 
@@ -1682,9 +1764,16 @@ impl Bridge {
 
     // Whatever is on screen belongs to a session that just ended.
     fn close_session_views(&mut self) {
+        self.chat_typing.clear();
+        self.presence_subscribed.clear();
+        self.ui.invoke_set_composer("".into(), 0);
+        self.mentions.clear();
+        self.ui.set_mention_open(false);
         self.ui.set_details_open(false);
         self.cancel_preview();
         self.current_jid = None;
+        self.ui.set_typing_members(ModelRc::default());
+        self.ui.set_typing_extra(0);
         self.unread_boundary = None;
         self.groups_fetched = false;
         self.ui.set_chat_open(false);
@@ -1700,6 +1789,8 @@ impl Bridge {
         self.ui.set_details_open(false);
         self.cancel_preview();
         self.current_jid = None;
+        self.ui.set_typing_members(ModelRc::default());
+        self.ui.set_typing_extra(0);
         self.unread_boundary = None;
         self.ui.set_chat_open(false);
         self.clear_store_state();
@@ -1722,7 +1813,15 @@ impl Bridge {
     // account it is switching away from.
     fn clear_store_state(&mut self) {
         self.clear_notification_sensitive_state();
+        self.preparation_states.clear();
+        self.preparations_active.clear();
+        self.outbox.clear();
+        self.outbox_connected = false;
         self.store = Store::default();
+        self.chat_typing.clear();
+        self.presence_subscribed.clear();
+        self.typing_gen += 1;
+        self.ui.invoke_set_composer("".into(), 0);
         self.self_jid.clear();
         self.chats_model.set_vec(Vec::new());
         self.messages_model.set_vec(Vec::new());
@@ -1863,7 +1962,7 @@ impl Bridge {
         }
         // A call belongs to the account it runs on.
         if self.call.is_some() {
-            self.ui.set_status_text(t("account.inCall").into());
+            self.ui.set_status_text(t("account.in_call").into());
             return;
         }
         self.switching = true;
@@ -1911,9 +2010,9 @@ impl Bridge {
             t("account.new")
         };
         self.ask_confirm(
-            ta("account.removeTitle", &[&label]),
-            t("account.removeBody"),
-            t("account.removeAction"),
+            ta("account.remove_title", &[&label]),
+            t("account.remove_body"),
+            t("account.remove_action"),
             ConfirmAction::RemoveAccount(id.to_string()),
         );
     }
@@ -2054,6 +2153,7 @@ impl Bridge {
             self.store.load_from(&vault);
             self.vault = Some(vault);
         }
+        self.restore_outbox();
         // "Add account" backed out of before pairing: the empty slot
         // would otherwise sit in the switcher forever.
         if abandoned {
@@ -2090,11 +2190,12 @@ impl Bridge {
         let Some(vault) = self.vault.take() else {
             return;
         };
-        let pending: Vec<String> = vault
-            .keys("store:msgs:")
-            .into_iter()
-            .map(|k| k["store:msgs:".len()..].to_string())
-            .filter(|jid| !self.store.search.has_chat(jid))
+        let mut seen = HashSet::new();
+        let pending: Vec<String> = self.store.chats.keys().cloned()
+            .chain(vault.keys("store:msgs:").into_iter()
+                .map(|k| k["store:msgs:".len()..].to_string()))
+            .map(|jid| self.store.canon_owned(&jid))
+            .filter(|jid| seen.insert(jid.clone()) && !self.store.search.has_chat(jid))
             .take(6)
             .collect();
         for jid in &pending {
@@ -2148,6 +2249,8 @@ impl Bridge {
         for web in &chunk.messages {
             if let Some(stored) = crate::wa_map::from_history(&mut self.store, web) {
                 let jid = stored.jid.clone();
+                if stored.from_me && stored.status >= 1 { self.on_outbox_ack(&stored.id, None); }
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
                 if self.store.add_message(stored) {
                     added += 1;
                     if Some(&jid) == self.current_jid.as_ref() {
@@ -2224,7 +2327,7 @@ impl Bridge {
                 && let Some(edited) = pm.edited_message.as_option()
             {
                 let jid = self.store.canon_owned(&normalize_jid(&chat));
-                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
                 let sender = self.store.canon_owned(&info.source.sender.to_non_ad_string());
                 let valid = self.store.messages_for(&jid).iter().find(|m| m.id == id).is_some_and(|m| {
                     m.from_me == info.source.is_from_me && (m.from_me || self.store.canon(&m.sender_jid) == sender)
@@ -2279,6 +2382,7 @@ impl Bridge {
                 && let Some(target) = pm.key.as_option().and_then(|k| k.id.clone())
             {
                 let chat_jid = self.store.canon_owned(&normalize_jid(&chat));
+                if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, &target); }
                 let destructive = self.ui.get_apply_deletions() || info.source.is_from_me;
                 let changed = if destructive {
                     self.store.mark_deleted(&chat_jid, &target)
@@ -2320,17 +2424,17 @@ impl Bridge {
             };
             let jid = stored.jid.clone();
             let from_me = stored.from_me;
+            if from_me { self.on_outbox_ack(&stored.id, None); }
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
             let mentions_me = stored.mentions_me;
+            let sender = stored.sender_jid.clone();
             if !self.store.add_message(stored) {
                 continue;
             }
+            if !from_me {
+                self.clear_participant_typing(&jid, &sender);
+            }
             if Some(&jid) == self.current_jid.as_ref() {
-                // The message they were typing has arrived. In a group
-                // someone else may still be at it; their next refresh
-                // puts the line back.
-                if !from_me {
-                    self.clear_typing();
-                }
                 self.push_message_row(&jid);
                 self.send_view_receipts(&jid);
             } else if !from_me {
@@ -2368,9 +2472,10 @@ impl Bridge {
             else if alternate.ends_with("@lid") { self.store.learn_alias(alternate, participant); }
         }
         let jid = self.store.canon_owned(&normalize_jid(chat));
-        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
         let mut changed = Vec::new();
         for id in ids {
+            if status >= 3 { self.on_outbox_ack(id, None); }
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
             if self.store.apply_receipt(&jid, id, participant, status, timestamp) {
                 changed.push(id.clone());
             }
@@ -2402,13 +2507,12 @@ impl Bridge {
         self.schedule_save();
     }
 
-    pub fn on_chat_presence(&mut self, chat: &str, state: &str, media: &str) {
+    pub fn on_chat_presence(&mut self, chat: &str, sender: &str, state: &str, media: &str) {
         let jid = self.store.canon_owned(&normalize_jid(chat));
-        if Some(&jid) != self.current_jid.as_ref() {
-            return;
-        }
+        let sender = self.store.canon_owned(&normalize_jid(sender));
+        if sender.is_empty() || self.store.self_jids.contains(&sender) { return; }
         if !state.contains("Composing") {
-            self.clear_typing();
+            self.clear_participant_typing(&jid, &sender);
             return;
         }
         let text = if media.contains("Audio") {
@@ -2416,54 +2520,101 @@ impl Bridge {
         } else {
             t("presence.typing")
         };
-        self.ui.set_current_status(text.into());
-        // A "composing" is only good for a while: the peer's client
-        // refreshes it as long as they keep going, and the "paused" that
-        // should end it is routinely lost (the app is killed, the network
-        // drops, the phone sleeps). WhatsApp's own clients age it out
-        // after about 25s, so this one does too.
         self.typing_gen += 1;
         let generation = self.typing_gen;
+        self.chat_typing.entry(jid.clone()).or_default().insert(sender.clone(), (generation, text));
+        self.update_typing_status();
+        self.schedule_refresh_chats();
         self.once(25_000, move |b| {
-            if b.typing_gen == generation {
-                b.clear_typing();
+            if b.chat_typing.get(&jid).and_then(|members| members.get(&sender)).is_some_and(|(token, _)| *token == generation) {
+                b.clear_participant_typing(&jid, &sender);
             }
         });
     }
 
-    // Back from typing/recording to what is known of the contact.
-    fn clear_typing(&mut self) {
-        self.typing_gen += 1;
-        self.ui.set_current_status(if self.peer_online {
-            t("presence.online").into()
+    fn update_typing_status(&mut self) {
+        let text = if let Some(jid) = self.current_jid.as_ref().filter(|jid| is_group(jid)) {
+            let typing = self.chat_typing.get(jid);
+            if let Some(members) = typing.filter(|members| !members.is_empty()) {
+                let (participants, extra) = typing_participants(members);
+                let names: Vec<_> = participants.iter().map(|jid| self.store.chat_name(jid)).collect();
+                group_typing_status(&names, extra > 0)
+            } else {
+                self.store.members_of(jid).iter().map(|member| {
+                    let canon = self.store.canon(&member.jid);
+                    let name = self.store.chat_name(canon);
+                    if name == display_id(canon) && !member.name.trim().is_empty() {
+                        clean_text(&member.name)
+                    } else { name }
+                }).collect::<Vec<_>>().join(", ")
+            }
         } else {
-            "".into()
-        });
+            self.current_jid.as_ref()
+            .and_then(|jid| self.chat_typing.get(jid))
+            .and_then(|members| members.values().max_by_key(|(token, _)| token))
+            .map(|(_, text)| text.clone())
+            .unwrap_or_else(|| if self.peer_online { t("presence.online") } else { String::new() })
+        };
+        self.ui.set_current_status(text.into());
+        self.refresh_typing_members();
+    }
+
+    fn refresh_typing_members(&mut self) {
+        let (participants, extra) = self.current_jid.as_ref().filter(|jid| is_group(jid))
+            .and_then(|jid| self.chat_typing.get(jid))
+            .map(typing_participants).unwrap_or_default();
+        let mut rows = Vec::new();
+        for jid in participants.into_iter().take(5) {
+            let name = self.store.chat_name(&jid);
+            rows.push(self.to_member_row(&jid, &name, "", false, false));
+            self.queue_avatar(&jid);
+        }
+        self.ui.set_typing_members(ModelRc::new(VecModel::from(rows)));
+        self.ui.set_typing_extra(extra);
+    }
+
+    fn clear_participant_typing(&mut self, jid: &str, sender: &str) {
+        let sender = self.store.canon_owned(&normalize_jid(sender));
+        if let Some(members) = self.chat_typing.get_mut(jid) {
+            members.remove(&sender);
+            if members.is_empty() { self.chat_typing.remove(jid); }
+        }
+        self.schedule_refresh_chats();
+        self.update_typing_status();
+    }
+
+    fn clear_chat_typing(&mut self, jid: &str) {
+        if self.chat_typing.remove(jid).is_some() {
+            self.schedule_refresh_chats();
+        }
+        self.update_typing_status();
     }
 
     pub fn on_presence(&mut self, from: &str, available: bool) {
         let jid = self.store.canon_owned(&normalize_jid(from));
-        if Some(&jid) != self.current_jid.as_ref() {
-            return;
+        if Some(&jid) == self.current_jid.as_ref() {
+            self.peer_online = available;
         }
-        self.peer_online = available;
-        // Someone who just went offline is not typing either; their
-        // "paused" will never come.
-        let current = self.ui.get_current_status();
-        if !available || current.is_empty() || current == t("presence.online").as_str() {
-            self.clear_typing();
+        if !available {
+            let groups: Vec<_> = self.chat_typing.iter()
+                .filter(|(chat, members)| is_group(chat) && members.contains_key(&jid))
+                .map(|(chat, _)| chat.clone()).collect();
+            for group in groups { self.clear_participant_typing(&group, &jid); }
+            self.clear_chat_typing(&jid);
+        } else {
+            self.update_typing_status();
         }
     }
 
     pub fn on_chat_flag(&mut self, jid: &str, pinned: Option<i64>, archived: Option<bool>) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        self.store
-            .upsert_chat(&jid, None, 0, None, pinned, archived);
+        self.store.upsert_chat(&jid, None, 0, None, pinned, archived);
         self.schedule_refresh_chats();
     }
 
     pub fn on_star(&mut self, jid: &str, id: &str, starred: bool) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         if self.store.set_starred(&jid, id, starred) && Some(&jid) == self.current_jid.as_ref() {
             self.patch_row(id, |row| row.starred = starred);
         }
@@ -2486,11 +2637,196 @@ impl Bridge {
     pub fn on_contact(&mut self, jid: &str, name: &str) {
         self.store
             .upsert_contact(&normalize_jid(jid), Some(name), None);
+        self.update_typing_status();
         self.schedule_refresh_chats();
     }
 
     // The just-sent message flows through the normal pipeline; the later
     // echo from the server is deduplicated by id in the store.
+    pub fn stage_attachment(&mut self, preparation: crate::outbox::Preparation) -> bool {
+        let key = format!("store:preparation:{}", preparation.id);
+        let result = serde_json::to_string(&preparation).map_err(|e| e.to_string()).and_then(|json| {
+            self.vault.as_ref().ok_or("vault unavailable".to_string())?.set_checked(&key, &json)
+        });
+        if result.is_err() { self.message_action_failed(&t("outbox.storage_failed")); return false; }
+        self.show_preparation(&preparation, "outbox.preparing");
+        if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+        true
+    }
+
+    fn show_preparation(&mut self, preparation: &crate::outbox::Preparation, state: &str) {
+        use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
+        self.preparation_states.insert(preparation.id.clone(), state == "outbox.failed");
+        self.echo_sent(&preparation.jid, &preparation.id, wa::Message::text(format!("{}: {}", t(state), preparation.filename)));
+        self.patch_row(&preparation.id, |row| {
+            row.sendPending = true;
+            row.sendRetry = state == "outbox.failed";
+            row.sendState = t(state).into();
+            row.ticks = "pending".into();
+        });
+    }
+
+    fn resume_preparations(&mut self) {
+        let preparations: Vec<_> = self.vault.as_ref().map(|vault| vault.keys("store:preparation:").into_iter()
+            .filter_map(|key| vault.get(&key)).filter_map(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok()).collect()).unwrap_or_default();
+        for preparation in preparations {
+            self.show_preparation(&preparation, "outbox.preparing");
+            if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+        }
+    }
+
+    pub fn on_attachment_prepared(&mut self, id: &str, result: Result<wa::Message, String>) {
+        self.preparations_active.remove(id);
+        let key = format!("store:preparation:{id}");
+        let preparation = self.vault.as_ref().and_then(|vault| vault.get(&key))
+            .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
+        let Some(preparation) = preparation else { return; };
+        let message = match result {
+            Ok(message) => message,
+            Err(_) => { self.show_preparation(&preparation, "outbox.failed"); return; }
+        };
+        let mut entries = self.outbox.clone();
+        entries.push(crate::outbox::Entry::new(id.to_string(), preparation.jid.clone(), std::sync::Arc::new(message.clone()), now_secs()));
+        let json = match serde_json::to_string(&entries) { Ok(json) => json, Err(_) => return };
+        let saved = self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[("store:outbox", &json)], &[&key]).is_ok());
+        if !saved { self.message_action_failed(&t("outbox.storage_failed")); return; }
+        self.outbox = entries;
+        self.preparation_states.remove(id);
+        if let Some(messages) = self.store.messages.get_mut(&preparation.jid) { messages.retain(|message| message.id != id); }
+        self.echo_sent_from(&preparation.jid, id, message, preparation.origin);
+        if self.current_jid.as_deref() == Some(&preparation.jid) { self.rebuild_conversation(&preparation.jid); }
+        self.dispatch_outbox();
+    }
+
+    fn persist_outbox(&self, entries: &[crate::outbox::Entry]) -> Result<(), String> {
+        let vault = self.vault.as_ref().ok_or("vault unavailable")?;
+        let json = serde_json::to_string(entries).map_err(|e| e.to_string())?;
+        vault.set_checked("store:outbox", &json)
+    }
+
+    fn restore_outbox(&mut self) {
+        self.outbox_connected = false;
+        self.resume_preparations();
+        let cached = self.vault.as_ref().and_then(|v| v.get("store:outbox"));
+        self.outbox = cached.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
+        for entry in &mut self.outbox { entry.recover_interrupted(); }
+        let _ = self.persist_outbox(&self.outbox);
+        for entry in self.outbox.clone() {
+            let found = self.vault.as_ref().is_some_and(|v| self.store.hydrate_id(v, &entry.jid, &entry.id));
+            if found && self.store.messages_for(&entry.jid).iter().any(|message| message.id == entry.id && message.status >= 1) {
+                self.on_outbox_ack(&entry.id, None);
+                continue;
+            }
+            if !found {
+                self.echo_sent(&entry.jid, &entry.id, (*entry.message).clone());
+                if let Some(message) = self.store.messages.get_mut(&entry.jid).and_then(|messages| messages.iter_mut().find(|m| m.id == entry.id)) {
+                    message.timestamp = entry.created;
+                }
+            }
+        }
+    }
+
+    pub fn enqueue_prepared(&mut self, jid: &str, message: wa::Message, origin: Option<String>) -> bool {
+        use rand::RngCore as _;
+        let mut bytes = [0u8; 16];
+        rand::rng().fill_bytes(&mut bytes);
+        let id = format!("3EB0{}", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>());
+        let jid = self.store.canon_owned(jid);
+        let entry = crate::outbox::Entry::new(id.clone(), jid.clone(), std::sync::Arc::new(message.clone()), now_secs());
+        let mut entries = self.outbox.clone();
+        entries.push(entry);
+        if self.persist_outbox(&entries).is_err() {
+            self.message_action_failed(&t("outbox.storage_failed"));
+            return false;
+        }
+        self.outbox = entries;
+        self.echo_sent_from(&jid, &id, message, origin);
+        self.dispatch_outbox();
+        true
+    }
+
+    fn dispatch_outbox(&mut self) {
+        use crate::outbox::State;
+        if !self.outbox_connected || self.switching { return; }
+        if self.outbox.iter().any(|entry| entry.state == State::Sending) { return; }
+        let Some(index) = self.outbox.iter().position(|entry| entry.state == State::Queued) else { return };
+        let mut entries = self.outbox.clone();
+        entries[index].state = State::Sending;
+        if self.persist_outbox(&entries).is_err() {
+            self.message_action_failed(&t("outbox.storage_failed"));
+            return;
+        }
+        self.outbox = entries;
+        let entry = self.outbox[index].clone();
+        self.refresh_outbox_row(&entry.id);
+        self.wa.send(Cmd::SendQueued { id: entry.id.clone(), jid: entry.jid, message: entry.message });
+        let epoch = self.epoch;
+        self.once(45_000, move |b| {
+            if b.epoch != epoch { return; }
+            if let Some(pending) = b.outbox.iter_mut().find(|e| e.id == entry.id && e.state == State::Sending) {
+                pending.state = State::Uncertain;
+                let _ = b.persist_outbox(&b.outbox);
+                b.refresh_outbox_row(&entry.id);
+                b.dispatch_outbox();
+            }
+        });
+    }
+
+    fn refresh_outbox_row(&self, id: &str) {
+        let state = self.outbox.iter().find(|entry| entry.id == id).map(|entry| entry.state);
+        let label = match state {
+            Some(crate::outbox::State::Queued) => t("outbox.queued"),
+            Some(crate::outbox::State::Sending) => t("outbox.sending"),
+            Some(crate::outbox::State::Uncertain) => t("outbox.uncertain"),
+            Some(crate::outbox::State::Failed) => t("outbox.failed"),
+            None => String::new(),
+        };
+        self.patch_row(id, |row| {
+            row.sendState = label.into();
+            row.sendRetry = matches!(state, Some(crate::outbox::State::Failed | crate::outbox::State::Uncertain));
+            row.sendPending = state.is_some();
+            if state.is_some() { row.ticks = "pending".into(); }
+        });
+    }
+
+    pub fn on_outbox_result(&mut self, _jid: &str, id: &str, result: Result<(), String>) {
+        if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id) {
+            if result.is_err() {
+                entry.state = crate::outbox::State::Uncertain;
+                entry.error = t("outbox.uncertain");
+                let _ = self.persist_outbox(&self.outbox);
+                self.refresh_outbox_row(id);
+                self.dispatch_outbox();
+            }
+        }
+    }
+
+    pub fn on_outbox_ack(&mut self, id: &str, error: Option<String>) {
+        if !self.outbox.iter().any(|entry| entry.id == id) { return; }
+        if let Some(error) = error {
+            if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id) {
+                entry.state = crate::outbox::State::Failed;
+                entry.error = error;
+            }
+        } else {
+            let entry = self.outbox.iter().find(|entry| entry.id == id).cloned().unwrap();
+            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &entry.jid, id); }
+            self.store.set_status(&entry.jid, id, 1);
+            if let Some(vault) = &self.vault {
+                if self.store.save_checked(vault).is_err() { return; }
+            }
+            let remaining: Vec<_> = self.outbox.iter().filter(|entry| entry.id != id).cloned().collect();
+            if self.persist_outbox(&remaining).is_err() { return; }
+            self.outbox = remaining;
+        }
+        let _ = self.persist_outbox(&self.outbox);
+        self.refresh_outbox_row(id);
+        if !self.outbox.iter().any(|entry| entry.id == id) {
+            self.patch_row(id, |row| row.ticks = "✓".into());
+        }
+        self.dispatch_outbox();
+    }
+
     pub fn echo_sent_from(&mut self, jid: &str, id: &str, message: wa::Message, origin: Option<String>) {
         if let Some(origin) = origin {
             if let Some(vault) = &self.vault {
@@ -2610,6 +2946,12 @@ impl Bridge {
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
+        if let Some(vault) = &self.vault {
+            if self.store.load_older(vault, &jid) {
+                self.prepend_older_rows(&jid);
+                return;
+            }
+        }
         // After a jump the list starts mid-conversation; the rows above it
         // are already in the store.
         if self.store.messages_for(&jid).len() > self.messages_model.row_count() {
@@ -2654,6 +2996,7 @@ impl Bridge {
         from_me: bool,
     ) {
         let chat_jid = self.store.canon_owned(&normalize_jid(remote_jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, target); }
         let updated = self.store.apply_reaction(&chat_jid, target, reactor, emoji);
         if updated && Some(&chat_jid) == self.current_jid.as_ref() {
             let summary = self
@@ -2717,6 +3060,11 @@ impl Bridge {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
         let meta = self.store.chats.get(jid);
+        let activity = self.chat_typing.get(jid).and_then(|members| members.values().max_by_key(|(token, _)| token)).map(|(_, text)| text.as_str());
+        let draft = self.store.drafts.get(jid)
+            .filter(|draft| self.current_jid.as_deref() != Some(jid) && !draft.text.trim().is_empty());
+        let draft_preview = draft.map(|draft| format!("{} {}", t("preview.draft"), clean_text(&draft.text)));
+        let preview = draft_preview.as_deref().or(activity).unwrap_or(preview);
         let (preview, ticks, ticks_blue) = if let Some(body) = preview.strip_prefix("✓ ") {
             let (ticks, blue) = self.store.messages.get(jid)
                 .and_then(|messages| messages.iter().max_by_key(|m| m.timestamp))
@@ -2731,6 +3079,8 @@ impl Bridge {
             jid: jid.into(),
             name: name.clone().into(),
             preview: preview.into(),
+            typing: activity.is_some() && draft.is_none(),
+            draft: draft.is_some(),
             ticks: ticks.into(),
             ticksBlue: ticks_blue,
             time: format_time(timestamp).into(),
@@ -2769,14 +3119,10 @@ impl Bridge {
                     // in their own tabs.
                     return false;
                 }
-                if self.tab == "archived" {
-                    if !meta.archived {
-                        return false;
-                    }
-                } else {
-                    if meta.archived {
-                        return false;
-                    }
+                if !chat_matches_archive(meta.archived, &self.tab, !search.is_empty()) {
+                    return false;
+                }
+                if self.tab != "archived" {
                     match self.tab.as_str() {
                         "unread" if meta.unread == 0 => return false,
                         "favorites" if !meta.favorite => return false,
@@ -2848,6 +3194,12 @@ impl Bridge {
                 self.to_chat_row(jid, preview, *ts, *unread, *mentioned)
             })
             .collect();
+        for row in &rows {
+            let jid = row.jid.as_str();
+            if !is_group(jid) && !is_channel(jid) && self.presence_subscribed.insert(jid.to_string()) {
+                self.wa.send(Cmd::SubscribePresence(jid.to_string()));
+            }
+        }
         let model = &self.chats_model;
         let common = model.row_count().min(rows.len());
         for (i, next) in rows.iter().take(common).enumerate() {
@@ -2857,6 +3209,10 @@ impl Bridge {
                     cur.jid != next.jid
                         || cur.name != next.name
                         || cur.preview != next.preview
+                        || cur.typing != next.typing
+                        || cur.draft != next.draft
+                        || cur.ticks != next.ticks
+                        || cur.ticksBlue != next.ticksBlue
                         || cur.time != next.time
                         || cur.unread != next.unread
                         || cur.mentioned != next.mentioned
@@ -3006,6 +3362,7 @@ impl Bridge {
             .set_current_avatar(avatar.unwrap_or_else(empty_image));
         self.ui.set_current_initial(initial_of(&name).into());
         self.ui.set_current_color_idx(color_idx_of(jid));
+        self.update_typing_status();
     }
 
     // Opens (or starts) the conversation with a jid; used by the chat list
@@ -3060,6 +3417,11 @@ impl Bridge {
     }
 
     fn open_jid(&mut self, jid: &str, jump_to: Option<&str>) {
+        self.ui.invoke_clear_sidebar_search();
+        if !self.search_text.is_empty() {
+            self.search_text.clear();
+            self.refresh_chats();
+        }
         self.ui.set_message_menu_open(false);
         self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
@@ -3077,7 +3439,9 @@ impl Bridge {
             self.truncated.remove(&current);
             self.clear_reply();
         }
-        if self.current_jid.as_deref() != Some(jid) {
+        let switching_chat = self.current_jid.as_deref() != Some(jid);
+        if switching_chat {
+            self.save_composer(true);
             self.cancel_preview();
             let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
             self.unread_boundary = if unread > 0 {
@@ -3102,6 +3466,12 @@ impl Bridge {
             self.mentions.clear();
         }
         self.current_jid = Some(jid.to_string());
+        if switching_chat {
+            let draft = self.store.drafts.get(jid).cloned().unwrap_or_default();
+            self.mentions = draft.mentions;
+            let cursor = draft.text.len() as i32;
+            self.ui.invoke_set_composer(draft.text.into(), cursor);
+        }
         self.ui.set_selected_jid(jid.into());
         self.ui.set_stick_bottom(true);
         self.ui.set_chat_menu_open(false);
@@ -3111,19 +3481,23 @@ impl Bridge {
         }
         self.send_view_receipts(jid);
         self.peer_online = false;
-        self.typing_gen += 1;
-        self.ui.set_current_status("".into());
+        self.update_typing_status();
         self.wa.send(Cmd::SubscribePresence(jid.to_string()));
         self.apply_header(jid);
         self.apply_chat_settings_ui();
         self.refresh_labels();
         self.ensure_group_meta(jid);
+        let jump_loaded = jump_to.map(|target| {
+            self.vault.as_ref().is_some_and(|vault| self.store.load_around(vault, jid, target))
+        });
+        let at = jump_to.and_then(|target| self.store.messages_for(jid).iter().position(|m| m.id == target));
+        if jump_to.is_some() && (jump_loaded == Some(false) || at.is_none()) {
+            self.message_action_failed(&t("history.unavailable"));
+        }
         let list = self.store.messages_for(jid);
         // Jumping to a message means starting the list there: the row
         // lands at the top exactly, instead of chasing a pixel offset
         // inside a virtualized list that estimates unmeasured heights.
-        let at = jump_to
-            .and_then(|target| list.iter().position(|m| m.id == target));
         let from = at.unwrap_or(0);
         if at.is_some() {
             self.truncated.insert(jid.to_string());
@@ -3149,6 +3523,8 @@ impl Bridge {
         self.ui.set_scroll_armed(!anchored_top);
         let saved = if anchored_top {
             Some(0.0)
+        } else if jump_to.is_some() {
+            None
         } else {
             self.scroll_pos.get(jid).copied()
         };
@@ -3407,10 +3783,30 @@ impl Bridge {
         } else {
             String::new()
         };
+        let card = crate::wa_map::special_card(m);
+        let card_picture = card.thumbnail.and_then(card_thumbnail);
         let (styled, has_styled, plain, links) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
         let system = m.kind == MessageKind::System;
+        let outgoing = self.outbox.iter().find(|entry| entry.id == m.id);
+        let preparing = self.preparation_states.get(&m.id).copied();
         MessageItem {
+            sendPending: outgoing.is_some() || preparing.is_some(),
+            sendRetry: preparing == Some(true) || outgoing.is_some_and(|entry| matches!(entry.state, crate::outbox::State::Failed | crate::outbox::State::Uncertain)),
+            sendState: outgoing.map(|entry| t(match entry.state {
+                crate::outbox::State::Queued => "outbox.queued",
+                crate::outbox::State::Sending => "outbox.sending",
+                crate::outbox::State::Uncertain => "outbox.uncertain",
+                crate::outbox::State::Failed => "outbox.failed",
+            })).unwrap_or_else(|| preparing.map(|failed| t(if failed { "outbox.failed" } else { "outbox.preparing" })).unwrap_or_default()).into(),
+            cardKind: card.kind.into(),
+            cardInitial: initial_of(&card.title).into(),
+            cardTitle: card.title.into(),
+            cardBody: card.body.into(),
+            cardDetail: card.detail.into(),
+            cardOptions: ModelRc::new(VecModel::from(card.options.into_iter().map(SharedString::from).collect::<Vec<_>>())),
+            cardHasPicture: card_picture.is_some(),
+            cardPicture: card_picture.unwrap_or_else(empty_image),
             id: m.id.clone().into(),
             kind: (if m.deleted {
                 "text"
@@ -3438,7 +3834,7 @@ impl Bridge {
             // The collapsed roster notice opens the group info on click;
             // an invite-link join offers to share the recent history.
             clickable: system
-                && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
+                && (m.text == t("notice.members_changed") || m.id.starts_with("sys:invite:")),
             // Saved contacts show their address-book name without the ~.
             senderLabel: if group && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid) {
                 format!("~ {}", self.store.chat_name(&sender_jid)).into()
@@ -3485,7 +3881,7 @@ impl Bridge {
             reactionCount: reaction_count.into(),
             dayLabel: day_label.into(),
             unread_boundary: self.unread_boundary.as_deref() == Some(m.id.as_str()),
-            ticks: ticks.into(),
+            ticks: if outgoing.is_some() || preparing.is_some() { "pending" } else { ticks }.into(),
             ticksBlue: ticks_blue,
             senderHasAvatar: self.avatar_for(&sender_jid).is_some(),
             senderAvatar: self.avatar_for(&sender_jid).unwrap_or_else(empty_image),
@@ -3548,7 +3944,7 @@ impl Bridge {
                 "".into()
             },
             styled,
-            hasStyled: has_styled,
+            hasStyled: has_styled && card.kind.is_empty(),
             links: ModelRc::new(VecModel::from(links)),
             plain: plain.into(),
             linkTitle: m.link_title.trim().into(),
@@ -3615,6 +4011,34 @@ impl Bridge {
 
     // ---- composing ----
 
+    fn save_draft(&mut self, text: &str, promote: bool) {
+        let Some(jid) = self.current_jid.clone() else { return; };
+        if text.is_empty() {
+            if self.store.drafts.remove(&jid).is_some() {
+                self.schedule_refresh_chats();
+            }
+            return;
+        }
+        if !self.store.chats.contains_key(&jid) { return; }
+        let previous = self.store.drafts.get(&jid).map_or(0, |draft| draft.promoted);
+        let promoted = if promote && !text.trim().is_empty() {
+            self.draft_sequence = self.draft_sequence
+                .max(self.store.drafts.values().map(|draft| draft.promoted).max().unwrap_or(0)) + 1;
+            self.draft_sequence
+        } else if text.trim().is_empty() { 0 } else { previous };
+        self.store.drafts.insert(jid, crate::store::Draft {
+            text: text.to_string(),
+            mentions: self.mentions.clone(),
+            promoted,
+        });
+        self.schedule_refresh_chats();
+    }
+
+    fn save_composer(&mut self, promote: bool) {
+        let text = self.ui.get_composer_text().to_string();
+        self.save_draft(&text, promote);
+    }
+
     fn handle_send_text(&mut self, text: &str) {
         let mut body = text.trim().to_string();
         let Some(jid) = self.current_jid.clone() else {
@@ -3632,7 +4056,7 @@ impl Bridge {
         {
             return;
         }
-        let quote = self.reply_to.take().and_then(|(chat, id)| {
+        let quote = self.reply_to.clone().and_then(|(chat, id)| {
             let m = self.store.messages_for(&chat).iter().find(|m| m.id == id)?;
             let raw = m.raw.clone()?;
             Some(QuoteRef {
@@ -3646,13 +4070,11 @@ impl Bridge {
                 message: raw,
             })
         });
-        self.clear_reply();
-        self.ui.set_mention_open(false);
         // "@Name" in the composer goes out as "@<number>" plus the jid in
         // the context, which is how every client renders a mention.
         let mut mentions: Vec<String> = Vec::new();
         let mut mention_all = None;
-        let picked = std::mem::take(&mut self.mentions);
+        let picked = self.mentions.clone();
         for (label, target) in picked {
             let token = format!("@{label}");
             if !body.contains(&token) {
@@ -3670,13 +4092,15 @@ impl Bridge {
                 }
             }
         }
-        self.wa.send(Cmd::SendText {
-            jid,
-            body,
-            quote,
-            mentions,
-            mention_all,
-        });
+        let message = crate::wa::build_text(&jid, body, &quote, mentions, mention_all);
+        if self.enqueue_prepared(&jid, message, None) {
+            self.store.drafts.remove(&jid);
+            self.mentions.clear();
+            self.clear_reply();
+            self.ui.set_mention_open(false);
+            self.ui.invoke_set_composer("".into(), 0);
+            self.schedule_refresh_chats();
+        }
     }
 
     // ---- mentions ----
@@ -3684,6 +4108,7 @@ impl Bridge {
     // Called on every composer edit with the cursor's byte offset: an
     // "@word" right before the cursor opens the member list.
     fn composer_changed(&mut self, text: &str, cursor: usize) {
+        self.save_draft(text, false);
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
@@ -3704,7 +4129,7 @@ impl Bridge {
             rows.push(MemberItem {
                 jid: "all".into(),
                 name: all_label.into(),
-                number: t("mention.allHint").into(),
+                number: t("mention.all_hint").into(),
                 hasAvatar: false,
                 avatar: empty_image(),
                 initial: "@".into(),
@@ -3771,6 +4196,7 @@ impl Bridge {
         let cursor = (at + insert.len()) as i32;
         self.mentions.retain(|(l, _)| l != &label);
         self.mentions.push((label, row.jid.to_string()));
+        self.save_draft(&next, false);
         self.ui.invoke_set_composer(next.into(), cursor);
     }
 
@@ -3859,6 +4285,7 @@ impl Bridge {
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
                 self.patch_avatar_everywhere(jid, &image);
                 self.refresh_message_details();
+                self.refresh_typing_members();
                 if jid == self.self_jid {
                     self.refresh_accounts();
                 }
@@ -4213,7 +4640,7 @@ impl Bridge {
             && ok
         {
             let who = crate::wa_map::notice_name(&self.store, &member);
-            let body = ta("notice.historyShared", &[&who]);
+            let body = ta("notice.history_shared", &[&who]);
             self.add_system_message(
                 &group,
                 &format!("sys:shared:{}", now_secs()),
@@ -4994,7 +5421,7 @@ impl Bridge {
                     "reject" => "call.declined",
                     "timeout" => {
                         if call.outgoing {
-                            "call.noAnswer"
+                            "call.no_answer"
                         } else {
                             "call.missed"
                         }
@@ -5079,14 +5506,14 @@ impl Bridge {
         let detail = t(match state {
             "incoming" => {
                 if video {
-                    "call.incomingVideo"
+                    "call.incoming_video"
                 } else {
-                    "call.incomingVoice"
+                    "call.incoming_voice"
                 }
             }
             "outgoing" => "call.calling",
             "connecting" => "call.connecting",
-            "active" => "call.inCall",
+            "active" => "call.in_call",
             _ => "call.ended",
         });
         self.queue_avatar(&jid);
@@ -5567,11 +5994,14 @@ impl Bridge {
         self.set_ring(Some(crate::call::Ring::In));
         let name = self.store.chat_name(&jid);
         let detail = t(if video {
-            "call.incomingVideo"
+            "call.incoming_video"
         } else {
-            "call.incomingVoice"
+            "call.incoming_voice"
         });
-        crate::platform::toast(&name, &detail, crate::platform::ToastPayload::default());
+        // The ring and the call window stay; only the banner obeys the setting.
+        if self.notifications {
+            crate::platform::toast(&name, &detail, crate::platform::ToastPayload::default());
+        }
         // Nobody home: stop ringing and file it as missed.
         let id = id.to_string();
         self.once(RING_TIMEOUT_MS, move |b| b.ring_timeout(&id));
@@ -5897,6 +6327,12 @@ impl Bridge {
     }
 
     fn close_chat(&mut self) {
+        self.save_composer(true);
+        self.ui.invoke_set_composer("".into(), 0);
+        self.clear_reply();
+        self.mentions.clear();
+        self.ui.set_mention_open(false);
+        self.schedule_refresh_chats();
         self.ui.set_message_menu_open(false);
         self.ui.set_details_open(false);
         self.ui.set_message_dialog_open(false);
@@ -5908,6 +6344,8 @@ impl Bridge {
         self.ui.set_selected_jid("".into());
         self.cancel_preview();
         self.current_jid = None;
+        self.ui.set_typing_members(ModelRc::default());
+        self.ui.set_typing_extra(0);
         self.unread_boundary = None;
         self.messages_model.set_vec(Vec::new());
         self.sync_mini_player();
@@ -6009,6 +6447,7 @@ impl Bridge {
             meta.left = false;
         }
         if Some(&jid) == self.current_jid.as_ref() {
+            self.apply_header(&jid);
             self.apply_chat_settings_ui();
             if self.ui.get_info_open() {
                 self.ui.set_info_desc(snap.desc.clone().into());
@@ -6124,7 +6563,7 @@ impl Bridge {
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.left = true;
         }
-        let body = t("notice.youLeft");
+        let body = t("notice.you_left");
         self.add_system_message(&jid, &format!("sys:left:{}", now_secs()), now_secs(), body);
         if Some(&jid) == self.current_jid.as_ref() {
             self.apply_chat_settings_ui();
@@ -6503,19 +6942,19 @@ impl Bridge {
             for_everyone: all_mine,
         });
         self.ui
-            .set_confirm_title(ta("confirm.deleteTitle", &[&count]).into());
-        self.ui.set_confirm_text(t("confirm.deleteBody").into());
+            .set_confirm_title(ta("confirm.delete_title", &[&count]).into());
+        self.ui.set_confirm_text(t("confirm.delete_body").into());
         self.ui.set_confirm_action(
             t(if all_mine {
-                "confirm.deleteEveryone"
+                "confirm.delete_everyone"
             } else {
-                "confirm.deleteMe"
+                "confirm.delete_me"
             })
             .into(),
         );
         self.ui.set_confirm_secondary(
             if all_mine {
-                t("confirm.deleteMe")
+                t("confirm.delete_me")
             } else {
                 String::new()
             }
@@ -6638,7 +7077,7 @@ impl Bridge {
         if !failed.is_empty() {
             let names: Vec<String> = failed.iter().map(|j| self.store.chat_name(j)).collect();
             self.ui
-                .set_status_text(ta("members.addFailed", &[&names.join(", ")]).into());
+                .set_status_text(ta("members.add_failed", &[&names.join(", ")]).into());
         }
     }
 
@@ -6922,7 +7361,7 @@ impl Bridge {
     pub fn on_gif_results(&mut self, results: Vec<(String, String, crate::media::Decoded)>) {
         self.gif_url_by_id.clear();
         if results.is_empty() {
-            self.ui.set_gif_hint(t("gif.noResults").into());
+            self.ui.set_gif_hint(t("gif.no_results").into());
             self.gif_model.set_vec(Vec::new());
             return;
         }
@@ -7052,7 +7491,7 @@ impl Bridge {
             return;
         }
         self.ui.set_pdf_engine_missing(true);
-        self.ui.set_pdf_status(t("pdf.engineMissing").into());
+        self.ui.set_pdf_status(t("pdf.engine_missing").into());
     }
 
     pub fn on_pdf_engine_installed(&mut self, result: Result<(), String>) {
@@ -7068,7 +7507,7 @@ impl Bridge {
             }
             Err(e) => self
                 .ui
-                .set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
+                .set_pdf_status(ta("pdf.install_failed", &[&e]).into()),
         }
     }
 
@@ -7550,6 +7989,77 @@ impl Bridge {
 
     // ---- self-update ----
 
+    fn load_changelog(&mut self, refresh: bool) {
+        if self.ui.get_changelog_loading() {
+            return;
+        }
+        if !self.ui.get_changelog_loaded() {
+            if let Some(cached) = self.vault.as_ref().and_then(|v| v.get("release-history")) {
+                if let Ok((releases, page, more)) = serde_json::from_str::<(Vec<crate::update::ReleaseNote>, i32, bool)>(&cached) {
+                    self.set_changelog(releases);
+                    self.ui.set_changelog_page(page.max(1));
+                    self.ui.set_changelog_more(more);
+                }
+            }
+        }
+        let page = if refresh || !self.ui.get_changelog_loaded() {
+            1
+        } else {
+            self.ui.get_changelog_page().max(1) as u32
+        };
+        if page == 1 { self.ui.set_changelog_verified(false); }
+        self.ui.set_changelog_loading(true);
+        self.ui.set_changelog_error("".into());
+        std::thread::spawn(move || {
+            let result = crate::update::release_notes(page);
+            ui_apply(move |b| {
+                b.ui.set_changelog_loading(false);
+                match result {
+                    Ok(result) => {
+                        let mut releases = if page == 1 { Vec::new() } else { b.changelog_entries() };
+                        for release in result.releases {
+                            if !releases.iter().any(|existing| existing.tag == release.tag) {
+                                releases.push(release);
+                            }
+                        }
+                        let next_page = page.saturating_add(1).min(i32::MAX as u32) as i32;
+                        if let Some(vault) = &b.vault {
+                            if let Ok(cache) = serde_json::to_string(&(&releases, next_page, result.has_more)) {
+                                vault.set("release-history", &cache);
+                            }
+                        }
+                        b.set_changelog(releases);
+                        b.ui.set_changelog_page(next_page);
+                        b.ui.set_changelog_more(result.has_more);
+                        b.ui.set_changelog_loaded(true);
+                        if page == 1 { b.ui.set_changelog_verified(true); }
+                    }
+                    Err(_) => b.ui.set_changelog_error(t("changelog.failed").into()),
+                }
+            });
+        });
+    }
+
+    fn changelog_entries(&self) -> Vec<crate::update::ReleaseNote> {
+        self.ui.get_releases().iter().map(|release| crate::update::ReleaseNote {
+            tag: release.tag.to_string(),
+            date: release.date.to_string(),
+            notes: release.notes.to_string(),
+        }).collect()
+    }
+
+    fn set_changelog(&self, releases: Vec<crate::update::ReleaseNote>) {
+        let items: Vec<ReleaseItem> = releases.into_iter().map(|release| ReleaseItem {
+            installed: release.tag.trim_start_matches('v') == crate::update::current_version(),
+            newer: crate::update::is_newer_release(&release.tag),
+            tag: release.tag.into(),
+            date: release.date.into(),
+            notes: release.notes.into(),
+        }).collect();
+        self.ui.set_changelog_has_new(items.iter().any(|item| item.newer));
+        self.ui.set_releases(ModelRc::new(VecModel::from(items)));
+    }
+
     fn update_tick(&mut self) {
         self.wa.send(Cmd::CheckUpdate);
         // Check again every hour while the app stays open: a release
@@ -7557,10 +8067,10 @@ impl Bridge {
         self.once(3_600_000, |b| b.update_tick());
     }
 
-    pub fn on_update_checked(&mut self, found: Option<String>) {
+    pub fn on_update_checked(&mut self, result: Result<Option<String>, String>) {
         let manual = std::mem::take(&mut self.update_manual);
-        match found {
-            Some(version) => {
+        match result {
+            Ok(Some(version)) => {
                 self.ui.set_update_version(version.into());
                 if self.ui.get_update_state() == 0 {
                     self.ui.set_update_state(1);
@@ -7569,8 +8079,12 @@ impl Bridge {
                     self.ui.set_settings_status("".into());
                 }
             }
-            None if manual => self.ui.set_settings_status(t("update.latest").into()),
-            None => {}
+            Ok(None) => {
+                if manual { self.ui.set_settings_status(t("update.latest").into()); }
+            }
+            Err(_) => {
+                if manual { self.ui.set_settings_status(t("changelog.failed").into()); }
+            }
         }
     }
 
@@ -7594,6 +8108,9 @@ impl Bridge {
     // ---- notifications ----
 
     fn push_notification(&mut self, title: String, text: String, jid: String, msg_id: String) {
+        if !self.notifications {
+            return;
+        }
         self.notify_queue.push((title, text, jid, msg_id));
         if !self.notify_queued {
             self.notify_queued = true;
@@ -7622,7 +8139,7 @@ impl Bridge {
                     return;
                 }
                 let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
-                let toast_title = if self.notify_previews { title.clone() } else { t("notify.appName") };
+                let toast_title = if self.notify_previews { title.clone() } else { t("notify.app_name") };
                 let mut payload = crate::platform::ToastPayload {
                     token: Some(token.clone()),
                     reply: true,
@@ -7646,7 +8163,7 @@ impl Bridge {
                     }
                     text
                 } else {
-                    t("notify.newMessage")
+                    t("notify.new_message")
                 };
                 if let Some(path) = &payload.thumbnail {
                     self.notification_thumbnails.insert(token.clone(), path.clone());
@@ -7674,13 +8191,13 @@ impl Bridge {
                 let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
                 if count == 0 || (self.notify_previews && names.is_empty()) { return; }
                 let text = if !self.notify_previews {
-                    ta("notify.newMessages", &[&count.to_string(), ""])
+                    ta("notify.new_messages", &[&count.to_string(), ""])
                 } else if names.len() == 1 {
-                    ta("notify.fromOne", &[&count.to_string(), names[0]])
+                    ta("notify.from_one", &[&count.to_string(), names[0]])
                 } else {
-                    ta("notify.newMessages", &[&count.to_string(), &names.join(", ")])
+                    ta("notify.new_messages", &[&count.to_string(), &names.join(", ")])
                 };
-                crate::platform::toast(&t("notify.appName"), &text, crate::platform::ToastPayload::default());
+                crate::platform::toast(&t("notify.app_name"), &text, crate::platform::ToastPayload::default());
             }
         }
     }
@@ -7774,9 +8291,8 @@ impl Bridge {
         {
             return;
         }
-        self.wa.send(Cmd::SendText {
-            jid: item.jid.clone(), body, quote: None, mentions: Vec::new(), mention_all: None,
-        });
+        let message = crate::wa::build_text(&item.jid, body, &None, Vec::new(), None);
+        if !self.enqueue_prepared(&item.jid, message, None) { return; }
         if self.ui.get_send_receipts() {
             let message = self.store.messages_for(&item.jid).iter().find(|m| m.id == item.msg_id).cloned();
             if let Some(message) = message {
@@ -7824,7 +8340,7 @@ impl Bridge {
                 self.ui.set_pin_set(true);
                 t("pin.saved")
             }
-            Err(crate::vault::PinError::WrongPin) => t("pin.wrongCurrent"),
+            Err(crate::vault::PinError::WrongPin) => t("pin.wrong_current"),
             Err(crate::vault::PinError::BadFormat) => t("pin.format"),
         };
         self.ui.set_settings_status(status.into());
@@ -7837,7 +8353,7 @@ impl Bridge {
                 self.ui.set_pin_set(false);
                 t("pin.removed")
             }
-            Err(_) => t("pin.wrongCurrent"),
+            Err(_) => t("pin.wrong_current"),
         };
         self.ui.set_settings_status(status.into());
     }
@@ -8019,7 +8535,7 @@ impl Bridge {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let jid = self.store.canon_owned(&normalize_jid(jid));
         let content = content.get_base_message();
-        if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         let text = content.conversation.clone()
             .or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()))
             .or_else(|| content.image_message.as_option().and_then(|m| m.caption.clone()))
@@ -8050,6 +8566,7 @@ impl Bridge {
 
     pub fn on_message_pin(&mut self, jid: &str, id: &str, until: i64) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
+        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
         if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
             m.pinned_until = until;
             self.store.dirty_jids.insert(jid.clone());
@@ -8111,6 +8628,60 @@ impl Bridge {
     }
 
     fn message_action(&mut self, id: &str, action: &str) {
+        let preparation_key = format!("store:preparation:{id}");
+        let preparation = self.vault.as_ref().and_then(|vault| vault.get(&preparation_key))
+            .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
+        if let Some(preparation) = preparation {
+            if action == "retry" {
+                if self.preparations_active.contains(id) { return; }
+                self.show_preparation(&preparation, "outbox.preparing");
+                if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+                return;
+            }
+            if action == "cancel" {
+                if self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[], &[&preparation_key]).is_ok()) {
+                    self.preparation_states.remove(id);
+                    self.store.remove_messages(&preparation.jid, &[id.to_string()]);
+                    self.rebuild_conversation(&preparation.jid);
+                }
+                return;
+            }
+        }
+        if let Some(index) = self.outbox.iter().position(|entry| entry.id == id) {
+            if action == "recover" {
+                if let Some(message) = self.find_message(id) {
+                    let text = message.text.clone();
+                    self.ui.invoke_set_composer(text.clone().into(), text.len() as i32);
+                    self.save_draft(&text, true);
+                }
+                return;
+            }
+            if action == "retry" && self.outbox[index].state != crate::outbox::State::Sending {
+                self.outbox[index].state = crate::outbox::State::Queued;
+                if self.persist_outbox(&self.outbox).is_ok() {
+                    self.refresh_outbox_row(id);
+                    self.dispatch_outbox();
+                }
+                return;
+            }
+            if action == "cancel" {
+                if self.outbox[index].state != crate::outbox::State::Queued {
+                    self.message_action_failed(&t("outbox.cannot_cancel"));
+                    return;
+                }
+                let entry = self.outbox[index].clone();
+                let mut entries = self.outbox.clone();
+                entries.remove(index);
+                if self.persist_outbox(&entries).is_err() {
+                    self.message_action_failed(&t("outbox.storage_failed"));
+                    return;
+                }
+                self.outbox = entries;
+                self.store.remove_messages(&entry.jid, &[id.to_string()]);
+                self.rebuild_conversation(&entry.jid);
+                return;
+            }
+        }
         let Some(m) = self.find_message(id).cloned() else { return };
         if m.deleted || m.kind == MessageKind::System { return; }
         match action {
@@ -8724,7 +9295,7 @@ impl Bridge {
                     },
                 );
             }
-            None => self.ui.set_status_text(t("rec.noMic").into()),
+            None => self.ui.set_status_text(t("rec.no_mic").into()),
         }
     }
 
@@ -8776,6 +9347,29 @@ impl Bridge {
 }
 
 // Whether a message has something to download or decode for its bubble.
+fn chat_matches_archive(archived: bool, tab: &str, searching: bool) -> bool {
+    if tab == "archived" {
+        archived
+    } else {
+        !archived || searching
+    }
+}
+
+fn group_typing_status(names: &[String], overflow: bool) -> String {
+    if overflow { return t("presence.group_many"); }
+    let first_names = names.iter().take(5)
+        .filter_map(|name| name.split_whitespace().next()).collect::<Vec<_>>().join(", ");
+    ta(if names.len() == 1 { "presence.group_one" } else { "presence.group_some" }, &[&first_names])
+}
+
+fn typing_participants(members: &HashMap<String, (u64, String)>) -> (Vec<String>, i32) {
+    let mut participants: Vec<_> = members.keys().cloned().collect();
+    participants.sort();
+    let extra = participants.len().saturating_sub(5).min(i32::MAX as usize) as i32;
+    participants.truncate(5);
+    (participants, extra)
+}
+
 fn quote_chat(m: &StoredMessage) -> &str {
     if m.quote_jid.is_empty() { &m.jid } else { &m.quote_jid }
 }
@@ -8820,6 +9414,55 @@ fn message_editable(m: &StoredMessage) -> bool {
 #[cfg(test)]
 mod message_action_tests {
     use super::*;
+
+    #[test]
+    fn sidebar_search_includes_archived_chats_without_changing_archive_filter() {
+        for tab in ["all", "unread", "favorites", "groups", "label:work"] {
+            assert!(chat_matches_archive(false, tab, false));
+            assert!(!chat_matches_archive(true, tab, false));
+            assert!(chat_matches_archive(false, tab, true));
+            assert!(chat_matches_archive(true, tab, true));
+        }
+        for searching in [false, true] {
+            assert!(chat_matches_archive(true, "archived", searching));
+            assert!(!chat_matches_archive(false, "archived", searching));
+        }
+    }
+
+    #[test]
+    fn group_header_typing_uses_first_names_and_plural_forms() {
+        let names = vec!["Ana Silva".to_string(), "  Bruno Costa".to_string()];
+        assert_eq!(group_typing_status(&names[..1], false), ta("presence.group_one", &["Ana"]));
+        assert_eq!(group_typing_status(&names, false), ta("presence.group_some", &["Ana, Bruno"]));
+        assert_eq!(group_typing_status(&names, true), t("presence.group_many"));
+        let names = vec!["Ana Silva".to_string(); 5];
+        assert_eq!(group_typing_status(&names, false), ta("presence.group_some", &["Ana, Ana, Ana, Ana, Ana"]));
+    }
+
+    #[test]
+    fn typing_bubbles_limit_avatars_and_count_remaining_people() {
+        for count in [0, 1, 5, 6, 12] {
+            let members = (0..count).rev().map(|i| {
+                (format!("{i:02}@s.whatsapp.net"), (i as u64, String::new()))
+            }).collect();
+            let (visible, extra) = typing_participants(&members);
+            assert_eq!(visible.len(), count.min(5));
+            assert_eq!(extra, count.saturating_sub(5) as i32);
+            assert!(visible.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+    }
+
+    #[test]
+    fn typing_members_refresh_independently() {
+        let mut members = HashMap::from([
+            ("a".to_string(), (1, String::new())),
+            ("b".to_string(), (2, String::new())),
+        ]);
+        members.insert("a".into(), (3, String::new()));
+        assert_eq!(members.len(), 2);
+        members.remove("a");
+        assert_eq!(typing_participants(&members).0, vec!["b".to_string()]);
+    }
 
     #[test]
     fn document_types_use_extension_and_mime_fallback() {
@@ -8924,10 +9567,10 @@ fn copy_body(m: &StoredMessage) -> String {
         MessageKind::Text | MessageKind::System => m.text.clone(),
         MessageKind::Image if m.sticker => t("preview.sticker"),
         MessageKind::Image | MessageKind::Video if !m.text.is_empty() => {
-            format!("{} {}", t("export.mediaOmitted"), m.text)
+            format!("{} {}", t("export.media_omitted"), m.text)
         }
-        MessageKind::Doc => format!("{} ({})", t("export.mediaOmitted"), m.text),
-        _ => t("export.mediaOmitted"),
+        MessageKind::Doc => format!("{} ({})", t("export.media_omitted"), m.text),
+        _ => t("export.media_omitted"),
     }
 }
 

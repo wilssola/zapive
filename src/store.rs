@@ -169,7 +169,7 @@ impl StoredMessage {
             .filter(|doc| doc.mimetype.as_deref().unwrap_or(&self.mimetype).starts_with("audio/"))
             .and_then(|doc| doc.file_name.as_deref())
             .filter(|name| !name.trim().is_empty());
-        original.or(document).map(clean_text).unwrap_or_else(|| t("audio.fallbackName"))
+        original.or(document).map(clean_text).unwrap_or_else(|| t("audio.fallback_name"))
     }
 }
 
@@ -378,12 +378,24 @@ pub fn format_time(timestamp: i64) -> String {
     if timestamp == 0 {
         return String::new();
     }
-    let d = local_date(timestamp);
-    let today = chrono::Local::now().date_naive();
-    if d.date_naive() == today {
-        d.format("%H:%M").to_string()
-    } else {
-        d.format("%d/%m").to_string()
+    format_time_at(local_date(timestamp).naive_local(), chrono::Local::now().date_naive())
+}
+
+fn format_time_at(d: chrono::NaiveDateTime, today: chrono::NaiveDate) -> String {
+    use chrono::Datelike as _;
+    match today.signed_duration_since(d.date()).num_days() {
+        0 => d.format("%H:%M").to_string(),
+        1 => t("day.yesterday"),
+        2..=6 => t(match d.weekday() {
+            chrono::Weekday::Mon => "day.monday",
+            chrono::Weekday::Tue => "day.tuesday",
+            chrono::Weekday::Wed => "day.wednesday",
+            chrono::Weekday::Thu => "day.thursday",
+            chrono::Weekday::Fri => "day.friday",
+            chrono::Weekday::Sat => "day.saturday",
+            chrono::Weekday::Sun => "day.sunday",
+        }),
+        _ => d.format("%d/%m").to_string(),
     }
 }
 
@@ -466,9 +478,17 @@ pub fn format_duration(seconds: u32) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct Draft {
+    pub text: String,
+    pub mentions: Vec<(String, String)>,
+    pub promoted: u64,
+}
+
 #[derive(Default)]
 pub struct Store {
     pub chats: HashMap<String, ChatMeta>,
+    pub drafts: HashMap<String, Draft>,
     // Our own identities (phone jid and lid).
     pub self_jids: HashSet<String>,
     pub messages: HashMap<String, Vec<StoredMessage>>,
@@ -501,6 +521,10 @@ pub struct Store {
     pub label_chats: HashMap<String, HashSet<String>>,
     pub labels_dirty: bool,
     pub search: crate::search::SearchIndex,
+    pending_removals: HashSet<(String, String)>,
+    pending_merges: Vec<(String, String)>,
+    older_cursors: HashMap<String, (i64, String)>,
+    older_exhausted: HashSet<String>,
 }
 
 impl Store {
@@ -515,7 +539,7 @@ impl Store {
 
     // Learns that `lid` and `pn` are the same contact; merges duplicates.
     pub fn learn_alias(&mut self, lid: &str, pn: &str) -> bool {
-        if self.aliases.get(lid).map(String::as_str) == Some(pn) {
+        if lid == pn || self.aliases.get(lid).map(String::as_str) == Some(pn) {
             return false;
         }
         self.aliases.insert(lid.to_string(), pn.to_string());
@@ -524,6 +548,17 @@ impl Store {
     }
 
     fn merge_jid(&mut self, from: &str, into: &str) {
+        if from == into { return; }
+        self.pending_merges.push((from.to_string(), into.to_string()));
+        self.older_cursors.remove(into);
+        self.older_exhausted.remove(into);
+        if let Some(src) = self.drafts.remove(from) {
+            if self.drafts.get(into).is_none_or(|dst| {
+                (!src.text.trim().is_empty(), src.promoted) > (!dst.text.trim().is_empty(), dst.promoted)
+            }) {
+                self.drafts.insert(into.to_string(), src);
+            }
+        }
         if let Some(src) = self.chats.remove(from) {
             let dst = self.chats.get(into);
             let merged = ChatMeta {
@@ -560,20 +595,17 @@ impl Store {
             }
         }
         self.search.remove_chat(from);
-        if let Some(src_msgs) = self.messages.remove(from) {
-            let dst_msgs = self.messages.entry(into.to_string()).or_default();
-            let seen: HashSet<String> = dst_msgs.iter().map(|m| m.id.clone()).collect();
-            for mut m in src_msgs {
-                if !seen.contains(&m.id) {
-                    m.jid = into.to_string();
-                    dst_msgs.push(m);
-                }
+        self.pending_removals = self.pending_removals.drain().map(|(jid, id)| {
+            (if jid == from { into.to_string() } else { jid }, id)
+        }).collect();
+        if let Some(mut src_msgs) = self.messages.remove(from) {
+            for m in &mut src_msgs {
+                m.jid = into.to_string();
             }
-            dst_msgs.sort_by_key(|m| m.timestamp);
+            self.merge_page(into, src_msgs);
             self.dirty_jids.insert(into.to_string());
             self.dirty_jids.remove(from);
         }
-        self.deleted_jids.insert(from.to_string());
         if let Some(name) = self.contacts.get(from).cloned()
             && !self.contacts.contains_key(into)
         {
@@ -673,7 +705,14 @@ impl Store {
             if pa > 0 {
                 return pb.cmp(&pa);
             }
-            b.timestamp.cmp(&a.timestamp)
+            let promotion = |chat: &ChatMeta| {
+                self.drafts.get(&chat.jid)
+                    .filter(|draft| !draft.text.trim().is_empty())
+                    .map(|draft| draft.promoted)
+                    .unwrap_or(0)
+            };
+            promotion(b).cmp(&promotion(a))
+                .then_with(|| b.timestamp.cmp(&a.timestamp))
         });
         list
     }
@@ -747,6 +786,9 @@ impl Store {
 
     // Returns true if the message was newly added (false = duplicate).
     pub fn add_message(&mut self, mut stored: StoredMessage) -> bool {
+        if self.pending_removals.contains(&(self.canon_owned(&stored.jid), stored.id.clone())) {
+            return false;
+        }
         let list = self.messages.entry(stored.jid.clone()).or_default();
         if list.iter().any(|m| m.id == stored.id) {
             return false;
@@ -760,10 +802,6 @@ impl Store {
         let preview_msg = stored.clone();
         list.push(stored);
         list.sort_by_key(|m| m.timestamp);
-        if list.len() > 500 {
-            let excess = list.len() - 500;
-            list.drain(..excess);
-        }
         self.dirty_jids.insert(jid.clone());
         self.search.add(&jid, &preview_msg);
 
@@ -789,10 +827,18 @@ impl Store {
     // Drops a chat's messages from RAM, the index and (via deleted_jids)
     // the vault, keeping the chat itself in the list.
     pub fn clear_messages(&mut self, jid: &str) {
+        let canonical = self.canon_owned(jid);
+        let jid = canonical.as_str();
+        self.older_cursors.remove(jid);
+        self.older_exhausted.remove(jid);
+        self.pending_removals.retain(|(chat, _)| chat != jid);
         self.messages.remove(jid);
         self.hydrated.remove(jid);
         self.dirty_jids.remove(jid);
         self.deleted_jids.insert(jid.to_string());
+        for (from, into) in &self.pending_merges {
+            if into == jid { self.deleted_jids.insert(from.clone()); }
+        }
         self.search.remove_chat(jid);
         if let Some(meta) = self.chats.get_mut(jid) {
             meta.preview = String::new();
@@ -801,8 +847,11 @@ impl Store {
 
     // Removes a chat entirely (WhatsApp's "delete chat").
     pub fn delete_chat(&mut self, jid: &str) {
+        let canonical = self.canon_owned(jid);
+        let jid = canonical.as_str();
         self.clear_messages(jid);
         self.chats.remove(jid);
+        self.drafts.remove(jid);
         for set in self.label_chats.values_mut() {
             set.remove(jid);
         }
@@ -896,40 +945,85 @@ impl Store {
     // Loads a chat's message list from the vault, merging with whatever
     // arrived over the socket while the chat was cold.
     pub fn hydrate(&mut self, vault: &Vault, jid: &str) {
-        // A locked vault reads as "no data": marking the chat hydrated
-        // here would let a later save truncate its history on disk.
-        if vault.locked() {
-            return;
-        }
         let jid = self.canon_owned(jid);
-        if !self.hydrated.insert(jid.clone()) {
-            return;
+        if self.hydrated.contains(&jid) { return; }
+        if let Err(e) = self.flush_history(vault) { eprintln!("[store] hydrate {jid} failed: {e}"); return; }
+        let disk = match vault.history_page(&jid, None, 100) {
+            Ok(disk) => disk,
+            Err(e) => { eprintln!("[store] hydrate {jid} failed: {e}"); return; }
+        };
+        if let Some(first) = disk.first() {
+            self.older_cursors.insert(jid.clone(), (first.timestamp, first.id.clone()));
         }
-        let Some(text) = vault.get(&format!("store:msgs:{jid}")) else { return };
-        let Ok(mut disk) = serde_json::from_str::<Vec<StoredMessage>>(&text) else { return };
-        let live = self.messages.entry(jid.clone()).or_default();
-        if !live.is_empty() {
-            let known: HashSet<String> = disk.iter().map(|m| m.id.clone()).collect();
-            for m in live.drain(..) {
-                if !known.contains(&m.id) {
-                    disk.push(m);
-                }
-            }
-            disk.sort_by_key(|m| m.timestamp);
-        }
-        *live = disk;
+        if disk.len() < 100 { self.older_exhausted.insert(jid.clone()); }
+        self.messages.remove(&jid);
+        self.merge_page(&jid, disk);
+        self.hydrated.insert(jid.clone());
         self.refresh_audio_preview(&jid);
+    }
+
+    fn merge_page(&mut self, jid: &str, disk: Vec<StoredMessage>) -> bool {
+        let live = self.messages.entry(jid.to_string()).or_default();
+        let removals = &self.pending_removals;
+        live.retain(|m| !removals.contains(&(jid.to_string(), m.id.clone())));
+        let known: HashSet<String> = live.iter().map(|m| m.id.clone()).collect();
+        let before = live.len();
+        live.extend(disk.into_iter().filter(|m| !known.contains(&m.id)
+            && !removals.contains(&(jid.to_string(), m.id.clone()))));
+        live.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
+        live.len() > before
+    }
+
+    pub fn load_older(&mut self, vault: &Vault, jid: &str) -> bool {
+        let jid = self.canon_owned(jid);
+        self.hydrate(vault, &jid);
+        if !self.hydrated.contains(&jid) || self.older_exhausted.contains(&jid) { return false; }
+        if let Err(e) = self.flush_history(vault) { eprintln!("[store] load_older {jid} failed: {e}"); return false; }
+        let cursor = self.older_cursors.get(&jid).map(|(ts, id)| (*ts, id.as_str()));
+        let page = match vault.history_page(&jid, cursor, 100) { Ok(page) => page, Err(e) => { eprintln!("[store] load_older {jid} failed: {e}"); return false; } };
+        if let Some(first) = page.first() {
+            self.older_cursors.insert(jid.clone(), (first.timestamp, first.id.clone()));
+        }
+        if page.len() < 100 { self.older_exhausted.insert(jid.clone()); }
+        let found = !page.is_empty();
+        self.merge_page(&jid, page);
+        found
+    }
+
+    pub fn hydrate_id(&mut self, vault: &Vault, jid: &str, id: &str) -> bool {
+        let jid = self.canon_owned(jid);
+        if self.pending_removals.contains(&(jid.clone(), id.to_string())) { return false; }
+        if self.messages_for(&jid).iter().any(|m| m.id == id) { return true; }
+        if self.flush_history(vault).is_err() { return false; }
+        let Ok(Some(message)) = vault.history_id(&jid, id) else { return false };
+        self.merge_page(&jid, vec![message]);
+        true
+    }
+
+    pub fn load_around(&mut self, vault: &Vault, jid: &str, id: &str) -> bool {
+        let jid = self.canon_owned(jid);
+        if let Err(e) = self.flush_history(vault) { eprintln!("[store] load_around {jid} failed: {e}"); return false; }
+        self.hydrate(vault, &jid);
+        if !self.hydrate_id(vault, &jid, id) { return false; }
+        let Some(target) = self.messages_for(&jid).iter().find(|m| m.id == id) else { return false };
+        let mut page = match vault.history_page(&jid, Some((target.timestamp, &target.id)), 50) { Ok(page) => page, Err(e) => { eprintln!("[store] load_around {jid} failed: {e}"); return false; } };
+        let after = match vault.history_after(&jid, target.timestamp, &target.id, 50) { Ok(after) => after, Err(e) => { eprintln!("[store] load_around {jid} failed: {e}"); return false; } };
+        page.extend(after);
+        self.merge_page(&jid, page);
+        true
     }
 
     // Drops a hydrated chat back to metadata-only. Dirty chats stay: their
     // unsaved messages would be lost.
     pub fn evict(&mut self, jid: &str) {
         let jid = self.canon_owned(jid);
-        if self.dirty_jids.contains(&jid) {
+        if self.dirty_jids.contains(&jid) || !self.pending_merges.is_empty() {
             return;
         }
         self.messages.remove(&jid);
         self.hydrated.remove(&jid);
+        self.older_cursors.remove(&jid);
+        self.older_exhausted.remove(&jid);
     }
 
     // Records a call event; returns true when it is new or changed.
@@ -1187,16 +1281,16 @@ impl Store {
 
     // Removes messages locally only ("delete for me").
     pub fn remove_messages(&mut self, jid: &str, ids: &[String]) -> bool {
-        let Some(list) = self.messages.get_mut(jid) else { return false };
-        let before = list.len();
-        list.retain(|m| !ids.contains(&m.id));
-        if list.len() == before {
-            return false;
+        let jid = self.canon_owned(jid);
+        if ids.is_empty() { return false; }
+        if let Some(list) = self.messages.get_mut(&jid) {
+            list.retain(|m| !ids.contains(&m.id));
         }
         for id in ids {
-            self.search.remove(jid, id);
+            self.pending_removals.insert((jid.clone(), id.clone()));
+            self.search.remove(&jid, id);
         }
-        self.dirty_jids.insert(jid.to_string());
+        self.dirty_jids.insert(jid);
         true
     }
 
@@ -1277,21 +1371,57 @@ impl Store {
     // ---- persistence (WhatsApp only sends history sync at pairing time,
     // so everything must survive restarts locally) ----
 
-    pub fn save_to(&mut self, vault: &Vault) {
-        vault.set("store:chats", &to_json(&self.chats));
-        vault.set("store:contacts", &to_json(&self.contacts));
-        vault.set("store:pushnames", &to_json(&self.push_names));
-        vault.set("store:saved", &to_json(&self.saved_contacts));
-        vault.set("store:aliases", &to_json(&self.aliases));
-        for jid in self.deleted_jids.drain() {
-            vault.del(&format!("store:msgs:{jid}"));
+    fn flush_history(&mut self, vault: &Vault) -> Result<(), String> {
+        for (jid, id) in &self.pending_removals {
+            if let Some(live) = self.messages.get_mut(jid) {
+                live.retain(|m| m.id != *id);
+            }
+            self.search.remove(jid, id);
         }
+        let messages: Vec<StoredMessage> = self.dirty_jids.iter()
+            .filter_map(|jid| self.messages.get(jid)).flatten().cloned().collect();
+        let clears: Vec<String> = self.deleted_jids.iter().cloned().collect();
+        let removals: Vec<(String, String)> = self.pending_removals.iter().cloned().collect();
+        vault.history_commit(&messages, &clears, &removals, &self.pending_merges)?;
+        for message in &messages {
+            if message.deleted { self.search.remove(&message.jid, &message.id); }
+            else { self.search.add(&message.jid, message); }
+        }
+        for (from, into) in std::mem::take(&mut self.pending_merges) {
+            self.search.remove_chat(&from);
+            self.index_from_vault(vault, &into);
+        }
+        self.deleted_jids.clear();
+        self.pending_removals.clear();
+        for jid in &self.dirty_jids {
+            if !self.hydrated.contains(jid) {
+                self.messages.remove(jid);
+            }
+        }
+        self.dirty_jids.clear();
+        Ok(())
+    }
+
+    pub fn save_to(&mut self, vault: &Vault) {
+        if let Err(error) = self.save_checked(vault) {
+            eprintln!("[store] save failed: {error}");
+        }
+    }
+
+    pub fn save_checked(&mut self, vault: &Vault) -> Result<(), String> {
+        self.flush_history(vault)?;
+        vault.set_checked("store:chats", &to_json(&self.chats))?;
+        vault.set_checked("store:drafts", &to_json(&self.drafts))?;
+        vault.set_checked("store:contacts", &to_json(&self.contacts))?;
+        vault.set_checked("store:pushnames", &to_json(&self.push_names))?;
+        vault.set_checked("store:saved", &to_json(&self.saved_contacts))?;
+        vault.set_checked("store:aliases", &to_json(&self.aliases))?;
         if self.starred_dirty {
-            vault.set("store:starred", &to_json(&self.starred_ids));
+            vault.set_checked("store:starred", &to_json(&self.starred_ids))?;
             self.starred_dirty = false;
         }
         if self.calls_dirty {
-            vault.set("store:calls", &to_json(&self.calls));
+            vault.set_checked("store:calls", &to_json(&self.calls))?;
             self.calls_dirty = false;
         }
         if self.statuses_dirty {
@@ -1301,46 +1431,23 @@ impl Store {
                 .iter()
                 .map(|(jid, list)| (jid, list.iter().collect()))
                 .collect();
-            vault.set("store:statuses", &to_json(&dehydrated));
+            vault.set_checked("store:statuses", &to_json(&dehydrated))?;
             self.statuses_dirty = false;
         }
         if self.members_dirty {
-            vault.set("store:members", &to_json(&self.members));
+            vault.set_checked("store:members", &to_json(&self.members))?;
             self.members_dirty = false;
         }
         if self.labels_dirty {
-            vault.set("store:labels", &to_json(&self.labels));
-            vault.set("store:labelchats", &to_json(&self.label_chats));
+            vault.set_checked("store:labels", &to_json(&self.labels))?;
+            vault.set_checked("store:labelchats", &to_json(&self.label_chats))?;
             self.labels_dirty = false;
         }
-        let mut saved = 0;
-        let dirty: Vec<String> = self.dirty_jids.drain().collect();
-        for jid in dirty {
-            // A cold chat that only collected new arrivals must merge with
-            // the vault first, or the write would truncate its history.
-            let was_cold = !self.hydrated.contains(&jid);
-            self.hydrate(vault, &jid);
-            if let Some(list) = self.messages.get(&jid) {
-                // Only the last 300 survive the disk (500 in memory).
-                let tail: Vec<&StoredMessage> =
-                    list.iter().skip(list.len().saturating_sub(300)).collect();
-                vault.set(&format!("store:msgs:{jid}"), &to_json(&tail));
-                // The full list is in hand: the index for this chat is
-                // rebuilt from it, which also backfills chats that
-                // predate the index.
-                self.search.rebuild(&jid, list);
-                saved += 1;
-            }
-            if was_cold {
-                self.messages.remove(&jid);
-                self.hydrated.remove(&jid);
-            }
-        }
+        self.flush_history(vault)?;
         self.search.save_to(vault);
-        if saved > 0 {
-            println!("[store] saved {saved} chat message list(s)");
-        }
+        Ok(())
     }
+
 
     // Indexes one cold chat straight from the vault (first-run backfill
     // for chats stored before the search index existed).
@@ -1358,21 +1465,21 @@ impl Store {
     }
 
     pub fn index_from_vault(&mut self, vault: &Vault, jid: &str) {
-        if self.search.has_chat(jid) {
-            return;
-        }
-        let Some(text) = vault.get(&format!("store:msgs:{jid}")) else { return };
-        let Ok(disk) = serde_json::from_str::<Vec<StoredMessage>>(&text) else { return };
-        if let Some(message) = disk.iter().max_by_key(|m| m.timestamp) {
-            if message.kind == MessageKind::Audio
-                && self.chats.get(jid).is_some_and(|chat| chat.timestamp == message.timestamp)
-            {
-                let preview = compute_preview(message, self);
-                self.chats.get_mut(jid).unwrap().preview = preview;
+        let jid = self.canon_owned(jid);
+        let mut cursor: Option<(i64, String)> = None;
+        loop {
+            let Ok(page) = vault.history_page(&jid, cursor.as_ref().map(|(ts, id)| (*ts, id.as_str())), 100) else { return };
+            for message in &page {
+                if !self.pending_removals.contains(&(jid.clone(), message.id.clone())) {
+                    self.search.add(&jid, message);
+                }
             }
+            if page.len() < 100 { break; }
+            cursor = page.first().map(|m| (m.timestamp, m.id.clone()));
         }
-        self.search.rebuild(jid, &disk);
+        self.search.mark_complete(&jid);
     }
+
 
     pub fn load_from(&mut self, vault: &Vault) {
         fn read<T: serde::de::DeserializeOwned>(vault: &Vault, key: &str) -> Option<T> {
@@ -1380,6 +1487,9 @@ impl Store {
         }
         if let Some(v) = read(vault, "store:chats") {
             self.chats = v;
+        }
+        if let Some(v) = read(vault, "store:drafts") {
+            self.drafts = v;
         }
         if let Some(v) = read(vault, "store:contacts") {
             self.contacts = v;
@@ -1392,6 +1502,8 @@ impl Store {
         }
         if let Some(v) = read(vault, "store:aliases") {
             self.aliases = v;
+            self.pending_merges.extend(self.aliases.iter().filter(|(from, into)| from != into)
+                .map(|(from, into)| (from.clone(), into.clone())));
         }
         // Message bodies stay on disk; chats hydrate on open/hover. The
         // list itself renders from ChatMeta.preview alone.
@@ -1433,6 +1545,11 @@ pub fn normalize_jid(jid: &str) -> String {
 // One line describing a quoted message, from the copy WhatsApp embeds in
 // the reply.
 pub fn quoted_summary(quoted: &wa::Message) -> String {
+    use whatsapp_rust::proto_helpers::MessageExt as _;
+    if quoted.is_view_once() { return t("compat.view_once"); }
+    if let Some(card) = crate::wa_map::compatibility_card(quoted.get_base_message()) {
+        return card.chars().take(120).collect();
+    }
     let inner: &wa::Message = quoted
         .ephemeral_message
         .as_option()
@@ -1509,6 +1626,313 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn history_message(jid: &str, n: i64) -> StoredMessage {
+        let mut message = crate::wa_map::system_message(jid, &format!("{n:05}"), n / 3, format!("history body {n}"));
+        message.kind = MessageKind::Text;
+        message
+    }
+
+    #[test]
+    fn durable_history_restart_pages_and_off_window_mutations() {
+        let path = std::env::temp_dir().join(format!("zapive_history_restart_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            for n in 0..751 { store.add_message(history_message("chat", n)); }
+            store.save_checked(&vault).unwrap();
+            assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 751);
+            assert!(store.messages_for("chat").is_empty());
+        }
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            store.hydrate(&vault, "chat");
+            assert_eq!(store.messages_for("chat").len(), 100);
+            assert!(store.hydrate_id(&vault, "chat", "00001"));
+            assert!(store.mark_deleted("chat", "00001"));
+            assert!(store.remove_messages("chat", &["00002".into()]));
+            store.save_checked(&vault).unwrap();
+            store.evict("chat");
+            store.hydrate(&vault, "chat");
+            assert!(store.load_around(&vault, "chat", "00200"));
+            while store.load_older(&vault, "chat") {}
+            assert_eq!(store.messages_for("chat").len(), 750);
+            assert!(store.messages_for("chat").iter().find(|m| m.id == "00001").unwrap().deleted);
+            assert!(vault.history_id("chat", "00002").unwrap().is_none());
+            store.add_message(history_message("chat", 999));
+            vault.lock();
+            assert!(store.save_checked(&vault).is_err());
+            store.evict("chat");
+            assert!(store.messages_for("chat").iter().any(|m| m.id == "00999"));
+            vault.open().unwrap();
+            store.save_checked(&vault).unwrap();
+            assert!(vault.history_id("chat", "00999").unwrap().is_some());
+        }
+        crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn durable_history_removals_survive_loading_dirty_save_and_restart() {
+        for around in [false, true] {
+            let path = std::env::temp_dir().join(format!(
+                "zapive_history_removals_{}_{around}.db", std::process::id()
+            ));
+            crate::paths::remove_db(&path);
+            {
+                let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+                vault.open().unwrap();
+                let mut store = Store::default();
+                for n in 0..300 { store.add_message(history_message("chat", n)); }
+                store.save_checked(&vault).unwrap();
+                if around { store.hydrate(&vault, "chat"); }
+                let removed = if around { ["00249", "00251"] } else { ["00298", "00299"] };
+                assert!(store.remove_messages("chat", &removed.map(String::from)));
+                if around {
+                    assert!(store.load_around(&vault, "chat", "00250"));
+                } else {
+                    store.hydrate(&vault, "chat");
+                }
+                assert!(store.messages_for("chat").iter().all(|m| !removed.contains(&m.id.as_str())));
+                assert!(!store.hydrate_id(&vault, "chat", removed[0]));
+                assert!(!store.load_around(&vault, "chat", removed[1]));
+                assert!(store.add_message(history_message("chat", 999)));
+                store.save_checked(&vault).unwrap();
+            }
+            {
+                let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+                vault.open().unwrap();
+                let mut store = Store::default();
+                store.load_from(&vault);
+                store.hydrate(&vault, "chat");
+                while store.load_older(&vault, "chat") {}
+                let removed = if around { ["00249", "00251"] } else { ["00298", "00299"] };
+                assert_eq!(store.messages_for("chat").len(), 299);
+                for id in removed {
+                    assert!(vault.history_id("chat", id).unwrap().is_none());
+                    assert!(store.messages_for("chat").iter().all(|m| m.id != id));
+                }
+                assert!(store.messages_for("chat").iter().any(|m| m.id == "00999"));
+            }
+            crate::paths::remove_db(&path);
+        }
+    }
+
+    #[test]
+    fn durable_history_pending_removals_filter_merges_and_resident_flush() {
+        let mut vault = Vault::open_at(":memory:").unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        store.hydrated.insert("chat".into());
+        store.add_message(history_message("chat", 1));
+        store.save_checked(&vault).unwrap();
+        assert!(store.remove_messages("chat", &["00001".into()]));
+        assert!(!store.merge_page("chat", vec![history_message("chat", 1)]));
+        assert!(!store.add_message(history_message("chat", 1)));
+        assert!(!store.hydrate_id(&vault, "chat", "00001"));
+        store.add_message(history_message("old@lid", 1));
+        store.learn_alias("old@lid", "chat");
+        assert!(store.messages_for("chat").is_empty());
+        store.messages.get_mut("chat").unwrap().push(history_message("chat", 1));
+        store.save_checked(&vault).unwrap();
+        assert!(store.messages_for("chat").is_empty());
+        assert!(store.pending_removals.is_empty());
+        store.add_message(history_message("chat", 2));
+        store.save_checked(&vault).unwrap();
+        let mut restarted = Store::default();
+        restarted.hydrate(&vault, "chat");
+        assert_eq!(restarted.messages_for("chat").len(), 1);
+        assert_eq!(restarted.messages_for("chat")[0].id, "00002");
+        assert!(vault.history_id("chat", "00001").unwrap().is_none());
+    }
+
+    #[test]
+    fn durable_history_legacy_migration_rollback_and_account_isolation() {
+        let mut vault = Vault::open_at(":memory:").unwrap();
+        vault.open().unwrap();
+        let legacy: Vec<_> = (0..610).map(|n| history_message("chat", n)).collect();
+        vault.set_checked("store:msgs:chat", &to_json(&legacy)).unwrap();
+        vault.set_checked("store:msgs:broken", "invalid json").unwrap();
+        vault.history_commit(&[history_message("broken", 900)], &["broken".into()], &[], &[]).unwrap();
+        assert_eq!(vault.history_page("broken", None, 1000).unwrap().len(), 1);
+        assert!(vault.get("store:msgs:chat").is_some());
+        assert!(vault.get("store:msgs:broken").is_some());
+        let mut store = Store::default();
+        store.hydrate(&vault, "chat");
+        assert_eq!(store.messages_for("chat").len(), 100);
+        assert!(vault.get("store:msgs:chat").is_none());
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 610);
+        vault.set_checked("store:msgs:chat", &to_json(&legacy)).unwrap();
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 610);
+        vault.set_account("other");
+        assert!(vault.history_page("chat", None, 1000).unwrap().is_empty());
+        vault.history_commit(&[history_message("chat", 999)], &[], &[], &[]).unwrap();
+        vault.set_account("");
+        store.remove_messages("chat", &["00000".into()]);
+        store.save_checked(&vault).unwrap();
+        assert!(vault.history_id("chat", "00000").unwrap().is_none());
+        store.clear_messages("chat");
+        store.add_message(history_message("chat", 888));
+        store.save_checked(&vault).unwrap();
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 1);
+        vault.set_account("other");
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap()[0].id, "00999");
+        vault.wipe_account("");
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 1);
+        vault.wipe_account("other");
+        assert!(vault.history_page("chat", None, 1000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn durable_history_cold_alias_merge_and_delete_chat() {
+        let mut vault = Vault::open_at(":memory:").unwrap();
+        vault.open().unwrap();
+        let source: Vec<_> = (0..620).map(|n| history_message("old@lid", n)).collect();
+        vault.set_checked("store:msgs:old@lid", &to_json(&source)).unwrap();
+        vault.history_commit(&[history_message("new", 900)], &[], &[], &[]).unwrap();
+        let mut store = Store::default();
+        store.learn_alias("old@lid", "new");
+        store.save_checked(&vault).unwrap();
+        assert!(vault.history_page("old@lid", None, 1000).unwrap().is_empty());
+        let merged = vault.history_page("new", None, 1000).unwrap();
+        assert_eq!(merged.len(), 621);
+        assert!(merged.iter().all(|m| m.jid == "new"));
+        store.delete_chat("new");
+        store.save_checked(&vault).unwrap();
+        assert!(vault.history_page("new", None, 1000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sidebar_time_uses_calendar_day_boundaries() {
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
+        let at = |year, month, day, hour, minute| {
+            chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap()
+                .and_hms_opt(hour, minute, 0).unwrap()
+        };
+        assert_eq!(format_time(0), "");
+        assert_eq!(format_time_at(at(2026, 1, 2, 9, 5), now), "09:05");
+        assert_eq!(format_time_at(at(2026, 1, 1, 23, 59), now), t("day.yesterday"));
+        for (day, key) in [(31, "day.wednesday"), (30, "day.tuesday"),
+            (29, "day.monday"), (28, "day.sunday"), (27, "day.saturday")] {
+            assert_eq!(format_time_at(at(2025, 12, day, 23, 59), now), t(key));
+        }
+        assert_eq!(format_time_at(at(2025, 12, 26, 23, 59), now), "26/12");
+        assert_eq!(format_time_at(at(2025, 1, 2, 9, 5), now), "02/01");
+        assert_eq!(format_time_at(at(2026, 1, 3, 9, 5), now), "03/01");
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 4).unwrap();
+        assert_eq!(format_time_at(at(2026, 1, 2, 0, 0), now), t("day.friday"));
+        assert_eq!(format_time_at(at(2026, 1, 1, 0, 0), now), t("day.thursday"));
+    }
+
+    #[test]
+    fn sidebar_time_uses_local_dates_across_offset_changes() {
+        for (message, now, key) in [
+            ("2026-03-07T23:30:00-05:00", "2026-03-09T00:15:00-04:00", "day.saturday"),
+            ("2026-10-31T00:15:00-04:00", "2026-11-01T23:30:00-05:00", "day.yesterday"),
+        ] {
+            let message = chrono::DateTime::parse_from_rfc3339(message).unwrap();
+            let now = chrono::DateTime::parse_from_rfc3339(now).unwrap();
+            assert_eq!(format_time_at(message.naive_local(), now.date_naive()), t(key));
+        }
+    }
+
+    #[test]
+    fn draft_sorting_preserves_pinned_precedence() {
+        let mut store = Store::default();
+        for (jid, timestamp, pinned, text, promoted) in [
+            ("pin-new", 1, 20, "", 0),
+            ("pin-old", 2, 10, "draft", 999),
+            ("draft-new", 3, 0, "draft", 200),
+            ("draft-old", 4, 0, "draft", 100),
+            ("normal", 50, 0, "", 0),
+            ("blank", 40, 0, " \n\t", 999),
+            ("unpromoted", 30, 0, "draft", 0),
+        ] {
+            store.chats.insert(jid.into(), ChatMeta {
+                jid: jid.into(), timestamp, pinned, ..Default::default()
+            });
+            store.drafts.insert(jid.into(), Draft {
+                text: text.into(), promoted, ..Default::default()
+            });
+        }
+        assert_eq!(store.sorted_chats().iter().map(|chat| chat.jid.as_str()).collect::<Vec<_>>(),
+            ["pin-new", "pin-old", "draft-new", "draft-old", "normal", "blank", "unpromoted"]);
+        assert_eq!(store.chats["draft-new"].timestamp, 3);
+        assert_eq!(store.chats["draft-old"].timestamp, 4);
+    }
+
+    #[test]
+    fn draft_removal_restores_timestamp_order() {
+        let mut store = Store::default();
+        for (jid, timestamp) in [("older", 10), ("newer", 20)] {
+            store.chats.insert(jid.into(), ChatMeta {
+                jid: jid.into(), timestamp, ..Default::default()
+            });
+        }
+        store.drafts.insert("older".into(), Draft {
+            text: "draft".into(), promoted: 1, ..Default::default()
+        });
+        assert_eq!(store.sorted_chats()[0].jid, "older");
+        store.drafts.remove("older");
+        assert_eq!(store.sorted_chats().iter().map(|chat| chat.jid.as_str()).collect::<Vec<_>>(), ["newer", "older"]);
+        assert_eq!(store.chats["older"].timestamp, 10);
+        assert_eq!(store.chats["newer"].timestamp, 20);
+    }
+
+    #[test]
+    fn draft_serialization_preserves_mentions() {
+        let draft = Draft {
+            text: "Hello @Alice and @Bob 👋".into(),
+            mentions: vec![("Alice".into(), "1@s.whatsapp.net".into()), ("Bob".into(), "2@lid".into())],
+            promoted: u64::MAX,
+        };
+        let drafts = HashMap::from([("group@g.us".to_string(), draft.clone())]);
+        let restored: HashMap<String, Draft> = serde_json::from_str(&to_json(&drafts)).unwrap();
+        assert_eq!(restored["group@g.us"].text, draft.text);
+        assert_eq!(restored["group@g.us"].mentions, draft.mentions);
+        assert_eq!(restored["group@g.us"].promoted, draft.promoted);
+    }
+
+    #[test]
+    fn draft_merge_keeps_newest_nonblank_draft_and_mentions() {
+        let mut store = Store::default();
+        for (source_text, source_promoted, target_text, target_promoted, expected) in [
+            ("source", 20, "target", 10, "source"),
+            ("source", 10, "target", 20, "target"),
+            ("source", 10, "target", 10, "target"),
+            (" \t", 30, "target", 20, "target"),
+            ("source", 0, "", 20, "source"),
+        ] {
+            for (jid, text, promoted) in [("from", source_text, source_promoted), ("into", target_text, target_promoted)] {
+                store.drafts.insert(jid.into(), Draft {
+                    text: text.into(), mentions: vec![(text.into(), jid.into())], promoted,
+                });
+            }
+            store.merge_jid("from", "into");
+            assert!(!store.drafts.contains_key("from"));
+            assert_eq!(store.drafts["into"].text, expected);
+            assert_eq!(store.drafts["into"].mentions[0].0, expected);
+        }
+        store.drafts.remove("into");
+        store.drafts.insert("from".into(), Draft {
+            text: "only source".into(), ..Default::default()
+        });
+        store.merge_jid("from", "into");
+        assert_eq!(store.drafts["into"].text, "only source");
+    }
+
+    #[test]
+    fn delete_chat_removes_draft() {
+        let mut store = Store::default();
+        store.chats.insert("chat".into(), ChatMeta { jid: "chat".into(), ..Default::default() });
+        store.drafts.insert("chat".into(), Draft { text: "draft".into(), ..Default::default() });
+        store.delete_chat("chat");
+        assert!(!store.chats.contains_key("chat"));
+        assert!(!store.drafts.contains_key("chat"));
+    }
 
     #[test]
     fn sidebar_counts_include_archived_and_community_groups() {
@@ -1672,7 +2096,7 @@ mod tests {
         let mut stored = audio_message(Some(false));
         assert_eq!(stored.audio_filename(Some(r"D:\Music\original song.mp3")), "original song.mp3");
         assert_eq!(stored.audio_filename(Some("/music/original.flac")), "original.flac");
-        assert_eq!(stored.audio_filename(None), t("audio.fallbackName"));
+        assert_eq!(stored.audio_filename(None), t("audio.fallback_name"));
         stored.kind = MessageKind::Doc;
         stored.raw = Some(Arc::new(wa::Message {
             document_message: wa::message::DocumentMessage {

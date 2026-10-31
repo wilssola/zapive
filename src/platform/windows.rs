@@ -134,8 +134,9 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
                 "<action content=\"Play\" arguments=\"play:{token}\" activationType=\"background\"/>"
             ));
         }
+        let placeholder = xml_escape(&crate::i18n::t("notify.reply_placeholder"));
         inputs.push_str(&format!(
-            "<input id=\"reply-input\" type=\"text\" placeHolderContent=\"Reply\"/>"
+            "<input id=\"reply-input\" type=\"text\" placeHolderContent=\"{placeholder}\"/>"
         ));
     }
     if let Some(path) = payload.thumbnail.as_deref() {

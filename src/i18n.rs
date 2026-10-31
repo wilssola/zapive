@@ -24,6 +24,14 @@ pub fn current_locale() -> Locale { if CURRENT_LOCALE.load(Ordering::Relaxed) ==
 
 pub fn t(id: &str) -> String { ta(id, &[]) }
 
+pub fn is_translation(id: &str, value: &str) -> bool {
+    let catalogs = catalogs();
+    [catalogs.en.get(id), catalogs.pt.get(id)]
+        .into_iter()
+        .flatten()
+        .any(|entry| entry.forms.iter().any(|form| *form == value))
+}
+
 // Positional `{0}`, `{1}` arguments.
 pub fn ta(id: &str, args: &[&str]) -> String {
     let Some(entry) = localized_entry(id) else { return missing(id) };
@@ -146,7 +154,7 @@ mod tests {
         for part in text.split('.') {
             let mut chars = part.chars();
             let ok = chars.next().is_some_and(|c| c.is_ascii_lowercase() || (parts > 0 && c.is_ascii_digit()))
-                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
             if !ok { return false; }
             parts += 1;
         }
@@ -180,6 +188,22 @@ mod tests {
             }
         }
         found
+    }
+
+    fn rust_literal_ids(catalogs: &Catalogs) -> BTreeSet<String> {
+        let mut paths = Vec::new();
+        files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), "rs", &mut paths);
+        let re = regex::Regex::new(r#""([^"\\]*(?:\\.[^"\\]*)*)""#).unwrap();
+        let mut literals = Vec::new();
+        for path in paths.into_iter().filter(|path| path.file_name().is_none_or(|name| name != "i18n.rs")) {
+            let text = std::fs::read_to_string(path).unwrap();
+            for line in text.lines() {
+                literals.extend(re.captures_iter(line).map(|caps| caps[1].to_string()));
+            }
+        }
+        literals.into_iter()
+            .filter(|literal| is_id(literal) && catalogs.en.contains_key(literal.as_str()))
+            .collect()
     }
 
     fn rust_calls() -> Vec<(String, String, &'static str)> {
@@ -264,13 +288,10 @@ mod tests {
     fn referenced_ids() -> BTreeSet<String> {
         let mut used = BTreeSet::new();
         for (_, id, _) in rust_calls() { used.insert(id); }
-        for id in ["preview.voice", "preview.audio"] { used.insert(id.to_string()); }
+        used.extend(rust_literal_ids(catalogs()));
+        used.insert("message.forwarded.label".to_string());
         for (_, id) in slint_calls() { used.insert(id); }
         for (_, id) in slint_plural_others() { used.insert(id); }
-        for key in ["emoji.smileys", "emoji.people", "emoji.animals", "emoji.food", "emoji.travel", "emoji.activities", "emoji.objects", "emoji.symbols", "emoji.flags"] {
-            used.insert(key.to_string());
-        }
-        used.insert("sync.progress".to_string());
         used
     }
 
@@ -347,8 +368,8 @@ mod tests {
         set_locale(Locale::Pt);
         assert_eq!(tp("ephemeral.hours", 1, &[]), "1 hora");
         assert_eq!(tp("ephemeral.hours", 3, &[]), "3 horas");
-        assert_eq!(ta("status.connectFailed", &["rede"]), "Falha ao conectar: rede");
+        assert_eq!(ta("status.connect_failed", &["rede"]), "Falha ao conectar: rede");
         set_locale(Locale::En);
-        assert_eq!(ta("status.connectFailed", &["net"]), "Failed to connect: net");
+        assert_eq!(ta("status.connect_failed", &["net"]), "Failed to connect: net");
     }
 }

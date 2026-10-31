@@ -1,3 +1,11 @@
+export struct ReleaseItem {
+    tag: string,
+    date: string,
+    notes: string,
+    installed: bool,
+    newer: bool,
+}
+
 export struct DetailRow {
     kind: string,
     title: string,
@@ -15,6 +23,8 @@ export struct ChatItem {
     jid: string,
     name: string,
     preview: string,
+    typing: bool,
+    draft: bool,
     ticks: string,
     ticksBlue: bool,
     time: string,
@@ -123,9 +133,20 @@ export struct StickerCell {
 }
 
 export struct MessageItem {
+    sendState: string,
+    sendPending: bool,
+    sendRetry: bool,
     id: string,
     kind: string,          // "text" | "image" | "audio" | "doc"
     text: string,          // body, caption, filename or audio duration
+    cardKind: string,      // contact | location | live-location | poll | unsupported | view-once | empty
+    cardTitle: string,
+    cardBody: string,
+    cardDetail: string,
+    cardOptions: [string],
+    cardInitial: string,
+    cardPicture: image,
+    cardHasPicture: bool,
     fromMe: bool,
     sender: string,
     senderJid: string,

@@ -40,6 +40,44 @@ pub struct QuoteRef {
     pub message: Arc<wa::Message>,
 }
 
+pub fn build_text(
+    jid: &str,
+    body: String,
+    quote: &Option<QuoteRef>,
+    mentions: Vec<String>,
+    mention_all: Option<String>,
+) -> wa::Message {
+    use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
+    let mut ctx = quote.as_ref().and_then(|q| {
+        let sender = parse_jid(&q.sender_jid)?;
+        let source = parse_jid(&q.chat_jid)?;
+        let to = parse_jid(jid)?;
+        Some(whatsapp_rust::proto_helpers::build_quote_context_with_info(
+            q.id.clone(), &sender, &source, &to, &q.message,
+        ))
+    });
+    if !mentions.is_empty() || mention_all.is_some() {
+        let mut info = ctx.take().unwrap_or_default();
+        info.mentioned_jid = mentions;
+        if let Some(subject) = mention_all {
+            info.group_mentions = vec![wa::GroupMention {
+                group_jid: Some(jid.into()),
+                group_subject: Some(subject),
+            }];
+        }
+        ctx = Some(info);
+    }
+    match ctx {
+        Some(ctx) => wa::Message::text_with_context(body, ctx),
+        None => wa::Message::text(body),
+    }
+}
+
+fn action_failed(epoch: u64, error: impl Into<String>) {
+    let error = error.into();
+    crate::bridge::wa_apply_at(epoch, move |b| b.message_action_failed(&error));
+}
+
 // What to do with a media file once cached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaWant {
@@ -79,6 +117,8 @@ pub enum Cmd {
         mentions: Vec<String>,
         mention_all: Option<String>,
     },
+    SendQueued { id: String, jid: String, message: Arc<wa::Message> },
+    PrepareAttachment(crate::outbox::Preparation),
     FetchHistory { jid: String, oldest_id: String, from_me: bool, ts_ms: i64 },
     // Group roster and settings, for the composer and the info panel.
     FetchGroupMeta(String),
@@ -659,7 +699,7 @@ impl EventHandler for Pump {
             }
             Event::LoggedOut(_) => {
                 self.stopped.store(true, Ordering::Relaxed);
-                ui_apply(|b| b.on_status(&t("status.sessionEnded")));
+                ui_apply(|b| b.on_status(&t("status.session_ended")));
                 let _ = self.cmd_tx.send(Cmd::ResetSession);
             }
             Event::ConnectFailure(f) => {
@@ -682,6 +722,11 @@ impl EventHandler for Pump {
                         b.on_messages(batch);
                     }
                 });
+            }
+            Event::ServerAck(ack) if ack.class.as_deref() == Some("message") => {
+                let id = ack.id.clone();
+                let error = ack.error.clone();
+                crate::bridge::wa_apply_at(self.epoch, move |b| b.on_outbox_ack(&id, error));
             }
             Event::Receipt(receipt) => {
                 let status = match receipt.r#type {
@@ -811,9 +856,10 @@ impl EventHandler for Pump {
             }
             Event::ChatPresence(update) => {
                 let chat = update.source.chat.to_non_ad_string();
+                let sender = update.source.sender.to_non_ad_string();
                 let state = format!("{:?}", update.state);
                 let media = format!("{:?}", update.media);
-                ui_apply(move |b| b.on_chat_presence(&chat, &state, &media));
+                ui_apply(move |b| b.on_chat_presence(&chat, &sender, &state, &media));
             }
             Event::Presence(update) => {
                 let from = update.from.to_non_ad_string();
@@ -972,6 +1018,157 @@ impl Pump {
     }
 }
 
+async fn prepare_attachment(
+    client: &Arc<Client>,
+    preparation: crate::outbox::Preparation,
+) -> Result<wa::Message, String> {
+    use whatsapp_rust::wacore::download::MediaType;
+    use whatsapp_rust::waproto::buffa::MessageField;
+
+    if parse_jid(&preparation.jid).is_none() {
+        return Err("Invalid destination JID".into());
+    }
+    if preparation.id.is_empty()
+        || preparation.id.len() > 128
+        || !preparation.id.bytes().all(|c| c.is_ascii_alphanumeric())
+    {
+        return Err("Invalid preparation ID".into());
+    }
+    let media_type = match preparation.kind.as_str() {
+        "image" => MediaType::Image,
+        "document" => MediaType::Document,
+        "audio" | "voice" => MediaType::Audio,
+        "sticker" => MediaType::Sticker,
+        "gif" => MediaType::Video,
+        _ => return Err("Unsupported attachment kind".into()),
+    };
+    let kind = preparation.kind.clone();
+    let filename = preparation.filename.clone();
+    let converted = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        struct Temporary(std::path::PathBuf);
+        impl Drop for Temporary {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let mut data = preparation.data;
+        let mut thumb = None;
+        let mut seconds = None;
+        let mut waveform = None;
+        match kind.as_str() {
+            "image" => thumb = make_jpeg_thumb(&data),
+            "sticker" => {
+                data = crate::media::to_webp_sticker(&data)
+                    .ok_or_else(|| "Sticker encode failed".to_string())?;
+            }
+            "audio" | "gif" | "voice" => {
+                let dir = std::env::temp_dir().join(format!(
+                    "zapive_attachment_{}_{}", preparation.id, crate::outbox::new_id()
+                ));
+                std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+                let temporary = Temporary(dir);
+                match kind.as_str() {
+                    "audio" => {
+                        let extension = std::path::Path::new(&filename)
+                            .extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let extension = if extension.bytes().all(|c| c.is_ascii_alphanumeric())
+                            && extension.len() <= 16 { extension } else { "audio" };
+                        let path = temporary.0.join(format!("source.{extension}"));
+                        std::fs::write(&path, &data).map_err(|e| e.to_string())?;
+                        seconds = crate::audio::probe_duration(&path);
+                    }
+                    "gif" => {
+                        let url = std::str::from_utf8(&data).map_err(|e| e.to_string())?;
+                        let mut response = ureq::get(url).header("User-Agent", "Zapive")
+                            .call().map_err(|e| e.to_string())?;
+                        let bytes = response.body_mut().read_to_vec().map_err(|e| e.to_string())?;
+                        let source = temporary.0.join("source.gif");
+                        let output = temporary.0.join("output.mp4");
+                        std::fs::write(&source, bytes).map_err(|e| e.to_string())?;
+                        crate::video::gif_to_mp4(&source, &output)
+                            .ok_or_else(|| "GIF conversion failed".to_string())?;
+                        data = std::fs::read(&output).map_err(|e| e.to_string())?;
+                    }
+                    "voice" => {
+                        if data.len() % 4 != 0 || preparation.in_rate == 0 {
+                            return Err("Invalid voice source".into());
+                        }
+                        let samples: Vec<f32> = data.chunks_exact(4)
+                            .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+                            .collect();
+                        if samples.iter().any(|sample| !sample.is_finite()) {
+                            return Err("Invalid voice samples".into());
+                        }
+                        waveform = Some(crate::audio::message_waveform(&samples));
+                        let output = temporary.0.join("output.ogg");
+                        seconds = Some(crate::audio::encode_voice_ogg(&samples, preparation.in_rate, &output)
+                            .ok_or_else(|| "Voice encode failed".to_string())?);
+                        data = std::fs::read(&output).map_err(|e| e.to_string())?;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => {}
+        }
+        Ok((data, thumb, seconds, waveform))
+    }).await.map_err(|e| e.to_string())??;
+    let (data, thumb, seconds, waveform) = converted;
+    let len = data.len() as u64;
+    let upload = client.upload(data, media_type, Default::default())
+        .await.map_err(|e| e.to_string())?;
+    let mut message = match preparation.kind.as_str() {
+        "image" => whatsapp_rust::media::image_message(upload, whatsapp_rust::media::ImageOptions {
+            caption: preparation.caption.filter(|c| !c.is_empty()),
+            jpeg_thumbnail: thumb,
+            ..Default::default()
+        }),
+        "document" => whatsapp_rust::media::document_message(upload, whatsapp_rust::media::DocumentOptions {
+            file_name: Some(preparation.filename),
+            ..Default::default()
+        }),
+        "audio" | "voice" => {
+            let mimetype = match std::path::Path::new(&preparation.filename).extension().and_then(|e| e.to_str()) {
+                Some("ogg") | Some("opus") => "audio/ogg; codecs=opus",
+                Some("m4a") | Some("aac") => "audio/mp4",
+                Some("wav") => "audio/wav",
+                _ => "audio/mpeg",
+            };
+            whatsapp_rust::media::audio_message(upload, whatsapp_rust::media::AudioOptions {
+                ptt: Some(preparation.kind == "voice"),
+                duration_seconds: seconds,
+                waveform,
+                mimetype: (preparation.kind == "audio").then(|| mimetype.to_string()),
+                ..Default::default()
+            })
+        }
+        "gif" => whatsapp_rust::media::video_message(upload, whatsapp_rust::media::VideoOptions {
+            gif_playback: Some(true),
+            ..Default::default()
+        }),
+        "sticker" => {
+            let sticker = wa::message::StickerMessage {
+                url: Some(upload.url),
+                direct_path: Some(upload.direct_path),
+                media_key: Some(upload.media_key.to_vec().into()),
+                file_enc_sha256: Some(upload.file_enc_sha256.to_vec().into()),
+                file_sha256: Some(upload.file_sha256.to_vec().into()),
+                file_length: Some(len),
+                mimetype: Some("image/webp".into()),
+                width: Some(512),
+                height: Some(512),
+                media_key_timestamp: Some(upload.media_key_timestamp),
+                ..Default::default()
+            };
+            wa::Message { sticker_message: MessageField::some(sticker), ..Default::default() }
+        }
+        _ => unreachable!(),
+    };
+    if preparation.view_once {
+        message = wrap_view_once(message);
+    }
+    Ok(message)
+}
+
 async fn executor(
     mut session: Session,
     mut cmd_rx: mpsc::UnboundedReceiver<Cmd>,
@@ -981,7 +1178,21 @@ async fn executor(
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
     while let Some(cmd) = cmd_rx.recv().await {
+        let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
         match cmd {
+            Cmd::PrepareAttachment(preparation) => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    if SESSION_EPOCH.load(Ordering::SeqCst) != epoch {
+                        return;
+                    }
+                    let id = preparation.id.clone();
+                    let result = prepare_attachment(&client, preparation).await;
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.on_attachment_prepared(&id, result);
+                    });
+                });
+            }
             Cmd::MediaKey(key) => {
                 media_key = key;
             }
@@ -1093,12 +1304,15 @@ async fn executor(
             Cmd::Revoke { jid, id } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
-                    let Some(chat) = parse_jid(&jid) else { return };
+                    let Some(chat) = parse_jid(&jid) else {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
+                    };
                     if let Err(e) = client
                         .revoke_message(chat, id, whatsapp_rust::send::RevokeType::Sender)
                         .await
                     {
-                        eprintln!("[wa] revoke failed: {e}");
+                        action_failed(epoch, format!("[wa] revoke failed: {e}"));
                     }
                 });
             }
@@ -1180,25 +1394,25 @@ async fn executor(
                 });
             }
             Cmd::Forward { jid, message } => {
-                let client = session.client.clone();
                 tokio::spawn(async move {
-                    let Some(to) = parse_jid(&jid) else { return };
-                    match client.forward_message(to, &message).await {
-                        Ok(sent) => {
-                            use whatsapp_rust::proto_helpers::MessageExt as _;
-                            let id = sent.message_id;
-                            let echoed = message.prepare_for_forward();
-                            ui_apply(move |b| b.echo_sent(&jid, &id, echoed));
-                        }
-                        Err(e) => eprintln!("[wa] forward failed: {e}"),
-                    }
+                    if parse_jid(&jid).is_none() {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
+                    };
+                    use whatsapp_rust::proto_helpers::MessageExt as _;
+                    let message = message.get_base_message().prepare_for_forward();
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.enqueue_prepared(&jid, message, None);
+                    });
                 });
             }
             Cmd::ResendMedia { jid, message } => {
-                let client = session.client.clone();
                 tokio::spawn(async move {
                     use whatsapp_rust::proto_helpers::MessageExt as _;
-                    let Some(to) = parse_jid(&jid) else { return };
+                    if parse_jid(&jid).is_none() {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
+                    };
                     // A plain send, not forward_message: prepare_for_forward
                     // always stamps `is_forwarded`, which is wrong here --
                     // this is a fresh message that merely reuses an
@@ -1207,201 +1421,113 @@ async fn executor(
                     // neither side sees it as forwarded.
                     let mut message = (*message).clone();
                     message.set_context_info(wa::ContextInfo::default());
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
-                        }
-                        Err(e) => eprintln!("[wa] resend failed: {e}"),
-                    }
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.enqueue_prepared(&jid, message, None);
+                    });
                 });
             }
 
             Cmd::SendImage { jid, path, origin, caption } => {
-                let client = session.client.clone();
-                let key = media_key.clone();
                 tokio::spawn(async move {
-                    let Ok(bytes) = tokio::fs::read(&path).await else { return };
-                    let thumb_src = bytes.clone();
-                    let thumb = tokio::task::spawn_blocking(move || make_jpeg_thumb(&thumb_src))
-                        .await
-                        .ok()
-                        .flatten();
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let upload = match client
-                        .upload(bytes.clone(), whatsapp_rust::wacore::download::MediaType::Image, Default::default())
-                        .await
-                    {
-                        Ok(u) => u,
+                    let data = match tokio::fs::read(&path).await {
+                        Ok(data) => data,
                         Err(e) => {
-                            eprintln!("[wa] image upload failed: {e}");
+                            action_failed(epoch, format!("Failed to read media: {e}"));
                             return;
                         }
                     };
-                    let message = whatsapp_rust::media::image_message(
-                        upload,
-                        whatsapp_rust::media::ImageOptions {
-                            caption: caption.filter(|c| !c.is_empty()),
-                            jpeg_thumbnail: thumb,
-                            ..Default::default()
-                        },
-                    );
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            let mimetype = message.image_message.as_option()
-                                .and_then(|image| image.mimetype.as_deref())
-                                .unwrap_or("image/jpeg");
-                            let cached = crate::media::cache_sent(&key, &id, mimetype, &message, &bytes).await;
-                            let decoded = if cached.is_some() {
-                                tokio::task::spawn_blocking(move || {
-                                    crate::media::decode_bytes(&bytes, crate::media::BUBBLE_PX)
-                                }).await.ok().flatten()
-                            } else {
-                                None
-                            };
-                            ui_apply(move |b| {
-                                if let Some(path) = cached {
-                                    if let Some(img) = decoded {
-                                        b.on_media_image(&id, &path, img);
-                                    } else {
-                                        b.on_media_file(&id, &path);
-                                    }
-                                }
-                                b.echo_sent_from(&jid, &id, message, origin);
-                            });
-                        }
-                        Err(e) => eprintln!("[wa] image send failed: {e}"),
-                    }
+                    let preparation = crate::outbox::Preparation {
+                        id: crate::outbox::new_id(),
+                        jid,
+                        kind: "image".into(),
+                        filename: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()),
+                        caption: caption,
+                        origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
+                        data,
+                        in_rate: 0,
+                        view_once: false,
+                    };
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.stage_attachment(preparation);
+                    });
                 });
             }
             Cmd::SendDocument { jid, path, origin } => {
-                let client = session.client.clone();
                 tokio::spawn(async move {
-                    let Ok(bytes) = tokio::fs::read(&path).await else { return };
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "file".into());
-                    let upload = match client
-                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Document, Default::default())
-                        .await
-                    {
-                        Ok(u) => u,
+                    let data = match tokio::fs::read(&path).await {
+                        Ok(data) => data,
                         Err(e) => {
-                            eprintln!("[wa] document upload failed: {e}");
+                            action_failed(epoch, format!("Failed to read media: {e}"));
                             return;
                         }
                     };
-                    let message = whatsapp_rust::media::document_message(
-                        upload,
-                        whatsapp_rust::media::DocumentOptions {
-                            file_name: Some(name),
-                            ..Default::default()
-                        },
-                    );
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
-                        }
-                        Err(e) => eprintln!("[wa] document send failed: {e}"),
-                    }
+                    let preparation = crate::outbox::Preparation {
+                        id: crate::outbox::new_id(),
+                        jid,
+                        kind: "document".into(),
+                        filename: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()),
+                        caption: None,
+                        origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
+                        data,
+                        in_rate: 0,
+                        view_once: false,
+                    };
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.stage_attachment(preparation);
+                    });
                 });
             }
             Cmd::SendAudioFile { jid, path, origin } => {
-                let client = session.client.clone();
                 tokio::spawn(async move {
-                    let Ok(bytes) = tokio::fs::read(&path).await else { return };
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let mimetype = match path.extension().and_then(|e| e.to_str()) {
-                        Some("ogg") | Some("opus") => "audio/ogg; codecs=opus",
-                        Some("mp3") => "audio/mpeg",
-                        Some("m4a") | Some("aac") => "audio/mp4",
-                        Some("wav") => "audio/wav",
-                        _ => "audio/mpeg",
-                    };
-                    let upload = match client
-                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Audio, Default::default())
-                        .await
-                    {
-                        Ok(u) => u,
+                    let data = match tokio::fs::read(&path).await {
+                        Ok(data) => data,
                         Err(e) => {
-                            eprintln!("[wa] audio upload failed: {e}");
+                            action_failed(epoch, format!("Failed to read media: {e}"));
                             return;
                         }
                     };
-                    let duration_seconds = tokio::task::spawn_blocking(move || crate::audio::probe_duration(&path))
-                        .await.ok().flatten();
-                    let message = whatsapp_rust::media::audio_message(
-                        upload,
-                        whatsapp_rust::media::AudioOptions {
-                            ptt: Some(false),
-                            duration_seconds,
-                            mimetype: Some(mimetype.to_string()),
-                            ..Default::default()
-                        },
-                    );
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent_from(&jid, &id, message, origin));
+                    let preparation = crate::outbox::Preparation {
+                        id: crate::outbox::new_id(),
+                        jid,
+                        kind: "audio".into(),
+                        filename: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()),
+                        caption: None,
+                        origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
+                        data,
+                        in_rate: 0,
+                        view_once: false,
+                    };
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.stage_attachment(preparation);
+                    });
+                });
+            }
+            Cmd::SendSticker { jid, path } => {
+                tokio::spawn(async move {
+                    let data = match tokio::fs::read(&path).await {
+                        Ok(data) => data,
+                        Err(e) => {
+                            action_failed(epoch, format!("Failed to read media: {e}"));
+                            return;
                         }
-                        Err(e) => eprintln!("[wa] audio send failed: {e}"),
-                    }
+                    };
+                    let preparation = crate::outbox::Preparation {
+                        id: crate::outbox::new_id(),
+                        jid,
+                        kind: "sticker".into(),
+                        filename: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()),
+                        caption: None,
+                        origin: Some(path.to_string_lossy().into_owned()),
+                        data,
+                        in_rate: 0,
+                        view_once: false,
+                    };
+                    crate::bridge::wa_apply_at(epoch, move |b| {
+                        b.stage_attachment(preparation);
+                    });
                 });
             }
 
-            Cmd::SendSticker { jid, path } => {
-                let client = session.client.clone();
-                tokio::spawn(async move {
-                    let webp = tokio::task::spawn_blocking(move || {
-                        let data = std::fs::read(&path).ok()?;
-                        crate::media::to_webp_sticker(&data)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    let Some(webp) = webp else {
-                        eprintln!("[wa] sticker encode failed");
-                        return;
-                    };
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let len = webp.len() as u64;
-                    let upload = match client
-                        .upload(webp, whatsapp_rust::wacore::download::MediaType::Sticker, Default::default())
-                        .await
-                    {
-                        Ok(u) => u,
-                        Err(e) => {
-                            eprintln!("[wa] sticker upload failed: {e}");
-                            return;
-                        }
-                    };
-                    use whatsapp_rust::waproto::buffa::MessageField;
-                    let mut sticker = wa::message::StickerMessage::default();
-                    sticker.url = Some(upload.url);
-                    sticker.direct_path = Some(upload.direct_path);
-                    sticker.media_key = Some(upload.media_key.to_vec().into());
-                    sticker.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec().into());
-                    sticker.file_sha256 = Some(upload.file_sha256.to_vec().into());
-                    sticker.file_length = Some(len);
-                    sticker.mimetype = Some("image/webp".into());
-                    sticker.width = Some(512);
-                    sticker.height = Some(512);
-                    sticker.media_key_timestamp = Some(upload.media_key_timestamp);
-                    let mut message = wa::Message::default();
-                    message.sticker_message = MessageField::some(sticker);
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
-                        }
-                        Err(e) => eprintln!("[wa] sticker send failed: {e}"),
-                    }
-                });
-            }
             Cmd::GifSearch(query) => {
                 tokio::spawn(async move {
                     let results = tokio::task::spawn_blocking(move || {
@@ -1442,58 +1568,22 @@ async fn executor(
                 });
             }
             Cmd::SendGifUrl { jid, url } => {
-                let client = session.client.clone();
-                tokio::spawn(async move {
-                    let mp4 = tokio::task::spawn_blocking(move || {
-                        let mut res = ureq::get(&url).header("User-Agent", "Zapive").call().ok()?;
-                        let bytes = res.body_mut().read_to_vec().ok()?;
-                        let stamp = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis())
-                            .unwrap_or(0);
-                        let gif = std::env::temp_dir().join(format!("zapive_gif_{stamp}.gif"));
-                        let mp4 = std::env::temp_dir().join(format!("zapive_gif_{stamp}.mp4"));
-                        std::fs::write(&gif, bytes).ok()?;
-                        let result = crate::video::gif_to_mp4(&gif, &mp4);
-                        let _ = std::fs::remove_file(&gif);
-                        result.map(|_| mp4)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    let Some(mp4) = mp4 else {
-                        eprintln!("[wa] gif conversion failed");
-                        return;
-                    };
-                    let Ok(bytes) = tokio::fs::read(&mp4).await else { return };
-                    let _ = tokio::fs::remove_file(&mp4).await;
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let upload = match client
-                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Video, Default::default())
-                        .await
-                    {
-                        Ok(u) => u,
-                        Err(e) => {
-                            eprintln!("[wa] gif upload failed: {e}");
-                            return;
-                        }
-                    };
-                    let message = whatsapp_rust::media::video_message(
-                        upload,
-                        whatsapp_rust::media::VideoOptions {
-                            gif_playback: Some(true),
-                            ..Default::default()
-                        },
-                    );
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
-                        }
-                        Err(e) => eprintln!("[wa] gif send failed: {e}"),
-                    }
+                let preparation = crate::outbox::Preparation {
+                    id: crate::outbox::new_id(),
+                    jid,
+                    kind: "gif".into(),
+                    filename: "animation.gif".into(),
+                    caption: None,
+                    origin: None,
+                    data: url.into_bytes(),
+                    in_rate: 0,
+                    view_once: false,
+                };
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.stage_attachment(preparation);
                 });
             }
+
             Cmd::ZoomFrames { id, path } => {
                 let key = media_key.clone();
                 tokio::spawn(async move {
@@ -1512,13 +1602,12 @@ async fn executor(
             }
             Cmd::CheckUpdate => {
                 tokio::spawn(async move {
-                    let found = tokio::task::spawn_blocking(crate::update::check)
+                    let result = tokio::task::spawn_blocking(crate::update::check)
                         .await
-                        .ok()
-                        .flatten();
+                        .unwrap_or_else(|_| Err("update check task failed".into()));
                     // Direct apply: the banner must show on the lock
                     // and login screens, not wait in the backlog.
-                    crate::bridge::ui_apply(move |b| b.on_update_checked(found));
+                    crate::bridge::ui_apply(move |b| b.on_update_checked(result));
                 });
             }
             Cmd::ApplyUpdate => {
@@ -1560,7 +1649,7 @@ async fn executor(
                         if let Err(e) = client.voip().reject(&offer).await {
                             log::warn!("[wa] call reject failed: {e}");
                         }
-                        fail_call(&t("call.noDevices"));
+                        fail_call(&t("call.no_devices"));
                         return;
                     };
                     // Answering an audio-only offer with video is not on
@@ -1595,7 +1684,7 @@ async fn executor(
                         return;
                     };
                     let Some(audio) = open_audio().await else {
-                        fail_call(&t("call.noDevices"));
+                        fail_call(&t("call.no_devices"));
                         return;
                     };
                     let vision = match video {
@@ -1603,7 +1692,7 @@ async fn executor(
                         false => None,
                     };
                     if video && vision.is_none() {
-                        fail_call(&t("call.noCamera"));
+                        fail_call(&t("call.no_camera"));
                         return;
                     }
                     let voip = client.voip();
@@ -1673,7 +1762,7 @@ async fn executor(
                         return;
                     }
                     let Some((camera, sink)) = open_video() else {
-                        fail_call(&t("call.noCamera"));
+                        fail_call(&t("call.no_camera"));
                         return;
                     };
                     // A parked request from the peer has to be answered with
@@ -1690,7 +1779,7 @@ async fn executor(
                     };
                     if let Err(e) = started {
                         log::error!("[wa] starting video failed: {e}");
-                        fail_call(&t("call.noCamera"));
+                        fail_call(&t("call.no_camera"));
                         return;
                     }
                     if let Ok(mut live) = LIVE_CALL.lock()
@@ -1858,10 +1947,13 @@ async fn executor(
             Cmd::SetEphemeral { jid, group, secs } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
-                    let Some(target) = parse_jid(&jid) else { return };
+                    let Some(target) = parse_jid(&jid) else {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
+                    };
                     if group {
                         if let Err(e) = client.groups().set_ephemeral(target, secs).await {
-                            eprintln!("[wa] ephemeral setting failed: {e}");
+                            action_failed(epoch, format!("[wa] ephemeral setting failed: {e}"));
                         }
                         return;
                     }
@@ -1874,7 +1966,7 @@ async fn executor(
                     let mut message = wa::Message::default();
                     message.protocol_message = MessageField::some(pm);
                     if let Err(e) = client.send_message(target, message).await {
-                        eprintln!("[wa] ephemeral setting failed: {e}");
+                        action_failed(epoch, format!("[wa] ephemeral setting failed: {e}"));
                     }
                 });
             }
@@ -2072,58 +2164,22 @@ async fn executor(
                 });
             }
             Cmd::SendVoice { jid, samples, in_rate, view_once } => {
-                let client = session.client.clone();
-                tokio::spawn(async move {
-                    let wave = crate::audio::message_waveform(&samples);
-                    let tmp = std::env::temp_dir().join(format!(
-                        "zapive_voice_{}.ogg",
-                        std::process::id()
-                    ));
-                    let encode_path = tmp.clone();
-                    let seconds = tokio::task::spawn_blocking(move || {
-                        crate::audio::encode_voice_ogg(&samples, in_rate, &encode_path)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    let Some(seconds) = seconds else {
-                        eprintln!("[audio] voice encode failed");
-                        return;
-                    };
-                    let Ok(bytes) = tokio::fs::read(&tmp).await else { return };
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let upload = match client
-                        .upload(bytes, whatsapp_rust::wacore::download::MediaType::Audio, Default::default())
-                        .await
-                    {
-                        Ok(u) => u,
-                        Err(e) => {
-                            eprintln!("[audio] voice upload failed: {e}");
-                            return;
-                        }
-                    };
-                    let mut message = whatsapp_rust::media::audio_message(
-                        upload,
-                        whatsapp_rust::media::AudioOptions {
-                            ptt: Some(true),
-                            duration_seconds: Some(seconds),
-                            waveform: Some(wave),
-                            ..Default::default()
-                        },
-                    );
-                    if view_once {
-                        message = wrap_view_once(message);
-                    }
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
-                        }
-                        Err(e) => eprintln!("[audio] voice send failed: {e}"),
-                    }
+                let preparation = crate::outbox::Preparation {
+                    id: crate::outbox::new_id(),
+                    jid,
+                    kind: "voice".into(),
+                    filename: "voice.f32le".into(),
+                    caption: None,
+                    origin: None,
+                    data: samples.iter().flat_map(|sample| sample.to_le_bytes()).collect(),
+                    in_rate,
+                    view_once,
+                };
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.stage_attachment(preparation);
                 });
             }
+
             Cmd::FetchAvatar(jid) => {
                 let client = session.client.clone();
                 let sem = avatar_sem.clone();
@@ -2226,7 +2282,11 @@ async fn executor(
                 let client = session.client.clone();
                 tokio::spawn(async move {
                     use whatsapp_rust::waproto::buffa::{Message as _, MessageField};
-                    let Some(to) = parse_jid(&group) else { return };
+                    let Some(to) = parse_jid(&group) else {
+                        action_failed(epoch, "Invalid destination JID");
+                        crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(false));
+                        return;
+                    };
                     let count = messages.len() as i64;
                     let oldest = messages.iter().filter_map(|m| m.message_timestamp).min().unwrap_or(0) as i64;
                     let bundle = wa::GroupHistory { messages, ..Default::default() };
@@ -2237,8 +2297,8 @@ async fn executor(
                     {
                         Ok(u) => u,
                         Err(e) => {
-                            eprintln!("[wa] history bundle upload failed: {e}");
-                            ui_apply(|b| b.on_share_result(false));
+                            action_failed(epoch, format!("[wa] history bundle upload failed: {e}"));
+                            crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(false));
                             return;
                         }
                     };
@@ -2262,10 +2322,10 @@ async fn executor(
                         ..Default::default()
                     };
                     match client.send_message(to, message).await {
-                        Ok(_) => ui_apply(|b| b.on_share_result(true)),
+                        Ok(_) => crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(true)),
                         Err(e) => {
-                            eprintln!("[wa] history bundle send failed: {e}");
-                            ui_apply(|b| b.on_share_result(false));
+                            action_failed(epoch, format!("[wa] history bundle send failed: {e}"));
+                            crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(false));
                         }
                     }
                 });
@@ -2395,46 +2455,39 @@ async fn executor(
                     }
                 });
             }
+            Cmd::SendQueued { id, jid, message } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let result = match parse_jid(&jid) {
+                        Some(to) => client.send_message_with_options(
+                            to,
+                            (*message).clone(),
+                            whatsapp_rust::send::SendOptions::default().with_message_id(id.clone()),
+                        ).await.map(|_| ()).map_err(|e| e.to_string()),
+                        None => Err("Invalid destination JID".into()),
+                    };
+                    crate::bridge::wa_apply_at(epoch, move |b| b.on_outbox_result(&jid, &id, result));
+                });
+            }
             Cmd::SendText { jid, body, quote, mentions, mention_all } => {
                 let client = session.client.clone();
                 tokio::spawn(async move {
-                    use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
-                    let Some(to) = parse_jid(&jid) else { return };
-                    let mut ctx = match &quote {
-                        Some(q) => {
-                            let Some(sender) = parse_jid(&q.sender_jid) else { return };
-                            let Some(source) = parse_jid(&q.chat_jid) else { return };
-                            Some(whatsapp_rust::proto_helpers::build_quote_context_with_info(
-                                q.id.clone(),
-                                &sender,
-                                &source,
-                                &to,
-                                &q.message,
-                            ))
-                        }
-                        None => None,
+                    let Some(to) = parse_jid(&jid) else {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
                     };
-                    if !mentions.is_empty() || mention_all.is_some() {
-                        let mut info = ctx.take().unwrap_or_default();
-                        info.mentioned_jid = mentions.clone();
-                        if let Some(subject) = &mention_all {
-                            info.group_mentions = vec![wa::GroupMention {
-                                group_jid: Some(jid.clone()),
-                                group_subject: Some(subject.clone()),
-                            }];
-                        }
-                        ctx = Some(info);
+                    if quote.as_ref().is_some_and(|q| parse_jid(&q.sender_jid).is_none() || parse_jid(&q.chat_jid).is_none()) {
+                        action_failed(epoch, "Invalid quote JID");
+                        return;
                     }
-                    let message = match ctx {
-                        Some(ctx) => wa::Message::text_with_context(body.clone(), ctx),
-                        None => wa::Message::text(body.clone()),
-                    };
+                    let message = build_text(&jid, body, &quote, mentions, mention_all);
+
                     match client.send_message(to, message.clone()).await {
                         Ok(sent) => {
                             let id = sent.message_id;
-                            ui_apply(move |b| b.echo_sent(&jid, &id, message));
+                            crate::bridge::wa_apply_at(epoch, move |b| b.echo_sent(&jid, &id, message));
                         }
-                        Err(e) => eprintln!("[wa] sendText failed: {e}"),
+                        Err(e) => action_failed(epoch, format!("[wa] sendText failed: {e}")),
                     }
                 });
             }
@@ -2544,7 +2597,7 @@ async fn executor(
                     }
                     Err(e) => {
                         eprintln!("[wa] session rebuild failed: {e}");
-                        let msg = t("status.connectFailed");
+                        let msg = t("status.connect_failed");
                         crate::bridge::ui_apply(move |b| b.on_status(&msg));
                         return;
                     }
@@ -2564,7 +2617,7 @@ async fn executor(
                     }
                     Err(e) => {
                         eprintln!("[wa] session rebuild failed: {e}");
-                        let msg = t("status.connectFailed");
+                        let msg = t("status.connect_failed");
                         ui_apply(move |b| b.on_status(&msg));
                         return;
                     }

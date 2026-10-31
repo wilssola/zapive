@@ -15,7 +15,8 @@ export component UpdateBanner inherits Rectangle {
     in property <length> inset: 12px;
     callback apply-update();
     callback restart();
-    height: root.state > 0 ? 66px : 0;
+    callback view-news();
+    height: root.state > 0 ? 94px : 0;
     visible: root.state > 0;
     Rectangle {
         x: root.inset;
@@ -59,6 +60,19 @@ export component UpdateBanner inherits Rectangle {
                     color: Theme.text-dim;
                     font-size: 12px;
                     overflow: elide;
+                }
+                TouchArea {
+                    height: 24px;
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: @tr("update.whats_new.title");
+                    clicked => { root.view-news(); }
+                    Text {
+                        text: @tr("update.whats_new.title");
+                        color: Theme.accent;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
                 }
             }
             if root.state == 1 || root.state == 3 || root.state == 4: Rectangle {

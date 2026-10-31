@@ -43,8 +43,266 @@ fn context_of(content: &wa::Message) -> Option<&wa::ContextInfo> {
                 && let Some(ci) = inner.context_info.as_option() { return Some(ci); })*
         };
     }
-    ctx!(image_message, video_message, audio_message, document_message, sticker_message);
+    ctx!(image_message, video_message, audio_message, document_message, sticker_message,
+        contact_message, contacts_array_message, location_message, live_location_message,
+        poll_creation_message, poll_creation_message_v2, poll_creation_message_v3,
+        poll_creation_message_v5, poll_creation_message_v6);
     None
+}
+
+fn display_content(message: &wa::Message) -> Option<&wa::Message> {
+    let mut current = message;
+    for _ in 0..32 {
+        if current.view_once_message.is_set()
+            || current.view_once_message_v2.is_set()
+            || current.view_once_message_v2_extension.is_set()
+            || current.image_message.as_option().and_then(|m| m.view_once) == Some(true)
+            || current.video_message.as_option().and_then(|m| m.view_once) == Some(true)
+            || current.ptv_message.as_option().and_then(|m| m.view_once) == Some(true)
+            || current.audio_message.as_option().and_then(|m| m.view_once) == Some(true)
+            || current.extended_text_message.as_option().and_then(|m| m.view_once) == Some(true)
+        {
+            return None;
+        }
+        let next = current.device_sent_message.as_option().and_then(|m| m.message.as_option())
+            .or_else(|| current.ephemeral_message.as_option().and_then(|m| m.message.as_option()))
+            .or_else(|| current.document_with_caption_message.as_option().and_then(|m| m.message.as_option()))
+            .or_else(|| current.edited_message.as_option().and_then(|m| m.message.as_option()))
+            .or_else(|| current.poll_creation_message_v4.as_option().and_then(|m| m.message.as_option()));
+        match next {
+            Some(inner) => current = inner,
+            None => return Some(current),
+        }
+    }
+    None
+}
+
+fn card_text(value: &str) -> String {
+    clean_text(value).chars().filter(|c| !c.is_control()).take(2048).collect::<String>().trim().to_string()
+}
+
+fn contact_parts(contact: &wa::message::ContactMessage) -> (String, Vec<String>) {
+    let mut name = card_text(contact.display_name.as_deref().unwrap_or(""));
+    let mut phones = Vec::new();
+    for line in contact.vcard.as_deref().unwrap_or("").lines().take(512) {
+        let Some((key, value)) = line.split_once(':') else { continue };
+        let property = key.split(';').next().unwrap_or("").rsplit('.').next().unwrap_or("");
+        if property.eq_ignore_ascii_case("FN") && name.is_empty() {
+            name = card_text(value);
+        }
+        if property.eq_ignore_ascii_case("TEL") {
+            let value = value.trim();
+            let value = value.strip_prefix("tel:").unwrap_or(value);
+            if value.len() <= 64
+                && value.chars().any(|c| c.is_ascii_digit())
+                && value.chars().all(|c| c.is_ascii_digit() || matches!(c, '+' | ' ' | '-' | '(' | ')' | '.'))
+                && !phones.iter().any(|p| p == value)
+            {
+                phones.push(value.to_string());
+            }
+        }
+    }
+    (name, phones)
+}
+
+fn contact_card(contact: &wa::message::ContactMessage) -> String {
+    let (name, phones) = contact_parts(contact);
+    let mut lines = vec![t("compat.contact")];
+    if !name.is_empty() { lines.push(name); }
+    lines.extend(phones);
+    lines.join("\n")
+}
+
+fn location_card(lat: Option<f64>, lon: Option<f64>, live: bool, details: &[&str]) -> String {
+    let mut lines = vec![t(if live { "compat.live_location" } else { "compat.location" })];
+    lines.extend(details.iter().map(|s| card_text(s)).filter(|s| !s.is_empty()));
+    match (lat, lon) {
+        (Some(lat), Some(lon)) if lat.is_finite() && lon.is_finite()
+            && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) => {
+                lines.push(format!("{lat:.6}, {lon:.6}"));
+            }
+        _ => lines.push(t("compat.invalid_location")),
+    }
+    lines.join("\n")
+}
+
+#[derive(Default, Debug)]
+pub struct SpecialCard<'a> {
+    pub kind: &'static str,
+    pub title: String,
+    pub body: String,
+    pub detail: String,
+    pub options: Vec<String>,
+    pub thumbnail: Option<&'a [u8]>,
+}
+
+fn titled_card(kind: &'static str, title: &str, body: &str) -> SpecialCard<'static> {
+    SpecialCard { kind, title: t(title), body: t(body), ..Default::default() }
+}
+
+pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
+    if message.deleted || message.kind == MessageKind::System {
+        return SpecialCard::default();
+    }
+    let Some(raw) = message.raw.as_deref() else {
+        if crate::i18n::is_translation("compat.view_once", &message.text) {
+            return titled_card("view-once", "card.view_once", "card.view_once_body");
+        }
+        if crate::i18n::is_translation("compat.unsupported", &message.text) {
+            return titled_card("unsupported", "card.unsupported", "card.unsupported_body");
+        }
+        return SpecialCard::default();
+    };
+    let Some(content) = display_content(raw) else {
+        return titled_card("view-once", "card.view_once", "card.view_once_body");
+    };
+    if let Some(contact) = content.contact_message.as_option() {
+        let (name, phones) = contact_parts(contact);
+        return SpecialCard {
+            kind: "contact",
+            title: if name.is_empty() { t("compat.contact") } else { name },
+            body: phones.join("\n"),
+            ..Default::default()
+        };
+    }
+    if let Some(contacts) = content.contacts_array_message.as_option() {
+        let body = contacts.contacts.iter().take(256).map(|contact| {
+            let (name, phones) = contact_parts(contact);
+            let mut lines = vec![if name.is_empty() { t("compat.contact") } else { name }];
+            lines.extend(phones);
+            lines.join("\n")
+        }).collect::<Vec<_>>().join("\n\n");
+        return SpecialCard { kind: "contact", title: t("card.contacts"), body, ..Default::default() };
+    }
+    if let Some(loc) = content.location_message.as_option() {
+        let live = loc.is_live.unwrap_or(false);
+        let name = card_text(loc.name.as_deref().unwrap_or(""));
+        let body = [loc.address.as_deref().unwrap_or(""), loc.comment.as_deref().unwrap_or("")]
+            .into_iter().map(card_text).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+        return SpecialCard {
+            kind: if live { "live-location" } else { "location" },
+            title: if name.is_empty() { t(if live { "card.live_location" } else { "compat.location" }) } else { name },
+            body,
+            detail: coordinate_detail(loc.degrees_latitude, loc.degrees_longitude, live),
+            thumbnail: loc.jpeg_thumbnail.as_deref(),
+            ..Default::default()
+        };
+    }
+    if let Some(loc) = content.live_location_message.as_option() {
+        return SpecialCard {
+            kind: "live-location", title: t("card.live_location"),
+            body: card_text(loc.caption.as_deref().unwrap_or("")),
+            detail: coordinate_detail(loc.degrees_latitude, loc.degrees_longitude, true),
+            thumbnail: loc.jpeg_thumbnail.as_deref(),
+            ..Default::default()
+        };
+    }
+    let poll = content.poll_creation_message.as_option()
+        .or_else(|| content.poll_creation_message_v2.as_option())
+        .or_else(|| content.poll_creation_message_v3.as_option())
+        .or_else(|| content.poll_creation_message_v5.as_option())
+        .or_else(|| content.poll_creation_message_v6.as_option());
+    if let Some(poll) = poll {
+        let question = card_text(poll.name.as_deref().unwrap_or(""));
+        return SpecialCard {
+            kind: "poll", title: if question.is_empty() { t("compat.poll") } else { question },
+            detail: t("compat.poll_phone"),
+            options: poll.options.iter().take(256).map(|option| card_text(option.option_name.as_deref().unwrap_or("")))
+                .filter(|name| !name.is_empty()).collect(),
+            ..Default::default()
+        };
+    }
+    if has_unsupported_content(content)
+        && content.conversation.is_none()
+        && !content.extended_text_message.is_set()
+        && !content.image_message.is_set()
+        && !content.video_message.is_set()
+        && !content.audio_message.is_set()
+        && !content.document_message.is_set()
+        && !content.sticker_message.is_set()
+    {
+        return titled_card("unsupported", "card.unsupported", "card.unsupported_body");
+    }
+    SpecialCard::default()
+}
+
+fn coordinate_detail(lat: Option<f64>, lon: Option<f64>, live: bool) -> String {
+    let coordinates = match (lat, lon) {
+        (Some(lat), Some(lon)) if lat.is_finite() && lon.is_finite()
+            && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) => format!("{lat:.6}, {lon:.6}"),
+        _ => t("compat.invalid_location"),
+    };
+    if live { format!("{coordinates}\n{}", t("card.live_location_detail")) } else { coordinates }
+}
+
+pub fn compatibility_card(content: &wa::Message) -> Option<String> {
+    if let Some(contact) = content.contact_message.as_option() {
+        return Some(contact_card(contact));
+    }
+    if let Some(contacts) = content.contacts_array_message.as_option() {
+        let cards: Vec<_> = contacts.contacts.iter().take(256).map(contact_card).collect();
+        return Some(if cards.is_empty() { t("compat.contact") } else { cards.join("\n\n") });
+    }
+    if let Some(loc) = content.location_message.as_option() {
+        return Some(location_card(loc.degrees_latitude, loc.degrees_longitude, loc.is_live.unwrap_or(false),
+            &[loc.name.as_deref().unwrap_or(""), loc.address.as_deref().unwrap_or(""), loc.comment.as_deref().unwrap_or("")]));
+    }
+    if let Some(loc) = content.live_location_message.as_option() {
+        return Some(location_card(loc.degrees_latitude, loc.degrees_longitude, true, &[loc.caption.as_deref().unwrap_or("")]));
+    }
+    let poll = content.poll_creation_message.as_option()
+        .or_else(|| content.poll_creation_message_v2.as_option())
+        .or_else(|| content.poll_creation_message_v3.as_option())
+        .or_else(|| content.poll_creation_message_v5.as_option())
+        .or_else(|| content.poll_creation_message_v6.as_option());
+    if let Some(poll) = poll {
+        let mut lines = vec![t("compat.poll")];
+        let question = card_text(poll.name.as_deref().unwrap_or(""));
+        if !question.is_empty() { lines.push(question); }
+        for (i, option) in poll.options.iter().take(256).enumerate() {
+            let name = card_text(option.option_name.as_deref().unwrap_or(""));
+            if !name.is_empty() { lines.push(format!("{}. {name}", i + 1)); }
+        }
+        lines.push(t("compat.poll_phone"));
+        return Some(lines.join("\n"));
+    }
+    None
+}
+
+fn has_unsupported_content(content: &wa::Message) -> bool {
+    use whatsapp_rust::waproto::buffa::Message as _;
+    let mut remaining = content.clone();
+    macro_rules! clear {
+        ($($field:ident),* $(,)?) => { $(remaining.$field = Default::default();)* };
+    }
+    clear!(sender_key_distribution_message, fast_ratchet_key_sender_key_distribution_message,
+        protocol_message, reaction_message, enc_reaction_message, poll_update_message,
+        message_context_info, keep_in_chat_message, pin_in_chat_message, sticker_sync_rmr_message,
+        call, chat, message_history_bundle, message_history_notice, status_notification_message,
+        enc_event_response_message, enc_comment_message, poll_result_snapshot_message,
+        poll_result_snapshot_message_v3, poll_add_option_message, group_root_key_share,
+        root_secret_distribute_message, status_link_preview_metadata,
+        ephemeral_message, device_sent_message, document_with_caption_message, edited_message);
+    remaining.encoded_len() != 0
+}
+
+pub fn display_content_summary(message: &wa::Message) -> String {
+    let Some(content) = display_content(message) else { return t("compat.view_once") };
+    if let Some(card) = compatibility_card(content) {
+        return card.chars().take(240).collect();
+    }
+    if has_unsupported_content(content)
+        && content.conversation.is_none()
+        && !content.extended_text_message.is_set()
+        && !content.image_message.is_set()
+        && !content.video_message.is_set()
+        && !content.audio_message.is_set()
+        && !content.document_message.is_set()
+        && !content.sticker_message.is_set()
+    {
+        return t("compat.unsupported");
+    }
+    quoted_summary(content)
 }
 
 pub struct LiveMeta<'a> {
@@ -101,9 +359,9 @@ pub fn ephemeral_label(secs: u32) -> String {
         86_400 => t("ephemeral.day"),
         604_800 => t("ephemeral.week"),
         7_776_000 => t("ephemeral.quarter"),
-        s if s % 86_400 == 0 => crate::i18n::tp("ephemeral.days", (s / 86_400) as i64, &[]),
-        s if s % 3600 == 0 => crate::i18n::tp("ephemeral.hours", (s / 3600) as i64, &[]),
-        s => crate::i18n::tp("ephemeral.minutes", (s / 60) as i64, &[]),
+        s if s % 86_400 == 0 => tp("ephemeral.days", (s / 86_400) as i64, &[]),
+        s if s % 3600 == 0 => tp("ephemeral.hours", (s / 3600) as i64, &[]),
+        s => tp("ephemeral.minutes", (s / 60) as i64, &[]),
     }
 }
 
@@ -131,63 +389,63 @@ pub fn group_notice(
     // Someone coming in through the link gets their own line: it is
     // also the handle for sharing the group's recent history with them.
     if kind == "invite" && !names_me {
-        return ta("notice.joinedLinkShare", &[&people]);
+        return ta("notice.joined_link_share", &[&people]);
     }
     if matches!(kind, "add" | "invite" | "remove" | "promote" | "demote")
         && !self_leave
         && !names_me
         && !actor_is_me
     {
-        return t("notice.membersChanged");
+        return t("notice.members_changed");
     }
     match kind {
         "add" => {
             if names_me {
-                ta("notice.addedYou", &[&actor_or_someone])
+                ta("notice.added_you", &[&actor_or_someone])
             } else if actor.is_some() && who.len() == 1 && actor_name == names[0] {
-                ta("notice.joinedLink", &[&people])
+                ta("notice.joined_link", &[&people])
             } else if actor_is_me {
-                ta("notice.youAdded", &[&people])
+                ta("notice.you_added", &[&people])
             } else {
                 ta("notice.added", &[&actor_or_someone, &people])
             }
         }
-        "invite" => ta("notice.joinedLink", &[&people]),
+        "invite" => ta("notice.joined_link", &[&people]),
         "remove" | "leave" => {
             if actor.is_some() && who.len() == 1 && actor_name == names[0] {
-                if names_me { t("notice.youLeft") } else { ta("notice.left", &[&people]) }
+                if names_me { t("notice.you_left") } else { ta("notice.left", &[&people]) }
             } else if names_me {
-                ta("notice.removedYou", &[&actor_or_someone])
+                ta("notice.removed_you", &[&actor_or_someone])
             } else if actor_is_me {
-                ta("notice.youRemoved", &[&people])
+                ta("notice.you_removed", &[&people])
             } else {
                 ta("notice.removed", &[&actor_or_someone, &people])
             }
         }
         "promote" => {
-            if names_me { t("notice.youAdmin") } else { ta("notice.promoted", &[&people]) }
+            if names_me { t("notice.you_admin") } else { ta("notice.promoted", &[&people]) }
         }
         "demote" => {
-            if names_me { t("notice.youNotAdmin") } else { ta("notice.demoted", &[&people]) }
+            if names_me { t("notice.you_not_admin") } else { ta("notice.demoted", &[&people]) }
         }
         "subject" => ta("notice.subject", &[&actor_or_someone, text]),
         "description" => ta("notice.description", &[&actor_or_someone]),
         "icon" => ta("notice.icon", &[&actor_or_someone]),
         "create" => ta("notice.created", &[&actor_or_someone, text]),
         "announce" => ta("notice.announce", &[&actor_or_someone]),
-        "not_announce" => ta("notice.notAnnounce", &[&actor_or_someone]),
+        "not_announce" => ta("notice.not_announce", &[&actor_or_someone]),
         "locked" => ta("notice.locked", &[&actor_or_someone]),
         "unlocked" => ta("notice.unlocked", &[&actor_or_someone]),
         "ephemeral" => {
             if number == 0 {
-                ta("notice.ephemeralOff", &[&actor_or_someone])
+                ta("notice.ephemeral_off", &[&actor_or_someone])
             } else {
-                ta("notice.ephemeralOn", &[&actor_or_someone, &ephemeral_label(number)])
+                ta("notice.ephemeral_on", &[&actor_or_someone, &ephemeral_label(number)])
             }
         }
         "delete" => t("notice.deleted"),
-        "missedVoice" => t("notice.missedVoice"),
-        "missedVideo" => t("notice.missedVideo"),
+        "missedVoice" => t("notice.missed_voice"),
+        "missedVideo" => t("notice.missed_video"),
         _ => String::new(),
     }
 }
@@ -335,8 +593,6 @@ pub fn normalize(
     reactions: &HashMap<String, String>,
     status: u32,
 ) -> Option<StoredMessage> {
-    use whatsapp_rust::proto_helpers::MessageExt as _;
-
     // LID addressing: the alt identity of the same peer collapses the
     // lid/pn versions of a chat into one.
     if let Some(alt) = &meta.sender_alt {
@@ -351,8 +607,8 @@ pub fn normalize(
         return None;
     }
 
-    // Disappearing/view-once wrappers hide the real content one level down.
-    let content = message.get_base_message();
+    let displayable = display_content(message);
+    let content = displayable.unwrap_or(message);
 
     let sender_jid = store.canon_owned(&meta.sender);
     if !meta.from_me && !meta.push_name.is_empty() {
@@ -373,7 +629,7 @@ pub fn normalize(
         )
     };
 
-    let ctx = context_of(content);
+    let ctx = displayable.and_then(context_of);
     let forwarded = ctx.and_then(|c| c.is_forwarded).unwrap_or(false);
 
     // "@number" mentions list us explicitly; "@all"/"@everyone" arrives as
@@ -397,7 +653,7 @@ pub fn normalize(
             ctx.and_then(|c| c.participant.as_deref())
                 .map(|p| store.canon_owned(&normalize_jid(p)))
                 .unwrap_or_default(),
-            quoted_summary(quoted),
+            display_content_summary(quoted),
         ),
         None => Default::default(),
     };
@@ -441,9 +697,17 @@ pub fn normalize(
         duration_sec: 0,
         status: if meta.from_me { status.max(2) } else { 0 },
         reactions: reactions.clone(),
-        raw: Some(Arc::new(message.clone())),
+        raw: displayable.map(|_| Arc::new(message.clone())),
     };
 
+    if displayable.is_none() {
+        stored.text = t("compat.view_once");
+        return Some(stored);
+    }
+    if let Some(card) = compatibility_card(content) {
+        stored.text = card;
+        return Some(stored);
+    }
     if let Some(text) = &content.conversation {
         stored.text = clean_text(text);
         return Some(stored);
@@ -504,7 +768,7 @@ pub fn normalize(
     }
     if let Some(doc) = content.document_message.as_option() {
         stored.kind = MessageKind::Doc;
-        stored.text = clean_text(doc.file_name.as_deref().unwrap_or(&t("doc.fallbackName")));
+        stored.text = clean_text(doc.file_name.as_deref().unwrap_or(&t("doc.fallback_name")));
         stored.mimetype =
             doc.mimetype.clone().unwrap_or_else(|| "application/octet-stream".into());
         return Some(stored);
@@ -515,6 +779,11 @@ pub fn normalize(
         stored.text = format_duration(seconds);
         stored.mimetype = audio.mimetype.clone().unwrap_or_else(|| "audio/ogg".into());
         stored.duration_sec = seconds;
+        return Some(stored);
+    }
+    if has_unsupported_content(content) {
+        stored.text = t("compat.unsupported");
+        stored.raw = None;
         return Some(stored);
     }
     None
@@ -530,11 +799,11 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
     if !info.push_name.is_empty() {
         store.contacts.insert(author.clone(), info.push_name.to_string());
     }
-    let content = {
-        use whatsapp_rust::proto_helpers::MessageExt as _;
-        inbound.message.get_base_message()
-    };
-    let (kind, text) = if let Some(text) = &content.conversation {
+    let displayable = display_content(&inbound.message);
+    let content = displayable.unwrap_or(&inbound.message);
+    let (kind, text) = if displayable.is_none() {
+        (MessageKind::Text, t("compat.view_once"))
+    } else if let Some(text) = &content.conversation {
         (MessageKind::Text, clean_text(text))
     } else if let Some(ext) = content.extended_text_message.as_option() {
         (MessageKind::Text, clean_text(ext.text.as_deref().unwrap_or("")))
@@ -581,7 +850,7 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         duration_sec: 0,
         status: 0,
         reactions: HashMap::new(),
-        raw: Some(inbound.message.clone()),
+        raw: displayable.map(|_| inbound.message.clone()),
     })
 }
 

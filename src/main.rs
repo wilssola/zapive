@@ -3,6 +3,7 @@
 
 slint::include_modules!();
 
+mod outbox;
 mod audio;
 mod bridge;
 mod call;
@@ -223,7 +224,7 @@ fn main() {
         Err(e) => {
             eprintln!("[wa] failed to start: {e}");
             ui.set_screen("login".into());
-            ui.set_status_text(i18n::ta("status.connectFailed", &[&e]).into());
+            ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
             ui.run().expect("event loop failed");
             return;
         }
@@ -255,7 +256,7 @@ fn main() {
             Ok(()) => bridge::ui_apply(move |b| b.boot(app_vault, registered)),
             Err(e) => {
                 eprintln!("[vault] open failed: {e}");
-                ui.set_status_text(i18n::ta("status.connectFailed", &[&e]).into());
+                ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
             }
         }
     }
