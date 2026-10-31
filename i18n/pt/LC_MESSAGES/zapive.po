@@ -1168,9 +1168,6 @@ msgstr "Desfocar texto das mensagens"
 msgid "settings.privacy.blur_media"
 msgstr "Desfocar prévias de mídia"
 
-msgid "call.window.title"
-msgstr "Chamada do Zapive"
-
 msgid "call.incoming.decline"
 msgstr "Recusar"
 
@@ -1573,10 +1570,10 @@ msgid "chat.mute.duration_always"
 msgstr "Sempre"
 
 msgid "chat.in_chat_search.title"
-msgstr "Pesquisar na conversa"
+msgstr "Pesquisar mensagens"
 
 msgid "chat.in_chat_search.placeholder"
-msgstr "Pesquisar mensagens"
+msgstr "Pesquisar"
 
 msgid "chat.in_chat_search.hint"
 msgstr "Pesquise mensagens nesta conversa"

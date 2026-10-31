@@ -1168,9 +1168,6 @@ msgstr "Blur message text"
 msgid "settings.privacy.blur_media"
 msgstr "Blur media previews"
 
-msgid "call.window.title"
-msgstr "Zapive Call"
-
 msgid "call.incoming.decline"
 msgstr "Decline"
 
@@ -1571,10 +1568,10 @@ msgid "chat.mute.duration_always"
 msgstr "Always"
 
 msgid "chat.in_chat_search.title"
-msgstr "Search in conversation"
+msgstr "Search messages"
 
 msgid "chat.in_chat_search.placeholder"
-msgstr "Search messages"
+msgstr "Search"
 
 msgid "chat.in_chat_search.hint"
 msgstr "Search for messages in this chat"
