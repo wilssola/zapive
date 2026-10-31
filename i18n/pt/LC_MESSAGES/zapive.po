@@ -687,9 +687,6 @@ msgstr "Selecionar"
 msgid "message.menu.details"
 msgstr "Detalhes"
 
-msgid "message.details.title"
-msgstr "Detalhes da mensagem"
-
 msgid "message.menu.delete"
 msgstr "Apagar"
 
@@ -795,7 +792,7 @@ msgstr "Aplicar mensagens apagadas pelo remetente"
 
 
 msgid "settings.notifications.previews"
-msgstr "Mostrar prévia das mensagens nas notificações"
+msgstr "Mostrar prévias das mensagens"
 
 
 msgid "settings.security.title"
@@ -1047,7 +1044,7 @@ msgid "chat.composer.admins_only_prefix"
 msgstr "Somente "
 
 msgid "chat.composer.admins_only_highlight"
-msgstr "administradores"
+msgstr "admins"
 
 msgid "chat.composer.admins_only_suffix"
 msgstr " podem enviar mensagens"
@@ -1157,19 +1154,19 @@ msgstr "Criar"
 
 
 msgid "settings.privacy.blur_hint"
-msgstr "Escolha qual conteúdo ocultar. Passar o mouse ou focar com o teclado revela só esse item."
+msgstr "Escolha o conteúdo a desfocar. Passe o mouse ou use o foco do teclado para revelar cada item."
 
 msgid "settings.privacy.blur_names"
-msgstr "Nomes"
+msgstr "Desfocar nomes dos contatos"
 
 msgid "settings.privacy.blur_photos"
-msgstr "Fotos"
+msgstr "Desfocar fotos de perfil"
 
 msgid "settings.privacy.blur_messages"
-msgstr "Mensagens"
+msgstr "Desfocar texto das mensagens"
 
 msgid "settings.privacy.blur_media"
-msgstr "Mídia"
+msgstr "Desfocar prévias de mídia"
 
 msgid "call.window.title"
 msgstr "Chamada do Zapive"
@@ -1415,10 +1412,10 @@ msgid "message.special.view_details"
 msgstr "Ver detalhes"
 
 msgid "settings.appearance.style.description"
-msgstr "Choose a translucent or opaque interface"
+msgstr "Escolha uma interface translúcida ou opaca."
 
 msgid "settings.appearance.theme.description"
-msgstr "Choose a light, dark or system theme"
+msgstr "Escolha o tema claro, escuro ou acompanhe o sistema."
 
 msgid "settings.category.account.description"
 msgstr "Gerencie suas contas"
@@ -1475,13 +1472,13 @@ msgid "settings.category.updates.title"
 msgstr "Atualizações"
 
 msgid "settings.general.startup.description"
-msgstr "Start the app automatically when you sign in"
+msgstr "Inicia o aplicativo automaticamente ao entrar no sistema."
 
 msgid "settings.general.startup.title"
 msgstr "Inicialização"
 
 msgid "settings.language.description"
-msgstr "Choose the language used by the app"
+msgstr "Escolha o idioma do aplicativo."
 
 msgid "settings.notifications.enabled"
 msgstr "Mostrar notificações"
@@ -1514,7 +1511,7 @@ msgid "settings.search.default_subtitle"
 msgstr "Personalize sua experiência no Zapive"
 
 msgid "settings.search.placeholder"
-msgstr "Search settings"
+msgstr "Buscar nas configurações…"
 
 msgid "settings.search.results_subtitle"
 msgstr "Configurações que correspondem à sua busca"
@@ -1523,16 +1520,16 @@ msgid "settings.search.results_title"
 msgstr "Resultados da busca"
 
 msgid "settings.updates.whats_new"
-msgstr "Ver novidades"
+msgstr "Consulte as novidades"
 
 msgid "update.release.empty_history"
-msgstr "No published releases yet"
+msgstr "Nenhuma versão publicada ainda."
 
 msgid "update.release.history.title"
 msgstr "Histórico de versões"
 
 msgid "update.release.installed_version"
-msgstr "Installed version"
+msgstr "Versão instalada: {}"
 
 msgid "update.release.load_history"
 msgstr "Carregar histórico"
@@ -1541,28 +1538,28 @@ msgid "update.release.load_older"
 msgstr "Carregar versões anteriores"
 
 msgid "update.release.new_in"
-msgstr "New in"
+msgstr "Novidades da {}"
 
 msgid "update.release.newer_versions_hint"
-msgstr "Changes in versions newer than the one installed are shown separately from release history."
+msgstr "As mudanças das versões mais recentes que a instalada aparecem separadas do seu histórico."
 
 msgid "update.release.notes_empty"
-msgstr "No release notes available"
+msgstr "Notas desta versão não disponíveis."
 
 msgid "update.release.notes_unavailable"
-msgstr "Release notes for version are not available yet"
+msgstr "As notas da versão {} ainda não estão disponíveis."
 
 msgid "update.release.original_language_hint"
-msgstr "Release notes are shown in their original language"
+msgstr "As notas das versões são exibidas no idioma original."
 
 msgid "update.release.refresh_history"
 msgstr "Atualizar histórico"
 
 msgid "update.release.up_to_date"
-msgstr "Nothing new. You're up to date."
+msgstr "Nada novo — você está atualizado"
 
 msgid "update.whats_new.title"
-msgstr "Title"
+msgstr "Ver novidades"
 
 
 
@@ -1582,10 +1579,43 @@ msgid "chat.in_chat_search.placeholder"
 msgstr "Pesquisar mensagens"
 
 msgid "chat.in_chat_search.hint"
-msgstr "Pesquisar nesta conversa"
+msgstr "Pesquise mensagens nesta conversa"
 
 msgid "chat.attach.sticker"
 msgstr "Figurinha"
 
 msgid "chat.attach.document"
 msgstr "Documento"
+
+msgid "update.release.installed_version_suffix"
+msgstr "{} · Versão instalada"
+
+msgid "update.version.available_title"
+msgstr "Nova versão disponível"
+
+msgid "chat.attach.audio"
+msgstr "Áudio"
+
+msgid "chat.attach.photos"
+msgstr "Fotos"
+
+msgid "chat.picker.tab_stickers"
+msgstr "Figurinhas"
+
+msgid "msg.details.title"
+msgstr "Detalhes da mensagem"
+
+msgid "settings.downloads.audio.description"
+msgstr "Baixa arquivos de áudio automaticamente."
+
+msgid "settings.downloads.documents.description"
+msgstr "Baixa documentos automaticamente."
+
+msgid "settings.downloads.photos.description"
+msgstr "Baixa fotos automaticamente."
+
+msgid "settings.downloads.stickers.description"
+msgstr "Baixa figurinhas automaticamente."
+
+msgid "settings.downloads.videos.description"
+msgstr "Baixa vídeos automaticamente."

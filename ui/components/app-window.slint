@@ -3887,7 +3887,7 @@ export component AppWindow inherits Window {
                         clicked => { root.picker-tab = "emoji"; }
                     }
                     FilterChip {
-                        label: @tr("settings.downloads.stickers");
+                        label: @tr("chat.picker.tab_stickers");
                         active: root.picker-tab == "sticker";
                         clicked => { root.picker-tab = "sticker"; }
                     }
@@ -4256,12 +4256,12 @@ export component AppWindow inherits Window {
                 }
                 MenuRow {
                     icon: @image-url("../icons/photo.svg");
-                    label: @tr("settings.downloads.photos");
+                    label: @tr("chat.attach.photos");
                     clicked => { root.attach-open = false; root.attach-image(); }
                 }
                 MenuRow {
                     icon: @image-url("../icons/music.svg");
-                    label: @tr("settings.downloads.audio");
+                    label: @tr("chat.attach.audio");
                     clicked => { root.attach-open = false; root.attach-audio(); }
                 }
                 MenuRow {
@@ -4907,7 +4907,7 @@ export component AppWindow inherits Window {
                         background: Theme.header;
                         HorizontalLayout {
                             padding: 16px;
-                            Text { text: @tr("message.details.title"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
+                            Text { text: @tr("msg.details.title"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
                             Rectangle {
                                 width: 28px;
                                 Text { text: "×"; color: Theme.text-dim; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; }
@@ -6094,7 +6094,7 @@ export component AppWindow inherits Window {
                                 }
                                 SettingsRow {
                                     label: @tr("settings.downloads.photos");
-                                    detail: @tr("settings.downloads.photos");
+                                    detail: @tr("settings.downloads.photos.description");
                                     icon: @image-url("../icons/photo.svg");
                                     Toggle {
                                         on: root.auto-download-photos;
@@ -6103,7 +6103,7 @@ export component AppWindow inherits Window {
                                 }
                                 SettingsRow {
                                     label: @tr("settings.downloads.audio");
-                                    detail: @tr("settings.downloads.audio");
+                                    detail: @tr("settings.downloads.audio.description");
                                     icon: @image-url("../icons/music.svg");
                                     Toggle {
                                         on: root.auto-download-audio;
@@ -6112,7 +6112,7 @@ export component AppWindow inherits Window {
                                 }
                                 SettingsRow {
                                     label: @tr("settings.downloads.videos");
-                                    detail: @tr("settings.downloads.videos");
+                                    detail: @tr("settings.downloads.videos.description");
                                     icon: @image-url("../icons/video.svg");
                                     Toggle {
                                         on: root.auto-download-video;
@@ -6121,7 +6121,7 @@ export component AppWindow inherits Window {
                                 }
                                 SettingsRow {
                                     label: @tr("settings.downloads.documents");
-                                    detail: @tr("settings.downloads.documents");
+                                    detail: @tr("settings.downloads.documents.description");
                                     icon: @image-url("../icons/file-text.svg");
                                     Toggle {
                                         on: root.auto-download-documents;
@@ -6130,7 +6130,7 @@ export component AppWindow inherits Window {
                                 }
                                 SettingsRow {
                                     label: @tr("settings.downloads.stickers");
-                                    detail: @tr("settings.downloads.stickers");
+                                    detail: @tr("settings.downloads.stickers.description");
                                     icon: @image-url("../icons/sticker-2.svg");
                                     Toggle {
                                         on: root.auto-download-stickers;
@@ -6169,7 +6169,7 @@ export component AppWindow inherits Window {
                                 hint: @tr("update.release.newer_versions_hint");
                                 SettingsRow {
                                     label: root.update-state == 3 ? @tr("settings.about.update_restart_required", root.update-version)
-                                        : root.changelog-has-new || root.update-state > 0 ? @tr("update.status.available")
+                                        : root.changelog-has-new || root.update-state > 0 ? @tr("update.version.available_title")
                                         : root.changelog-verified ? @tr("update.release.up_to_date") : @tr("settings.updates.whats_new");
                                     detail: @tr("update.release.installed_version", root.app-version);
                                     DialogButton {
@@ -6208,7 +6208,7 @@ export component AppWindow inherits Window {
                                         spacing: 8px;
                                         alignment: start;
                                         Text {
-                                            text: release.installed ? @tr("update.release.installed_version", release.tag) : release.tag;
+                                            text: release.installed ? @tr("update.release.installed_version_suffix", release.tag) : release.tag;
                                             color: Theme.text;
                                             font-size: 15px;
                                             font-weight: 700;

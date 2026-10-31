@@ -687,9 +687,6 @@ msgstr "Select"
 msgid "message.menu.details"
 msgstr "Details"
 
-msgid "message.details.title"
-msgstr "Message details"
-
 msgid "message.menu.delete"
 msgstr "Delete"
 
@@ -795,7 +792,7 @@ msgstr "Apply messages deleted by the sender"
 
 
 msgid "settings.notifications.previews"
-msgstr "Show message previews in notifications"
+msgstr "Show message previews"
 
 
 msgid "settings.security.title"
@@ -1157,19 +1154,19 @@ msgstr "Create"
 
 
 msgid "settings.privacy.blur_hint"
-msgstr "Choose which content to hide. Hover or keyboard focus reveals only that item."
+msgstr "Choose which content to blur. Hover or keyboard focus reveals only that item."
 
 msgid "settings.privacy.blur_names"
-msgstr "Names"
+msgstr "Blur contact names"
 
 msgid "settings.privacy.blur_photos"
-msgstr "Photos"
+msgstr "Blur profile photos"
 
 msgid "settings.privacy.blur_messages"
-msgstr "Messages"
+msgstr "Blur message text"
 
 msgid "settings.privacy.blur_media"
-msgstr "Media"
+msgstr "Blur media previews"
 
 msgid "call.window.title"
 msgstr "Zapive Call"
@@ -1415,10 +1412,10 @@ msgid "message.special.view_details"
 msgstr "View details"
 
 msgid "settings.appearance.style.description"
-msgstr "Choose a translucent or opaque interface"
+msgstr "Choose a translucent or opaque interface."
 
 msgid "settings.appearance.theme.description"
-msgstr "Choose a light, dark or system theme"
+msgstr "Choose a light, dark or system theme."
 
 msgid "settings.category.account.description"
 msgstr "Manage your accounts"
@@ -1475,13 +1472,13 @@ msgid "settings.category.updates.title"
 msgstr "Updates"
 
 msgid "settings.general.startup.description"
-msgstr "Start the app automatically when you sign in"
+msgstr "Start the app automatically when you sign in."
 
 msgid "settings.general.startup.title"
 msgstr "Startup"
 
 msgid "settings.language.description"
-msgstr "Choose the language used by the app"
+msgstr "Choose the language used by the app."
 
 msgid "settings.notifications.enabled"
 msgstr "Show notifications"
@@ -1514,7 +1511,7 @@ msgid "settings.search.default_subtitle"
 msgstr "Customize your Zapive experience"
 
 msgid "settings.search.placeholder"
-msgstr "Search settings"
+msgstr "Search settings…"
 
 msgid "settings.search.results_subtitle"
 msgstr "Settings matching your search"
@@ -1523,16 +1520,16 @@ msgid "settings.search.results_title"
 msgstr "Search results"
 
 msgid "settings.updates.whats_new"
-msgstr "What's new"
+msgstr "Check what's new"
 
 msgid "update.release.empty_history"
-msgstr "No published releases yet"
+msgstr "No published releases yet."
 
 msgid "update.release.history.title"
 msgstr "Release history"
 
 msgid "update.release.installed_version"
-msgstr "Installed version"
+msgstr "Installed version: {}"
 
 msgid "update.release.load_history"
 msgstr "Load history"
@@ -1541,28 +1538,28 @@ msgid "update.release.load_older"
 msgstr "Load older releases"
 
 msgid "update.release.new_in"
-msgstr "New in"
+msgstr "New in {}"
 
 msgid "update.release.newer_versions_hint"
-msgstr "Changes in versions newer than the one installed are shown separately from release history."
+msgstr "Changes in versions newer than the one installed are shown separately from your history."
 
 msgid "update.release.notes_empty"
-msgstr "No release notes available"
+msgstr "No release notes available."
 
 msgid "update.release.notes_unavailable"
-msgstr "Release notes for version are not available yet"
+msgstr "Release notes for version {} are not available yet."
 
 msgid "update.release.original_language_hint"
-msgstr "Release notes are shown in their original language"
+msgstr "Release notes are shown in their original language."
 
 msgid "update.release.refresh_history"
 msgstr "Refresh history"
 
 msgid "update.release.up_to_date"
-msgstr "Nothing new. You're up to date."
+msgstr "Nothing new — you're up to date"
 
 msgid "update.whats_new.title"
-msgstr "Title"
+msgstr "What's new"
 
 msgid "chat.mute.duration_8h"
 msgstr "8 hours"
@@ -1580,10 +1577,43 @@ msgid "chat.in_chat_search.placeholder"
 msgstr "Search messages"
 
 msgid "chat.in_chat_search.hint"
-msgstr "Search within this conversation"
+msgstr "Search for messages in this chat"
 
 msgid "chat.attach.sticker"
 msgstr "Sticker"
 
 msgid "chat.attach.document"
 msgstr "Document"
+
+msgid "update.release.installed_version_suffix"
+msgstr "{} · Installed version"
+
+msgid "update.version.available_title"
+msgstr "New version available"
+
+msgid "chat.attach.audio"
+msgstr "Audio"
+
+msgid "chat.attach.photos"
+msgstr "Photos"
+
+msgid "chat.picker.tab_stickers"
+msgstr "Stickers"
+
+msgid "msg.details.title"
+msgstr "Message details"
+
+msgid "settings.downloads.audio.description"
+msgstr "Download audio files automatically."
+
+msgid "settings.downloads.documents.description"
+msgstr "Download documents automatically."
+
+msgid "settings.downloads.photos.description"
+msgstr "Download photos automatically."
+
+msgid "settings.downloads.stickers.description"
+msgstr "Download stickers automatically."
+
+msgid "settings.downloads.videos.description"
+msgstr "Download videos automatically."
