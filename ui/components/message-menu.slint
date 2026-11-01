@@ -1,0 +1,188 @@
+import { ScrollView } from "std-widgets.slint";
+import { ModalLayer } from "modal.slint";
+import { MenuRow } from "rows/menu.slint";
+import { Theme } from "theme.slint";
+import { MessageItem } from "types.slint";
+
+export component MessageMenuLayer inherits ModalLayer {
+    in property <string> theme-style;
+    callback copy-text(string);
+    callback copy-image(string);
+    callback request-reply(string);
+    callback toggle-star(string);
+    callback message-action(string, string);
+    in property <MessageItem> menu-message;
+    in-out property <bool> message-menu-open;
+    in property <length> message-menu-x;
+    in property <length> message-menu-y;
+    callback react-pick(string);
+    callback request-forward(string);
+    callback select-start(string);
+    pure callback can-translate(MessageItem) -> bool;
+    in property <length> win-width;
+    in property <length> win-height;
+
+    if root.mounted: Rectangle {
+        x: max(8px, min(root.message-menu-x, root.win-width - self.width - 8px));
+        y: max(8px, min(root.message-menu-y, root.win-height - self.height - 8px)) + (1 - root.progress) * 4px;
+        opacity: root.progress;
+        width: 264px;
+        height: min(root.win-height - 16px, message-menu-items.preferred-height + 12px);
+        border-radius: 12px;
+        background: Theme.dark ? (root.theme-style == "glass" ? #222c32f5 : #222c32) : Theme.panel;
+        border-width: 1px;
+        border-color: Theme.dark ? #ffffff18 : Theme.border;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000066;
+        TouchArea { }
+        ScrollView {
+            x: 6px; y: 6px;
+            width: parent.width - 12px;
+            height: parent.height - 12px;
+            message-menu-items := VerticalLayout {
+                spacing: 1px;
+                if root.menu-message.sendPending: Text {
+                    text: root.menu-message.sendState;
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                if root.menu-message.sendRetry: MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/refresh.svg");
+                    label: @tr("settings.about.retry_action");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "retry"); }
+                }
+                if root.menu-message.sendRetry && root.menu-message.kind == "text": MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/copy.svg");
+                    label: @tr("message.action.copy_to_composer");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "recover"); }
+                }
+                if root.menu-message.sendPending && !root.menu-message.sendRetry: MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/x.svg");
+                    label: @tr("chat.list.new_cancel");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "cancel"); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/message-circle.svg");
+                    label: @tr("message.menu.reply");
+                    clicked => { root.message-menu-open = false; root.request-reply(root.menu-message.id); }
+                }
+                if root.menu-message.privateReply: MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/users.svg");
+                    label: @tr("message.menu.reply_privately");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "private"); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/corner-up-right.svg");
+                    label: @tr("message.menu.forward");
+                    clicked => { root.message-menu-open = false; root.request-forward(root.menu-message.id); }
+                }
+                if root.can-translate(root.menu-message): MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/translate.svg");
+                    label: root.menu-message.translationBusy ? @tr("chat.message.translating") : @tr("chat.message.translate");
+                    enabled: !root.menu-message.translationBusy;
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translate"); }
+                }
+                if root.can-translate(root.menu-message) && root.menu-message.translationText != "": MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/x.svg");
+                    label: @tr("chat.message.hide_translation");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-hide"); }
+                }
+                if root.can-translate(root.menu-message) && root.menu-message.translationSource != "": MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/translate.svg");
+                    label: @tr("chat.message.always_translate_from", root.menu-message.translationSource);
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-always"); }
+                }
+                if root.can-translate(root.menu-message) && root.menu-message.translationSource != "": MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/circle-minus.svg");
+                    label: @tr("chat.message.never_translate_from", root.menu-message.translationSource);
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-never"); }
+                }
+                if root.menu-message.text != "" && (root.menu-message.kind == "text" || root.menu-message.kind == "image" || root.menu-message.kind == "video"): MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/copy.svg");
+                    label: @tr("chat.message.copy_original_text");
+                    clicked => { root.message-menu-open = false; root.copy-text(root.menu-message.id); }
+                }
+                if root.menu-message.kind == "image" && root.menu-message.mediaReady: MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/photo.svg");
+                    label: @tr("message.menu.copy_image");
+                    clicked => { root.message-menu-open = false; root.copy-image(root.menu-message.id); }
+                }
+                if root.menu-message.linkUrl != "": MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/copy.svg");
+                    label: @tr("message.menu.copy_link");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "link"); }
+                }
+                if root.menu-message.kind != "text" && root.menu-message.mediaReady: MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/download.svg");
+                    label: @tr("message.menu.save_as");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "save"); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/mood-smile.svg");
+                    label: @tr("message.menu.react");
+                    clicked => { root.message-menu-open = false; root.react-pick(root.menu-message.id); }
+                }
+                if root.menu-message.editable: MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/file-text.svg");
+                    label: @tr("message.menu.edit");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "edit"); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/pin.svg");
+                    label: root.menu-message.pinned ? @tr("message.menu.unpin") : @tr("message.menu.pin");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "pin"); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/message-circle.svg");
+                    label: @tr("message.menu.mark_unread");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "unread"); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/star.svg");
+                    label: root.menu-message.starred ? @tr("message.menu.unstar") : @tr("message.menu.star");
+                    clicked => { root.message-menu-open = false; root.toggle-star(root.menu-message.id); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/checkbox.svg");
+                    label: @tr("message.menu.select");
+                    clicked => { root.message-menu-open = false; root.select-start(root.menu-message.id); }
+                }
+                MenuRow {
+                    height: 32px;
+                    icon: @image-url("../icons/info-circle.svg");
+                    label: @tr("message.menu.details");
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "details"); }
+                }
+                Rectangle { height: 1px; background: Theme.dark ? #ffffff18 : Theme.border; }
+                MenuRow {
+                    height: 34px;
+                    icon: @image-url("../icons/trash.svg");
+                    label: @tr("message.menu.delete");
+                    tint: #f47783;
+                    clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "delete"); }
+                }
+            }
+        }
+    }
+}

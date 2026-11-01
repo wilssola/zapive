@@ -1,0 +1,190 @@
+import { DialogButton } from "dialog-button.slint";
+import { ModalLayer } from "modal.slint";
+import { AccountRow } from "rows/account.slint";
+import { MenuRow } from "rows/menu.slint";
+import { Theme } from "theme.slint";
+import { AccountItem } from "types.slint";
+
+export component SyncLayer inherits ModalLayer {
+    in-out property <bool> sync-open;
+    in property <string> sync-detail;
+
+    if root.mounted: Rectangle {
+        width: 400px;
+        height: sync-col.preferred-height + 44px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        TouchArea { }
+        sync-col := VerticalLayout {
+            padding: 22px;
+            spacing: 14px;
+            width: parent.width;
+            Text {
+                text: @tr("chat.history.syncing");
+                color: Theme.text;
+                font-size: 18px;
+                font-weight: 700;
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            Text {
+                text: root.sync-detail;
+                color: Theme.text-dim;
+                font-size: 14px;
+                wrap: word-wrap;
+                width: parent.width - 44px;
+            }
+            HorizontalLayout {
+                alignment: end;
+                DialogButton {
+                    label: @tr("common.action.ok");
+                    primary: true;
+                    clicked => { root.sync-open = false; }
+                }
+            }
+        }
+    }
+}
+
+export component AccountLayer inherits ModalLayer {
+    callback logout();
+    in property <[AccountItem]> accounts;
+    in property <bool> can-add-account;
+    in-out property <bool> account-menu-open;
+    callback switch-account(string);
+    callback add-account();
+    callback remove-account(string);
+
+    if root.mounted: Rectangle {
+        x: 64px;
+        y: parent.height - self.height - 10px + (1 - root.progress) * 8px;
+        opacity: root.progress;
+        width: 300px;
+        height: account-col.preferred-height;
+        background: Theme.panel;
+        border-radius: 10px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000066;
+        TouchArea { }
+        account-col := VerticalLayout {
+            padding: 6px;
+            spacing: 1px;
+            for acc in root.accounts: AccountRow {
+                account: acc;
+                clicked => {
+                    if (acc.active) { root.account-menu-open = false; }
+                    else { root.switch-account(acc.id); }
+                }
+                remove => { root.remove-account(acc.id); }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            if root.can-add-account: MenuRow {
+                icon: @image-url("../icons/user-plus.svg");
+                label: @tr("account.menu.add");
+                clicked => { root.add-account(); }
+            }
+            if !root.can-add-account: Text {
+                text: @tr("account.menu.limit_hint");
+                color: Theme.text-dim;
+                font-size: 12px;
+                height: 32px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            MenuRow {
+                icon: @image-url("../icons/logout.svg");
+                label: @tr("account.menu.logout");
+                tint: #f05d4d;
+                clicked => {
+                    root.account-menu-open = false;
+                    root.logout();
+                }
+            }
+        }
+    }
+}
+
+export component AlertLayer inherits ModalLayer {
+    in property <string> alert-title;
+    in property <string> alert-text;
+    in property <string> alert-action;
+    callback alert-retry();
+    callback alert-dismiss();
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: 380px;
+        height: alert-col.preferred-height + 44px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        alert-col := VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            width: parent.width;
+            Text {
+                text: root.alert-title;
+                color: Theme.text;
+                font-size: 17px;
+                font-weight: 700;
+                wrap: word-wrap;
+                width: parent.width - 44px;
+            }
+            Text {
+                text: root.alert-text;
+                color: Theme.text-dim;
+                font-size: 14px;
+                wrap: word-wrap;
+                width: parent.width - 44px;
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 10px;
+                Rectangle {
+                    width: dismiss-text.preferred-width + 28px;
+                    height: 36px;
+                    border-radius: 18px;
+                    background: dismiss-touch.has-hover ? Theme.hover : transparent;
+                    dismiss-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.alert-dismiss(); }
+                    }
+                    dismiss-text := Text {
+                        text: @tr("common.action.close");
+                        color: Theme.text-dim;
+                        font-size: 14px;
+                        width: parent.width;
+                        height: parent.height;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    width: retry-text.preferred-width + 32px;
+                    height: 36px;
+                    border-radius: 18px;
+                    background: retry-touch.has-hover ? Theme.accent.darker(0.15) : Theme.accent;
+                    retry-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.alert-retry(); }
+                    }
+                    retry-text := Text {
+                        text: root.alert-action;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: 700;
+                        width: parent.width;
+                        height: parent.height;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,213 @@
+import { Avatar } from "avatar.slint";
+import { Theme } from "theme.slint";
+import { MemberItem } from "types.slint";
+
+// Building blocks of the message list: delivery ticks, time cluster, media placeholder, typing dots.
+
+// Delivery ticks drawn as vectors in WhatsApp's Material shape
+// (done/done_all): the "✓" glyph comes from the emoji fallback font,
+// whose wide bitmap cell leaves the two checks far apart; paths sit
+// tight and render identically on every platform.
+// Outlines: Material Icons (Apache 2.0), Google LLC,
+// https://github.com/google/material-design-icons
+export component Ticks {
+    in property <string> ticks;
+    in property <bool> blue;
+    property <length> mark-size: 14px;
+    width: mark-size;
+    height: mark-size;
+    if ticks == "pending": Rectangle {
+        width: 11px;
+        height: 11px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.time-out;
+        Rectangle { x: 5px; y: 2px; width: 1px; height: 4px; background: Theme.time-out; }
+        Rectangle { x: 5px; y: 5px; width: 3px; height: 1px; background: Theme.time-out; }
+    }
+    if ticks != "" && ticks != "pending": Path {
+        commands: ticks == "✓✓"
+            ? "M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"
+            : "M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z";
+        viewbox-width: 24;
+        viewbox-height: 24;
+        width: mark-size;
+        height: mark-size;
+        fill: blue ? #53bdeb : Theme.time-out;
+    }
+}
+
+// The time/ticks cluster that floats at the bottom-right of a bubble's
+// text block, on the space the trailing NBSP run reserves.
+export component BubbleMeta {
+    in property <string> time;
+    in property <string> ticks;
+    in property <bool> blue;
+    in property <bool> fromMe;
+    height: 14px;
+    HorizontalLayout {
+        spacing: 4px;
+        if ticks != "": Ticks { ticks: ticks; blue: blue; }
+        Text {
+            text: time;
+            font-size: 10px;
+            color: fromMe ? Theme.time-out : Theme.text-dim;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component MediaPlaceholder inherits TouchArea {
+    in property <image> preview;
+    in property <bool> privacy-blurred: false;
+    in property <bool> sticker;
+    in property <bool> video;
+    in property <string> file-size;
+    in property <bool> loading;
+    in property <float> progress: -1;
+    mouse-cursor: root.loading ? default : pointer;
+    enabled: !root.loading;
+
+    Rectangle {
+        border-radius: 6px;
+        clip: true;
+        background: Theme.hover;
+        Image {
+            source: root.preview;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+            opacity: root.privacy-blurred && !root.has-hover ? 0.05 : 1;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            visible: root.privacy-blurred && !root.has-hover;
+            background: Theme.dark ? #172126 : #dfe5e8;
+            animate background { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            backdrop-blur: 12px;
+            visible: !root.privacy-blurred || root.has-hover;
+            background: #00000050;
+        }
+        Rectangle {
+            width: 50px;
+            height: 50px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 25px;
+            background: root.has-hover ? #ffffff28 : #ffffff18;
+            Image {
+                source: root.sticker ? @image-url("../icons/sticker-2.svg")
+                    : root.video ? @image-url("../icons/video.svg")
+                    : @image-url("../icons/photo.svg");
+                width: 28px;
+                height: 28px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                colorize: white;
+            }
+        }
+        if root.loading: Text {
+            text: root.progress < 0 ? @tr("media.download.downloading") : round(clamp(root.progress, 0, 100)) + "%";
+            color: white;
+            font-size: 11px;
+            width: parent.width;
+            horizontal-alignment: center;
+            y: parent.height / 2 + 30px;
+        }
+        if root.file-size != "": Text {
+            text: root.file-size;
+            color: white;
+            font-size: 11px;
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 6px;
+        }
+    }
+}
+
+export component TypingBubbles inherits Rectangle {
+    in property <[MemberItem]> members;
+    in property <int> extra;
+    in property <bool> privacy-blurred;
+    property <int> avatar-count: min(root.members.length, 5) + (root.extra > 0 ? 1 : 0);
+    property <int> bounce-phase: 0;
+    width: root.avatar-count * 22px + 54px;
+    height: 32px;
+    Timer {
+        interval: 160ms;
+        running: root.members.length > 0;
+        triggered => { root.bounce-phase = mod(root.bounce-phase + 1, 8); }
+    }
+    for member[index] in root.members: Rectangle {
+        visible: index < 5;
+        x: index * 22px;
+        y: 1px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.conv-bg;
+        typing-hover := TouchArea { enabled: false; }
+        Avatar {
+            x: 2px;
+            y: 2px;
+            width: 26px;
+            height: 26px;
+            src: member.avatar;
+            has-image: member.hasAvatar;
+            initial: member.initial;
+            color-idx: member.colorIdx;
+            privacy-blurred: root.privacy-blurred;
+            privacy-reveal: typing-hover.has-hover;
+        }
+    }
+    if root.extra > 0: Rectangle {
+        x: min(root.members.length, 5) * 22px;
+        y: 1px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        border-width: 2px;
+        border-color: Theme.conv-bg;
+        background: Theme.chip-bg;
+        Text {
+            text: "+" + root.extra;
+            color: Theme.text;
+            font-size: 10px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle {
+        x: root.avatar-count * 22px + 12px;
+        y: 1px;
+        width: 42px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.bubble-in;
+        Rectangle {
+            x: 1px;
+            y: 21px;
+            width: 8px;
+            height: 7px;
+            border-bottom-right-radius: 7px;
+            background: Theme.bubble-in;
+        }
+        for index in 3: Rectangle {
+            x: 11px + index * 8px;
+            y: root.bounce-phase == index + 1 || root.bounce-phase == index + 2 ? 9px : 14px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.dark ? #ad93ff : #7654d6;
+            animate y { duration: 240ms; easing: ease-in-out; }
+        }
+    }
+}

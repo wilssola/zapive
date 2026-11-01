@@ -1,0 +1,551 @@
+import { LineEdit, ListView, VerticalBox } from "std-widgets.slint";
+import { EmojiText } from "emoji.slint";
+import { FilterChip } from "filter-chip.slint";
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { HitRow } from "rows/hit.slint";
+import { MenuRow } from "rows/menu.slint";
+import { Theme } from "theme.slint";
+import { EmojiRow, LabelItem, SearchHit, StickerCell } from "types.slint";
+
+export component PickerLayer inherits ModalLayer {
+    in-out property <bool> picker-open;
+    in-out property <string> picker-tab;
+    in property <[EmojiRow]> emoji-rows;
+    in property <[[StickerCell]]> sticker-rows;
+    in property <[[StickerCell]]> gif-rows;
+    in property <[[StickerCell]]> fav-rows;
+    callback gif-send(string);
+    callback emoji-pick(string);
+    callback sticker-send(string);
+    callback gif-search(string);
+    in property <string> gif-hint;
+    in property <string> fav-hint;
+    in property <length> conv-x;
+    in property <length> conv-y;
+    in property <length> conv-h;
+    in property <length> dock-h;
+
+    Rectangle {
+        x: root.conv-x - root.absolute-position.x + 12px;
+        y: root.conv-y - root.absolute-position.y + root.conv-h - self.height - root.dock-h - 8px + (1 - root.progress) * 8px;
+        width: 380px;
+        height: 320px;
+        opacity: root.progress;
+        background: Theme.panel;
+        border-radius: 10px;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000055;
+        TouchArea { }
+
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                FilterChip {
+                    label: @tr("chat.picker.tab_emoji");
+                    active: root.picker-tab == "emoji";
+                    clicked => { root.picker-tab = "emoji"; }
+                }
+                FilterChip {
+                    label: @tr("chat.picker.tab_stickers");
+                    active: root.picker-tab == "sticker";
+                    clicked => { root.picker-tab = "sticker"; }
+                }
+                FilterChip {
+                    label: @tr("chat.picker.tab_favorites");
+                    active: root.picker-tab == "fav";
+                    clicked => { root.picker-tab = "fav"; }
+                }
+                FilterChip {
+                    label: "GIF";
+                    active: root.picker-tab == "gif";
+                    clicked => { root.picker-tab = "gif"; }
+                }
+            }
+            if root.picker-tab == "emoji": ListView {
+                for row in root.emoji-rows: Rectangle {
+                    height: row.label != "" ? 28px : 44px;
+                    if row.label != "": Text {
+                        text: row.label;
+                        font-size: 12px;
+                        color: Theme.text-dim;
+                        x: 6px;
+                        width: parent.width - 6px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                    }
+                    if row.label == "": HorizontalLayout {
+                        spacing: 2px;
+                        alignment: start;
+                        for e in row.cells: em-touch := TouchArea {
+                            width: 42px;
+                            height: 42px;
+                            mouse-cursor: pointer;
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 6px;
+                                background: em-touch.has-hover ? Theme.hover : transparent;
+                                EmojiText {
+                                    text: e;
+                                    font-size: 24px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            clicked => { root.emoji-pick(e); }
+                        }
+                    }
+                }
+            }
+            if root.picker-tab == "gif": VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    gif-input := LineEdit {
+                        placeholder-text: @tr("chat.picker.search_gifs");
+                        accepted => { root.gif-search(self.text); }
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/search.svg");
+                        clicked => { root.gif-search(gif-input.text); }
+                    }
+                }
+                if root.gif-hint != "": Text {
+                    text: root.gif-hint;
+                    color: Theme.text-dim;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+                ListView {
+                for row in root.gif-rows: Rectangle {
+                    height: 92px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for cell in row: gif-touch := TouchArea {
+                            width: 84px;
+                            height: 84px;
+                            mouse-cursor: pointer;
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 8px;
+                                clip: true;
+                                background: gif-touch.has-hover ? Theme.hover : transparent;
+                                if cell.ready: Image {
+                                    source: cell.pic;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    image-fit: cover;
+                                }
+                            }
+                            clicked => {
+                                root.gif-send(cell.id);
+                                root.picker-open = false;
+                            }
+                        }
+                    }
+                }
+                }
+            }
+            if root.picker-tab == "fav" && root.fav-hint != "": Text {
+                text: root.fav-hint;
+                color: Theme.text-dim;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+            if root.picker-tab == "fav": ListView {
+                for row in root.fav-rows: Rectangle {
+                    height: 92px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for cell in row: fav-touch := TouchArea {
+                            width: 84px;
+                            height: 84px;
+                            mouse-cursor: pointer;
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 8px;
+                                background: fav-touch.has-hover ? Theme.hover : transparent;
+                                if cell.ready: Image {
+                                    source: cell.pic;
+                                    width: 76px;
+                                    height: 76px;
+                                    x: 4px;
+                                    y: 4px;
+                                    image-fit: contain;
+                                }
+                            }
+                            clicked => {
+                                root.sticker-send(cell.id);
+                                root.picker-open = false;
+                            }
+                        }
+                    }
+                }
+            }
+            if root.picker-tab == "sticker": ListView {
+                for row in root.sticker-rows: Rectangle {
+                    height: 92px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for cell in row: sk-touch := TouchArea {
+                            width: 84px;
+                            height: 84px;
+                            mouse-cursor: pointer;
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 8px;
+                                background: sk-touch.has-hover ? Theme.hover : transparent;
+                                if cell.ready: Image {
+                                    source: cell.pic;
+                                    width: 76px;
+                                    height: 76px;
+                                    x: 4px;
+                                    y: 4px;
+                                    image-fit: contain;
+                                }
+                            }
+                            clicked => {
+                                root.sticker-send(cell.id);
+                                root.picker-open = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ChatMenuLayer inherits ModalLayer {
+    callback open-info();
+    in property <bool> current-left;
+    in property <bool> current-is-group;
+    in property <bool> current-admin;
+    in property <bool> current-muted;
+    in property <string> current-mute-label;
+    in property <bool> current-favorite;
+    in property <int> current-ephemeral;
+    in property <string> current-ephemeral-label;
+    callback select-start(string);
+    in-out property <bool> chat-menu-open;
+    in-out property <string> chat-menu-sub;
+    in property <[LabelItem]> labels;
+    callback menu-add-member();
+    callback menu-search();
+    callback menu-mute(int);
+    callback menu-ephemeral(int);
+    callback menu-favorite();
+    callback menu-list(string);
+    callback menu-export();
+    callback menu-close-chat();
+    callback menu-clear();
+    callback menu-delete-chat();
+    callback menu-exit-group();
+    in-out property <bool> new-list-open;
+    in property <length> conv-x;
+    in property <length> conv-y;
+    in property <length> conv-w;
+
+    if root.mounted: Rectangle {
+        x: root.conv-x - root.absolute-position.x + root.conv-w - self.width - 8px;
+        y: root.conv-y - root.absolute-position.y + 50px - (1 - root.progress) * 8px;
+        width: 260px;
+        height: chat-menu-col.preferred-height + 12px;
+        background: Theme.panel;
+        border-radius: 10px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000066;
+        opacity: root.progress;
+        TouchArea { }
+
+        chat-menu-col := VerticalLayout {
+            padding: 6px;
+            spacing: 1px;
+            if root.chat-menu-sub == "": VerticalLayout {
+                spacing: 1px;
+                if root.current-is-group && !root.current-left: MenuRow {
+                    icon: @image-url("../icons/user-plus.svg");
+                    label: @tr("group.add_member.title");
+                    clicked => { root.menu-add-member(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/info-circle.svg");
+                    label: root.current-is-group ? @tr("info.panel.group_title") : @tr("info.panel.contact_title");
+                    clicked => { root.chat-menu-open = false; root.open-info(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/search.svg");
+                    label: @tr("chat.in_chat_search.placeholder");
+                    clicked => { root.menu-search(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/checkbox.svg");
+                    label: @tr("chat.menu.select_messages");
+                    clicked => { root.select-start(""); }
+                }
+                MenuRow {
+                    icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
+                    label: root.current-muted ? @tr("info.action.unmute") : @tr("info.action.mute");
+                    detail: root.current-mute-label;
+                    submenu: !root.current-muted;
+                    clicked => {
+                        if (root.current-muted) { root.menu-mute(0); }
+                        else { root.chat-menu-sub = "mute"; }
+                    }
+                }
+                if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
+                    icon: @image-url("../icons/clock-pause.svg");
+                    label: @tr("chat.disappearing.title");
+                    detail: root.current-ephemeral-label;
+                    submenu: true;
+                    clicked => { root.chat-menu-sub = "ephemeral"; }
+                }
+                MenuRow {
+                    icon: root.current-favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
+                    label: root.current-favorite ? @tr("chat.menu.favorite_remove") : @tr("chat.menu.favorite_add");
+                    clicked => { root.menu-favorite(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/list-details.svg");
+                    label: @tr("chat.list.picker_title");
+                    submenu: true;
+                    clicked => { root.chat-menu-sub = "lists"; }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/download.svg");
+                    label: @tr("chat.menu.export");
+                    clicked => { root.menu-export(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/circle-x.svg");
+                    label: @tr("chat.menu.close");
+                    clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                MenuRow {
+                    icon: @image-url("../icons/circle-minus.svg");
+                    label: @tr("chat.menu.clear");
+                    clicked => { root.menu-clear(); }
+                }
+                if root.current-is-group && !root.current-left: MenuRow {
+                    icon: @image-url("../icons/logout.svg");
+                    label: @tr("chat.menu.exit_group");
+                    tint: #f05d4d;
+                    clicked => { root.menu-exit-group(); }
+                }
+                if !root.current-is-group || root.current-left: MenuRow {
+                    icon: @image-url("../icons/trash.svg");
+                    label: @tr("chat.menu.delete");
+                    tint: #f05d4d;
+                    clicked => { root.menu-delete-chat(); }
+                }
+            }
+            if root.chat-menu-sub == "mute": VerticalLayout {
+                spacing: 1px;
+                MenuRow {
+                    icon: @image-url("../icons/arrow-left.svg");
+                    label: @tr("info.action.mute");
+                    clicked => { root.chat-menu-sub = ""; }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_8h"); clicked => { root.menu-mute(8); } }
+                MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_1w"); clicked => { root.menu-mute(168); } }
+                MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_always"); clicked => { root.menu-mute(-1); } }
+            }
+            if root.chat-menu-sub == "ephemeral": VerticalLayout {
+                spacing: 1px;
+                MenuRow {
+                    icon: @image-url("../icons/arrow-left.svg");
+                    label: @tr("chat.disappearing.title");
+                    clicked => { root.chat-menu-sub = ""; }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                MenuRow {
+                    icon: root.current-ephemeral == 86400 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
+                    label: @tr("chat.disappearing.duration_24h");
+                    clicked => { root.menu-ephemeral(86400); }
+                }
+                MenuRow {
+                    icon: root.current-ephemeral == 604800 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
+                    label: @tr("chat.disappearing.duration_7d");
+                    clicked => { root.menu-ephemeral(604800); }
+                }
+                MenuRow {
+                    icon: root.current-ephemeral == 7776000 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
+                    label: @tr("chat.disappearing.duration_90d");
+                    clicked => { root.menu-ephemeral(7776000); }
+                }
+                MenuRow {
+                    icon: root.current-ephemeral == 0 ? @image-url("../icons/check.svg") : @image-url("../icons/circle-x.svg");
+                    label: @tr("chat.disappearing.off");
+                    clicked => { root.menu-ephemeral(0); }
+                }
+            }
+            if root.chat-menu-sub == "lists": VerticalLayout {
+                spacing: 1px;
+                MenuRow {
+                    icon: @image-url("../icons/arrow-left.svg");
+                    label: @tr("chat.list.picker_title");
+                    clicked => { root.chat-menu-sub = ""; }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                for lb in root.labels: MenuRow {
+                    icon: lb.active ? @image-url("../icons/check.svg") : @image-url("../icons/list-details.svg");
+                    label: lb.name;
+                    tint: lb.active ? Theme.accent : Theme.text;
+                    clicked => { root.menu-list(lb.id); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/plus.svg");
+                    label: @tr("chat.list.new_title");
+                    clicked => { root.chat-menu-open = false; root.new-list-open = true; }
+                }
+            }
+        }
+    }
+}
+
+export component AttachLayer inherits ModalLayer {
+    in-out property <bool> attach-open;
+    callback attach-sticker();
+    callback attach-image();
+    callback attach-audio();
+    callback attach-doc();
+    in property <length> conv-x;
+    in property <length> conv-y;
+    in property <length> conv-h;
+    in property <length> dock-h;
+
+    if root.mounted: Rectangle {
+        x: root.conv-x - root.absolute-position.x + 12px;
+        y: root.conv-y - root.absolute-position.y + root.conv-h - self.height - root.dock-h - 8px + (1 - root.progress) * 8px;
+        width: 220px;
+        height: menu-col.preferred-height + 16px;
+        opacity: root.progress;
+        background: Theme.panel;
+        border-radius: 10px;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000055;
+        TouchArea { }
+
+        menu-col := VerticalLayout {
+            padding: 8px;
+            spacing: 2px;
+            MenuRow {
+                icon: @image-url("../icons/file-text.svg");
+                label: @tr("chat.attach.document");
+                clicked => { root.attach-open = false; root.attach-doc(); }
+            }
+            MenuRow {
+                icon: @image-url("../icons/photo.svg");
+                label: @tr("chat.attach.photos");
+                clicked => { root.attach-open = false; root.attach-image(); }
+            }
+            MenuRow {
+                icon: @image-url("../icons/music.svg");
+                label: @tr("chat.attach.audio");
+                clicked => { root.attach-open = false; root.attach-audio(); }
+            }
+            MenuRow {
+                icon: @image-url("../icons/sticker-2.svg");
+                label: @tr("chat.attach.sticker");
+                clicked => { root.attach-open = false; root.attach-sticker(); }
+            }
+    }
+}
+}
+
+export component ChatSearchLayer inherits ModalLayer {
+    callback open-hit(string, string);
+    in property <[SearchHit]> chat-search-rows;
+    in property <string> chat-search-count;
+    callback chat-search-changed(string);
+    callback chat-search-step(int);
+    callback chat-search-close();
+
+    if root.mounted: Rectangle {
+        width: 380px;
+        height: parent.height;
+        x: parent.width - self.width + (1 - root.progress) * self.width;
+        opacity: root.progress;
+        background: Theme.panel;
+        TouchArea { }
+        VerticalBox {
+            padding: 0;
+            spacing: 0;
+            Rectangle {
+                height: 54px;
+                background: Theme.header;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    IconButton {
+                        icon: @image-url("../icons/x.svg");
+                        clicked => { root.chat-search-close(); }
+                    }
+                    Text {
+                        text: @tr("chat.in_chat_search.title");
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/chevron-up.svg");
+                        enabled: root.chat-search-rows.length > 0;
+                        clicked => { root.chat-search-step(1); }
+                    }
+                    IconButton {
+                        icon: @image-url("../icons/chevron-down.svg");
+                        enabled: root.chat-search-rows.length > 0;
+                        clicked => { root.chat-search-step(-1); }
+                    }
+                }
+            }
+            Rectangle {
+                height: 58px;
+                HorizontalLayout {
+                    padding: 10px;
+                    chat-search-input := LineEdit {
+                        placeholder-text: @tr("chat.in_chat_search.placeholder");
+                        init => { self.focus(); }
+                        edited => { root.chat-search-changed(self.text); }
+                        accepted => { root.chat-search-step(0); }
+                    }
+                }
+            }
+            if root.chat-search-count != "": Text {
+                text: root.chat-search-count;
+                color: Theme.text-dim;
+                font-size: 12px;
+                horizontal-alignment: center;
+            }
+            if chat-search-input.text == "": Text {
+                text: @tr("chat.in_chat_search.hint");
+                color: Theme.text-dim;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+            ListView {
+                for hit in root.chat-search-rows: HitRow {
+                    hit: hit;
+                    clicked => { root.open-hit(hit.jid, hit.id); }
+                }
+            }
+        }
+    }
+}

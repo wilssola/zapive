@@ -1,269 +1,32 @@
-import { Button, ComboBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
-import { Theme } from "theme.slint";
-import { ReleaseItem, DetailRow, ChatItem, SearchHit, MemberItem, PdfPage, LabelItem, ReactionItem, CallItem, LinkSpan, AccountItem, StickerCell, MessageItem, EmojiRow } from "types.slint";
+import { Button, HorizontalBox, LineEdit, ListView, Palette, VerticalBox } from "std-widgets.slint";
+import { AccountLayer, AlertLayer, SyncLayer } from "account-dialogs.slint";
 import { Avatar } from "avatar.slint";
-import { GreenLink } from "green-link.slint";
-import { IconButton } from "icon-button.slint";
-import { FilterChip } from "filter-chip.slint";
+import { AttachLayer, ChatMenuLayer, ChatSearchLayer, PickerLayer } from "chat-popovers.slint";
 import { DialogButton } from "dialog-button.slint";
-import { Toggle } from "toggle.slint";
-import { SettingsCard } from "settings-card.slint";
-import { SettingsRow } from "settings-row.slint";
-import { LinkHover } from "link-hover.slint";
 import { EmojiText } from "emoji.slint";
-import { UpdateBanner } from "update-banner.slint";
+import { FilterChip } from "filter-chip.slint";
+import { GreenLink } from "green-link.slint";
+import { ForwardLayer, MemberPickLayer, NewListLayer, ShareLayer } from "group-dialogs.slint";
 import { HomeScreen } from "home-screen.slint";
+import { IconButton } from "icon-button.slint";
 import { ImagePreview } from "image-preview.slint";
-import { SpecialMessage } from "special-message.slint";
-import { MenuRow } from "rows/menu.slint";
-import { MemberRow } from "rows/member.slint";
-import { HitRow } from "rows/hit.slint";
-import { AccountRow } from "rows/account.slint";
+import { InfoLayer } from "info-panel.slint";
+import { LinkHover } from "link-hover.slint";
+import { LightboxLayer, VideoLayer } from "media-viewers.slint";
+import { ConfirmLayer, DetailsLayer, MessageDialogLayer, ReactionsLayer } from "message-dialogs.slint";
+import { MessageMenuLayer } from "message-menu.slint";
+import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
-
-
-// Delivery ticks drawn as vectors in WhatsApp's Material shape
-// (done/done_all): the "✓" glyph comes from the emoji fallback font,
-// whose wide bitmap cell leaves the two checks far apart; paths sit
-// tight and render identically on every platform.
-// Outlines: Material Icons (Apache 2.0), Google LLC,
-// https://github.com/google/material-design-icons
-component Ticks {
-    in property <string> ticks;
-    in property <bool> blue;
-    property <length> mark-size: 14px;
-    width: mark-size;
-    height: mark-size;
-    if ticks == "pending": Rectangle {
-        width: 11px;
-        height: 11px;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: Theme.time-out;
-        Rectangle { x: 5px; y: 2px; width: 1px; height: 4px; background: Theme.time-out; }
-        Rectangle { x: 5px; y: 5px; width: 3px; height: 1px; background: Theme.time-out; }
-    }
-    if ticks != "" && ticks != "pending": Path {
-        commands: ticks == "✓✓"
-            ? "M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"
-            : "M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z";
-        viewbox-width: 24;
-        viewbox-height: 24;
-        width: mark-size;
-        height: mark-size;
-        fill: blue ? #53bdeb : Theme.time-out;
-    }
-}
-
-// The time/ticks cluster that floats at the bottom-right of a bubble's
-// text block, on the space the trailing NBSP run reserves.
-component BubbleMeta {
-    in property <string> time;
-    in property <string> ticks;
-    in property <bool> blue;
-    in property <bool> fromMe;
-    height: 14px;
-    HorizontalLayout {
-        spacing: 4px;
-        if ticks != "": Ticks { ticks: ticks; blue: blue; }
-        Text {
-            text: time;
-            font-size: 10px;
-            color: fromMe ? Theme.time-out : Theme.text-dim;
-            vertical-alignment: center;
-        }
-    }
-}
-
-component MediaPlaceholder inherits TouchArea {
-    in property <image> preview;
-    in property <bool> privacy-blurred: false;
-    in property <bool> sticker;
-    in property <bool> video;
-    in property <string> file-size;
-    in property <bool> loading;
-    in property <float> progress: -1;
-    mouse-cursor: root.loading ? default : pointer;
-    enabled: !root.loading;
-
-    Rectangle {
-        border-radius: 6px;
-        clip: true;
-        background: Theme.hover;
-        Image {
-            source: root.preview;
-            width: parent.width;
-            height: parent.height;
-            image-fit: cover;
-            opacity: root.privacy-blurred && !root.has-hover ? 0.05 : 1;
-            animate opacity { duration: 120ms; easing: ease-out; }
-        }
-        Rectangle {
-            width: parent.width;
-            height: parent.height;
-            visible: root.privacy-blurred && !root.has-hover;
-            background: Theme.dark ? #172126 : #dfe5e8;
-            animate background { duration: 120ms; easing: ease-out; }
-        }
-        Rectangle {
-            width: parent.width;
-            height: parent.height;
-            backdrop-blur: 12px;
-            visible: !root.privacy-blurred || root.has-hover;
-            background: #00000050;
-        }
-        Rectangle {
-            width: 50px;
-            height: 50px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            border-radius: 25px;
-            background: root.has-hover ? #ffffff28 : #ffffff18;
-            Image {
-                source: root.sticker ? @image-url("../icons/sticker-2.svg")
-                    : root.video ? @image-url("../icons/video.svg")
-                    : @image-url("../icons/photo.svg");
-                width: 28px;
-                height: 28px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                colorize: white;
-            }
-        }
-        if root.loading: Text {
-            text: root.progress < 0 ? @tr("media.download.downloading") : round(clamp(root.progress, 0, 100)) + "%";
-            color: white;
-            font-size: 11px;
-            width: parent.width;
-            horizontal-alignment: center;
-            y: parent.height / 2 + 30px;
-        }
-        if root.file-size != "": Text {
-            text: root.file-size;
-            color: white;
-            font-size: 11px;
-            x: parent.width - self.width - 8px;
-            y: parent.height - self.height - 6px;
-        }
-    }
-}
-
-component InfoAction inherits TouchArea {
-    in property <image> icon;
-    in property <string> label;
-    mouse-cursor: self.enabled ? pointer : default;
-    height: 62px;
-    min-width: 0px;
-    preferred-width: 0px;
-    horizontal-stretch: 1;
-    Rectangle {
-        width: parent.width;
-        height: parent.height;
-        border-radius: 12px;
-        background: root.has-hover && root.enabled ? Theme.selected : Theme.dark ? #15262d : Theme.header;
-        opacity: root.enabled ? 1 : 0.4;
-        Image {
-            source: root.icon;
-            colorize: Theme.icon;
-            width: 20px;
-            height: 20px;
-            x: (parent.width - self.width) / 2;
-            y: 11px;
-        }
-        Text {
-            text: root.label;
-            color: Theme.text-dim;
-            font-size: 11px;
-            width: parent.width;
-            height: 16px;
-            y: 37px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-}
-
-component TypingBubbles inherits Rectangle {
-    in property <[MemberItem]> members;
-    in property <int> extra;
-    in property <bool> privacy-blurred;
-    property <int> avatar-count: min(root.members.length, 5) + (root.extra > 0 ? 1 : 0);
-    property <int> bounce-phase: 0;
-    width: root.avatar-count * 22px + 54px;
-    height: 32px;
-    Timer {
-        interval: 160ms;
-        running: root.members.length > 0;
-        triggered => { root.bounce-phase = mod(root.bounce-phase + 1, 8); }
-    }
-    for member[index] in root.members: Rectangle {
-        visible: index < 5;
-        x: index * 22px;
-        y: 1px;
-        width: 30px;
-        height: 30px;
-        border-radius: 15px;
-        background: Theme.conv-bg;
-        typing-hover := TouchArea { enabled: false; }
-        Avatar {
-            x: 2px;
-            y: 2px;
-            width: 26px;
-            height: 26px;
-            src: member.avatar;
-            has-image: member.hasAvatar;
-            initial: member.initial;
-            color-idx: member.colorIdx;
-            privacy-blurred: root.privacy-blurred;
-            privacy-reveal: typing-hover.has-hover;
-        }
-    }
-    if root.extra > 0: Rectangle {
-        x: min(root.members.length, 5) * 22px;
-        y: 1px;
-        width: 30px;
-        height: 30px;
-        border-radius: 15px;
-        border-width: 2px;
-        border-color: Theme.conv-bg;
-        background: Theme.chip-bg;
-        Text {
-            text: "+" + root.extra;
-            color: Theme.text;
-            font-size: 10px;
-            font-weight: 600;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-    Rectangle {
-        x: root.avatar-count * 22px + 12px;
-        y: 1px;
-        width: 42px;
-        height: 30px;
-        border-radius: 15px;
-        background: Theme.bubble-in;
-        Rectangle {
-            x: 1px;
-            y: 21px;
-            width: 8px;
-            height: 7px;
-            border-bottom-right-radius: 7px;
-            background: Theme.bubble-in;
-        }
-        for index in 3: Rectangle {
-            x: 11px + index * 8px;
-            y: root.bounce-phase == index + 1 || root.bounce-phase == index + 2 ? 9px : 14px;
-            width: 4px;
-            height: 4px;
-            border-radius: 2px;
-            background: Theme.dark ? #ad93ff : #7654d6;
-            animate y { duration: 240ms; easing: ease-in-out; }
-        }
-    }
-}
+import { SettingsLayer } from "settings-pane.slint";
+import { SpecialMessage } from "special-message.slint";
+import { SvLayer } from "status-viewer.slint";
+import { Theme } from "theme.slint";
+import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell } from "types.slint";
+import { UpdateBanner } from "update-banner.slint";
+import { WhatsNewLayer } from "whats-new.slint";
+import { AccountRow } from "rows/account.slint";
+import { HitRow } from "rows/hit.slint";
+import { MemberRow } from "rows/member.slint";
 
 export component AppWindow inherits Window {
     title: "Zapive";
@@ -3957,7 +3720,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-
             // Floating "jump to latest" button
             if root.chat-open && !root.stick-bottom: Rectangle {
                 x: parent.width - self.width - 24px;
@@ -4006,7 +3768,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-
             preview-layer := ModalLayer {
                 open: root.preview-open && root.chat-open;
                 scrim: transparent;
@@ -4030,864 +3791,156 @@ export component AppWindow inherits Window {
         }
     }
 
-
     // Emoji / sticker picker above the composer
-    picker-layer := ModalLayer {
+    picker-layer := PickerLayer {
         open: root.picker-open && root.chat-open;
         scrim: transparent;
         dismiss => { root.picker-open = false; }
-        Rectangle {
-            x: conv-pane.absolute-position.x - picker-layer.absolute-position.x + 12px;
-            y: conv-pane.absolute-position.y - picker-layer.absolute-position.y + conv-pane.height - self.height - composer-dock.height - 8px + (1 - picker-layer.progress) * 8px;
-            width: 380px;
-            height: 320px;
-            opacity: picker-layer.progress;
-            background: Theme.panel;
-            border-radius: 10px;
-            drop-shadow-blur: 8px;
-            drop-shadow-color: #00000055;
-            TouchArea { }
 
-            VerticalLayout {
-                padding: 10px;
-                spacing: 8px;
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    FilterChip {
-                        label: @tr("chat.picker.tab_emoji");
-                        active: root.picker-tab == "emoji";
-                        clicked => { root.picker-tab = "emoji"; }
-                    }
-                    FilterChip {
-                        label: @tr("chat.picker.tab_stickers");
-                        active: root.picker-tab == "sticker";
-                        clicked => { root.picker-tab = "sticker"; }
-                    }
-                    FilterChip {
-                        label: @tr("chat.picker.tab_favorites");
-                        active: root.picker-tab == "fav";
-                        clicked => { root.picker-tab = "fav"; }
-                    }
-                    FilterChip {
-                        label: "GIF";
-                        active: root.picker-tab == "gif";
-                        clicked => { root.picker-tab = "gif"; }
-                    }
-                }
-                if root.picker-tab == "emoji": ListView {
-                    for row in root.emoji-rows: Rectangle {
-                        height: row.label != "" ? 28px : 44px;
-                        if row.label != "": Text {
-                            text: row.label;
-                            font-size: 12px;
-                            color: Theme.text-dim;
-                            x: 6px;
-                            width: parent.width - 6px;
-                            height: parent.height;
-                            vertical-alignment: center;
-                        }
-                        if row.label == "": HorizontalLayout {
-                            spacing: 2px;
-                            alignment: start;
-                            for e in row.cells: em-touch := TouchArea {
-                                width: 42px;
-                                height: 42px;
-                                mouse-cursor: pointer;
-                                Rectangle {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    border-radius: 6px;
-                                    background: em-touch.has-hover ? Theme.hover : transparent;
-                                    EmojiText {
-                                        text: e;
-                                        font-size: 24px;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                clicked => { root.emoji-pick(e); }
-                            }
-                        }
-                    }
-                }
-                if root.picker-tab == "gif": VerticalLayout {
-                    spacing: 6px;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        gif-input := LineEdit {
-                            placeholder-text: @tr("chat.picker.search_gifs");
-                            accepted => { root.gif-search(self.text); }
-                        }
-                        IconButton {
-                            icon: @image-url("../icons/search.svg");
-                            clicked => { root.gif-search(gif-input.text); }
-                        }
-                    }
-                    if root.gif-hint != "": Text {
-                        text: root.gif-hint;
-                        color: Theme.text-dim;
-                        font-size: 11px;
-                        wrap: word-wrap;
-                    }
-                    ListView {
-                    for row in root.gif-rows: Rectangle {
-                        height: 92px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            alignment: start;
-                            for cell in row: gif-touch := TouchArea {
-                                width: 84px;
-                                height: 84px;
-                                mouse-cursor: pointer;
-                                Rectangle {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    border-radius: 8px;
-                                    clip: true;
-                                    background: gif-touch.has-hover ? Theme.hover : transparent;
-                                    if cell.ready: Image {
-                                        source: cell.pic;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: cover;
-                                    }
-                                }
-                                clicked => {
-                                    root.gif-send(cell.id);
-                                    root.picker-open = false;
-                                }
-                            }
-                        }
-                    }
-                    }
-                }
-                if root.picker-tab == "fav" && root.fav-hint != "": Text {
-                    text: root.fav-hint;
-                    color: Theme.text-dim;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                }
-                if root.picker-tab == "fav": ListView {
-                    for row in root.fav-rows: Rectangle {
-                        height: 92px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            alignment: start;
-                            for cell in row: fav-touch := TouchArea {
-                                width: 84px;
-                                height: 84px;
-                                mouse-cursor: pointer;
-                                Rectangle {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    border-radius: 8px;
-                                    background: fav-touch.has-hover ? Theme.hover : transparent;
-                                    if cell.ready: Image {
-                                        source: cell.pic;
-                                        width: 76px;
-                                        height: 76px;
-                                        x: 4px;
-                                        y: 4px;
-                                        image-fit: contain;
-                                    }
-                                }
-                                clicked => {
-                                    root.sticker-send(cell.id);
-                                    root.picker-open = false;
-                                }
-                            }
-                        }
-                    }
-                }
-                if root.picker-tab == "sticker": ListView {
-                    for row in root.sticker-rows: Rectangle {
-                        height: 92px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            alignment: start;
-                            for cell in row: sk-touch := TouchArea {
-                                width: 84px;
-                                height: 84px;
-                                mouse-cursor: pointer;
-                                Rectangle {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    border-radius: 8px;
-                                    background: sk-touch.has-hover ? Theme.hover : transparent;
-                                    if cell.ready: Image {
-                                        source: cell.pic;
-                                        width: 76px;
-                                        height: 76px;
-                                        x: 4px;
-                                        y: 4px;
-                                        image-fit: contain;
-                                    }
-                                }
-                                clicked => {
-                                    root.sticker-send(cell.id);
-                                    root.picker-open = false;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        picker-open <=> root.picker-open;
+        picker-tab <=> root.picker-tab;
+        emoji-rows: root.emoji-rows;
+        sticker-rows: root.sticker-rows;
+        gif-rows: root.gif-rows;
+        fav-rows: root.fav-rows;
+        gif-send(a0) => { root.gif-send(a0); }
+        emoji-pick(a0) => { root.emoji-pick(a0); }
+        sticker-send(a0) => { root.sticker-send(a0); }
+        gif-search(a0) => { root.gif-search(a0); }
+        gif-hint: root.gif-hint;
+        fav-hint: root.fav-hint;
+        conv-x: conv-pane.absolute-position.x;
+        conv-y: conv-pane.absolute-position.y;
+        conv-h: conv-pane.height;
+        dock-h: composer-dock.height;
     }
 
     // Chat header menu, dropping from the "⋮" button.
-    chat-menu-layer := ModalLayer {
+    chat-menu-layer := ChatMenuLayer {
         open: root.chat-menu-open && root.chat-open;
         scrim: transparent;
         dismiss => { root.chat-menu-open = false; root.chat-menu-sub = ""; }
-        if chat-menu-layer.mounted: Rectangle {
-            x: conv-pane.absolute-position.x - chat-menu-layer.absolute-position.x + conv-pane.width - self.width - 8px;
-            y: conv-pane.absolute-position.y - chat-menu-layer.absolute-position.y + 50px - (1 - chat-menu-layer.progress) * 8px;
-            width: 260px;
-            height: chat-menu-col.preferred-height + 12px;
-            background: Theme.panel;
-            border-radius: 10px;
-            drop-shadow-blur: 10px;
-            drop-shadow-color: #00000066;
-            opacity: chat-menu-layer.progress;
-            TouchArea { }
 
-            chat-menu-col := VerticalLayout {
-                padding: 6px;
-                spacing: 1px;
-                if root.chat-menu-sub == "": VerticalLayout {
-                    spacing: 1px;
-                    if root.current-is-group && !root.current-left: MenuRow {
-                        icon: @image-url("../icons/user-plus.svg");
-                        label: @tr("group.add_member.title");
-                        clicked => { root.menu-add-member(); }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/info-circle.svg");
-                        label: root.current-is-group ? @tr("info.panel.group_title") : @tr("info.panel.contact_title");
-                        clicked => { root.chat-menu-open = false; root.open-info(); }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/search.svg");
-                        label: @tr("chat.in_chat_search.placeholder");
-                        clicked => { root.menu-search(); }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/checkbox.svg");
-                        label: @tr("chat.menu.select_messages");
-                        clicked => { root.select-start(""); }
-                    }
-                    MenuRow {
-                        icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
-                        label: root.current-muted ? @tr("info.action.unmute") : @tr("info.action.mute");
-                        detail: root.current-mute-label;
-                        submenu: !root.current-muted;
-                        clicked => {
-                            if (root.current-muted) { root.menu-mute(0); }
-                            else { root.chat-menu-sub = "mute"; }
-                        }
-                    }
-                    if !root.current-left && (!root.current-is-group || root.current-admin): MenuRow {
-                        icon: @image-url("../icons/clock-pause.svg");
-                        label: @tr("chat.disappearing.title");
-                        detail: root.current-ephemeral-label;
-                        submenu: true;
-                        clicked => { root.chat-menu-sub = "ephemeral"; }
-                    }
-                    MenuRow {
-                        icon: root.current-favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
-                        label: root.current-favorite ? @tr("chat.menu.favorite_remove") : @tr("chat.menu.favorite_add");
-                        clicked => { root.menu-favorite(); }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/list-details.svg");
-                        label: @tr("chat.list.picker_title");
-                        submenu: true;
-                        clicked => { root.chat-menu-sub = "lists"; }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/download.svg");
-                        label: @tr("chat.menu.export");
-                        clicked => { root.menu-export(); }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/circle-x.svg");
-                        label: @tr("chat.menu.close");
-                        clicked => { root.chat-menu-open = false; root.menu-close-chat(); }
-                    }
-                    Rectangle { height: 1px; background: Theme.border; }
-                    MenuRow {
-                        icon: @image-url("../icons/circle-minus.svg");
-                        label: @tr("chat.menu.clear");
-                        clicked => { root.menu-clear(); }
-                    }
-                    if root.current-is-group && !root.current-left: MenuRow {
-                        icon: @image-url("../icons/logout.svg");
-                        label: @tr("chat.menu.exit_group");
-                        tint: #f05d4d;
-                        clicked => { root.menu-exit-group(); }
-                    }
-                    if !root.current-is-group || root.current-left: MenuRow {
-                        icon: @image-url("../icons/trash.svg");
-                        label: @tr("chat.menu.delete");
-                        tint: #f05d4d;
-                        clicked => { root.menu-delete-chat(); }
-                    }
-                }
-                if root.chat-menu-sub == "mute": VerticalLayout {
-                    spacing: 1px;
-                    MenuRow {
-                        icon: @image-url("../icons/arrow-left.svg");
-                        label: @tr("info.action.mute");
-                        clicked => { root.chat-menu-sub = ""; }
-                    }
-                    Rectangle { height: 1px; background: Theme.border; }
-                    MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_8h"); clicked => { root.menu-mute(8); } }
-                    MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_1w"); clicked => { root.menu-mute(168); } }
-                    MenuRow { icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_always"); clicked => { root.menu-mute(-1); } }
-                }
-                if root.chat-menu-sub == "ephemeral": VerticalLayout {
-                    spacing: 1px;
-                    MenuRow {
-                        icon: @image-url("../icons/arrow-left.svg");
-                        label: @tr("chat.disappearing.title");
-                        clicked => { root.chat-menu-sub = ""; }
-                    }
-                    Rectangle { height: 1px; background: Theme.border; }
-                    MenuRow {
-                        icon: root.current-ephemeral == 86400 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                        label: @tr("chat.disappearing.duration_24h");
-                        clicked => { root.menu-ephemeral(86400); }
-                    }
-                    MenuRow {
-                        icon: root.current-ephemeral == 604800 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                        label: @tr("chat.disappearing.duration_7d");
-                        clicked => { root.menu-ephemeral(604800); }
-                    }
-                    MenuRow {
-                        icon: root.current-ephemeral == 7776000 ? @image-url("../icons/check.svg") : @image-url("../icons/clock-pause.svg");
-                        label: @tr("chat.disappearing.duration_90d");
-                        clicked => { root.menu-ephemeral(7776000); }
-                    }
-                    MenuRow {
-                        icon: root.current-ephemeral == 0 ? @image-url("../icons/check.svg") : @image-url("../icons/circle-x.svg");
-                        label: @tr("chat.disappearing.off");
-                        clicked => { root.menu-ephemeral(0); }
-                    }
-                }
-                if root.chat-menu-sub == "lists": VerticalLayout {
-                    spacing: 1px;
-                    MenuRow {
-                        icon: @image-url("../icons/arrow-left.svg");
-                        label: @tr("chat.list.picker_title");
-                        clicked => { root.chat-menu-sub = ""; }
-                    }
-                    Rectangle { height: 1px; background: Theme.border; }
-                    for lb in root.labels: MenuRow {
-                        icon: lb.active ? @image-url("../icons/check.svg") : @image-url("../icons/list-details.svg");
-                        label: lb.name;
-                        tint: lb.active ? Theme.accent : Theme.text;
-                        clicked => { root.menu-list(lb.id); }
-                    }
-                    MenuRow {
-                        icon: @image-url("../icons/plus.svg");
-                        label: @tr("chat.list.new_title");
-                        clicked => { root.chat-menu-open = false; root.new-list-open = true; }
-                    }
-                }
-            }
-        }
+        open-info() => { root.open-info(); }
+        current-left: root.current-left;
+        current-is-group: root.current-is-group;
+        current-admin: root.current-admin;
+        current-muted: root.current-muted;
+        current-mute-label: root.current-mute-label;
+        current-favorite: root.current-favorite;
+        current-ephemeral: root.current-ephemeral;
+        current-ephemeral-label: root.current-ephemeral-label;
+        select-start(a0) => { root.select-start(a0); }
+        chat-menu-open <=> root.chat-menu-open;
+        chat-menu-sub <=> root.chat-menu-sub;
+        labels: root.labels;
+        menu-add-member() => { root.menu-add-member(); }
+        menu-search() => { root.menu-search(); }
+        menu-mute(a0) => { root.menu-mute(a0); }
+        menu-ephemeral(a0) => { root.menu-ephemeral(a0); }
+        menu-favorite() => { root.menu-favorite(); }
+        menu-list(a0) => { root.menu-list(a0); }
+        menu-export() => { root.menu-export(); }
+        menu-close-chat() => { root.menu-close-chat(); }
+        menu-clear() => { root.menu-clear(); }
+        menu-delete-chat() => { root.menu-delete-chat(); }
+        menu-exit-group() => { root.menu-exit-group(); }
+        new-list-open <=> root.new-list-open;
+        conv-x: conv-pane.absolute-position.x;
+        conv-y: conv-pane.absolute-position.y;
+        conv-w: conv-pane.width;
     }
 
     // WhatsApp-style attach menu popping above the composer
-    attach-layer := ModalLayer {
+    attach-layer := AttachLayer {
         open: root.attach-open && root.chat-open;
         scrim: transparent;
         dismiss => { root.attach-open = false; }
-        if attach-layer.mounted: Rectangle {
-            x: conv-pane.absolute-position.x - attach-layer.absolute-position.x + 12px;
-            y: conv-pane.absolute-position.y - attach-layer.absolute-position.y + conv-pane.height - self.height - composer-dock.height - 8px + (1 - attach-layer.progress) * 8px;
-            width: 220px;
-            height: menu-col.preferred-height + 16px;
-            opacity: attach-layer.progress;
-            background: Theme.panel;
-            border-radius: 10px;
-            drop-shadow-blur: 8px;
-            drop-shadow-color: #00000055;
-            TouchArea { }
 
-            menu-col := VerticalLayout {
-                padding: 8px;
-                spacing: 2px;
-                MenuRow {
-                    icon: @image-url("../icons/file-text.svg");
-                    label: @tr("chat.attach.document");
-                    clicked => { root.attach-open = false; root.attach-doc(); }
-                }
-                MenuRow {
-                    icon: @image-url("../icons/photo.svg");
-                    label: @tr("chat.attach.photos");
-                    clicked => { root.attach-open = false; root.attach-image(); }
-                }
-                MenuRow {
-                    icon: @image-url("../icons/music.svg");
-                    label: @tr("chat.attach.audio");
-                    clicked => { root.attach-open = false; root.attach-audio(); }
-                }
-                MenuRow {
-                    icon: @image-url("../icons/sticker-2.svg");
-                    label: @tr("chat.attach.sticker");
-                    clicked => { root.attach-open = false; root.attach-sticker(); }
-                }
-        }
+        attach-open <=> root.attach-open;
+        attach-sticker() => { root.attach-sticker(); }
+        attach-image() => { root.attach-image(); }
+        attach-audio() => { root.attach-audio(); }
+        attach-doc() => { root.attach-doc(); }
+        conv-x: conv-pane.absolute-position.x;
+        conv-y: conv-pane.absolute-position.y;
+        conv-h: conv-pane.height;
+        dock-h: composer-dock.height;
     }
-            }
     // ---------- Contact / group info ----------
-    info-layer := ModalLayer {
+    info-layer := InfoLayer {
         open: root.info-open;
         scrim: #00000030;
         dismiss => { root.close-info(); }
-        if info-layer.mounted: info-panel := Rectangle {
-            property <bool> media-expanded: false;
-            property <bool> actions-expanded: false;
-            width: min(360px, parent.width - 16px);
-            height: parent.height - 16px;
-            x: parent.width - self.width - 8px + (1 - info-layer.progress) * self.width;
-            y: 8px;
-            opacity: info-layer.progress;
-            border-radius: 18px;
-            border-width: 1px;
-            border-color: Theme.dark ? #1c3038 : Theme.border;
-            background: Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel;
-            clip: true;
-            TouchArea { }
-            VerticalLayout {
-                padding: 0px;
-                spacing: 0px;
-                Rectangle {
-                    height: 56px;
-                    HorizontalLayout {
-                        padding-left: 20px;
-                        padding-right: 12px;
-                        spacing: 8px;
-                        Text {
-                            text: root.info-is-group ? @tr("info.panel.group_title") : @tr("info.panel.contact_title");
-                            color: Theme.text;
-                            font-size: 14px;
-                            font-weight: 600;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        IconButton {
-                            width: 32px;
-                            height: 32px;
-                            icon-size: 18px;
-                            y: (parent.height - self.height) / 2;
-                            icon: @image-url("../icons/x.svg");
-                            clicked => { root.close-info(); }
-                        }
-                    }
-                }
-                Flickable {
-                    content-height: info-col.preferred-height;
-                    content-width: self.width;
-                    Rectangle {
-                        height: info-col.preferred-height;
-                        width: parent.width;
-                        info-col := VerticalLayout {
-                            width: parent.width;
-                            padding-left: 18px;
-                            padding-right: 18px;
-                            padding-top: 10px;
-                            padding-bottom: 18px;
-                            spacing: 0px;
-                            HorizontalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 84px;
-                                    height: 84px;
-                                    border-radius: 42px;
-                                    border-width: 2px;
-                                    border-color: Theme.dark ? #174039 : Theme.border;
-                                    Avatar {
-                                        x: 5px;
-                                        y: 5px;
-                                        width: 74px;
-                                        height: 74px;
-                                        src: root.info-avatar;
-                                        has-image: root.info-has-avatar;
-                                        initial: root.info-initial;
-                                        color-idx: root.info-color-idx;
-                                    }
-                                }
-                            }
-                            Rectangle { height: 14px; }
-                            TextInput {
-                                read-only: true;
-                                single-line: false;
-                                selection-background-color: Theme.accent;
-                                selection-foreground-color: white;
-                                text: root.info-name;
-                                color: Theme.text;
-                                font-size: 16px;
-                                font-weight: 600;
-                                horizontal-alignment: center;
-                                wrap: word-wrap;
-                            }
-                            Rectangle { height: 5px; }
-                            if !root.info-is-group && root.info-id != "": TextInput {
-                                read-only: true;
-                                single-line: false;
-                                wrap: word-wrap;
-                                selection-background-color: Theme.accent;
-                                selection-foreground-color: white;
-                                text: root.info-id;
-                                color: Theme.text-dim;
-                                font-size: 12px;
-                                horizontal-alignment: center;
-                            }
-                            if root.info-members != "": Text {
-                                text: root.info-members;
-                                color: Theme.text-dim;
-                                font-size: 12px;
-                                horizontal-alignment: center;
-                            }
-                            Rectangle { height: 18px; }
-                            HorizontalLayout {
-                                spacing: 10px;
-                                InfoAction {
-                                    icon: @image-url("../icons/phone.svg");
-                                    label: @tr("info.action.call");
-                                    enabled: root.current-callable;
-                                    clicked => { root.start-call(root.current-jid); }
-                                }
-                                InfoAction {
-                                    icon: @image-url("../icons/video.svg");
-                                    label: @tr("info.action.video");
-                                    enabled: root.current-callable;
-                                    clicked => { root.start-video-call(root.current-jid); }
-                                }
-                                InfoAction {
-                                    icon: @image-url("../icons/search.svg");
-                                    label: @tr("info.action.search");
-                                    clicked => { root.close-info(); root.menu-search(); }
-                                }
-                                InfoAction {
-                                    icon: @image-url("../icons/dots-vertical.svg");
-                                    label: @tr("info.action.more");
-                                    clicked => { info-panel.actions-expanded = !info-panel.actions-expanded; }
-                                }
-                            }
-                            Rectangle { height: 16px; }
-                            if info-panel.actions-expanded: VerticalLayout {
-                                spacing: 0px;
-                                MenuRow {
-                                    icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
-                                    label: root.current-muted ? @tr("info.action.unmute") : @tr("info.action.mute");
-                                    clicked => { root.menu-mute(root.current-muted ? 0 : -1); }
-                                }
-                                MenuRow {
-                                    icon: @image-url("../icons/archive.svg");
-                                    label: root.info-archived ? @tr("info.action.unarchive") : @tr("info.action.archive");
-                                    clicked => { root.toggle-archive(); }
-                                }
-                                MenuRow {
-                                    icon: @image-url("../icons/trash.svg");
-                                    label: @tr("info.action.clear_local");
-                                    clicked => { root.clear-chat(); }
-                                }
-                                Rectangle { height: 12px; }
-                            }
-                            Rectangle { height: 1px; background: Theme.border; }
-                            if root.info-about != "" || root.info-desc != "": VerticalLayout {
-                                padding-top: 14px;
-                                padding-bottom: 14px;
-                                TextInput {
-                                    read-only: true;
-                                    single-line: false;
-                                    selection-background-color: Theme.accent;
-                                    selection-foreground-color: white;
-                                    text: root.info-is-group ? root.info-desc : root.info-about;
-                                    color: Theme.text;
-                                    font-size: 13px;
-                                    wrap: word-wrap;
-                                }
-                                Rectangle { height: 14px; }
-                                Rectangle { height: 1px; background: Theme.border; }
-                            }
-                            MenuRow {
-                                icon: @image-url("../icons/photo.svg");
-                                label: @tr("info.media.title");
-                                submenu: true;
-                                clicked => { info-panel.media-expanded = !info-panel.media-expanded; }
-                            }
-                            if info-panel.media-expanded: VerticalLayout {
-                                padding-top: 8px;
-                                padding-bottom: 12px;
-                                spacing: 6px;
-                                if root.info-media.length == 0: Text {
-                                    text: @tr("info.media.empty");
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                }
-                                for row in root.info-media: HorizontalLayout {
-                                    spacing: 6px;
-                                    alignment: start;
-                                    for cell in row: Rectangle {
-                                        width: (info-panel.width - 56px) / 4;
-                                        height: self.width;
-                                        border-radius: 8px;
-                                        clip: true;
-                                        background: Theme.hover;
-                                        if cell.ready: Image {
-                                            source: cell.pic;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            image-fit: cover;
-                                        }
-                                    }
-                                }
-                            }
-                            Rectangle { height: 1px; background: Theme.border; }
-                            if root.info-is-group: HorizontalLayout {
-                                padding-top: 16px;
-                                padding-bottom: 10px;
-                                spacing: 8px;
-                                Text {
-                                    text: root.info-members != "" ? root.info-members : @tr("info.group.participants");
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-                                if !root.current-left: TouchArea {
-                                    width: add-member-label.preferred-width;
-                                    height: 24px;
-                                    mouse-cursor: pointer;
-                                    add-member-label := Text {
-                                        text: @tr("info.group.add_member");
-                                        color: Theme.accent;
-                                        font-size: 12px;
-                                        height: parent.height;
-                                        vertical-alignment: center;
-                                    }
-                                    clicked => { root.close-info(); root.menu-add-member(); }
-                                }
-                            }
-                            if !root.info-is-group: VerticalLayout {
-                                padding-top: 16px;
-                                spacing: 8px;
-                                Text {
-                                    text: @tr("info.common_groups.title") + (root.info-common-groups-state == "ready" ? " (" + root.info-common-groups.length + ")" : "");
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                }
-                                if root.info-common-groups-state != "ready" || root.info-common-groups.length == 0: Text {
-                                    text: root.info-common-groups-state == "loading" ? @tr("info.common_groups.loading")
-                                        : root.info-common-groups-state == "error" ? @tr("info.common_groups.error")
-                                        : @tr("info.common_groups.empty");
-                                    color: Theme.text-dim;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                }
-                                for group in root.info-common-groups: MemberRow {
-                                    item: group;
-                                    compact: true;
-                                    clicked => { root.close-info(); root.open-chat(group.jid); }
-                                }
-                            }
-                            for m in root.info-member-rows: MemberRow {
-                                item: m;
-                                compact: true;
-                                clicked => { root.open-member(m.jid); }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+
+        current-callable: root.current-callable;
+        start-call(a0) => { root.start-call(a0); }
+        start-video-call(a0) => { root.start-video-call(a0); }
+        open-chat(a0) => { root.open-chat(a0); }
+        current-jid: root.current-jid;
+        info-name: root.info-name;
+        info-id: root.info-id;
+        info-about: root.info-about;
+        info-desc: root.info-desc;
+        info-is-group: root.info-is-group;
+        info-members: root.info-members;
+        info-archived: root.info-archived;
+        info-avatar: root.info-avatar;
+        info-has-avatar: root.info-has-avatar;
+        info-initial: root.info-initial;
+        info-color-idx: root.info-color-idx;
+        info-media: root.info-media;
+        close-info() => { root.close-info(); }
+        toggle-archive() => { root.toggle-archive(); }
+        clear-chat() => { root.clear-chat(); }
+        current-left: root.current-left;
+        current-muted: root.current-muted;
+        menu-add-member() => { root.menu-add-member(); }
+        menu-search() => { root.menu-search(); }
+        menu-mute(a0) => { root.menu-mute(a0); }
+        info-member-rows: root.info-member-rows;
+        info-common-groups: root.info-common-groups;
+        info-common-groups-state: root.info-common-groups-state;
+        open-member(a0) => { root.open-member(a0); }
     }
 
     // ---------- In-chat search panel ----------
-    chat-search-layer := ModalLayer {
+    chat-search-layer := ChatSearchLayer {
         open: root.chat-search-open && root.chat-open;
         scrim: transparent;
         dismiss => { root.chat-search-close(); }
-        if chat-search-layer.mounted: Rectangle {
-            width: 380px;
-            height: parent.height;
-            x: parent.width - self.width + (1 - chat-search-layer.progress) * self.width;
-            opacity: chat-search-layer.progress;
-            background: Theme.panel;
-            TouchArea { }
-            VerticalBox {
-                padding: 0;
-                spacing: 0;
-                Rectangle {
-                    height: 54px;
-                    background: Theme.header;
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 10px;
-                        IconButton {
-                            icon: @image-url("../icons/x.svg");
-                            clicked => { root.chat-search-close(); }
-                        }
-                        Text {
-                            text: @tr("chat.in_chat_search.title");
-                            color: Theme.text;
-                            font-size: 16px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        IconButton {
-                            icon: @image-url("../icons/chevron-up.svg");
-                            enabled: root.chat-search-rows.length > 0;
-                            clicked => { root.chat-search-step(1); }
-                        }
-                        IconButton {
-                            icon: @image-url("../icons/chevron-down.svg");
-                            enabled: root.chat-search-rows.length > 0;
-                            clicked => { root.chat-search-step(-1); }
-                        }
-                    }
-                }
-                Rectangle {
-                    height: 58px;
-                    HorizontalLayout {
-                        padding: 10px;
-                        chat-search-input := LineEdit {
-                            placeholder-text: @tr("chat.in_chat_search.placeholder");
-                            init => { self.focus(); }
-                            edited => { root.chat-search-changed(self.text); }
-                            accepted => { root.chat-search-step(0); }
-                        }
-                    }
-                }
-                if root.chat-search-count != "": Text {
-                    text: root.chat-search-count;
-                    color: Theme.text-dim;
-                    font-size: 12px;
-                    horizontal-alignment: center;
-                }
-                if chat-search-input.text == "": Text {
-                    text: @tr("chat.in_chat_search.hint");
-                    color: Theme.text-dim;
-                    font-size: 13px;
-                    horizontal-alignment: center;
-                }
-                ListView {
-                    for hit in root.chat-search-rows: HitRow {
-                        hit: hit;
-                        clicked => { root.open-hit(hit.jid, hit.id); }
-                    }
-                }
-            }
-        }
+
+        open-hit(a0, a1) => { root.open-hit(a0, a1); }
+        chat-search-rows: root.chat-search-rows;
+        chat-search-count: root.chat-search-count;
+        chat-search-changed(a0) => { root.chat-search-changed(a0); }
+        chat-search-step(a0) => { root.chat-search-step(a0); }
+        chat-search-close() => { root.chat-search-close(); }
     }
 
     // ---------- Sync progress ----------
-    sync-layer := ModalLayer {
+    sync-layer := SyncLayer {
         open: root.sync-open;
         scrim: #00000088;
         dismiss => { root.sync-open = false; }
-        if sync-layer.mounted: Rectangle {
-            width: 400px;
-            height: sync-col.preferred-height + 44px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            opacity: sync-layer.progress;
-            transform-scale: 0.96 + 0.04 * sync-layer.progress;
-            TouchArea { }
-            sync-col := VerticalLayout {
-                padding: 22px;
-                spacing: 14px;
-                width: parent.width;
-                Text {
-                    text: @tr("chat.history.syncing");
-                    color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 700;
-                }
-                Rectangle { height: 1px; background: Theme.border; }
-                Text {
-                    text: root.sync-detail;
-                    color: Theme.text-dim;
-                    font-size: 14px;
-                    wrap: word-wrap;
-                    width: parent.width - 44px;
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    DialogButton {
-                        label: @tr("common.action.ok");
-                        primary: true;
-                        clicked => { root.sync-open = false; }
-                    }
-                }
-            }
-        }
+
+        sync-open <=> root.sync-open;
+        sync-detail: root.sync-detail;
     }
 
     // ---------- Account switcher ----------
-    account-layer := ModalLayer {
+    account-layer := AccountLayer {
         open: root.account-menu-open && root.screen == "main";
         scrim: transparent;
         dismiss => { root.account-menu-open = false; }
-        if account-layer.mounted: Rectangle {
-            x: 64px;
-            y: parent.height - self.height - 10px + (1 - account-layer.progress) * 8px;
-            opacity: account-layer.progress;
-            width: 300px;
-            height: account-col.preferred-height;
-            background: Theme.panel;
-            border-radius: 10px;
-            drop-shadow-blur: 10px;
-            drop-shadow-color: #00000066;
-            TouchArea { }
-            account-col := VerticalLayout {
-                padding: 6px;
-                spacing: 1px;
-                for acc in root.accounts: AccountRow {
-                    account: acc;
-                    clicked => {
-                        if (acc.active) { root.account-menu-open = false; }
-                        else { root.switch-account(acc.id); }
-                    }
-                    remove => { root.remove-account(acc.id); }
-                }
-                Rectangle { height: 1px; background: Theme.border; }
-                if root.can-add-account: MenuRow {
-                    icon: @image-url("../icons/user-plus.svg");
-                    label: @tr("account.menu.add");
-                    clicked => { root.add-account(); }
-                }
-                if !root.can-add-account: Text {
-                    text: @tr("account.menu.limit_hint");
-                    color: Theme.text-dim;
-                    font-size: 12px;
-                    height: 32px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                MenuRow {
-                    icon: @image-url("../icons/logout.svg");
-                    label: @tr("account.menu.logout");
-                    tint: #f05d4d;
-                    clicked => {
-                        root.account-menu-open = false;
-                        root.logout();
-                    }
-                }
-            }
-        }
+
+        logout() => { root.logout(); }
+        accounts: root.accounts;
+        can-add-account: root.can-add-account;
+        account-menu-open <=> root.account-menu-open;
+        switch-account(a0) => { root.switch-account(a0); }
+        add-account() => { root.add-account(); }
+        remove-account(a0) => { root.remove-account(a0); }
     }
 
     // Swapping sessions takes a moment; nothing underneath belongs to
@@ -4906,1663 +3959,262 @@ export component AppWindow inherits Window {
         }
     }
 
-    message-menu-layer := ModalLayer {
+    message-menu-layer := MessageMenuLayer {
         open: root.message-menu-open;
         scrim: transparent;
         dismiss => { root.message-menu-open = false; }
-        if message-menu-layer.mounted: Rectangle {
-            x: max(8px, min(root.message-menu-x, root.width - self.width - 8px));
-            y: max(8px, min(root.message-menu-y, root.height - self.height - 8px)) + (1 - message-menu-layer.progress) * 4px;
-            opacity: message-menu-layer.progress;
-            width: 264px;
-            height: min(root.height - 16px, message-menu-items.preferred-height + 12px);
-            border-radius: 12px;
-            background: Theme.dark ? (root.theme-style == "glass" ? #222c32f5 : #222c32) : Theme.panel;
-            border-width: 1px;
-            border-color: Theme.dark ? #ffffff18 : Theme.border;
-            drop-shadow-blur: 24px;
-            drop-shadow-color: #00000066;
-            TouchArea { }
-            ScrollView {
-                x: 6px; y: 6px;
-                width: parent.width - 12px;
-                height: parent.height - 12px;
-                message-menu-items := VerticalLayout {
-                    spacing: 1px;
-                    if root.menu-message.sendPending: Text {
-                        text: root.menu-message.sendState;
-                        color: Theme.text-dim;
-                        font-size: 12px;
-                        wrap: word-wrap;
-                    }
-                    if root.menu-message.sendRetry: MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/refresh.svg");
-                        label: @tr("settings.about.retry_action");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "retry"); }
-                    }
-                    if root.menu-message.sendRetry && root.menu-message.kind == "text": MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/copy.svg");
-                        label: @tr("message.action.copy_to_composer");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "recover"); }
-                    }
-                    if root.menu-message.sendPending && !root.menu-message.sendRetry: MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/x.svg");
-                        label: @tr("chat.list.new_cancel");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "cancel"); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/message-circle.svg");
-                        label: @tr("message.menu.reply");
-                        clicked => { root.message-menu-open = false; root.request-reply(root.menu-message.id); }
-                    }
-                    if root.menu-message.privateReply: MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/users.svg");
-                        label: @tr("message.menu.reply_privately");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "private"); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/corner-up-right.svg");
-                        label: @tr("message.menu.forward");
-                        clicked => { root.message-menu-open = false; root.request-forward(root.menu-message.id); }
-                    }
-                    if root.can-translate(root.menu-message): MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/translate.svg");
-                        label: root.menu-message.translationBusy ? @tr("chat.message.translating") : @tr("chat.message.translate");
-                        enabled: !root.menu-message.translationBusy;
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translate"); }
-                    }
-                    if root.can-translate(root.menu-message) && root.menu-message.translationText != "": MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/x.svg");
-                        label: @tr("chat.message.hide_translation");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-hide"); }
-                    }
-                    if root.can-translate(root.menu-message) && root.menu-message.translationSource != "": MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/translate.svg");
-                        label: @tr("chat.message.always_translate_from", root.menu-message.translationSource);
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-always"); }
-                    }
-                    if root.can-translate(root.menu-message) && root.menu-message.translationSource != "": MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/circle-minus.svg");
-                        label: @tr("chat.message.never_translate_from", root.menu-message.translationSource);
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "translation-never"); }
-                    }
-                    if root.menu-message.text != "" && (root.menu-message.kind == "text" || root.menu-message.kind == "image" || root.menu-message.kind == "video"): MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/copy.svg");
-                        label: @tr("chat.message.copy_original_text");
-                        clicked => { root.message-menu-open = false; root.copy-text(root.menu-message.id); }
-                    }
-                    if root.menu-message.kind == "image" && root.menu-message.mediaReady: MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/photo.svg");
-                        label: @tr("message.menu.copy_image");
-                        clicked => { root.message-menu-open = false; root.copy-image(root.menu-message.id); }
-                    }
-                    if root.menu-message.linkUrl != "": MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/copy.svg");
-                        label: @tr("message.menu.copy_link");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "link"); }
-                    }
-                    if root.menu-message.kind != "text" && root.menu-message.mediaReady: MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/download.svg");
-                        label: @tr("message.menu.save_as");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "save"); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/mood-smile.svg");
-                        label: @tr("message.menu.react");
-                        clicked => { root.message-menu-open = false; root.react-pick(root.menu-message.id); }
-                    }
-                    if root.menu-message.editable: MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/file-text.svg");
-                        label: @tr("message.menu.edit");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "edit"); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/pin.svg");
-                        label: root.menu-message.pinned ? @tr("message.menu.unpin") : @tr("message.menu.pin");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "pin"); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/message-circle.svg");
-                        label: @tr("message.menu.mark_unread");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "unread"); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/star.svg");
-                        label: root.menu-message.starred ? @tr("message.menu.unstar") : @tr("message.menu.star");
-                        clicked => { root.message-menu-open = false; root.toggle-star(root.menu-message.id); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/checkbox.svg");
-                        label: @tr("message.menu.select");
-                        clicked => { root.message-menu-open = false; root.select-start(root.menu-message.id); }
-                    }
-                    MenuRow {
-                        height: 32px;
-                        icon: @image-url("../icons/info-circle.svg");
-                        label: @tr("message.menu.details");
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "details"); }
-                    }
-                    Rectangle { height: 1px; background: Theme.dark ? #ffffff18 : Theme.border; }
-                    MenuRow {
-                        height: 34px;
-                        icon: @image-url("../icons/trash.svg");
-                        label: @tr("message.menu.delete");
-                        tint: #f47783;
-                        clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "delete"); }
-                    }
-                }
-            }
-        }
+
+        theme-style: root.theme-style;
+        copy-text(a0) => { root.copy-text(a0); }
+        copy-image(a0) => { root.copy-image(a0); }
+        request-reply(a0) => { root.request-reply(a0); }
+        toggle-star(a0) => { root.toggle-star(a0); }
+        message-action(a0, a1) => { root.message-action(a0, a1); }
+        menu-message: root.menu-message;
+        message-menu-open <=> root.message-menu-open;
+        message-menu-x: root.message-menu-x;
+        message-menu-y: root.message-menu-y;
+        react-pick(a0) => { root.react-pick(a0); }
+        request-forward(a0) => { root.request-forward(a0); }
+        select-start(a0) => { root.select-start(a0); }
+        can-translate(a0) => { return root.can-translate(a0); }
+        win-width: root.width;
+        win-height: root.height;
     }
 
-    details-layer := ModalLayer {
+    details-layer := DetailsLayer {
         open: root.details-open;
         scrim: #00000025;
         dismiss => { root.details-open = false; }
-        if details-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            FocusScope {
-                init => { self.focus(); }
-                key-pressed(e) => {
-                    if (e.text == Key.Escape) { root.details-open = false; return accept; }
-                    return reject;
-                }
-            }
-            Rectangle {
-                width: min(336px, root.width);
-                height: parent.height;
-                x: parent.width - self.width + (1 - details-layer.progress) * self.width;
-                opacity: details-layer.progress;
-                background: Theme.dark ? #1b252dee : Theme.panel;
-                border-width: 1px;
-                border-color: Theme.border;
-                TouchArea { }
-                VerticalLayout {
-                    spacing: 0px;
-                    Rectangle {
-                        height: 64px;
-                        background: Theme.header;
-                        HorizontalLayout {
-                            padding: 16px;
-                            Text { text: @tr("msg.details.title"); color: Theme.text; font-size: 17px; font-weight: 600; vertical-alignment: center; }
-                            Rectangle {
-                                width: 28px;
-                                Text { text: "×"; color: Theme.text-dim; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; }
-                                TouchArea { clicked => { root.details-open = false; } }
-                            }
-                        }
-                    }
-                    ScrollView {
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 12px;
-                            Rectangle {
-                                border-radius: 10px;
-                                background: Theme.bubble-in;
-                                height: details-preview.preferred-height;
-                                details-preview := VerticalLayout {
-                                    padding: 12px;
-                                    spacing: 8px;
-                                    if root.details-has-image: Image {
-                                        source: root.details-image;
-                                        height: 154px;
-                                        image-fit: contain;
-                                    }
-                                    Text { text: root.details-text; color: Theme.text; wrap: word-wrap; }
-                                }
-                            }
-                            for row in root.details-rows: Rectangle {
-                                background: row.kind == "status" ? Theme.bubble-in : transparent;
-                                border-radius: 8px;
-                                height: row.kind == "person" ? 38px : row.kind == "participant-heading" ? 28px : detail-content.preferred-height;
-                                detail-content := HorizontalLayout {
-                                    padding: row.kind == "heading" || row.kind == "person" || row.kind == "participant-heading" ? 0px : 10px;
-                                    spacing: row.kind == "person" ? 8px : 10px;
-                                    alignment: start;
-                                    if row.kind == "person": Avatar {
-                                        width: 28px; height: 28px;
-                                        vertical-stretch: 0;
-                                        src: row.avatar; has-image: row.hasAvatar;
-                                        initial: row.initial; color-idx: row.colorIdx;
-                                    }
-                                    if row.kind == "status" || row.kind == "participant-heading": Ticks {
-                                        ticks: row.ticks; blue: row.blue;
-                                        vertical-stretch: 0;
-                                    }
-                                    if row.kind == "version": Rectangle {
-                                        width: 10px;
-                                        background: transparent;
-                                        Rectangle { x: 4px; width: 2px; height: parent.height; background: Theme.accent; }
-                                        Rectangle { y: 4px; width: 10px; height: 10px; border-radius: 5px; background: Theme.accent; }
-                                    }
-                                    VerticalLayout {
-                                        spacing: row.kind == "person" ? 1px : 5px;
-                                        alignment: center;
-                                        horizontal-stretch: 1;
-                                        Text {
-                                            text: row.title;
-                                            color: row.kind == "participant-heading" ? Theme.text-dim : row.kind == "heading" ? Theme.accent : Theme.text;
-                                            font-size: row.kind == "heading" ? 14px : row.kind == "person" ? 12px : 13px;
-                                            horizontal-alignment: left;
-                                            font-weight: row.kind == "heading" || row.kind == "version" || row.kind == "person" ? 600 : 400;
-                                            wrap: row.kind == "person" ? no-wrap : word-wrap;
-                                            overflow: elide;
-                                        }
-                                        if row.text != "": Text { text: row.text; color: Theme.text; wrap: word-wrap; font-size: 13px; }
-                                        if row.time != "": Text { text: row.time; color: Theme.text-dim; wrap: word-wrap; font-size: 11px; horizontal-alignment: left; }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+
+        details-open <=> root.details-open;
+        details-text: root.details-text;
+        details-image: root.details-image;
+        details-has-image: root.details-has-image;
+        details-rows: root.details-rows;
+        win-width: root.width;
     }
 
-    message-dialog-layer := ModalLayer {
+    message-dialog-layer := MessageDialogLayer {
         open: root.message-dialog-open;
         scrim: #00000088;
         dismiss => { root.message-dialog-open = false; }
-        if message-dialog-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            FocusScope {
-                init => { self.focus(); }
-                key-pressed(e) => {
-                    if (e.text == Key.Escape) { root.message-dialog-open = false; return accept; }
-                    return reject;
-                }
-            }
-            Rectangle {
-                width: min(480px, root.width - 32px);
-                height: message-dialog-col.preferred-height + 40px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: 12px;
-                opacity: message-dialog-layer.progress;
-                transform-scale: 0.96 + 0.04 * message-dialog-layer.progress;
-                background: Theme.panel;
-                TouchArea { }
-                message-dialog-col := VerticalLayout {
-                    padding: 20px;
-                    spacing: 14px;
-                    Text { text: root.message-dialog-title; color: Theme.text; font-size: 18px; }
-                    if !root.message-dialog-edit: Text {
-                        text: root.message-dialog-text;
-                        color: Theme.text-dim;
-                        wrap: word-wrap;
-                    }
-                    if root.message-dialog-edit: TextInput {
-                        text <=> root.message-dialog-text;
-                        color: Theme.text;
-                        wrap: word-wrap;
-                        height: 120px;
-                        init => { self.focus(); }
-                    }
-                    HorizontalLayout {
-                        alignment: end;
-                        spacing: 8px;
-                        DialogButton {
-                            label: @tr("common.action.close");
-                            clicked => { root.message-dialog-open = false; }
-                        }
-                        if root.message-dialog-edit: DialogButton {
-                            label: @tr("message.dialog.save");
-                            primary: true;
-                            enabled: root.message-dialog-text != "";
-                            clicked => { root.submit-edit(root.message-dialog-id, root.message-dialog-text); }
-                        }
-                    }
-                }
-            }
-        }
+
+        submit-edit(a0, a1) => { root.submit-edit(a0, a1); }
+        message-dialog-open <=> root.message-dialog-open;
+        message-dialog-edit: root.message-dialog-edit;
+        message-dialog-title: root.message-dialog-title;
+        message-dialog-text <=> root.message-dialog-text;
+        message-dialog-id: root.message-dialog-id;
+        win-width: root.width;
     }
 
     // ---------- Confirm dialog ----------
-    confirm-layer := ModalLayer {
+    confirm-layer := ConfirmLayer {
         open: root.confirm-open;
         scrim: #00000088;
         dismiss => { root.confirm-open = false; }
-        if confirm-layer.mounted: Rectangle {
-            opacity: confirm-layer.progress;
-            transform-scale: 0.96 + 0.04 * confirm-layer.progress;
-            width: 400px;
-            height: confirm-col.preferred-height + 44px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            TouchArea { }
-            confirm-col := VerticalLayout {
-                padding: 22px;
-                spacing: 14px;
-                width: parent.width;
-                Text {
-                    text: root.confirm-title;
-                    color: Theme.text;
-                    font-size: 17px;
-                    font-weight: 700;
-                    wrap: word-wrap;
-                    width: parent.width - 44px;
-                }
-                Text {
-                    text: root.confirm-text;
-                    color: Theme.text-dim;
-                    font-size: 14px;
-                    wrap: word-wrap;
-                    width: parent.width - 44px;
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 8px;
-                    DialogButton {
-                        label: @tr("message.confirm.cancel");
-                        clicked => { root.confirm-open = false; }
-                    }
-                    if root.confirm-secondary != "": DialogButton {
-                        label: root.confirm-secondary;
-                        clicked => { root.confirm-other(); }
-                    }
-                    DialogButton {
-                        label: root.confirm-action;
-                        primary: true;
-                        danger: true;
-                        clicked => { root.confirm-accept(); }
-                    }
-                }
-            }
-        }
+
+        confirm-open <=> root.confirm-open;
+        confirm-title: root.confirm-title;
+        confirm-text: root.confirm-text;
+        confirm-action: root.confirm-action;
+        confirm-secondary: root.confirm-secondary;
+        confirm-accept() => { root.confirm-accept(); }
+        confirm-other() => { root.confirm-other(); }
     }
 
     // ---------- Share group history ----------
-    share-layer := ModalLayer {
+    share-layer := ShareLayer {
         open: root.share-open;
         scrim: #00000088;
         dismiss => { root.share-cancel(); }
-        if share-layer.mounted: Rectangle {
-            opacity: share-layer.progress;
-            transform-scale: 0.96 + 0.04 * share-layer.progress;
-            width: 500px;
-            height: share-col.preferred-height + 48px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            TouchArea { }
-            share-col := VerticalLayout {
-                padding: 24px;
-                spacing: 14px;
-                width: parent.width;
-                HorizontalLayout {
-                    alignment: center;
-                    Avatar {
-                        width: 66px;
-                        height: 66px;
-                        src: root.share-avatar;
-                        has-image: root.share-has-avatar;
-                        initial: root.share-initial;
-                        color-idx: root.share-color-idx;
-                    }
-                }
-                Text {
-                    text: @tr("chat.history_share.title", root.share-name);
-                    color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 700;
-                    wrap: word-wrap;
-                    width: parent.width - 48px;
-                }
-                HorizontalLayout {
-                    spacing: 4px;
-                    alignment: start;
-                    Text {
-                        text: root.share-name + " ";
-                        color: Theme.text;
-                        font-size: 14px;
-                    }
-                    Text {
-                        text: @tr("chat.history_share.prefix");
-                        color: Theme.text;
-                        font-size: 14px;
-                    }
-                    Text {
-                        text: @tr("chat.history_share.highlight");
-                        color: Theme.accent;
-                        font-size: 14px;
-                    }
-                    Text {
-                        text: @tr("chat.history_share.suffix");
-                        color: Theme.text;
-                        font-size: 14px;
-                    }
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 8px;
-                    DialogButton {
-                        label: @tr("chat.history_share.cancel");
-                        clicked => { root.share-cancel(); }
-                    }
-                    DialogButton {
-                        label: root.share-sending ? @tr("chat.history_share.sending") : @tr("chat.history_share.send");
-                        primary: true;
-                        enabled: !root.share-sending;
-                        clicked => { root.share-accept(); }
-                    }
-                }
-            }
-        }
+
+        share-name: root.share-name;
+        share-avatar: root.share-avatar;
+        share-has-avatar: root.share-has-avatar;
+        share-initial: root.share-initial;
+        share-color-idx: root.share-color-idx;
+        share-sending: root.share-sending;
+        share-accept() => { root.share-accept(); }
+        share-cancel() => { root.share-cancel(); }
     }
 
     // ---------- New list ----------
-    new-list-layer := ModalLayer {
+    new-list-layer := NewListLayer {
         open: root.new-list-open;
         scrim: #00000088;
         dismiss => { root.new-list-open = false; }
-        if new-list-layer.mounted: Rectangle {
-            opacity: new-list-layer.progress;
-            transform-scale: 0.96 + 0.04 * new-list-layer.progress;
-            width: 380px;
-            height: list-col.preferred-height + 44px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            TouchArea { }
-            list-col := VerticalLayout {
-                padding: 22px;
-                spacing: 14px;
-                width: parent.width;
-                Text {
-                    text: @tr("chat.list.new_title");
-                    color: Theme.text;
-                    font-size: 17px;
-                    font-weight: 700;
-                }
-                Text {
-                    text: @tr("chat.list.new_hint");
-                    color: Theme.text-dim;
-                    font-size: 13px;
-                    wrap: word-wrap;
-                    width: parent.width - 44px;
-                }
-                new-list-name := LineEdit {
-                    placeholder-text: @tr("chat.list.name_placeholder");
-                    accepted => {
-                        root.menu-new-list(self.text);
-                        self.text = "";
-                        root.new-list-open = false;
-                    }
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 8px;
-                    DialogButton {
-                        label: @tr("chat.list.new_cancel");
-                        clicked => { root.new-list-open = false; }
-                    }
-                    DialogButton {
-                        label: @tr("chat.list.create");
-                        primary: true;
-                        clicked => {
-                            root.menu-new-list(new-list-name.text);
-                            new-list-name.text = "";
-                            root.new-list-open = false;
-                        }
-                    }
-                }
-            }
-        }
+
+        menu-new-list(a0) => { root.menu-new-list(a0); }
+        new-list-open <=> root.new-list-open;
     }
 
     // ---------- Add member ----------
-    member-pick-layer := ModalLayer {
+    member-pick-layer := MemberPickLayer {
         open: root.member-pick-open;
         scrim: #000000aa;
         dismiss => { root.member-pick-open = false; }
-        if member-pick-layer.mounted: Rectangle {
-            opacity: member-pick-layer.progress;
-            transform-scale: 0.96 + 0.04 * member-pick-layer.progress;
-            width: 420px;
-            height: 560px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            TouchArea { }
-            VerticalBox {
-                padding: 18px;
-                spacing: 10px;
-                HorizontalLayout {
-                    Text {
-                        text: @tr("group.add_member.title");
-                        color: Theme.text;
-                        font-size: 17px;
-                        font-weight: 700;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        clicked => { root.member-pick-open = false; }
-                    }
-                }
-                LineEdit {
-                    placeholder-text: @tr("group.add_member.search_placeholder");
-                    edited => { root.member-search(self.text); }
-                }
-                ListView {
-                    for m in root.member-rows: MemberRow {
-                        item: m;
-                        pickable: true;
-                        clicked => { root.member-toggle(m.jid); }
-                    }
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 8px;
-                    Text {
-                        text: @tr("group.add_member.selected_count.one" | "group.add_member.selected_count.other" % root.member-count);
-                        color: Theme.text-dim;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    DialogButton {
-                        label: @tr("group.add_member.confirm");
-                        primary: true;
-                        enabled: root.member-count > 0;
-                        clicked => { root.member-confirm(); }
-                    }
-                }
-            }
-        }
+
+        member-pick-open <=> root.member-pick-open;
+        member-rows: root.member-rows;
+        member-count: root.member-count;
+        member-search(a0) => { root.member-search(a0); }
+        member-toggle(a0) => { root.member-toggle(a0); }
+        member-confirm() => { root.member-confirm(); }
     }
 
     // ---------- Status viewer ----------
-    sv-layer := ModalLayer {
+    sv-layer := SvLayer {
         open: root.sv-open;
         scrim: #000000f0;
         dismissible: false;
-        if sv-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            opacity: sv-layer.progress;
-            TouchArea { clicked => { root.status-next(); } }
-            VerticalLayout {
-                padding: 20px;
-                spacing: 12px;
-                HorizontalLayout {
-                    spacing: 10px;
-                    Text {
-                        text: root.sv-name;
-                        color: white;
-                        font-size: 16px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.sv-time + "  ·  " + root.sv-index + "/" + root.sv-count;
-                        color: #b0b8bd;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        clicked => { root.status-close(); }
-                    }
-                }
-                Rectangle {
-                    vertical-stretch: 1;
-                    if root.sv-has-image: Image {
-                        source: root.sv-image;
-                        width: parent.width * 0.9;
-                        height: parent.height * 0.94;
-                        x: parent.width * 0.05;
-                        y: parent.height * 0.03;
-                        image-fit: contain;
-                    }
-                    if root.sv-is-video: Rectangle {
-                        width: 72px;
-                        height: 72px;
-                        border-radius: 36px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        background: root.sv-video-ready ? #000000a0 : #00000050;
-                        TouchArea {
-                            mouse-cursor: pointer;
-                            enabled: root.sv-video-ready;
-                            clicked => { root.status-play(); }
-                        }
-                        Image {
-                            source: @image-url("../icons/player-play.svg");
-                            colorize: white;
-                            width: 34px;
-                            height: 34px;
-                            x: 21px;
-                            y: 19px;
-                        }
-                    }
-                    if !root.sv-has-image: Rectangle {
-                        width: parent.width * 0.7;
-                        height: parent.height * 0.7;
-                        x: parent.width * 0.15;
-                        y: parent.height * 0.15;
-                        background: Theme.accent;
-                        border-radius: 14px;
-                        Text {
-                            text: root.sv-text;
-                            color: white;
-                            font-size: 24px;
-                            wrap: word-wrap;
-                            width: parent.width - 60px;
-                            x: 30px;
-                            height: parent.height;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/chevron-left.svg");
-                        x: 4px;
-                        y: (parent.height - self.height) / 2;
-                        clicked => { root.status-prev(); }
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/chevron-right.svg");
-                        x: parent.width - self.width - 4px;
-                        y: (parent.height - self.height) / 2;
-                        clicked => { root.status-next(); }
-                    }
-                }
-                if root.sv-has-image && root.sv-text != "": Text {
-                    text: root.sv-text;
-                    color: white;
-                    font-size: 14px;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                }
-            }
-        }
+
+        sv-name: root.sv-name;
+        sv-time: root.sv-time;
+        sv-text: root.sv-text;
+        sv-has-image: root.sv-has-image;
+        sv-image: root.sv-image;
+        sv-index: root.sv-index;
+        sv-count: root.sv-count;
+        status-next() => { root.status-next(); }
+        status-prev() => { root.status-prev(); }
+        status-close() => { root.status-close(); }
+        sv-is-video: root.sv-is-video;
+        sv-video-ready: root.sv-video-ready;
+        status-play() => { root.status-play(); }
     }
 
     // ---------- Blocking alert ----------
-    alert-layer := ModalLayer {
+    alert-layer := AlertLayer {
         open: root.alert-open;
         scrim: #000000aa;
         dismissible: false;
-        if alert-layer.mounted: Rectangle {
-            opacity: alert-layer.progress;
-            transform-scale: 0.96 + 0.04 * alert-layer.progress;
-            width: 380px;
-            height: alert-col.preferred-height + 44px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            alert-col := VerticalLayout {
-                padding: 22px;
-                spacing: 12px;
-                width: parent.width;
-                Text {
-                    text: root.alert-title;
-                    color: Theme.text;
-                    font-size: 17px;
-                    font-weight: 700;
-                    wrap: word-wrap;
-                    width: parent.width - 44px;
-                }
-                Text {
-                    text: root.alert-text;
-                    color: Theme.text-dim;
-                    font-size: 14px;
-                    wrap: word-wrap;
-                    width: parent.width - 44px;
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 10px;
-                    Rectangle {
-                        width: dismiss-text.preferred-width + 28px;
-                        height: 36px;
-                        border-radius: 18px;
-                        background: dismiss-touch.has-hover ? Theme.hover : transparent;
-                        dismiss-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.alert-dismiss(); }
-                        }
-                        dismiss-text := Text {
-                            text: @tr("common.action.close");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            width: parent.width;
-                            height: parent.height;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                    Rectangle {
-                        width: retry-text.preferred-width + 32px;
-                        height: 36px;
-                        border-radius: 18px;
-                        background: retry-touch.has-hover ? Theme.accent.darker(0.15) : Theme.accent;
-                        retry-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.alert-retry(); }
-                        }
-                        retry-text := Text {
-                            text: root.alert-action;
-                            color: white;
-                            font-size: 14px;
-                            font-weight: 700;
-                            width: parent.width;
-                            height: parent.height;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-        }
+
+        alert-title: root.alert-title;
+        alert-text: root.alert-text;
+        alert-action: root.alert-action;
+        alert-retry() => { root.alert-retry(); }
+        alert-dismiss() => { root.alert-dismiss(); }
     }
 
-    reactions-layer := ModalLayer {
+    reactions-layer := ReactionsLayer {
         open: root.reactions-open;
         scrim: #00000066;
         dismiss => { root.reactions-open = false; }
-        if reactions-layer.mounted: Rectangle {
-            opacity: reactions-layer.progress;
-            transform-scale: 0.96 + 0.04 * reactions-layer.progress;
-            width: 380px;
-            height: min(440px, 108px + root.reaction-rows.length * 56px);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            TouchArea { }
-            VerticalBox {
-                padding: 18px;
-                spacing: 8px;
-                HorizontalLayout {
-                    Text {
-                        text: root.reactions-title;
-                        color: Theme.text;
-                        font-size: 16px;
-                        font-weight: 700;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        clicked => { root.reactions-open = false; }
-                    }
-                }
-                Rectangle { height: 1px; background: Theme.border; }
-                ListView {
-                    for r in root.reaction-rows: Rectangle {
-                        height: 56px;
-                        background: react-row.has-hover ? Theme.hover : transparent;
-                        react-row := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.reactions-open = false;
-                                root.open-dm(r.jid);
-                            }
-                        }
-                        HorizontalLayout {
-                            padding-left: 4px;
-                            padding-right: 4px;
-                            spacing: 12px;
-                            VerticalLayout {
-                                alignment: center;
-                                Avatar {
-                                    width: 40px;
-                                    height: 40px;
-                                    src: r.avatar;
-                                    has-image: r.hasAvatar;
-                                    initial: r.initial;
-                                    color-idx: r.colorIdx;
-                                }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                horizontal-stretch: 1;
-                                Text {
-                                    text: r.name;
-                                    color: Theme.text;
-                                    font-size: 15px;
-                                    overflow: elide;
-                                }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                EmojiText {
-                                    text: r.emoji;
-                                    font-size: 20px;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+
+        reaction-rows: root.reaction-rows;
+        reactions-title: root.reactions-title;
+        reactions-open <=> root.reactions-open;
+        open-dm(a0) => { root.open-dm(a0); }
     }
 
     // ---------- Forward picker ----------
-    forward-layer := ModalLayer {
+    forward-layer := ForwardLayer {
         open: root.forward-open;
         scrim: #000000aa;
         dismiss => { root.forward-open = false; }
-        if forward-layer.mounted: Rectangle {
-            opacity: forward-layer.progress;
-            transform-scale: 0.96 + 0.04 * forward-layer.progress;
-            width: 420px;
-            height: 540px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            TouchArea { }
-            VerticalBox {
-                padding: 18px;
-                spacing: 10px;
-                HorizontalLayout {
-                    Text {
-                        text: @tr("message.forward.title");
-                        color: Theme.text;
-                        font-size: 17px;
-                        font-weight: 700;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        clicked => { root.forward-open = false; }
-                    }
-                }
-                Rectangle {
-                    height: 38px;
-                    border-radius: 19px;
-                    background: Theme.pill;
-                    HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 14px;
-                        spacing: 10px;
-                        VerticalLayout {
-                            alignment: center;
-                            Image {
-                                source: @image-url("../icons/search.svg");
-                                colorize: Theme.text-dim;
-                                width: 16px;
-                                height: 16px;
-                            }
-                        }
-                        fwd-search := TextInput {
-                            color: Theme.text;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                            single-line: true;
-                            edited => { root.forward-search(self.text); }
-                        }
-                    }
-                    if fwd-search.text == "": Text {
-                        text: @tr("message.forward.search_placeholder");
-                        color: Theme.text-dim;
-                        font-size: 14px;
-                        x: 40px;
-                        vertical-alignment: center;
-                        height: parent.height;
-                    }
-                }
-                ListView {
-                    for chat[i] in root.forward-rows: Rectangle {
-                        height: 56px;
-                        background: fwd-touch.has-hover ? Theme.hover : transparent;
-                        border-radius: 8px;
-                        fwd-touch := TouchArea {
-                            clicked => { root.forward-to(chat.jid); }
-                        }
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            spacing: 10px;
-                            VerticalLayout {
-                                alignment: center;
-                                Avatar {
-                                    width: 40px;
-                                    height: 40px;
-                                    src: chat.avatar;
-                                    has-image: chat.hasAvatar;
-                                    initial: chat.initial;
-                                    color-idx: chat.colorIdx;
-                                }
-                            }
-                            Text {
-                                text: chat.name;
-                                color: Theme.text;
-                                font-size: 14px;
-                                vertical-alignment: center;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                            }
-                        }
-                    }
-                }
-                Rectangle {
-                    height: 56px;
-                    border-radius: 8px;
-                    background: Theme.pill;
-                    HorizontalLayout {
-                        padding: 8px;
-                        spacing: 10px;
-                        if root.forward-preview-has-image: Image {
-                            source: root.forward-preview-image;
-                            width: 40px;
-                            height: 40px;
-                            image-fit: cover;
-                            y: (parent.height - self.height) / 2;
-                        }
-                        Text {
-                            text: root.forward-preview-text;
-                            color: Theme.text-dim;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
-                        }
-                    }
-                }
-            }
-        }
+
+        forward-open <=> root.forward-open;
+        forward-rows: root.forward-rows;
+        forward-preview-text: root.forward-preview-text;
+        forward-preview-image: root.forward-preview-image;
+        forward-preview-has-image: root.forward-preview-has-image;
+        forward-search(a0) => { root.forward-search(a0); }
+        forward-to(a0) => { root.forward-to(a0); }
     }
 
     // ---------- Settings ----------
-    settings-layer := ModalLayer {
+    settings-layer := SettingsLayer {
         open: root.settings-open;
         scrim: transparent;
         dismissible: false;
         x: 61px;
         width: parent.width - self.x;
         height: parent.height;
-        if settings-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            x: (1 - settings-layer.progress) * 16px;
-            opacity: settings-layer.progress;
-            background: Theme.dark ? #091419 : Theme.sidebar;
-            TouchArea { }
-            HorizontalLayout {
-                spacing: 0;
-                Rectangle {
-                    width: min(280px, root.width * 0.3);
-                    background: Theme.dark ? #081217 : Theme.sidebar;
-                    clip: true;
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 12px;
-                        Text {
-                            height: 42px;
-                            text: @tr("settings.title"); color: Theme.text;
-                            font-size: 20px; font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                        LineEdit {
-                            height: 36px;
-                            placeholder-text: @tr("settings.search.placeholder");
-                            text <=> root.settings-query;
-                            accessible-label: @tr("settings.search.placeholder");
-                        }
-                        ScrollView {
-                            vertical-stretch: 1;
-                            VerticalLayout {
-                                spacing: 4px;
-                                alignment: start;
-                                for category in root.settings-categories: Rectangle {
-                                    height: 62px;
-                                    border-radius: 8px;
-                                    background: root.settings-section == category.key ? Theme.accent.with-alpha(0.2)
-                                        : category-touch.has-hover ? Theme.hover : transparent;
-                                    Rectangle {
-                                        x: 0px; width: 2px; y: 9px; height: parent.height - 18px;
-                                        background: root.settings-section == category.key ? Theme.accent : transparent;
-                                    }
-                                    HorizontalLayout {
-                                        padding: 8px; spacing: 12px;
-                                        Rectangle {
-                                            width: 38px; height: 38px;
-                                            y: (parent.height - self.height) / 2;
-                                            border-radius: 19px;
-                                            background: Theme.hover;
-                                            Image {
-                                                x: 9px; y: 9px; width: 20px; height: 20px;
-                                                source: category.icon;
-                                                colorize: root.settings-section == category.key ? Theme.accent : Theme.icon;
-                                            }
-                                        }
-                                        VerticalLayout {
-                                            alignment: center; spacing: 4px;
-                                            Text { text: category.title; color: Theme.text; font-size: 14px; overflow: elide; }
-                                            Text { text: category.detail; color: Theme.text-dim; font-size: 11px; overflow: elide; }
-                                        }
-                                    }
-                                    category-touch := TouchArea {
-                                        mouse-cursor: pointer;
-                                        accessible-role: button;
-                                        accessible-label: category.title;
-                                        clicked => {
-                                            root.settings-section = category.key;
-                                            root.settings-query = "";
-                                            if (category.key == "updates" && !root.changelog-loaded) { root.changelog-load(false); }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Rectangle { width: 1px; background: Theme.border; }
-                Rectangle {
-                    horizontal-stretch: 1;
-                    VerticalLayout {
-                        spacing: 0;
-                        Rectangle {
-                            height: 78px;
-                            HorizontalLayout {
-                                padding-left: 20px; padding-right: 12px;
-                                VerticalLayout {
-                                    alignment: center; spacing: 4px;
-                                    Text {
-                                        text: root.settings-query != "" ? @tr("settings.search.results_title") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : root.settings-section == "translation" ? 9 : 1].title;
-                                        color: Theme.text; font-size: 20px; font-weight: 700;
-                                    }
-                                    Text {
-                                        text: root.settings-query != "" ? @tr("settings.search.results_subtitle") : @tr("settings.search.default_subtitle");
-                                        color: Theme.text-dim; font-size: 12px;
-                                    }
-                                }
-                                IconButton {
-                                    icon: @image-url("../icons/arrow-left.svg");
-                                    clicked => { root.settings-open = false; }
-                                }
-                            }
-                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
-                        }
-                    ScrollView {
-                        vertical-stretch: 1;
-                        VerticalLayout {
-                            padding: 20px;
-                            padding-top: 18px;
-                            spacing: 20px;
-                            alignment: start;
-                            if ((root.settings-query == "" && (root.settings-section == "general")) || (root.settings-query != "" && root.settings-matches(@tr("settings.general.startup.title") + " " + @tr("settings.general.launch_at_login")))): SettingsCard {
-                                title: @tr("settings.general.startup.title");
-                                SettingsRow {
-                                    label: @tr("settings.general.launch_at_login");
-                                    detail: @tr("settings.general.startup.description");
-                                    icon: @image-url("../icons/settings.svg");
-                                    Toggle {
-                                        on: root.autostart;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.autostart-changed(!root.autostart); }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "appearance")) || (root.settings-query != "" && root.settings-matches(@tr("settings.appearance.title") + " " + @tr("settings.appearance.theme") + " " + @tr("settings.appearance.style") + " " + @tr("settings.language.title")))): SettingsCard {
-                                title: @tr("settings.appearance.title");
-                                SettingsRow {
-                                    label: @tr("settings.appearance.theme");
-                                    detail: @tr("settings.appearance.theme.description");
-                                    icon: @image-url("../icons/eye.svg");
-                                    ComboBox {
-                                        width: min(210px, root.width * 0.25);
-                                        height: 34px;
-                                        y: (parent.height - self.height) / 2;
-                                        model: [@tr("settings.appearance.theme_dark"), @tr("settings.appearance.theme_light"), @tr("settings.language.system")];
-                                        current-value: root.theme-mode == "dark" ? @tr("settings.appearance.theme_dark") : root.theme-mode == "light" ? @tr("settings.appearance.theme_light") : @tr("settings.language.system");
-                                        selected(value) => {
-                                            root.theme-mode = value == @tr("settings.appearance.theme_dark") ? "dark" : value == @tr("settings.appearance.theme_light") ? "light" : "system";
-                                            root.theme-changed(root.theme-mode);
-                                        }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.appearance.style");
-                                    detail: @tr("settings.appearance.style.description");
-                                    icon: @image-url("../icons/list-details.svg");
-                                    ComboBox {
-                                        width: min(210px, root.width * 0.25);
-                                        height: 34px;
-                                        y: (parent.height - self.height) / 2;
-                                        model: [@tr("settings.appearance.style_glass"), @tr("settings.appearance.style_opaque")];
-                                        current-value: root.theme-style == "glass" ? @tr("settings.appearance.style_glass") : @tr("settings.appearance.style_opaque");
-                                        selected(value) => {
-                                            root.theme-style = value == @tr("settings.appearance.style_glass") ? "glass" : "opaque";
-                                            root.style-changed(root.theme-style);
-                                        }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.language.title");
-                                    detail: @tr("settings.language.description");
-                                    icon: @image-url("../icons/users.svg");
-                                    ComboBox {
-                                        width: min(210px, root.width * 0.25);
-                                        height: 34px;
-                                        y: (parent.height - self.height) / 2;
-                                        model: ["Português", "English", @tr("settings.language.system")];
-                                        current-value: root.language-mode == "pt" ? "Português" : root.language-mode == "en" ? "English" : @tr("settings.language.system");
-                                        selected(value) => {
-                                            root.language-mode = value == "Português" ? "pt" : value == "English" ? "en" : "system";
-                                            root.language-changed(root.language-mode);
-                                        }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "calls")) || (root.settings-query != "" && root.settings-matches(@tr("settings.calls.title") + " " + @tr("settings.calls.microphone") + " " + @tr("settings.calls.speaker") + " " + @tr("settings.calls.camera")))): SettingsCard {
-                                title: @tr("settings.calls.title");
-                                hint: @tr("settings.calls.devices_hint");
-                                SettingsRow {
-                                    label: @tr("settings.calls.microphone");
-                                    icon: @image-url("../icons/microphone.svg");
-                                    ComboBox {
-                                        width: 200px;
-                                        height: 34px;
-                                        y: (parent.height - self.height) / 2;
-                                        model: root.mic-devices;
-                                        current-value: root.mic-device;
-                                        selected(value) => {
-                                            root.mic-device = value;
-                                            root.device-changed("mic", value);
-                                        }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.calls.speaker");
-                                    icon: @image-url("../icons/volume.svg");
-                                    ComboBox {
-                                        width: 200px;
-                                        height: 34px;
-                                        y: (parent.height - self.height) / 2;
-                                        model: root.speaker-devices;
-                                        current-value: root.speaker-device;
-                                        selected(value) => {
-                                            root.speaker-device = value;
-                                            root.device-changed("speaker", value);
-                                        }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.calls.camera");
-                                    icon: @image-url("../icons/video.svg");
-                                    ComboBox {
-                                        width: 200px;
-                                        height: 34px;
-                                        y: (parent.height - self.height) / 2;
-                                        model: root.camera-devices;
-                                        current-value: root.camera-device;
-                                        selected(value) => {
-                                            root.camera-device = value;
-                                            root.device-changed("camera", value);
-                                        }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "privacy")) || (root.settings-query != "" && root.settings-matches(@tr("settings.privacy.title") + " " + @tr("settings.privacy.read_receipts") + " " + @tr("settings.privacy.apply_deletions") + " " + @tr("settings.privacy.blur_names") + " " + @tr("settings.privacy.blur_photos") + " " + @tr("settings.privacy.blur_messages") + " " + @tr("settings.privacy.blur_media")))): SettingsCard {
-                                title: @tr("settings.privacy.title");
-                                hint: @tr("settings.privacy.hint");
-                                SettingsRow {
-                                    label: @tr("settings.privacy.read_receipts");
-                                    detail: @tr("settings.privacy.read_receipts.description");
-                                    icon: @image-url("../icons/check.svg");
-                                    Toggle {
-                                        on: root.send-receipts;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.send-receipts-changed(!root.send-receipts); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.privacy.apply_deletions");
-                                    detail: @tr("settings.privacy.apply_deletions.description");
-                                    icon: @image-url("../icons/trash.svg");
-                                    Toggle {
-                                        on: root.apply-deletions;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.apply-deletions-changed(!root.apply-deletions); }
-                                    }
-                                }
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: @tr("settings.privacy.blur_hint");
-                                        color: Theme.text-dim;
-                                        font-size: 12px;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.privacy.blur_names");
-                                    detail: @tr("settings.privacy.blur_names.description");
-                                    Toggle {
-                                        label: @tr("settings.privacy.blur_names");
-                                        on: root.blur-names;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.privacy-blur-changed("names", !root.blur-names); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.privacy.blur_photos");
-                                    detail: @tr("settings.privacy.blur_photos.description");
-                                    Toggle {
-                                        label: @tr("settings.privacy.blur_photos");
-                                        on: root.blur-photos;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.privacy.blur_messages");
-                                    detail: @tr("settings.privacy.blur_messages.description");
-                                    Toggle {
-                                        label: @tr("settings.privacy.blur_messages");
-                                        on: root.blur-messages;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.privacy.blur_media");
-                                    detail: @tr("settings.privacy.blur_media.description");
-                                    Toggle {
-                                        label: @tr("settings.privacy.blur_media");
-                                        on: root.blur-media;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.privacy-blur-changed("media", !root.blur-media); }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("settings.category.notifications.title") + " " + @tr("settings.notifications.enabled") + " " + @tr("settings.notifications.previews")))): SettingsCard {
-                                title: @tr("settings.category.notifications.title");
-                                SettingsRow {
-                                    label: @tr("settings.notifications.enabled");
-                                    icon: @image-url("../icons/bell.svg");
-                                    detail: @tr("settings.notifications.enabled.description");
-                                    Toggle {
-                                        accessible-role: button;
-                                        accessible-label: @tr("settings.notifications.enabled");
-                                        on: root.notifications;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.notifications-changed(!root.notifications); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.notifications.previews");
-                                    icon: @image-url("../icons/message-circle.svg");
-                                    detail: @tr("settings.notifications.previews.description");
-                                    Toggle {
-                                        accessible-role: button;
-                                        accessible-label: @tr("settings.notifications.previews");
-                                        on: root.notify-previews;
-                                        y: (parent.height - self.height) / 2;
-                                        clicked => { root.notify-previews-changed(!root.notify-previews); }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "security")) || (root.settings-query != "" && root.settings-matches(@tr("settings.security.title") + " " + @tr("security.unlock.pin_placeholder")))): SettingsCard {
-                                title: @tr("settings.security.title");
-                                VerticalLayout {
-                                    padding: 14px;
-                                    padding-top: 10px;
-                                    spacing: 10px;
-                                    alignment: start;
-                                    Text {
-                                        text: root.pin-set
-                                            ? @tr("settings.security.pin_enabled_hint")
-                                            : @tr("settings.security.pin_disabled_hint");
-                                        color: Theme.text-dim;
-                                        font-size: 13px;
-                                        wrap: word-wrap;
-                                    }
-                                    current-pin := LineEdit {
-                                        height: root.pin-set ? 36px : 0px;
-                                        visible: root.pin-set;
-                                        input-type: password;
-                                        placeholder-text: @tr("settings.security.current_pin");
-                                    }
-                                    new-pin := LineEdit {
-                                        height: 36px;
-                                        input-type: password;
-                                        placeholder-text: @tr("settings.security.new_pin");
-                                    }
-                                    HorizontalLayout {
-                                        spacing: 10px;
-                                        alignment: start;
-                                        Button {
-                                            height: 34px;
-                                            text: root.pin-set ? @tr("settings.security.change_pin") : @tr("settings.security.set_pin");
-                                            primary: true;
-                                            clicked => {
-                                                root.save-pin(current-pin.text, new-pin.text);
-                                                new-pin.text = "";
-                                            }
-                                        }
-                                        Button {
-                                            visible: root.pin-set;
-                                            height: 34px;
-                                            text: @tr("settings.security.remove_pin");
-                                            clicked => {
-                                                root.remove-pin(current-pin.text);
-                                                current-pin.text = "";
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "downloads")) || (root.settings-query != "" && root.settings-matches(@tr("settings.downloads.title") + " " + @tr("settings.downloads.photos") + " " + @tr("settings.downloads.audio") + " " + @tr("settings.downloads.videos") + " " + @tr("settings.downloads.documents") + " " + @tr("settings.downloads.stickers")))): SettingsCard {
-                                title: @tr("settings.downloads.title");
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    padding-top: 8px;
-                                    padding-bottom: 4px;
-                                    Text { text: @tr("settings.downloads.voice_hint"); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.downloads.photos");
-                                    detail: @tr("settings.downloads.photos.description");
-                                    icon: @image-url("../icons/photo.svg");
-                                    Toggle {
-                                        on: root.auto-download-photos;
-                                        clicked => { root.auto-download-photos-changed(!root.auto-download-photos); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.downloads.audio");
-                                    detail: @tr("settings.downloads.audio.description");
-                                    icon: @image-url("../icons/music.svg");
-                                    Toggle {
-                                        on: root.auto-download-audio;
-                                        clicked => { root.auto-download-audio-changed(!root.auto-download-audio); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.downloads.videos");
-                                    detail: @tr("settings.downloads.videos.description");
-                                    icon: @image-url("../icons/video.svg");
-                                    Toggle {
-                                        on: root.auto-download-video;
-                                        clicked => { root.auto-download-video-changed(!root.auto-download-video); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.downloads.documents");
-                                    detail: @tr("settings.downloads.documents.description");
-                                    icon: @image-url("../icons/file-text.svg");
-                                    Toggle {
-                                        on: root.auto-download-documents;
-                                        clicked => { root.auto-download-documents-changed(!root.auto-download-documents); }
-                                    }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.downloads.stickers");
-                                    detail: @tr("settings.downloads.stickers.description");
-                                    icon: @image-url("../icons/sticker-2.svg");
-                                    Toggle {
-                                        on: root.auto-download-stickers;
-                                        clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
-                                    }
-                                }
-                            }
-                        if ((root.settings-query == "" && root.settings-section == "translation") || (root.settings-query != "" && root.settings-matches(@tr("translation.settings.title") + " " + @tr("translation.settings.category_description") + " " + @tr("translation.settings.source_language") + " " + @tr("translation.settings.target_language") + " " + @tr("translation.models.title")))): SettingsCard {
-                            title: @tr("translation.settings.title");
-                            hint: @tr("translation.settings.hint");
-                            SettingsRow {
-                                label: @tr("translation.service.title");
-                                detail: (root.translation-status == "Stopped" ? @tr("translation.service.stopped") : root.translation-status)
-                                    + (root.translation-detail != "" ? " · " + root.translation-detail : "");
-                                icon: @image-url("../icons/translate.svg");
-                                DialogButton {
-                                    label: root.translation-busy ? @tr("translation.service.working") : root.translation-running ? @tr("update.action.restart") : @tr("translation.service.start");
-                                    enabled: !root.translation-busy;
-                                    clicked => { root.translation-action(root.translation-running ? "restart" : "start"); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.service.stop_title");
-                                detail: @tr("translation.service.stop_description");
-                                DialogButton {
-                                    label: @tr("translation.service.stop");
-                                    enabled: root.translation-running || root.translation-busy;
-                                    clicked => { root.translation-action("stop"); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.settings.source_language");
-                                detail: @tr("translation.settings.source_language_description");
-                                ComboBox {
-                                    width: min(210px, root.width * 0.25);
-                                    height: 34px;
-                                    y: (parent.height - self.height) / 2;
-                                    enabled: !root.translation-busy;
-                                    model: ["auto", "en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
-                                    current-value: root.translation-source;
-                                    selected(value) => { root.translation-language("source", value); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.settings.target_language");
-                                detail: @tr("translation.settings.target_language_description");
-                                ComboBox {
-                                    width: min(210px, root.width * 0.25);
-                                    height: 34px;
-                                    y: (parent.height - self.height) / 2;
-                                    enabled: !root.translation-busy;
-                                    model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
-                                    current-value: root.translation-target;
-                                    selected(value) => { root.translation-language("target", value); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.models.source_language");
-                                detail: @tr("translation.models.source_language_description");
-                                ComboBox {
-                                    width: min(210px, root.width * 0.25);
-                                    height: 34px;
-                                    y: (parent.height - self.height) / 2;
-                                    enabled: !root.translation-busy;
-                                    model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
-                                    current-value: root.translation-model-source;
-                                    selected(value) => { root.translation-model-source = value; }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.models.title");
-                                detail: root.translation-detail != "" ? root.translation-detail
-                                    : root.translation-model-source == root.translation-target
-                                    ? @tr("translation.models.choose_different_languages")
-                                    : @tr("translation.models.install_pair", root.translation-model-source, root.translation-target);
-                                DialogButton {
-                                    label: root.translation-busy ? @tr("translation.service.working") : @tr("translation.models.install");
-                                    enabled: !root.translation-busy && root.translation-model-source != root.translation-target;
-                                    clicked => { root.translation-install(root.translation-model-source); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.models.installed_title");
-                                detail: root.translation-models != "" ? root.translation-models : @tr("translation.models.none_installed");
-                                DialogButton {
-                                    label: @tr("translation.models.refresh");
-                                    enabled: !root.translation-busy;
-                                    clicked => { root.translation-action("refresh"); }
-                                }
-                            }
-                            SettingsRow {
-                                label: @tr("translation.pairs.title");
-                                detail: root.translation-pairs != "" ? root.translation-pairs : @tr("translation.pairs.refresh_hint");
-                            }
-                        }
-                            if ((root.settings-query == "" && (root.settings-section == "updates")) || (root.settings-query != "" && root.settings-matches(@tr("settings.about.title") + " " + @tr("settings.category.updates.title")))): SettingsCard {
-                                title: @tr("settings.about.title");
-                                SettingsRow {
-                                    label: "Zapive";
-                                    detail: root.update-state == 1 ? @tr("settings.about.update_available", root.update-version)
-                                        : root.update-state == 2 ? @tr("settings.about.update_downloading_button")
-                                        : root.update-state == 3 ? @tr("settings.about.update_restart_required", root.update-version)
-                                        : root.update-state == 4 ? @tr("settings.about.update_failed", root.update-error)
-                                        : @tr("settings.about.version", root.app-version);
-                                    DialogButton {
-                                        y: (parent.height - self.height) / 2;
-                                        primary: root.update-state != 0;
-                                        enabled: root.update-state != 2;
-                                        label: root.update-state == 1 ? @tr("settings.about.update_action")
-                                            : root.update-state == 2 ? @tr("settings.about.update_downloading_button")
-                                            : root.update-state == 3 ? @tr("settings.about.restart_action")
-                                            : root.update-state == 4 ? @tr("settings.about.retry_action")
-                                            : @tr("settings.about.check_updates");
-                                        clicked => {
-                                            if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
-                                            else if (root.update-state == 3) { root.update-restart(); }
-                                            else if (root.update-state == 0) { root.update-check(); }
-                                        }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("update.whats_new.title") + " " + @tr("settings.category.updates.title")))): SettingsCard {
-                                title: @tr("update.whats_new.title");
-                                hint: @tr("update.release.newer_versions_hint");
-                                SettingsRow {
-                                    label: root.update-state == 3 ? @tr("settings.about.update_restart_required", root.update-version)
-                                        : root.changelog-has-new || root.update-state > 0 ? @tr("update.version.available_title")
-                                        : root.changelog-verified ? @tr("update.release.up_to_date") : @tr("settings.updates.whats_new");
-                                    detail: @tr("update.release.installed_version", root.app-version);
-                                    DialogButton {
-                                        label: @tr("update.whats_new.title");
-                                        clicked => { root.show-whats-new(); }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("update.release.history.title") + " changelog"))): SettingsCard {
-                                title: @tr("update.release.history.title");
-                                hint: @tr("update.release.original_language_hint");
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 12px;
-                                    alignment: start;
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        DialogButton {
-                                            label: root.changelog-loading ? @tr("pdf.loading") : root.changelog-loaded ? @tr("update.release.refresh_history") : @tr("update.release.load_history");
-                                            enabled: !root.changelog-loading;
-                                            clicked => { root.changelog-load(true); }
-                                        }
-                                    }
-                                    if root.changelog-error != "": Text {
-                                        text: root.changelog-error;
-                                        color: Theme.text-dim;
-                                        wrap: word-wrap;
-                                    }
-                                    if root.changelog-loaded && !root.changelog-loading && root.releases.length == 0 && root.changelog-error == "": Text {
-                                        text: @tr("update.release.empty_history");
-                                        color: Theme.text-dim;
-                                        wrap: word-wrap;
-                                    }
-                                    for release in root.releases: VerticalLayout {
-                                        if !release.newer: VerticalLayout {
-                                        spacing: 8px;
-                                        alignment: start;
-                                        Text {
-                                            text: release.installed ? @tr("update.release.installed_version_suffix", release.tag) : release.tag;
-                                            color: Theme.text;
-                                            font-size: 15px;
-                                            font-weight: 700;
-                                            wrap: word-wrap;
-                                        }
-                                        Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
-                                        Text {
-                                            text: release.notes != "" ? release.notes : @tr("update.release.notes_empty");
-                                            color: Theme.text;
-                                            font-size: 13px;
-                                            wrap: word-wrap;
-                                        }
-                                        Rectangle { height: 1px; background: Theme.border; }
-                                        }
-                                    }
-                                    if root.changelog-more: HorizontalLayout {
-                                        alignment: start;
-                                        DialogButton {
-                                            label: @tr("update.release.load_older");
-                                            enabled: !root.changelog-loading;
-                                            clicked => { root.changelog-load(false); }
-                                        }
-                                    }
-                                }
-                            }
-                            if ((root.settings-query == "" && (root.settings-section == "account")) || (root.settings-query != "" && root.settings-matches(@tr("settings.account.title") + " " + @tr("settings.account.logout_action")))): SettingsCard {
-                                title: @tr("settings.account.title");
-                                for acc in root.accounts: AccountRow {
-                                    account: acc;
-                                    clicked => { if (!acc.active) { root.switch-account(acc.id); } }
-                                    remove => { root.remove-account(acc.id); }
-                                }
-                                if root.can-add-account: MenuRow {
-                                    icon: @image-url("../icons/user-plus.svg");
-                                    label: @tr("account.menu.add");
-                                    clicked => { root.add-account(); }
-                                }
-                                SettingsRow {
-                                    label: @tr("settings.account.logout_description");
-                                    DialogButton {
-                                        y: (parent.height - self.height) / 2;
-                                        primary: true;
-                                        danger: true;
-                                        label: @tr("settings.account.logout_action");
-                                        clicked => { root.logout(); }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if root.settings-status != "": Rectangle {
-                        height: status-text.preferred-height + 20px;
-                        background: #ffbc38.with-alpha(0.12);
-                        status-text := Text {
-                            x: 24px;
-                            y: 10px;
-                            width: parent.width - 48px;
-                            text: root.settings-status;
-                            color: #ffbc38;
-                            font-size: 13px;
-                            wrap: word-wrap;
-                        }
-                    }
-                }
-            }
-            }
-        }
+
+        theme-style <=> root.theme-style;
+        notifications: root.notifications;
+        notify-previews: root.notify-previews;
+        blur-names: root.blur-names;
+        blur-photos: root.blur-photos;
+        blur-messages: root.blur-messages;
+        blur-media: root.blur-media;
+        style-changed(a0) => { root.style-changed(a0); }
+        notifications-changed(a0) => { root.notifications-changed(a0); }
+        notify-previews-changed(a0) => { root.notify-previews-changed(a0); }
+        privacy-blur-changed(a0, a1) => { root.privacy-blur-changed(a0, a1); }
+        theme-mode <=> root.theme-mode;
+        language-mode <=> root.language-mode;
+        theme-changed(a0) => { root.theme-changed(a0); }
+        language-changed(a0) => { root.language-changed(a0); }
+        mic-devices: root.mic-devices;
+        speaker-devices: root.speaker-devices;
+        camera-devices: root.camera-devices;
+        mic-device <=> root.mic-device;
+        speaker-device <=> root.speaker-device;
+        camera-device <=> root.camera-device;
+        device-changed(a0, a1) => { root.device-changed(a0, a1); }
+        update-state: root.update-state;
+        update-version: root.update-version;
+        update-error: root.update-error;
+        app-version: root.app-version;
+        releases: root.releases;
+        changelog-loading: root.changelog-loading;
+        changelog-loaded: root.changelog-loaded;
+        changelog-more: root.changelog-more;
+        changelog-error: root.changelog-error;
+        changelog-has-new: root.changelog-has-new;
+        changelog-verified: root.changelog-verified;
+        show-whats-new() => { root.show-whats-new(); }
+        changelog-load(a0) => { root.changelog-load(a0); }
+        update-check() => { root.update-check(); }
+        update-apply() => { root.update-apply(); }
+        update-restart() => { root.update-restart(); }
+        settings-open <=> root.settings-open;
+        settings-section <=> root.settings-section;
+        settings-query <=> root.settings-query;
+        settings-categories: root.settings-categories;
+        settings-matches(a0) => { return root.settings-matches(a0); }
+        pin-set: root.pin-set;
+        autostart: root.autostart;
+        settings-status: root.settings-status;
+        translation-status: root.translation-status;
+        translation-detail: root.translation-detail;
+        translation-busy: root.translation-busy;
+        translation-running: root.translation-running;
+        translation-target: root.translation-target;
+        translation-source: root.translation-source;
+        translation-models: root.translation-models;
+        translation-pairs: root.translation-pairs;
+        translation-action(a0) => { root.translation-action(a0); }
+        translation-install(a0) => { root.translation-install(a0); }
+        translation-model-source <=> root.translation-model-source;
+        translation-language(a0, a1) => { root.translation-language(a0, a1); }
+        autostart-changed(a0) => { root.autostart-changed(a0); }
+        save-pin(a0, a1) => { root.save-pin(a0, a1); }
+        remove-pin(a0) => { root.remove-pin(a0); }
+        logout() => { root.logout(); }
+        accounts: root.accounts;
+        can-add-account: root.can-add-account;
+        switch-account(a0) => { root.switch-account(a0); }
+        add-account() => { root.add-account(); }
+        remove-account(a0) => { root.remove-account(a0); }
+        send-receipts: root.send-receipts;
+        apply-deletions: root.apply-deletions;
+        send-receipts-changed(a0) => { root.send-receipts-changed(a0); }
+        apply-deletions-changed(a0) => { root.apply-deletions-changed(a0); }
+        auto-download-photos: root.auto-download-photos;
+        auto-download-photos-changed(a0) => { root.auto-download-photos-changed(a0); }
+        auto-download-audio: root.auto-download-audio;
+        auto-download-audio-changed(a0) => { root.auto-download-audio-changed(a0); }
+        auto-download-video: root.auto-download-video;
+        auto-download-video-changed(a0) => { root.auto-download-video-changed(a0); }
+        auto-download-documents: root.auto-download-documents;
+        auto-download-documents-changed(a0) => { root.auto-download-documents-changed(a0); }
+        auto-download-stickers: root.auto-download-stickers;
+        auto-download-stickers-changed(a0) => { root.auto-download-stickers-changed(a0); }
+        win-width: root.width;
     }
 
     // ---------- PDF viewer ----------
@@ -6720,344 +4372,59 @@ export component AppWindow inherits Window {
     }
 
     // ---------- Video player ----------
-    video-layer := ModalLayer {
+    video-layer := VideoLayer {
         open: root.video-open;
         scrim: #000000f2;
         dismissible: false;
-        if video-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            opacity: video-layer.progress;
-            // The bar, the close button and the pointer fade out while a clip
-            // plays untouched, and any movement brings them back.
-            property <bool> chrome: true;
-            property <bool> show-chrome: !root.video-is-clip || !root.video-playing
-                || self.chrome || bar-hover.has-hover || top-hover.has-hover || seek-area.pressed
-                || vol-area.pressed;
-            idle := Timer {
-                interval: 2.6s;
-                running: root.video-is-clip && root.video-playing;
-                triggered => { parent.chrome = false; }
-            }
-            stage := TouchArea {
-                mouse-cursor: parent.show-chrome ? MouseCursor.default : MouseCursor.none;
-                pointer-event(e) => {
-                    if (e.kind == PointerEventKind.move) {
-                        parent.chrome = true;
-                        idle.running = false;
-                        idle.running = root.video-is-clip && root.video-playing;
-                    }
-                }
-                clicked => {
-                    if (root.video-is-clip) { root.video-toggle(); }
-                    else { root.close-video(); }
-                }
-            }
-            keys := FocusScope {
-                init => { self.focus(); }
-                key-pressed(event) => {
-                    if (event.text == Key.Escape) { root.close-video(); return accept; }
-                    if (!root.video-is-clip) { return reject; }
-                    if (event.text == " " || event.text == "k") { root.video-toggle(); return accept; }
-                    if (event.text == Key.LeftArrow) { root.video-seek-by(-5); return accept; }
-                    if (event.text == Key.RightArrow) { root.video-seek-by(5); return accept; }
-                    if (event.text == Key.UpArrow) { root.video-set-volume(min(1, root.video-volume + 0.1)); return accept; }
-                    if (event.text == Key.DownArrow) { root.video-set-volume(max(0, root.video-volume - 0.1)); return accept; }
-                    if (event.text == "m") { root.video-mute-toggle(); return accept; }
-                    reject
-                }
-            }
-            // Fit inside the window both ways (a tall clip used to run off
-            // the bottom), and never blow a small one up past 3x.
-            property <float> ratio: root.video-w / max(root.video-h, 1);
-            property <length> fit-w: min(self.width - 32px, (self.height - 32px) * self.ratio,
-                root.video-w * 3px);
-            Image {
-                source: root.video-frame;
-                width: parent.fit-w;
-                height: self.width / max(parent.ratio, 0.01);
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                image-fit: contain;
-            }
-            if root.video-is-clip && root.video-loading: Rectangle {
-                width: loading-text.preferred-width + 28px;
-                height: 34px;
-                border-radius: 17px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                background: #000000b0;
-                loading-text := Text {
-                    text: @tr("pdf.loading");
-                    color: white;
-                    font-size: 13px;
-                    width: parent.width;
-                    height: parent.height;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-            if root.video-is-clip && !root.video-playing && !root.video-loading: Rectangle {
-                width: 76px;
-                height: 76px;
-                border-radius: 38px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                background: #000000a8;
-                Image {
-                    source: root.video-ended
-                        ? @image-url("../icons/rotate-clockwise.svg")
-                        : @image-url("../icons/player-play.svg");
-                    colorize: white;
-                    width: 36px;
-                    height: 36px;
-                    x: (parent.width - self.width) / 2 + (root.video-ended ? 0 : 2px);
-                    y: (parent.height - self.height) / 2;
-                }
-            }
 
-            // Top: save and close.
-            top-hover := TouchArea {
-                visible: parent.show-chrome;
-                height: 64px;
-                y: 0;
-                clicked => { if (root.video-is-clip) { root.video-toggle(); } }
-                Rectangle {
-                    background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
-                }
-                HorizontalLayout {
-                    padding: 12px;
-                    spacing: 6px;
-                    alignment: end;
-                    if root.video-is-clip: IconButton {
-                        icon: @image-url("../icons/download.svg");
-                        tint: white;
-                        clicked => { root.video-save(); }
-                    }
-                    IconButton {
-                        icon: @image-url("../icons/x.svg");
-                        tint: white;
-                        clicked => { root.close-video(); }
-                    }
-                }
-            }
-
-            // Bottom: transport.
-            bar-hover := TouchArea {
-                visible: root.video-is-clip && parent.show-chrome;
-                height: 84px;
-                y: parent.height - self.height;
-                Rectangle {
-                    background: @linear-gradient(180deg, #00000000 0%, #000000d0 100%);
-                }
-                // Seek bar: a press jumps, a drag scrubs.
-                seek-area := TouchArea {
-                    x: 20px;
-                    y: 18px;
-                    width: parent.width - 40px;
-                    height: 20px;
-                    mouse-cursor: pointer;
-                    property <float> at: 0;
-                    function pick() {
-                        self.at = max(0, min(1, self.mouse-x / self.width));
-                        root.video-seek(self.at);
-                    }
-                    pointer-event(e) => {
-                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
-                    }
-                    moved => { if (self.pressed) { self.pick(); } }
-                    property <float> shown: self.pressed ? self.at : root.video-progress;
-                    Rectangle {
-                        y: (parent.height - self.height) / 2;
-                        height: seek-area.has-hover || seek-area.pressed ? 6px : 4px;
-                        border-radius: self.height / 2;
-                        background: #ffffff40;
-                        Rectangle {
-                            x: 0;
-                            width: parent.width * seek-area.shown;
-                            border-radius: parent.border-radius;
-                            background: Theme.accent;
-                        }
-                    }
-                    Rectangle {
-                        visible: seek-area.has-hover || seek-area.pressed;
-                        width: 14px;
-                        height: 14px;
-                        border-radius: 7px;
-                        background: white;
-                        x: parent.width * seek-area.shown - self.width / 2;
-                        y: (parent.height - self.height) / 2;
-                    }
-                }
-                HorizontalLayout {
-                    x: 12px;
-                    y: 40px;
-                    width: parent.width - 24px;
-                    height: 36px;
-                    spacing: 10px;
-                    IconButton {
-                        icon: root.video-ended
-                            ? @image-url("../icons/rotate-clockwise.svg")
-                            : (root.video-playing
-                                ? @image-url("../icons/player-pause.svg")
-                                : @image-url("../icons/player-play.svg"));
-                        tint: white;
-                        clicked => { root.video-toggle(); }
-                    }
-                    Text {
-                        text: root.video-pos-label + " / " + root.video-duration-label;
-                        color: white;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    IconButton {
-                        icon: root.video-muted || root.video-volume <= 0
-                            ? @image-url("../icons/volume-off.svg")
-                            : @image-url("../icons/volume.svg");
-                        tint: white;
-                        clicked => { root.video-mute-toggle(); }
-                    }
-                    vol-area := TouchArea {
-                        width: 90px;
-                        mouse-cursor: pointer;
-                        function pick() {
-                            root.video-set-volume(max(0, min(1, self.mouse-x / self.width)));
-                        }
-                        pointer-event(e) => {
-                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
-                        }
-                        moved => { if (self.pressed) { self.pick(); } }
-                        Rectangle {
-                            y: (parent.height - self.height) / 2;
-                            height: 4px;
-                            border-radius: 2px;
-                            background: #ffffff40;
-                            Rectangle {
-                                x: 0;
-                                width: parent.width * (root.video-muted ? 0 : root.video-volume);
-                                border-radius: 2px;
-                                background: white;
-                            }
-                        }
-                        Rectangle {
-                            width: 12px;
-                            height: 12px;
-                            border-radius: 6px;
-                            background: white;
-                            x: parent.width * (root.video-muted ? 0 : root.video-volume) - self.width / 2;
-                            y: (parent.height - self.height) / 2;
-                        }
-                    }
-                    Rectangle { width: 4px; }
-                }
-            }
-        }
+        video-frame: root.video-frame;
+        video-w: root.video-w;
+        video-h: root.video-h;
+        close-video() => { root.close-video(); }
+        video-is-clip: root.video-is-clip;
+        video-loading: root.video-loading;
+        video-playing: root.video-playing;
+        video-ended: root.video-ended;
+        video-progress: root.video-progress;
+        video-pos-label: root.video-pos-label;
+        video-duration-label: root.video-duration-label;
+        video-volume: root.video-volume;
+        video-muted: root.video-muted;
+        video-toggle() => { root.video-toggle(); }
+        video-seek(a0) => { root.video-seek(a0); }
+        video-seek-by(a0) => { root.video-seek-by(a0); }
+        video-set-volume(a0) => { root.video-set-volume(a0); }
+        video-mute-toggle() => { root.video-mute-toggle(); }
+        video-save() => { root.video-save(); }
     }
 
     // ---------- Lightbox ----------
-    lightbox-layer := ModalLayer {
+    lightbox-layer := LightboxLayer {
         open: root.lightbox-open;
         scrim: #000000e6;
         dismiss => { root.lightbox-open = false; }
-        if lightbox-layer.mounted: Rectangle {
-            width: 100%;
-            height: 100%;
-            opacity: lightbox-layer.progress;
-            Image {
-                source: root.lightbox-image;
-                width: parent.width * 0.92;
-                height: parent.height * 0.92;
-                x: parent.width * 0.04;
-                y: parent.height * 0.04;
-                image-fit: contain;
-            }
-            IconButton {
-                icon: @image-url("../icons/x.svg");
-                x: parent.width - self.width - 16px;
-                y: 16px;
-                clicked => { root.lightbox-open = false; }
-            }
-        }
+
+        lightbox-open <=> root.lightbox-open;
+        lightbox-image: root.lightbox-image;
     }
     }
-    whats-new-layer := ModalLayer {
+    whats-new-layer := WhatsNewLayer {
         open: root.whats-new-open;
         scrim: #00000088;
         dismiss => { root.whats-new-open = false; }
-        if whats-new-layer.mounted: Rectangle {
-            width: min(640px, parent.width - 32px);
-            height: min(640px, parent.height - 32px);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.panel;
-            border-radius: 12px;
-            opacity: whats-new-layer.progress;
-            transform-scale: 0.96 + 0.04 * whats-new-layer.progress;
-            TouchArea { }
-            news-focus := FocusScope {
-                width: parent.width;
-                height: parent.height;
-                init => { self.focus(); }
-                capture-key-pressed(event) => {
-                    if (event.text == Key.Escape) { root.whats-new-open = false; return accept; }
-                    reject
-                }
-                VerticalLayout {
-                    padding: 20px;
-                    spacing: 12px;
-                    HorizontalLayout {
-                        Text { text: @tr("update.whats_new.title"); color: Theme.text; font-size: 20px; font-weight: 700; }
-                        DialogButton { label: @tr("common.action.close"); clicked => { root.whats-new-open = false; } }
-                    }
-                    Text { text: @tr("update.release.installed_version", root.app-version); color: Theme.text-dim; }
-                    ScrollView {
-                        content-width: self.width;
-                        VerticalLayout {
-                            alignment: start;
-                            spacing: 12px;
-                            if root.changelog-loading: Text { text: @tr("pdf.loading"); color: Theme.text-dim; }
-                            if root.changelog-error != "": Text { text: root.changelog-error; color: Theme.text-dim; wrap: word-wrap; }
-                            if root.changelog-verified && !root.changelog-has-new && root.update-state == 0: Text {
-                                text: @tr("update.release.up_to_date");
-                                color: Theme.accent;
-                                font-size: 16px;
-                                wrap: word-wrap;
-                            }
-                            if !root.changelog-loading && !root.changelog-has-new && root.update-state > 0: Text {
-                                text: @tr("update.release.notes_unavailable", root.update-version);
-                                color: Theme.text-dim;
-                                wrap: word-wrap;
-                            }
-                            for release in root.releases: VerticalLayout {
-                                if release.newer: VerticalLayout {
-                                    alignment: start;
-                                    spacing: 8px;
-                                    Text { text: @tr("update.release.new_in", release.tag); color: Theme.accent; font-size: 16px; font-weight: 700; wrap: word-wrap; }
-                                    Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
-                                    Text { text: release.notes != "" ? release.notes : @tr("update.release.notes_empty"); color: Theme.text; wrap: word-wrap; }
-                                    Rectangle { height: 1px; background: Theme.border; }
-                                }
-                            }
-                            if root.changelog-more && root.changelog-has-new: HorizontalLayout {
-                                alignment: start;
-                                DialogButton { label: @tr("update.release.load_older"); enabled: !root.changelog-loading; clicked => { root.changelog-load(false); } }
-                            }
-                        }
-                    }
-                    Text { text: @tr("update.release.original_language_hint"); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
-                    HorizontalLayout {
-                        alignment: end;
-                        if root.changelog-error != "": DialogButton { label: @tr("settings.about.retry_action"); enabled: !root.changelog-loading; clicked => { root.changelog-load(true); } }
-                        if root.update-state == 1 || root.update-state == 4: DialogButton {
-                            label: @tr("settings.about.update_action"); primary: true;
-                            clicked => { root.update-apply(); }
-                        }
-                        if root.update-state == 2: Text { text: @tr("settings.about.update_downloading_button"); color: Theme.text-dim; }
-                        if root.update-state == 3: DialogButton { label: @tr("settings.about.restart_action"); primary: true; clicked => { root.update-restart(); } }
-                    }
-                }
-            }
-        }
+
+        update-state: root.update-state;
+        update-version: root.update-version;
+        app-version: root.app-version;
+        releases: root.releases;
+        changelog-loading: root.changelog-loading;
+        changelog-more: root.changelog-more;
+        changelog-error: root.changelog-error;
+        changelog-has-new: root.changelog-has-new;
+        changelog-verified: root.changelog-verified;
+        whats-new-open <=> root.whats-new-open;
+        changelog-load(a0) => { root.changelog-load(a0); }
+        update-apply() => { root.update-apply(); }
+        update-restart() => { root.update-restart(); }
     }
 }

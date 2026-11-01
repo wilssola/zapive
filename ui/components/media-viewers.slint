@@ -1,0 +1,280 @@
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { Theme } from "theme.slint";
+
+export component VideoLayer inherits ModalLayer {
+    in property <image> video-frame;
+    in property <int> video-w;
+    in property <int> video-h;
+    callback close-video();
+    in property <bool> video-is-clip;
+    in property <bool> video-loading;
+    in property <bool> video-playing;
+    in property <bool> video-ended;
+    in property <float> video-progress;
+    in property <string> video-pos-label;
+    in property <string> video-duration-label;
+    in property <float> video-volume;
+    in property <bool> video-muted;
+    callback video-toggle();
+    callback video-seek(float);
+    callback video-seek-by(float);
+    callback video-set-volume(float);
+    callback video-mute-toggle();
+    callback video-save();
+
+    if root.mounted: Rectangle {
+        width: 100%;
+        height: 100%;
+        opacity: root.progress;
+        // The bar, the close button and the pointer fade out while a clip
+        // plays untouched, and any movement brings them back.
+        property <bool> chrome: true;
+        property <bool> show-chrome: !root.video-is-clip || !root.video-playing
+            || self.chrome || bar-hover.has-hover || top-hover.has-hover || seek-area.pressed
+            || vol-area.pressed;
+        idle := Timer {
+            interval: 2.6s;
+            running: root.video-is-clip && root.video-playing;
+            triggered => { parent.chrome = false; }
+        }
+        stage := TouchArea {
+            mouse-cursor: parent.show-chrome ? MouseCursor.default : MouseCursor.none;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.move) {
+                    parent.chrome = true;
+                    idle.running = false;
+                    idle.running = root.video-is-clip && root.video-playing;
+                }
+            }
+            clicked => {
+                if (root.video-is-clip) { root.video-toggle(); }
+                else { root.close-video(); }
+            }
+        }
+        keys := FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) { root.close-video(); return accept; }
+                if (!root.video-is-clip) { return reject; }
+                if (event.text == " " || event.text == "k") { root.video-toggle(); return accept; }
+                if (event.text == Key.LeftArrow) { root.video-seek-by(-5); return accept; }
+                if (event.text == Key.RightArrow) { root.video-seek-by(5); return accept; }
+                if (event.text == Key.UpArrow) { root.video-set-volume(min(1, root.video-volume + 0.1)); return accept; }
+                if (event.text == Key.DownArrow) { root.video-set-volume(max(0, root.video-volume - 0.1)); return accept; }
+                if (event.text == "m") { root.video-mute-toggle(); return accept; }
+                reject
+            }
+        }
+        // Fit inside the window both ways (a tall clip used to run off
+        // the bottom), and never blow a small one up past 3x.
+        property <float> ratio: root.video-w / max(root.video-h, 1);
+        property <length> fit-w: min(self.width - 32px, (self.height - 32px) * self.ratio,
+            root.video-w * 3px);
+        Image {
+            source: root.video-frame;
+            width: parent.fit-w;
+            height: self.width / max(parent.ratio, 0.01);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+        }
+        if root.video-is-clip && root.video-loading: Rectangle {
+            width: loading-text.preferred-width + 28px;
+            height: 34px;
+            border-radius: 17px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #000000b0;
+            loading-text := Text {
+                text: @tr("pdf.loading");
+                color: white;
+                font-size: 13px;
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        if root.video-is-clip && !root.video-playing && !root.video-loading: Rectangle {
+            width: 76px;
+            height: 76px;
+            border-radius: 38px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #000000a8;
+            Image {
+                source: root.video-ended
+                    ? @image-url("../icons/rotate-clockwise.svg")
+                    : @image-url("../icons/player-play.svg");
+                colorize: white;
+                width: 36px;
+                height: 36px;
+                x: (parent.width - self.width) / 2 + (root.video-ended ? 0 : 2px);
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        // Top: save and close.
+        top-hover := TouchArea {
+            visible: parent.show-chrome;
+            height: 64px;
+            y: 0;
+            clicked => { if (root.video-is-clip) { root.video-toggle(); } }
+            Rectangle {
+                background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+            }
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 6px;
+                alignment: end;
+                if root.video-is-clip: IconButton {
+                    icon: @image-url("../icons/download.svg");
+                    tint: white;
+                    clicked => { root.video-save(); }
+                }
+                IconButton {
+                    icon: @image-url("../icons/x.svg");
+                    tint: white;
+                    clicked => { root.close-video(); }
+                }
+            }
+        }
+
+        // Bottom: transport.
+        bar-hover := TouchArea {
+            visible: root.video-is-clip && parent.show-chrome;
+            height: 84px;
+            y: parent.height - self.height;
+            Rectangle {
+                background: @linear-gradient(180deg, #00000000 0%, #000000d0 100%);
+            }
+            // Seek bar: a press jumps, a drag scrubs.
+            seek-area := TouchArea {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                height: 20px;
+                mouse-cursor: pointer;
+                property <float> at: 0;
+                function pick() {
+                    self.at = max(0, min(1, self.mouse-x / self.width));
+                    root.video-seek(self.at);
+                }
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
+                }
+                moved => { if (self.pressed) { self.pick(); } }
+                property <float> shown: self.pressed ? self.at : root.video-progress;
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: seek-area.has-hover || seek-area.pressed ? 6px : 4px;
+                    border-radius: self.height / 2;
+                    background: #ffffff40;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * seek-area.shown;
+                        border-radius: parent.border-radius;
+                        background: Theme.accent;
+                    }
+                }
+                Rectangle {
+                    visible: seek-area.has-hover || seek-area.pressed;
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: white;
+                    x: parent.width * seek-area.shown - self.width / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+            HorizontalLayout {
+                x: 12px;
+                y: 40px;
+                width: parent.width - 24px;
+                height: 36px;
+                spacing: 10px;
+                IconButton {
+                    icon: root.video-ended
+                        ? @image-url("../icons/rotate-clockwise.svg")
+                        : (root.video-playing
+                            ? @image-url("../icons/player-pause.svg")
+                            : @image-url("../icons/player-play.svg"));
+                    tint: white;
+                    clicked => { root.video-toggle(); }
+                }
+                Text {
+                    text: root.video-pos-label + " / " + root.video-duration-label;
+                    color: white;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                IconButton {
+                    icon: root.video-muted || root.video-volume <= 0
+                        ? @image-url("../icons/volume-off.svg")
+                        : @image-url("../icons/volume.svg");
+                    tint: white;
+                    clicked => { root.video-mute-toggle(); }
+                }
+                vol-area := TouchArea {
+                    width: 90px;
+                    mouse-cursor: pointer;
+                    function pick() {
+                        root.video-set-volume(max(0, min(1, self.mouse-x / self.width)));
+                    }
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { self.pick(); }
+                    }
+                    moved => { if (self.pressed) { self.pick(); } }
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: #ffffff40;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * (root.video-muted ? 0 : root.video-volume);
+                            border-radius: 2px;
+                            background: white;
+                        }
+                    }
+                    Rectangle {
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 6px;
+                        background: white;
+                        x: parent.width * (root.video-muted ? 0 : root.video-volume) - self.width / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+                Rectangle { width: 4px; }
+            }
+        }
+    }
+}
+
+export component LightboxLayer inherits ModalLayer {
+    in-out property <bool> lightbox-open;
+    in property <image> lightbox-image;
+
+    if root.mounted: Rectangle {
+        width: 100%;
+        height: 100%;
+        opacity: root.progress;
+        Image {
+            source: root.lightbox-image;
+            width: parent.width * 0.92;
+            height: parent.height * 0.92;
+            x: parent.width * 0.04;
+            y: parent.height * 0.04;
+            image-fit: contain;
+        }
+        IconButton {
+            icon: @image-url("../icons/x.svg");
+            x: parent.width - self.width - 16px;
+            y: 16px;
+            clicked => { root.lightbox-open = false; }
+        }
+    }
+}

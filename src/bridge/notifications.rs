@@ -1,0 +1,261 @@
+// Desktop notifications and their reply tokens.
+use super::*;
+
+pub(super) const NOTIFICATION_TOKEN_TTL: Duration = Duration::from_secs(60);
+
+pub(super) const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
+
+#[derive(Clone)]
+pub(super) struct NotificationToken {
+    pub(super) jid: String,
+    pub(super) msg_id: String,
+    pub(super) expires: SystemTime,
+}
+
+// Every media kind gets a translated one-liner in notifications.
+pub(super) fn notification_body(m: &StoredMessage) -> String {
+    if m.sticker {
+        return t("preview.sticker");
+    }
+    match m.kind {
+        MessageKind::Image => t("preview.photo"),
+        MessageKind::Audio => t("preview.audio"),
+        MessageKind::Doc => ta("preview.document", &[&m.text]),
+        MessageKind::Video => {
+            if m.gif {
+                t("preview.gif")
+            } else {
+                t("preview.video")
+            }
+        }
+        MessageKind::Text | MessageKind::System => m.text.clone(),
+    }
+}
+
+impl Bridge {
+    // ---- notifications ----
+
+    pub(super) fn push_notification(&mut self, title: String, text: String, jid: String, msg_id: String) {
+        if !self.notifications {
+            return;
+        }
+        self.notify_queue.push((title, text, jid, msg_id));
+        if !self.notify_queued {
+            self.notify_queued = true;
+            self.once(1200, |b| b.flush_notifications());
+        }
+    }
+
+    pub(super) fn flush_notifications(&mut self) {
+        self.notify_queued = false;
+        let queue = std::mem::take(&mut self.notify_queue);
+        match queue.len() {
+            0 => {}
+            1 => {
+                let (title, text, jid, msg_id) = queue.into_iter().next().expect("one entry");
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    self.clear_notification_sensitive_state();
+                    return;
+                }
+                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                let Some(chat) = self.store.chats.get(&jid) else { return };
+                if chat.is_muted() { return; }
+                let message = self.store.messages_for(&jid).iter().find(|message| message.id == msg_id).cloned();
+                let Some(message) = message else { return };
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    self.clear_notification_sensitive_state();
+                    return;
+                }
+                let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
+                let toast_title = if self.notify_previews { title.clone() } else { t("notify.app_name") };
+                let mut payload = crate::platform::ToastPayload {
+                    token: Some(token.clone()),
+                    reply: true,
+                    ..Default::default()
+                };
+                let toast_body = if self.notify_previews {
+                    if let Some(raw) = message.raw.as_ref() {
+                        let inner = raw.get_base_message();
+                        let view_once = raw.is_view_once();
+                        let thumbnail = if view_once {
+                            None
+                        } else {
+                            inner.image_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref())
+                                .or_else(|| inner.video_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref()))
+                                .or_else(|| inner.sticker_message.as_option().and_then(|v| v.context_info.quoted_message.image_message.as_option().and_then(|image| image.jpeg_thumbnail.as_deref())))
+                        };
+                        payload.thumbnail = thumbnail.and_then(crate::media::notification_thumbnail);
+                        payload.play = !view_once
+                            && inner.audio_message.as_option().is_some()
+                            && self.media_path.contains_key(&message.id);
+                    }
+                    text
+                } else {
+                    t("notify.new_message")
+                };
+                if let Some(path) = &payload.thumbnail {
+                    self.notification_thumbnails.insert(token.clone(), path.clone());
+                }
+                crate::platform::toast(&toast_title, &toast_body, payload);
+                let expired_token = token.clone();
+                self.once(60_000, move |bridge| {
+                    bridge.notify_tokens.remove(&expired_token);
+                    if let Some(path) = bridge.notification_thumbnails.remove(&expired_token) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                });
+            }
+            n => {
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) { return; }
+                let mut names: Vec<&str> = Vec::new();
+                if self.notify_previews {
+                    for (title, _, jid, _) in &queue {
+                        if self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted()) && !names.contains(&title.as_str()) {
+                            names.push(title);
+                            if names.len() == 3 { break; }
+                        }
+                    }
+                }
+                let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
+                if count == 0 || (self.notify_previews && names.is_empty()) { return; }
+                let text = if !self.notify_previews {
+                    ta("notify.new_messages", &[&count.to_string(), ""])
+                } else if names.len() == 1 {
+                    ta("notify.from_one", &[&count.to_string(), names[0]])
+                } else {
+                    ta("notify.new_messages", &[&count.to_string(), &names.join(", ")])
+                };
+                crate::platform::toast(&t("notify.app_name"), &text, crate::platform::ToastPayload::default());
+            }
+        }
+    }
+
+    pub(super) fn clear_notification_sensitive_state(&mut self) {
+        self.notify_queue.clear();
+        self.notify_queued = false;
+        self.notify_tokens.clear();
+        for (_, path) in self.notification_thumbnails.drain() {
+            let _ = std::fs::remove_file(path);
+        }
+        crate::media::clean_notification_thumbnails();
+    }
+
+    pub(super) fn register_notification_token(&mut self, jid: &str, msg_id: &str) -> Option<String> {
+        use rand::TryRngCore as _;
+        let mut bytes = [0u8; 16];
+        rand::rngs::OsRng.try_fill_bytes(&mut bytes).ok()?;
+        let token = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        self.expire_notification_tokens();
+        self.notify_tokens.insert(token.clone(), NotificationToken {
+            jid: jid.to_string(),
+            msg_id: msg_id.to_string(),
+            expires: SystemTime::now() + NOTIFICATION_TOKEN_TTL,
+        });
+        Some(token)
+    }
+
+    pub(super) fn expire_notification_tokens(&mut self) {
+        let now = SystemTime::now();
+        self.notify_tokens.retain(|_, token| token.expires > now);
+        let expired: Vec<String> = self.notification_thumbnails.keys()
+            .filter(|token| !self.notify_tokens.contains_key(*token))
+            .cloned().collect();
+        for token in expired {
+            if let Some(path) = self.notification_thumbnails.remove(&token) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
+    pub(super) fn take_notification_token(&mut self, token: &str) -> Option<NotificationToken> {
+        if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+            self.clear_notification_sensitive_state();
+            return None;
+        }
+        self.expire_notification_tokens();
+        let item = self.notify_tokens.remove(token)?;
+        if let Some(path) = self.notification_thumbnails.remove(token) {
+            let _ = std::fs::remove_file(path);
+        }
+        if item.expires <= SystemTime::now()
+            || !self.store.chats.contains_key(&item.jid)
+            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+        {
+            return None;
+        }
+        Some(item)
+    }
+
+    pub fn on_notification_activated(&mut self, token: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        self.open_dm(&item.jid, None);
+    }
+
+    pub fn on_notification_play(&mut self, token: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        let valid_audio = self.store.messages_for(&item.jid).iter()
+            .find(|message| message.id == item.msg_id)
+            .and_then(|message| message.raw.as_ref())
+            .is_some_and(|raw| !raw.is_view_once() && raw.get_base_message().audio_message.as_option().is_some());
+        if valid_audio && self.media_path.contains_key(&item.msg_id) {
+            self.toggle_audio_background(&item.jid, &item.msg_id);
+        }
+    }
+
+    pub fn on_notification_reply(&mut self, token: &str, text: &str) {
+        let Some(item) = self.take_notification_token(token) else { return };
+        let mut body: String = text.chars().filter(|ch| !ch.is_control() || *ch == '\n').collect();
+        body = body.trim_matches(|ch: char| ch != '\n' && ch.is_whitespace()).to_string();
+        if body.is_empty() { return; }
+        if body.len() > NOTIFICATION_REPLY_MAX_BYTES {
+            let mut end = NOTIFICATION_REPLY_MAX_BYTES;
+            while !body.is_char_boundary(end) { end -= 1; }
+            body.truncate(end);
+        }
+        if body.is_empty()
+            || !self.store.chats.contains_key(&item.jid)
+            || !self.store.chats.get(&item.jid).is_some_and(|chat| chat.can_send())
+            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+        {
+            return;
+        }
+        let message = crate::wa::build_text(&item.jid, body, &None, Vec::new(), None);
+        if !self.enqueue_prepared(&item.jid, message, None) { return; }
+        if self.ui.get_send_receipts() {
+            let message = self.store.messages_for(&item.jid).iter().find(|m| m.id == item.msg_id).cloned();
+            if let Some(message) = message {
+                self.wa.send(Cmd::MarkRead {
+                    jid: item.jid.clone(), sender: self.key_participant(&message), ids: vec![item.msg_id.clone()],
+                });
+                self.store.mark_read_sent(&item.jid, &[item.msg_id.clone()]);
+            }
+        }
+        self.schedule_save();
+    }
+
+    pub(super) fn toggle_audio_background(&mut self, jid: &str, id: &str) {
+        if self.vault.as_ref().is_none_or(|vault| vault.locked())
+            || !self.media_path.contains_key(id)
+            || !self.store.messages_for(jid).iter().any(|message| message.id == id)
+        {
+            return;
+        }
+        if self.audio.as_ref().is_some_and(|audio| audio.id == id) {
+            self.toggle_audio(id);
+        } else {
+            self.start_audio_for_notification(jid, id);
+        }
+    }
+
+    pub(super) fn start_audio_for_notification(&mut self, jid: &str, id: &str) {
+        let Some(message) = self.store.messages_for(jid).iter().find(|message| message.id == id) else { return };
+        let duration = message.duration_sec.max(1) as f64;
+        self.stop_audio();
+        self.audio = Some(AudioState {
+            id: id.to_string(), jid: jid.to_string(), duration,
+            paused: false, pending_offset: Some(0.0), player: None,
+        });
+        self.spin_audio_at(0.0);
+        self.sync_mini_player();
+    }
+}

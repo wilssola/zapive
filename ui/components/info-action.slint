@@ -1,0 +1,36 @@
+import { Theme } from "theme.slint";
+
+export component InfoAction inherits TouchArea {
+    in property <image> icon;
+    in property <string> label;
+    mouse-cursor: self.enabled ? pointer : default;
+    height: 62px;
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        background: root.has-hover && root.enabled ? Theme.selected : Theme.dark ? #15262d : Theme.header;
+        opacity: root.enabled ? 1 : 0.4;
+        Image {
+            source: root.icon;
+            colorize: Theme.icon;
+            width: 20px;
+            height: 20px;
+            x: (parent.width - self.width) / 2;
+            y: 11px;
+        }
+        Text {
+            text: root.label;
+            color: Theme.text-dim;
+            font-size: 11px;
+            width: parent.width;
+            height: 16px;
+            y: 37px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

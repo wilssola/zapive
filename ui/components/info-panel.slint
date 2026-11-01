@@ -1,0 +1,300 @@
+import { Avatar } from "avatar.slint";
+import { IconButton } from "icon-button.slint";
+import { InfoAction } from "info-action.slint";
+import { ModalLayer } from "modal.slint";
+import { MemberRow } from "rows/member.slint";
+import { MenuRow } from "rows/menu.slint";
+import { Theme } from "theme.slint";
+import { MemberItem, StickerCell } from "types.slint";
+
+export component InfoLayer inherits ModalLayer {
+    in property <bool> current-callable;
+    callback start-call(string);
+    callback start-video-call(string);
+    callback open-chat(string);
+    in property <string> current-jid;
+    in property <string> info-name;
+    in property <string> info-id;
+    in property <string> info-about;
+    in property <string> info-desc;
+    in property <bool> info-is-group;
+    in property <string> info-members;
+    in property <bool> info-archived;
+    in property <image> info-avatar;
+    in property <bool> info-has-avatar;
+    in property <string> info-initial;
+    in property <int> info-color-idx;
+    in property <[[StickerCell]]> info-media;
+    callback close-info();
+    callback toggle-archive();
+    callback clear-chat();
+    in property <bool> current-left;
+    in property <bool> current-muted;
+    callback menu-add-member();
+    callback menu-search();
+    callback menu-mute(int);
+    in property <[MemberItem]> info-member-rows;
+    in property <[MemberItem]> info-common-groups;
+    in property <string> info-common-groups-state;
+    callback open-member(string);
+
+    if root.mounted: info-panel := Rectangle {
+        property <bool> media-expanded: false;
+        property <bool> actions-expanded: false;
+        width: min(360px, parent.width - 16px);
+        height: parent.height - 16px;
+        x: parent.width - self.width - 8px + (1 - root.progress) * self.width;
+        y: 8px;
+        opacity: root.progress;
+        border-radius: 18px;
+        border-width: 1px;
+        border-color: Theme.dark ? #1c3038 : Theme.border;
+        background: Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel;
+        clip: true;
+        TouchArea { }
+        VerticalLayout {
+            padding: 0px;
+            spacing: 0px;
+            Rectangle {
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    Text {
+                        text: root.info-is-group ? @tr("info.panel.group_title") : @tr("info.panel.contact_title");
+                        color: Theme.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        width: 32px;
+                        height: 32px;
+                        icon-size: 18px;
+                        y: (parent.height - self.height) / 2;
+                        icon: @image-url("../icons/x.svg");
+                        clicked => { root.close-info(); }
+                    }
+                }
+            }
+            Flickable {
+                content-height: info-col.preferred-height;
+                content-width: self.width;
+                Rectangle {
+                    height: info-col.preferred-height;
+                    width: parent.width;
+                    info-col := VerticalLayout {
+                        width: parent.width;
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        padding-top: 10px;
+                        padding-bottom: 18px;
+                        spacing: 0px;
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 84px;
+                                height: 84px;
+                                border-radius: 42px;
+                                border-width: 2px;
+                                border-color: Theme.dark ? #174039 : Theme.border;
+                                Avatar {
+                                    x: 5px;
+                                    y: 5px;
+                                    width: 74px;
+                                    height: 74px;
+                                    src: root.info-avatar;
+                                    has-image: root.info-has-avatar;
+                                    initial: root.info-initial;
+                                    color-idx: root.info-color-idx;
+                                }
+                            }
+                        }
+                        Rectangle { height: 14px; }
+                        TextInput {
+                            read-only: true;
+                            single-line: false;
+                            selection-background-color: Theme.accent;
+                            selection-foreground-color: white;
+                            text: root.info-name;
+                            color: Theme.text;
+                            font-size: 16px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        Rectangle { height: 5px; }
+                        if !root.info-is-group && root.info-id != "": TextInput {
+                            read-only: true;
+                            single-line: false;
+                            wrap: word-wrap;
+                            selection-background-color: Theme.accent;
+                            selection-foreground-color: white;
+                            text: root.info-id;
+                            color: Theme.text-dim;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                        }
+                        if root.info-members != "": Text {
+                            text: root.info-members;
+                            color: Theme.text-dim;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                        }
+                        Rectangle { height: 18px; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            InfoAction {
+                                icon: @image-url("../icons/phone.svg");
+                                label: @tr("info.action.call");
+                                enabled: root.current-callable;
+                                clicked => { root.start-call(root.current-jid); }
+                            }
+                            InfoAction {
+                                icon: @image-url("../icons/video.svg");
+                                label: @tr("info.action.video");
+                                enabled: root.current-callable;
+                                clicked => { root.start-video-call(root.current-jid); }
+                            }
+                            InfoAction {
+                                icon: @image-url("../icons/search.svg");
+                                label: @tr("info.action.search");
+                                clicked => { root.close-info(); root.menu-search(); }
+                            }
+                            InfoAction {
+                                icon: @image-url("../icons/dots-vertical.svg");
+                                label: @tr("info.action.more");
+                                clicked => { info-panel.actions-expanded = !info-panel.actions-expanded; }
+                            }
+                        }
+                        Rectangle { height: 16px; }
+                        if info-panel.actions-expanded: VerticalLayout {
+                            spacing: 0px;
+                            MenuRow {
+                                icon: root.current-muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
+                                label: root.current-muted ? @tr("info.action.unmute") : @tr("info.action.mute");
+                                clicked => { root.menu-mute(root.current-muted ? 0 : -1); }
+                            }
+                            MenuRow {
+                                icon: @image-url("../icons/archive.svg");
+                                label: root.info-archived ? @tr("info.action.unarchive") : @tr("info.action.archive");
+                                clicked => { root.toggle-archive(); }
+                            }
+                            MenuRow {
+                                icon: @image-url("../icons/trash.svg");
+                                label: @tr("info.action.clear_local");
+                                clicked => { root.clear-chat(); }
+                            }
+                            Rectangle { height: 12px; }
+                        }
+                        Rectangle { height: 1px; background: Theme.border; }
+                        if root.info-about != "" || root.info-desc != "": VerticalLayout {
+                            padding-top: 14px;
+                            padding-bottom: 14px;
+                            TextInput {
+                                read-only: true;
+                                single-line: false;
+                                selection-background-color: Theme.accent;
+                                selection-foreground-color: white;
+                                text: root.info-is-group ? root.info-desc : root.info-about;
+                                color: Theme.text;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: 14px; }
+                            Rectangle { height: 1px; background: Theme.border; }
+                        }
+                        MenuRow {
+                            icon: @image-url("../icons/photo.svg");
+                            label: @tr("info.media.title");
+                            submenu: true;
+                            clicked => { info-panel.media-expanded = !info-panel.media-expanded; }
+                        }
+                        if info-panel.media-expanded: VerticalLayout {
+                            padding-top: 8px;
+                            padding-bottom: 12px;
+                            spacing: 6px;
+                            if root.info-media.length == 0: Text {
+                                text: @tr("info.media.empty");
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                            }
+                            for row in root.info-media: HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                for cell in row: Rectangle {
+                                    width: (info-panel.width - 56px) / 4;
+                                    height: self.width;
+                                    border-radius: 8px;
+                                    clip: true;
+                                    background: Theme.hover;
+                                    if cell.ready: Image {
+                                        source: cell.pic;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        image-fit: cover;
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { height: 1px; background: Theme.border; }
+                        if root.info-is-group: HorizontalLayout {
+                            padding-top: 16px;
+                            padding-bottom: 10px;
+                            spacing: 8px;
+                            Text {
+                                text: root.info-members != "" ? root.info-members : @tr("info.group.participants");
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            if !root.current-left: TouchArea {
+                                width: add-member-label.preferred-width;
+                                height: 24px;
+                                mouse-cursor: pointer;
+                                add-member-label := Text {
+                                    text: @tr("info.group.add_member");
+                                    color: Theme.accent;
+                                    font-size: 12px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                }
+                                clicked => { root.close-info(); root.menu-add-member(); }
+                            }
+                        }
+                        if !root.info-is-group: VerticalLayout {
+                            padding-top: 16px;
+                            spacing: 8px;
+                            Text {
+                                text: @tr("info.common_groups.title") + (root.info-common-groups-state == "ready" ? " (" + root.info-common-groups.length + ")" : "");
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                            }
+                            if root.info-common-groups-state != "ready" || root.info-common-groups.length == 0: Text {
+                                text: root.info-common-groups-state == "loading" ? @tr("info.common_groups.loading")
+                                    : root.info-common-groups-state == "error" ? @tr("info.common_groups.error")
+                                    : @tr("info.common_groups.empty");
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            for group in root.info-common-groups: MemberRow {
+                                item: group;
+                                compact: true;
+                                clicked => { root.close-info(); root.open-chat(group.jid); }
+                            }
+                        }
+                        for m in root.info-member-rows: MemberRow {
+                            item: m;
+                            compact: true;
+                            clicked => { root.open-member(m.jid); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

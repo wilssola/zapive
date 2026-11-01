@@ -1,0 +1,96 @@
+import { ScrollView } from "std-widgets.slint";
+import { DialogButton } from "dialog-button.slint";
+import { ModalLayer } from "modal.slint";
+import { Theme } from "theme.slint";
+import { ReleaseItem } from "types.slint";
+
+export component WhatsNewLayer inherits ModalLayer {
+    in property <int> update-state;
+    in property <string> update-version;
+    in property <string> app-version;
+    in property <[ReleaseItem]> releases;
+    in property <bool> changelog-loading;
+    in property <bool> changelog-more;
+    in property <string> changelog-error;
+    in property <bool> changelog-has-new;
+    in property <bool> changelog-verified;
+    in-out property <bool> whats-new-open;
+    callback changelog-load(bool);
+    callback update-apply();
+    callback update-restart();
+
+    if root.mounted: Rectangle {
+        width: min(640px, parent.width - 32px);
+        height: min(640px, parent.height - 32px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        TouchArea { }
+        news-focus := FocusScope {
+            width: parent.width;
+            height: parent.height;
+            init => { self.focus(); }
+            capture-key-pressed(event) => {
+                if (event.text == Key.Escape) { root.whats-new-open = false; return accept; }
+                reject
+            }
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                HorizontalLayout {
+                    Text { text: @tr("update.whats_new.title"); color: Theme.text; font-size: 20px; font-weight: 700; }
+                    DialogButton { label: @tr("common.action.close"); clicked => { root.whats-new-open = false; } }
+                }
+                Text { text: @tr("update.release.installed_version", root.app-version); color: Theme.text-dim; }
+                ScrollView {
+                    content-width: self.width;
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 12px;
+                        if root.changelog-loading: Text { text: @tr("pdf.loading"); color: Theme.text-dim; }
+                        if root.changelog-error != "": Text { text: root.changelog-error; color: Theme.text-dim; wrap: word-wrap; }
+                        if root.changelog-verified && !root.changelog-has-new && root.update-state == 0: Text {
+                            text: @tr("update.release.up_to_date");
+                            color: Theme.accent;
+                            font-size: 16px;
+                            wrap: word-wrap;
+                        }
+                        if !root.changelog-loading && !root.changelog-has-new && root.update-state > 0: Text {
+                            text: @tr("update.release.notes_unavailable", root.update-version);
+                            color: Theme.text-dim;
+                            wrap: word-wrap;
+                        }
+                        for release in root.releases: VerticalLayout {
+                            if release.newer: VerticalLayout {
+                                alignment: start;
+                                spacing: 8px;
+                                Text { text: @tr("update.release.new_in", release.tag); color: Theme.accent; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+                                Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
+                                Text { text: release.notes != "" ? release.notes : @tr("update.release.notes_empty"); color: Theme.text; wrap: word-wrap; }
+                                Rectangle { height: 1px; background: Theme.border; }
+                            }
+                        }
+                        if root.changelog-more && root.changelog-has-new: HorizontalLayout {
+                            alignment: start;
+                            DialogButton { label: @tr("update.release.load_older"); enabled: !root.changelog-loading; clicked => { root.changelog-load(false); } }
+                        }
+                    }
+                }
+                Text { text: @tr("update.release.original_language_hint"); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end;
+                    if root.changelog-error != "": DialogButton { label: @tr("settings.about.retry_action"); enabled: !root.changelog-loading; clicked => { root.changelog-load(true); } }
+                    if root.update-state == 1 || root.update-state == 4: DialogButton {
+                        label: @tr("settings.about.update_action"); primary: true;
+                        clicked => { root.update-apply(); }
+                    }
+                    if root.update-state == 2: Text { text: @tr("settings.about.update_downloading_button"); color: Theme.text-dim; }
+                    if root.update-state == 3: DialogButton { label: @tr("settings.about.restart_action"); primary: true; clicked => { root.update-restart(); } }
+                }
+            }
+        }
+    }
+}
