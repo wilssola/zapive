@@ -32,14 +32,25 @@ impl Bridge {
     }
 
     pub(super) fn handle_privacy_blur(&mut self, category: &str, enabled: bool) {
-        let (key, current) = match category {
-            "names" => ("privacy_blur_names", self.ui.get_blur_names()),
-            "photos" => ("privacy_blur_photos", self.ui.get_blur_photos()),
-            "messages" => ("privacy_blur_messages", self.ui.get_blur_messages()),
-            "media" => ("privacy_blur_media", self.ui.get_blur_media()),
+        let key = match category {
+            "names" => {
+                self.ui.set_blur_names(enabled);
+                "privacy_blur_names"
+            }
+            "photos" => {
+                self.ui.set_blur_photos(enabled);
+                "privacy_blur_photos"
+            }
+            "messages" => {
+                self.ui.set_blur_messages(enabled);
+                "privacy_blur_messages"
+            }
+            "media" => {
+                self.ui.set_blur_media(enabled);
+                "privacy_blur_media"
+            }
             _ => return,
         };
-        if current != enabled { return; }
         if let Some(vault) = &self.vault {
             vault.setting_set(key, if enabled { "1" } else { "0" });
         }
