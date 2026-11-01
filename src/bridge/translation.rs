@@ -1,5 +1,8 @@
 // Local message translation: settings, per-message state and the engine requests.
 use super::*;
+use crate::TranslationModelItem;
+use crate::i18n::tp;
+use std::collections::BTreeSet;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -13,6 +16,13 @@ impl Default for TranslationSettings {
     fn default() -> Self {
         Self { source: "auto".into(), target: "pt".into(), policies: HashMap::new() }
     }
+}
+
+/// Language pairs known to the engine: the cached catalog and what is installed.
+#[derive(Default)]
+pub(super) struct TranslationPairs {
+    pub(super) catalog: BTreeSet<(String, String)>,
+    pub(super) installed: BTreeSet<(String, String)>,
 }
 
 pub(super) struct TranslationEntry {
@@ -66,8 +76,32 @@ pub(super) fn translation_error(code: &str) -> String {
         "network_not_found" => "translation.error.network_not_found",
         "model_download_failed" | "network_failed" | "network_timeout" | "network_dns" | "network_refused" | "network_interrupted" | "network_unreachable" | "network_http" => "translation.error.download_failed",
         "model_unsupported" => "translation.error.model_unsupported",
+        "model_remove_failed" => "translation.models.remove_failed",
         _ => "translation.error.unavailable",
     })
+}
+
+pub(super) fn translation_size(bytes: u64) -> String {
+    let value = format!("{:.1}", bytes as f64 / (1024.0 * 1024.0));
+    let value = if crate::i18n::current_locale() == crate::i18n::Locale::Pt { value.replace('.', ",") } else { value };
+    ta("translation.models.size_mb", &[&value])
+}
+
+fn translation_pair_set(pairs: &str) -> BTreeSet<(String, String)> {
+    pairs.split(',').filter_map(|pair| pair.split_once(':')).map(|(a, b)| (a.into(), b.into())).collect()
+}
+
+pub(super) fn translation_progress_text(value: &serde_json::Value) -> String {
+    let (step, steps) = (value["step"].as_u64().unwrap_or(1).to_string(), value["steps"].as_u64().unwrap_or(1).to_string());
+    if value["phase"].as_str() == Some("install") {
+        return ta("translation.models.progress_install", &[&step, &steps]);
+    }
+    let heading = ta("translation.models.progress_download", &[&step, &steps]);
+    let (downloaded, total) = (value["downloaded"].as_u64().unwrap_or(0), value["total"].as_u64().unwrap_or(0));
+    let bytes = if total > 0 {
+        ta("translation.models.progress_bytes", &[&translation_size(downloaded), &translation_size(total)])
+    } else if downloaded > 0 { translation_size(downloaded) } else { return heading };
+    format!("{heading} · {bytes}")
 }
 
 pub(super) fn translation_eligible(m: &StoredMessage) -> bool {
@@ -103,8 +137,64 @@ impl Bridge {
         self.ui.set_translation_busy(false);
         self.ui.set_translation_status(t("translation.service.stopped").into());
         self.ui.set_translation_detail("".into());
-        self.ui.set_translation_models("".into());
+        self.ui.set_translation_installed(ModelRc::default());
         self.ui.set_translation_pairs("".into());
+        self.translation_pairs = TranslationPairs::default();
+        self.translation_progress_clear();
+        self.update_translation_pair_state();
+    }
+
+    fn translation_progress_clear(&mut self) {
+        self.ui.set_translation_installing(false);
+        self.ui.set_translation_progress(-1.0);
+        self.ui.set_translation_progress_text("".into());
+    }
+
+    pub(super) fn translation_model_selected(&mut self, source: &str) {
+        self.ui.set_translation_model_source(source.into());
+        self.update_translation_pair_state();
+    }
+
+    /// Whether the pair chosen for installation is installed, downloadable or unknown.
+    pub(super) fn update_translation_pair_state(&mut self) {
+        let source = self.ui.get_translation_model_source().to_string();
+        let target = self.translation_settings.target.clone();
+        let pairs = &self.translation_pairs;
+        let (state, detail) = if source == target {
+            (0, String::new())
+        } else {
+            match crate::translation::missing_models(&source, &target, &pairs.catalog, &pairs.installed) {
+                Some(0) => (2, t("translation.models.state_installed")),
+                Some(n) => (1, tp("translation.models.state_available", n as i64, &[])),
+                None if pairs.catalog.is_empty() => (0, t("translation.models.state_unknown")),
+                None => (3, t("translation.models.state_unavailable")),
+            }
+        };
+        self.ui.set_translation_pair_state(state);
+        self.ui.set_translation_pair_detail(detail.into());
+    }
+
+    fn apply_translation_status(&mut self, value: &serde_json::Value) {
+        if let Some(models) = value["installed"].as_array() {
+            let mut installed = BTreeSet::new();
+            let items: Vec<TranslationModelItem> = models.iter().filter_map(|model| {
+                let (source, target) = (model["source"].as_str()?, model["target"].as_str()?);
+                installed.insert((source.to_string(), target.to_string()));
+                Some(TranslationModelItem {
+                    source: source.into(),
+                    target: target.into(),
+                    label: format!("{} → {}", translation_language_name(source), translation_language_name(target)).into(),
+                    size: translation_size(model["size"].as_u64().unwrap_or(0)).into(),
+                })
+            }).collect();
+            self.translation_pairs.installed = installed;
+            self.ui.set_translation_installed(ModelRc::new(VecModel::from(items)));
+        }
+        if let Some(pairs) = value["pairs"].as_str() {
+            self.translation_pairs.catalog = translation_pair_set(pairs);
+            self.ui.set_translation_pairs(self.translation_pairs_label(pairs).into());
+        }
+        self.update_translation_pair_state();
     }
 
     pub(super) fn translation_language(&mut self, kind: &str, value: &str) {
@@ -119,6 +209,7 @@ impl Bridge {
         self.save_translation_settings();
         self.ui.set_translation_source(self.translation_settings.source.clone().into());
         self.ui.set_translation_target(self.translation_settings.target.clone().into());
+        self.update_translation_pair_state();
         if let Some(jid) = self.current_jid.clone() {
             self.rebuild_conversation(&jid);
             self.auto_translate_chat(&jid);
@@ -128,24 +219,31 @@ impl Bridge {
     pub(super) fn install_translation_model(&mut self, source: &str) {
         if !matches!(source, "en" | "pt" | "es" | "fr" | "de" | "zh" | "ja" | "ru" | "it" | "ar")
             || source == self.translation_settings.target { return; }
-        self.run_translation_action("install", Some(source));
+        let target = self.translation_settings.target.clone();
+        self.run_translation_action("install", Some((source, &target)));
+    }
+
+    pub(super) fn remove_translation_model(&mut self, source: &str, target: &str) {
+        if !self.translation_pairs.installed.contains(&(source.to_string(), target.to_string())) { return; }
+        self.run_translation_action("remove", Some((source, target)));
     }
 
     pub(super) fn translation_action(&mut self, action: &str) {
+        if action == "cancel" && !self.ui.get_translation_installing() { return; }
         self.run_translation_action(action, None);
     }
 
-    pub(super) fn run_translation_action(&mut self, action: &str, model_source: Option<&str>) {
+    pub(super) fn run_translation_action(&mut self, action: &str, model: Option<(&str, &str)>) {
         log::info!("[translation] requested action={action}");
-        if self.vault.is_none() || self.switching || (self.ui.get_translation_busy() && action != "stop") {
+        if self.vault.is_none() || self.switching || (self.ui.get_translation_busy() && !matches!(action, "stop" | "cancel")) {
             log::warn!("[translation] action ignored: unlocked={} switching={} busy={}", self.vault.is_some(), self.switching, self.ui.get_translation_busy());
             return;
         }
         let op = match action {
             "start" => "status", "restart" => "restart", "stop" => "stop",
-            "refresh" => "refresh", "install" => "install", _ => return,
+            "refresh" => "refresh", "install" => "install", "remove" => "remove", "cancel" => "cancel", _ => return,
         };
-        if matches!(op, "restart" | "stop") {
+        if matches!(op, "restart" | "stop" | "cancel") {
             self.translation_gen = self.translation_gen.wrapping_add(1);
             for e in self.translation_cache.values_mut() {
                 if e.busy { e.busy = false; e.error = t("translation.status.cancelled"); }
@@ -156,24 +254,43 @@ impl Bridge {
         let epoch = self.epoch;
         let account = self.account.clone();
         let stopped = op == "stop";
+        let cancelled = op == "cancel";
         self.ui.set_translation_busy(true);
-        self.ui.set_translation_detail(if op == "install" {
-            t("translation.models.installing")
-        } else { String::new() }.into());
-        log::info!("[translation] action={op} source={} target={}", model_source.unwrap_or(&self.translation_settings.source), self.translation_settings.target);
-        let result = self.translation.request(serde_json::json!({"op":op,
-            "source":model_source.unwrap_or(&self.translation_settings.source), "target":self.translation_settings.target}), move |result| {
+        self.ui.set_translation_detail("".into());
+        if op == "install" {
+            self.ui.set_translation_installing(true);
+            self.ui.set_translation_progress(-1.0);
+            self.ui.set_translation_progress_text(t("translation.models.installing").into());
+        } else {
+            self.translation_progress_clear();
+        }
+        let (source, target) = model.unwrap_or((&self.translation_settings.source, &self.translation_settings.target));
+        log::info!("[translation] action={op} source={source} target={target}");
+        let request = serde_json::json!({"op":op, "source":source, "target":target});
+        let progress_account = account.clone();
+        let progress = move |value: serde_json::Value| {
+            let account = progress_account.clone();
+            ui_apply(move |b| {
+                if b.translation_gen != generation || b.epoch != epoch || b.account != account || b.switching
+                    || !b.ui.get_translation_installing() { return; }
+                let (downloaded, total) = (value["downloaded"].as_u64().unwrap_or(0), value["total"].as_u64().unwrap_or(0));
+                let known = value["phase"].as_str() == Some("download") && total > 0;
+                b.ui.set_translation_progress(if known { (downloaded as f64 / total as f64).clamp(0.0, 1.0) as f32 } else { -1.0 });
+                b.ui.set_translation_progress_text(translation_progress_text(&value).into());
+            });
+        };
+        let done = move |result: Result<serde_json::Value, String>| {
             ui_apply(move |b| {
                 if b.translation_gen != generation || b.epoch != epoch || b.account != account || b.switching { return; }
                 b.ui.set_translation_busy(false);
+                b.translation_progress_clear();
                 match result {
                     Ok(value) => {
                         log::info!("[translation] action completed");
-                        b.ui.set_translation_detail("".into());
+                        b.ui.set_translation_detail(if cancelled { t("translation.models.cancelled") } else { String::new() }.into());
                         b.ui.set_translation_running(b.translation.status()["running"].as_bool().unwrap_or(false));
                         b.ui.set_translation_status(if stopped { t("translation.service.stopped") } else { t("translation.service.ready") }.into());
-                        if let Some(models) = value["models"].as_str() { b.ui.set_translation_models(b.translation_pairs_label(models).into()); }
-                        if let Some(pairs) = value["pairs"].as_str() { b.ui.set_translation_pairs(b.translation_pairs_label(pairs).into()); }
+                        b.apply_translation_status(&value);
                         if !stopped {
                             b.monitor_translation(generation);
                             if let Some(jid) = b.current_jid.clone() { b.auto_translate_chat(&jid); }
@@ -182,7 +299,12 @@ impl Bridge {
                     Err(error) => b.translation_failed(&error),
                 }
             });
-        });
+        };
+        let result = if op == "install" {
+            self.translation.request_with_progress(request, progress, done)
+        } else {
+            self.translation.request(request, done)
+        };
         if let Err(error) = result { self.translation_failed(&error); }
     }
 
@@ -195,6 +317,7 @@ impl Bridge {
     pub(super) fn translation_failed(&mut self, error: &str) {
         log::error!("[translation] operation failed: {error}");
         self.ui.set_translation_busy(false);
+        self.translation_progress_clear();
         self.ui.set_translation_running(self.translation.status()["running"].as_bool().unwrap_or(false));
         self.ui.set_translation_status(t("translation.service.unavailable").into());
         self.ui.set_translation_detail(translation_error(error).into());

@@ -22,6 +22,7 @@ const MAX_TEXT: usize = 16_000;
 const MAX_ENGINES: usize = 2;
 const TRANSLATE_TIMEOUT: Duration = Duration::from_secs(180);
 type Done = Box<dyn FnOnce(Result<Value, String>) + Send>;
+type Progress = Box<dyn Fn(Value) + Send>;
 
 #[derive(Clone)]
 pub struct Worker {
@@ -44,6 +45,7 @@ struct Task {
     request: Value,
     generation: u64,
     done: Done,
+    progress: Option<Progress>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -81,12 +83,26 @@ impl Worker {
     }
 
     /// Queues a request; `done` runs on the engine thread with the reply.
-    /// `stop` and `restart` cancel everything queued or running before them.
+    /// `stop`, `restart` and `cancel` cancel everything queued or running before them.
     pub fn request(
         &self,
         request: Value,
         done: impl FnOnce(Result<Value, String>) + Send + 'static,
     ) -> Result<(), String> {
+        self.send(request, None, Box::new(done))
+    }
+
+    /// Like `request`; `progress` runs on the engine thread with install progress.
+    pub fn request_with_progress(
+        &self,
+        request: Value,
+        progress: impl Fn(Value) + Send + 'static,
+        done: impl FnOnce(Result<Value, String>) + Send + 'static,
+    ) -> Result<(), String> {
+        self.send(request, Some(Box::new(progress)), Box::new(done))
+    }
+
+    fn send(&self, request: Value, progress: Option<Progress>, done: Done) -> Result<(), String> {
         validate_request(&request)?;
         let mut sender = lock(&self.inner.sender);
         if sender.is_none() {
@@ -100,12 +116,13 @@ impl Worker {
             *sender = Some(tx);
         }
         let mut state = lock(&self.inner.shared);
-        let control = matches!(request["op"].as_str(), Some("stop" | "restart"));
+        let control = matches!(request["op"].as_str(), Some("stop" | "restart" | "cancel"));
         let generation = state.generation.wrapping_add(u64::from(control));
         let task = Task {
             request,
             generation,
-            done: Box::new(done),
+            done,
+            progress,
         };
         sender
             .as_ref()
@@ -229,7 +246,7 @@ fn execute(
     }
     lock(shared).running = true;
     match op {
-        "status" | "restart" => {}
+        "status" | "restart" | "cancel" => {}
         "refresh" => {
             downloads::refresh(models, &check)?;
         }
@@ -237,7 +254,18 @@ fn execute(
             let source = task.request["source"].as_str().unwrap_or_default();
             let target = task.request["target"].as_str().unwrap_or_default();
             core.engines.clear();
-            downloads::install(models, source, target, &check)?;
+            let progress = |value: Value| {
+                if let Some(progress) = &task.progress {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| progress(value)));
+                }
+            };
+            downloads::install(models, source, target, &check, &progress)?;
+        }
+        "remove" => {
+            let source = task.request["source"].as_str().unwrap_or_default();
+            let target = task.request["target"].as_str().unwrap_or_default();
+            core.engines.clear();
+            models::remove(models, source, target)?;
         }
         "translate" => return translate(&task.request, models, core, &check),
         _ => return Err("invalid_operation".into()),
@@ -290,6 +318,19 @@ fn translate(
     Ok(reply(&text))
 }
 
+/// Models still missing to translate `source -> target`: `Some(0)` when it
+/// already works with what is installed, `None` when no route is known.
+pub fn missing_models(
+    source: &str,
+    target: &str,
+    catalog: &BTreeSet<Pair>,
+    installed: &BTreeSet<Pair>,
+) -> Option<usize> {
+    let catalog: Catalog = catalog.iter().map(|pair| (pair.clone(), Vec::new())).collect();
+    plan_route(source, target, &catalog, installed)
+        .map(|route| route.iter().filter(|pair| !installed.contains(*pair)).count())
+}
+
 fn validate_request(request: &Value) -> Result<(), String> {
     if !request.is_object() {
         return Err("invalid_request".into());
@@ -297,7 +338,7 @@ fn validate_request(request: &Value) -> Result<(), String> {
     let op = request["op"].as_str();
     if !matches!(
         op,
-        Some("status" | "refresh" | "install" | "translate" | "stop" | "restart")
+        Some("status" | "refresh" | "install" | "remove" | "translate" | "stop" | "restart" | "cancel")
     ) {
         return Err("invalid_operation".into());
     }
@@ -326,7 +367,7 @@ fn validate_request(request: &Value) -> Result<(), String> {
                 return Err("empty_text".into());
             }
         }
-        Some("install") => {
+        Some("install" | "remove") => {
             if !code(source) || !code(target) || source == target {
                 return Err("invalid_language".into());
             }
@@ -365,6 +406,12 @@ mod tests {
     fn validates_requests() {
         assert!(validate_request(&json!({"op":"stop"})).is_ok());
         assert!(validate_request(&json!({"op":"restart"})).is_ok());
+        assert!(validate_request(&json!({"op":"cancel"})).is_ok());
+        assert!(validate_request(&json!({"op":"remove","source":"en","target":"pt"})).is_ok());
+        assert_eq!(
+            validate_request(&json!({"op":"remove","source":"..","target":"pt"})).unwrap_err(),
+            "invalid_language"
+        );
         assert!(validate_request(&json!({"op":"status"})).is_ok());
         assert_eq!(validate_request(&json!({"op":"unknown"})).unwrap_err(), "invalid_operation");
         assert_eq!(validate_request(&json!([])).unwrap_err(), "invalid_request");
@@ -428,6 +475,11 @@ mod tests {
         assert_eq!(call(&worker, json!({"op":"stop"})).unwrap(), json!({"running":false}));
         assert_eq!(worker.status(), json!({"running":false}));
         assert_eq!(call(&worker, json!({"op":"restart"})).unwrap()["running"], true);
+        assert_eq!(call(&worker, json!({"op":"cancel"})).unwrap()["installed"], json!([]));
+        assert_eq!(
+            call(&worker, json!({"op":"remove","source":"en","target":"pt"})).unwrap_err(),
+            "model_not_installed"
+        );
         assert_eq!(worker.status(), json!({"running":true}));
         let _ = std::fs::remove_dir_all(root);
     }

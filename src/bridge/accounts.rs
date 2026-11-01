@@ -287,6 +287,7 @@ impl Bridge {
             self.vault = Some(vault);
         }
         self.load_translation_settings();
+        self.load_mcp();
         self.restore_outbox();
         // "Add account" backed out of before pairing: the empty slot
         // would otherwise sit in the switcher forever.

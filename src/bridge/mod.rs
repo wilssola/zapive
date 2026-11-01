@@ -36,6 +36,7 @@ mod documents;
 mod helpers;
 mod history;
 mod incoming;
+mod mcp;
 mod media;
 mod message_actions;
 mod notifications;
@@ -72,6 +73,7 @@ pub struct Bridge {
     translation_monitor: Option<u64>,
     translation_cache: HashMap<(String, String, String, String), TranslationEntry>,
     translation_settings: TranslationSettings,
+    translation_pairs: TranslationPairs,
     chats_model: Rc<VecModel<ChatItem>>,
     messages_model: Rc<VecModel<MessageItem>>,
     current_jid: Option<String>,
@@ -230,6 +232,7 @@ pub struct Bridge {
     preparations_active: HashSet<String>,
     outbox: Vec<crate::outbox::Entry>,
     outbox_connected: bool,
+    mcp: Option<crate::mcp::Server>,
     update_manual: bool,
     // Status/stories, calls, channels and the info panel.
     status_model: Rc<VecModel<ChatItem>>,

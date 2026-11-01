@@ -21,7 +21,7 @@ import { SettingsLayer } from "settings-pane.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
-import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell } from "types.slint";
+import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell, TranslationModelItem } from "types.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
@@ -509,7 +509,8 @@ export component AppWindow inherits Window {
         { key: "downloads", title: @tr("settings.category.downloads.title"), detail: @tr("settings.category.downloads.description"), icon: @image-url("../icons/download.svg") },
         { key: "security", title: @tr("settings.category.security.title"), detail: @tr("settings.category.security.description"), icon: @image-url("../icons/lock.svg") },
         { key: "updates", title: @tr("settings.category.updates.title"), detail: @tr("settings.category.updates.description"), icon: @image-url("../icons/refresh.svg") },
-        { key: "translation", title: @tr("translation.settings.title"), detail: @tr("translation.settings.category_description"), icon: @image-url("../icons/translate.svg") }
+        { key: "translation", title: @tr("translation.settings.title"), detail: @tr("translation.settings.category_description"), icon: @image-url("../icons/translate.svg") },
+        { key: "mcp", title: @tr("settings.category.mcp.title"), detail: @tr("settings.category.mcp.description"), icon: @image-url("../icons/message-circle.svg") }
     ];
     pure callback settings-search(string, string) -> bool;
     pure function settings-matches(text: string) -> bool {
@@ -517,6 +518,10 @@ export component AppWindow inherits Window {
     }
     in-out property <bool> pin-set: false;
     in-out property <bool> autostart: false;
+    in-out property <bool> mcp-enabled: false;
+    in-out property <string> mcp-url;
+    in-out property <string> mcp-token;
+    in-out property <string> mcp-status;
     in-out property <string> settings-status: "";
     in property <string> translation-status: "Stopped";
     in property <string> translation-detail: "";
@@ -524,17 +529,27 @@ export component AppWindow inherits Window {
     in property <bool> translation-running: false;
     in property <string> translation-target: "pt";
     in property <string> translation-source: "auto";
-    in property <string> translation-models;
+    in property <[TranslationModelItem]> translation-installed;
     in property <string> translation-pairs;
+    in property <bool> translation-installing: false;
+    in property <float> translation-progress: -1;
+    in property <string> translation-progress-text;
+    in property <int> translation-pair-state: 0;
+    in property <string> translation-pair-detail;
     callback translation-action(string);
     callback translation-install(string);
-    property <string> translation-model-source: "en";
+    callback translation-remove(string, string);
+    callback translation-model-selected(string);
+    in-out property <string> translation-model-source: "en";
     callback translation-language(string, string);
     pure function can-translate(message: MessageItem) -> bool {
         return !message.deleted && message.cardKind == "" && !message.sticker
             && message.text != "" && (message.kind == "text" || message.kind == "image" || message.kind == "video");
     }
     callback autostart-changed(bool);
+    callback mcp-changed(bool);
+    callback mcp-copy-config();
+    callback mcp-regenerate-token();
     callback save-pin(string, string);
     callback remove-pin(string);
     callback logout();
@@ -4178,6 +4193,10 @@ export component AppWindow inherits Window {
         settings-matches(a0) => { return root.settings-matches(a0); }
         pin-set: root.pin-set;
         autostart: root.autostart;
+        mcp-enabled: root.mcp-enabled;
+        mcp-url: root.mcp-url;
+        mcp-token: root.mcp-token;
+        mcp-status: root.mcp-status;
         settings-status: root.settings-status;
         translation-status: root.translation-status;
         translation-detail: root.translation-detail;
@@ -4185,13 +4204,23 @@ export component AppWindow inherits Window {
         translation-running: root.translation-running;
         translation-target: root.translation-target;
         translation-source: root.translation-source;
-        translation-models: root.translation-models;
+        translation-installed: root.translation-installed;
         translation-pairs: root.translation-pairs;
+        translation-installing: root.translation-installing;
+        translation-progress: root.translation-progress;
+        translation-progress-text: root.translation-progress-text;
+        translation-pair-state: root.translation-pair-state;
+        translation-pair-detail: root.translation-pair-detail;
         translation-action(a0) => { root.translation-action(a0); }
         translation-install(a0) => { root.translation-install(a0); }
+        translation-remove(a0, a1) => { root.translation-remove(a0, a1); }
+        translation-model-selected(a0) => { root.translation-model-selected(a0); }
         translation-model-source <=> root.translation-model-source;
         translation-language(a0, a1) => { root.translation-language(a0, a1); }
         autostart-changed(a0) => { root.autostart-changed(a0); }
+        mcp-changed(a0) => { root.mcp-changed(a0); }
+        mcp-copy-config() => { root.mcp-copy-config(); }
+        mcp-regenerate-token() => { root.mcp-regenerate-token(); }
         save-pin(a0, a1) => { root.save-pin(a0, a1); }
         remove-pin(a0) => { root.remove-pin(a0); }
         logout() => { root.logout(); }

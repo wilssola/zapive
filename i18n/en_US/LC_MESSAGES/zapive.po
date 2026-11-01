@@ -1827,3 +1827,95 @@ msgstr "Other language"
 
 msgid "translation.error.runtime_missing"
 msgstr "The translation library is missing from the Zapive installation. Reinstall Zapive to use translation."
+
+msgid "translation.models.cancel"
+msgstr "Cancel"
+
+msgid "translation.models.cancelled"
+msgstr "Model installation cancelled."
+
+msgid "translation.models.installed"
+msgstr "Installed"
+
+msgid "translation.models.installing_button"
+msgstr "Installing…"
+
+msgid "translation.models.progress_bytes"
+msgstr "{0} / {1}"
+
+msgid "translation.models.progress_download"
+msgstr "Downloading model {0} of {1}"
+
+msgid "translation.models.progress_install"
+msgstr "Installing model {0} of {1}…"
+
+msgid "translation.models.progress_percent"
+msgstr "{}%"
+
+msgid "translation.models.remove"
+msgstr "Remove"
+
+msgid "translation.models.remove_failed"
+msgstr "Could not remove the translation model. Close Zapive and try again."
+
+msgid "translation.models.size_mb"
+msgstr "{0} MB"
+
+msgid "translation.models.state_installed"
+msgstr "Already installed"
+
+msgid "translation.models.state_unavailable"
+msgstr "Not available in the catalog"
+
+msgid "translation.models.state_unknown"
+msgstr "Refresh to check availability"
+
+msgid "translation.models.state_available.one"
+msgid_plural "translation.models.state_available.other"
+msgstr[0] "{n} model to download"
+msgstr[1] "{n} models to download"
+
+msgid "settings.category.mcp.title"
+msgstr "AI integration"
+
+msgid "settings.category.mcp.description"
+msgstr "MCP server for AI assistants"
+
+msgid "settings.mcp.title"
+msgstr "MCP server"
+
+msgid "settings.mcp.enable"
+msgstr "Enable MCP server"
+
+msgid "settings.mcp.description"
+msgstr "Lets AI clients such as Claude and Cursor read and send WhatsApp messages through Zapive on this computer."
+
+msgid "settings.mcp.warning"
+msgstr "Anyone with this token can read your chats and send messages as you. Only share it with clients you trust."
+
+msgid "settings.mcp.url"
+msgstr "Server URL"
+
+msgid "settings.mcp.token"
+msgstr "Access token"
+
+msgid "settings.mcp.show_token"
+msgstr "Show token"
+
+msgid "settings.mcp.hide_token"
+msgstr "Hide token"
+
+msgid "settings.mcp.copy_config"
+msgstr "Copy client configuration"
+
+msgid "settings.mcp.regenerate_token"
+msgstr "Regenerate token"
+
+msgid "settings.mcp.status_running"
+msgstr "Running at {0}"
+
+msgid "settings.mcp.status_stopped"
+msgstr "Stopped"
+
+msgid "settings.mcp.status_error"
+msgstr "Could not start the server: {0}"
