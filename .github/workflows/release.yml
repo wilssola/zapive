@@ -235,14 +235,21 @@ jobs:
           [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
           codesign --force --identifier io.github.wilssola.Zapive --sign "$identity" target/release/zapive
 
-      # The self-updater downloads this bare-binary zip; on Windows it is
-      # zipped after signing, so updated installs stay signed.
+      # The self-updater downloads this zip; on Windows it is zipped after
+      # signing, so updated installs stay signed. It also carries the
+      # CTranslate2 DLLs the Windows executable needs next to it: the updater
+      # only replaces the ones that are missing or different.
       - name: Updater payload
         shell: bash
         run: |
           mkdir -p dist
           cd target/release
-          7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
+          files="${{ matrix.bin }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp ../../vendor/ctranslate2-4.8.4/ctranslate2.dll ../../vendor/ctranslate2-4.8.4/libiomp5md.dll .
+            files="$files ctranslate2.dll libiomp5md.dll"
+          fi
+          7z a "../../dist/zapive-${{ matrix.target }}.zip" $files || zip "../../dist/zapive-${{ matrix.target }}.zip" $files
       - uses: actions/upload-artifact@v7
         with:
           name: zapive-${{ matrix.target }}

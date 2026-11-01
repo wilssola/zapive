@@ -10,7 +10,18 @@ fn main() {
     if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
         embed_windows_resources();
         stage_ctranslate2();
+        delay_load_ctranslate2();
     }
+}
+
+// ctranslate2.dll is delay-loaded: the process starts even when the DLL is
+// missing (an install updated by an older self-updater never received it),
+// and src/translation/engine.rs checks that it can be loaded before the
+// first call into it, so translation reports an error instead of the whole
+// app failing at launch.
+fn delay_load_ctranslate2() {
+    println!("cargo:rustc-link-lib=delayimp");
+    println!("cargo:rustc-link-arg=/DELAYLOAD:ctranslate2.dll");
 }
 
 const CT2_VERSION: &str = "4.8.4";

@@ -1,6 +1,6 @@
 [package]
 name = "zapive"
-version = "0.25.3"
+version = "0.26.1"
 edition = "2024"
 description = "Native WhatsApp desktop client"
 publish = false
@@ -136,6 +136,7 @@ windows = { version = "0.58", features = [
     "ApplicationModel",
     "ApplicationModel_Core",
     "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
