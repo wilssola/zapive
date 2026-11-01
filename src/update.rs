@@ -136,6 +136,12 @@ pub fn apply() -> Result<String, String> {
     std::fs::create_dir_all(&stage)
         .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
     let staged = stage_binary(&release, &zip_name, &zip_url, &stage);
+    // Libraries first, so a failure to place them never leaves a new
+    // executable waiting on an old library; they are best effort anyway.
+    #[cfg(windows)]
+    if staged.is_ok() {
+        install_runtime(&stage.join(&zip_name), &stage, &dir);
+    }
     let result = staged.and_then(|fresh| swap_in(&exe, &fresh));
     let _ = std::fs::remove_dir_all(&stage);
     result.map(|()| release.version)
@@ -157,6 +163,9 @@ pub fn sweep() {
     let _ = std::fs::remove_file(old_path(&exe));
     if let Some(dir) = exe.parent() {
         let _ = std::fs::remove_dir_all(dir.join(STAGE_DIR));
+        for name in RUNTIME_FILES {
+            let _ = std::fs::remove_file(old_path(&dir.join(name)));
+        }
     }
 }
 
@@ -395,9 +404,82 @@ fn stage_binary(
     Ok(fresh)
 }
 
-// Only the executable is swapped: on Windows the CTranslate2 DLLs sit next
-// to it, are laid down by the installer and do not change between releases.
-//
+// The libraries the Windows build loads from next to the executable. The
+// updater zip carries them in newer releases; older ones carry only
+// the executable, and installs that were updated through them have none.
+const RUNTIME_FILES: &[&str] = &["ctranslate2.dll", "libiomp5md.dll"];
+
+// Unpacks the named files that the zip holds into `stage`. A zip without
+// them (an old release) just yields fewer files; nothing here is fatal.
+fn extract_named(
+    zip: &std::path::Path,
+    names: &[&str],
+    stage: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let Ok(file) = std::fs::File::open(zip) else { return Vec::new() };
+    let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for name in names {
+        let Ok(mut entry) = archive.by_name(name) else { continue };
+        if !entry.is_file() {
+            continue;
+        }
+        let target = stage.join(name);
+        let written = std::fs::File::create(&target).and_then(|mut out| std::io::copy(&mut entry, &mut out));
+        match written {
+            Ok(_) => found.push(target),
+            Err(e) => log::warn!("[update] cannot unpack {name}: {e}"),
+        }
+    }
+    found
+}
+
+fn same_content(a: &std::path::Path, b: &std::path::Path) -> bool {
+    use sha2::Digest as _;
+    let sum = |path: &std::path::Path| std::fs::read(path).map(|bytes| sha2::Sha256::digest(bytes));
+    match (sum(a), sum(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+// Puts `fresh` at `dest` unless `dest` already holds the same bytes. A
+// loaded DLL cannot be overwritten or deleted on Windows but can be renamed,
+// so the current file is moved aside (and swept at the next launch) first.
+fn place_file(dest: &std::path::Path, fresh: &std::path::Path) -> Result<bool, String> {
+    if dest.is_file() && same_content(dest, fresh) {
+        return Ok(false);
+    }
+    let old = old_path(dest);
+    let _ = std::fs::remove_file(&old);
+    let moved = dest.exists();
+    if moved {
+        std::fs::rename(dest, &old).map_err(|e| format!("cannot move {} aside: {e}", dest.display()))?;
+    }
+    if let Err(e) = std::fs::rename(fresh, dest).or_else(|_| std::fs::copy(fresh, dest).map(|_| ())) {
+        if moved {
+            let _ = std::fs::rename(&old, dest);
+        }
+        return Err(format!("cannot put {} in place: {e}", dest.display()));
+    }
+    let _ = std::fs::remove_file(&old);
+    Ok(true)
+}
+
+#[cfg(windows)]
+fn install_runtime(zip: &std::path::Path, stage: &std::path::Path, dir: &std::path::Path) {
+    for fresh in extract_named(zip, RUNTIME_FILES, stage) {
+        let Some(name) = fresh.file_name() else { continue };
+        match place_file(&dir.join(name), &fresh) {
+            Ok(true) => log::info!("[update] updated {}", name.to_string_lossy()),
+            Ok(false) => {}
+            Err(e) => log::warn!("[update] {e}"),
+        }
+    }
+}
+
 // Old binary aside, new one in, and the old one back if that fails. A
 // running executable can be renamed on every platform this ships on.
 fn swap_in(exe: &std::path::Path, fresh: &std::path::Path) -> Result<(), String> {
@@ -444,6 +526,60 @@ fn apply_appimage(appimage: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn zip_of(path: &std::path::Path, files: &[(&str, &[u8])]) {
+        use std::io::Write as _;
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, data) in files {
+            writer.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn runtime_libraries_are_extracted_when_the_zip_has_them() {
+        let dir = scratch("extract");
+        let zip = dir.join("u.zip");
+        zip_of(&zip, &[("zapive.exe", b"exe"), ("ctranslate2.dll", b"ct2"), ("libiomp5md.dll", b"omp")]);
+        let stage = dir.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        let found = extract_named(&zip, RUNTIME_FILES, &stage);
+        assert_eq!(found.len(), 2);
+        assert_eq!(std::fs::read(stage.join("ctranslate2.dll")).unwrap(), b"ct2");
+        assert_eq!(std::fs::read(stage.join("libiomp5md.dll")).unwrap(), b"omp");
+        assert!(!stage.join("zapive.exe").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_zip_without_libraries_or_unreadable_is_not_an_error() {
+        let dir = scratch("old-zip");
+        let zip = dir.join("u.zip");
+        zip_of(&zip, &[("zapive.exe", b"exe")]);
+        assert!(extract_named(&zip, RUNTIME_FILES, &dir).is_empty());
+        std::fs::write(&zip, b"not a zip").unwrap();
+        assert!(extract_named(&zip, RUNTIME_FILES, &dir).is_empty());
+        assert!(extract_named(&dir.join("missing.zip"), RUNTIME_FILES, &dir).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn libraries_are_placed_only_when_missing_or_different() {
+        let dir = scratch("place");
+        let (dest, fresh) = (dir.join("ctranslate2.dll"), dir.join("fresh.dll"));
+        std::fs::write(&fresh, b"new").unwrap();
+        assert!(place_file(&dest, &fresh).unwrap(), "missing file is installed");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        std::fs::write(&fresh, b"new").unwrap();
+        assert!(!place_file(&dest, &fresh).unwrap(), "identical file is left alone");
+        assert!(fresh.exists());
+        std::fs::write(&fresh, b"newer").unwrap();
+        assert!(place_file(&dest, &fresh).unwrap(), "different file is replaced");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"newer");
+        assert!(!old_path(&dest).exists(), "the previous copy is not left behind");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn release_versions_use_semver_ordering() {

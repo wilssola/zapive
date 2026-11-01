@@ -16,8 +16,59 @@ pub(super) struct Engine {
     target_prefix: String,
 }
 
+// Windows links ctranslate2.dll lazily (see build.rs). Loading it here, by
+// absolute path from the executable's directory, means a missing or broken
+// DLL becomes an error the user can read, and the delay-load helper later
+// finds the module already in the process instead of raising an exception.
+// The handle is kept for the life of the process on purpose.
+#[cfg(windows)]
+fn runtime_ready() -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use std::sync::OnceLock;
+    use windows::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LoadLibraryExW,
+    };
+    static READY: OnceLock<Result<(), String>> = OnceLock::new();
+    READY
+        .get_or_init(|| {
+            let exe = std::env::current_exe().map_err(|_| "runtime_missing")?;
+            let dir = exe.parent().ok_or("runtime_missing")?;
+            for name in RUNTIME_DLLS {
+                let path = dir.join(name);
+                if !path.is_file() {
+                    log::warn!("[translation] {name} is missing next to the executable");
+                    return Err("runtime_missing".into());
+                }
+                if *name != RUNTIME_DLLS[0] {
+                    continue;
+                }
+                let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+                let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+                if let Err(error) = unsafe {
+                    LoadLibraryExW(windows::core::PCWSTR(wide.as_ptr()), None, flags)
+                } {
+                    log::warn!("[translation] {name} could not be loaded: {error}");
+                    return Err("runtime_missing".into());
+                }
+            }
+            Ok(())
+        })
+        .clone()
+}
+
+#[cfg(not(windows))]
+fn runtime_ready() -> Result<(), String> {
+    Ok(())
+}
+
+/// The DLLs the Windows build needs next to the executable, the one the
+/// executable imports first.
+#[cfg(windows)]
+const RUNTIME_DLLS: &[&str] = &["ctranslate2.dll", "libiomp5md.dll"];
+
 impl Engine {
     pub(super) fn load(dir: &Path, target_prefix: String) -> Result<Self, String> {
+        runtime_ready()?;
         let spm = dir.join("sentencepiece.model");
         // Read here rather than via `open`: the C++ side takes a narrow path
         // that breaks on Windows profiles with non-ASCII names.

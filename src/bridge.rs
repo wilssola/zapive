@@ -98,6 +98,7 @@ fn translation_error(code: &str) -> String {
         "insecure_download" => "translation.error.download_insecure",
         "download_too_large" => "translation.error.download_too_large",
         "worker_unavailable" => "translation.error.engine_unavailable",
+        "runtime_missing" => "translation.error.runtime_missing",
         "source_required" => "translation.error.source_required",
         "model_not_installed" | "pair_unavailable" => "translation.error.model_missing",
         "worker_busy" => "translation.error.busy",
