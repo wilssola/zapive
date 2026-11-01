@@ -145,8 +145,12 @@ objc2 = "0.6"
 
 # Elsewhere CTranslate2 is compiled from source and linked statically
 # (CPU, ruy backend): needs CMake and a C++17 toolchain.
+# `disable-cpu-dispatch` builds one generic set of CPU kernels: with runtime
+# dispatch CTranslate2 compiles kernels.cc once per ISA under the same object
+# name, and the rlib bundling of the static library drops the duplicates
+# (undefined `ctranslate2::cpu::*<CpuIsa>` symbols at link time on Linux).
 [target.'cfg(not(windows))'.dependencies]
-ct2rs = { version = "0.10", default-features = false, features = ["ruy"] }
+ct2rs = { version = "0.10", default-features = false, features = ["ruy", "disable-cpu-dispatch"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
