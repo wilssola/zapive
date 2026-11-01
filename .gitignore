@@ -6,6 +6,8 @@ target/
 # Packaging outputs (release workflow scratch space).
 build/
 dist/
+# Official CTranslate2 DLLs (scripts/fetch-ctranslate2.ps1).
+vendor/
 # Generated from Cargo.lock by the flatpak workflow.
 packaging/flatpak/cargo-sources.json
 # Signing certificates: private keys, never committed.

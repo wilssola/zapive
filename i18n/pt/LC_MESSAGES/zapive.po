@@ -648,9 +648,6 @@ msgstr "Responder em particular"
 msgid "message.menu.forward"
 msgstr "Encaminhar"
 
-msgid "message.menu.copy_text"
-msgstr "Copiar texto"
-
 msgid "message.menu.copy_image"
 msgstr "Copiar imagem"
 
@@ -1616,3 +1613,216 @@ msgstr "Baixa figurinhas automaticamente."
 
 msgid "settings.downloads.videos.description"
 msgstr "Baixa vídeos automaticamente."
+
+msgid "chat.message.always_translate_from"
+msgstr "Sempre traduzir de {}"
+
+msgid "chat.message.copy_original_text"
+msgstr "Copiar texto original"
+
+msgid "chat.message.copy_translation"
+msgstr "Copiar tradução"
+
+msgid "chat.message.hide_translation"
+msgstr "Ocultar tradução"
+
+msgid "chat.message.never_translate_from"
+msgstr "Nunca traduzir de {}"
+
+msgid "chat.message.translate"
+msgstr "Traduzir mensagem"
+
+msgid "chat.message.translated"
+msgstr "Traduzido"
+
+msgid "chat.message.translated_from"
+msgstr "Traduzido ({})"
+
+msgid "chat.message.translating"
+msgstr "Traduzindo…"
+
+msgid "translation.models.choose_different_languages"
+msgstr "Escolha idiomas de origem e destino diferentes para instalar um modelo."
+
+msgid "translation.models.install"
+msgstr "Instalar modelo"
+
+msgid "translation.models.install_pair"
+msgstr "Instalar modelo: {} → {}"
+
+msgid "translation.models.installed_title"
+msgstr "Modelos instalados"
+
+msgid "translation.models.none_installed"
+msgstr "Nenhum modelo de tradução instalado."
+
+msgid "translation.models.refresh"
+msgstr "Atualizar"
+
+msgid "translation.models.source_language"
+msgstr "Idioma de origem do modelo"
+
+msgid "translation.models.source_language_description"
+msgstr "Escolha o idioma para baixar sem alterar a detecção automática."
+
+msgid "translation.models.title"
+msgstr "Modelos de tradução"
+
+msgid "translation.pairs.refresh_hint"
+msgstr "Atualize para listar os pares de idiomas disponíveis."
+
+msgid "translation.pairs.title"
+msgstr "Pares de idiomas disponíveis"
+
+msgid "translation.service.start"
+msgstr "Iniciar"
+
+msgid "translation.service.stop"
+msgstr "Parar"
+
+msgid "translation.service.stop_description"
+msgstr "Inicie novamente quando precisar de tradução local."
+
+msgid "translation.service.stop_title"
+msgstr "Parar serviço de tradução"
+
+msgid "translation.service.stopped"
+msgstr "Parado"
+
+msgid "translation.service.title"
+msgstr "Serviço de tradução"
+
+msgid "translation.service.working"
+msgstr "Processando…"
+
+msgid "translation.settings.category_description"
+msgstr "Tradução local com Argos"
+
+msgid "translation.settings.hint"
+msgstr "As mensagens são traduzidas localmente com Argos. O serviço de tradução funciona em segundo plano sem abrir uma janela."
+
+msgid "translation.settings.source_language"
+msgstr "Idioma de origem"
+
+msgid "translation.settings.source_language_description"
+msgstr "Use auto para detectar o idioma da mensagem."
+
+msgid "translation.settings.target_language"
+msgstr "Idioma de destino"
+
+msgid "translation.settings.target_language_description"
+msgstr "Traduza mensagens para este idioma."
+
+msgid "translation.settings.title"
+msgstr "Tradução"
+
+msgid "translation.error.model_invalid"
+msgstr "O arquivo do modelo está ausente ou é inválido. Baixe e instale o modelo novamente nas Configurações."
+
+msgid "translation.error.install_failed"
+msgstr "Não foi possível instalar o modelo de tradução. Verifique o espaço em disco e as permissões da pasta e tente novamente."
+
+msgid "translation.error.catalog_invalid"
+msgstr "O catálogo de modelos de tradução é inválido. Atualize o catálogo e tente novamente."
+
+msgid "translation.error.download_insecure"
+msgstr "O download de tradução foi bloqueado por não ser seguro. Atualize o catálogo ou o aplicativo."
+
+msgid "translation.error.download_too_large"
+msgstr "O download de tradução excede o tamanho permitido. Atualize o catálogo ou escolha outro modelo."
+
+msgid "translation.error.engine_unavailable"
+msgstr "O mecanismo de tradução não pôde iniciar. Reinicie-o nas Configurações."
+
+msgid "translation.error.source_required"
+msgstr "Selecione o idioma de origem nas Configurações."
+
+msgid "translation.error.model_missing"
+msgstr "Instale um modelo para este par de idiomas nas Configurações."
+
+msgid "translation.error.busy"
+msgstr "A tradução está ocupada. Tente novamente em instantes."
+
+msgid "translation.error.timeout"
+msgstr "A tradução demorou demais. Tente reiniciá-la."
+
+msgid "translation.error.too_long"
+msgstr "Esta mensagem é longa demais para traduzir."
+
+msgid "translation.error.network_tls_certificate"
+msgstr "Não foi possível verificar o certificado do servidor de tradução. Verifique os certificados do sistema, o relógio e o proxy HTTPS."
+
+msgid "translation.error.network_tls"
+msgstr "Não foi possível estabelecer uma conexão segura com o servidor de tradução."
+
+msgid "translation.error.network_access_denied"
+msgstr "O sistema operacional negou a conexão de rede de tradução do aplicativo. Verifique as permissões de rede do aplicativo."
+
+msgid "translation.error.network_http_unauthorized"
+msgstr "O servidor de download de tradução exige autenticação (HTTP 401)."
+
+msgid "translation.error.network_http_forbidden"
+msgstr "O servidor de download de tradução recusou a solicitação (HTTP 403)."
+
+msgid "translation.error.network_proxy_auth"
+msgstr "O proxy exige autenticação para os downloads de tradução (HTTP 407). Verifique as configurações do proxy."
+
+msgid "translation.error.network_unavailable"
+msgstr "O servidor de tradução está temporariamente indisponível ou limitando solicitações. Tente novamente mais tarde."
+
+msgid "translation.error.network_not_found"
+msgstr "O download de tradução não foi encontrado. Atualize o catálogo e tente novamente."
+
+msgid "translation.error.download_failed"
+msgstr "Não foi possível baixar os dados de tradução. Verifique sua conexão e tente novamente."
+
+msgid "translation.error.unavailable"
+msgstr "Outro idioma"
+
+msgid "translation.error.model_unsupported"
+msgstr "Este modelo de tradução não é compatível. Instale outro modelo nas Configurações."
+
+msgid "translation.service.ready"
+msgstr "Pronto"
+
+msgid "translation.service.unavailable"
+msgstr "Indisponível"
+
+msgid "translation.status.cancelled"
+msgstr "Tradução cancelada. Tente novamente."
+
+msgid "translation.models.installing"
+msgstr "Baixando e instalando o modelo…"
+
+msgid "translation.language.en"
+msgstr "Inglês"
+
+msgid "translation.language.pt"
+msgstr "Português"
+
+msgid "translation.language.es"
+msgstr "Espanhol"
+
+msgid "translation.language.fr"
+msgstr "Francês"
+
+msgid "translation.language.de"
+msgstr "Alemão"
+
+msgid "translation.language.zh"
+msgstr "Chinês"
+
+msgid "translation.language.ja"
+msgstr "Japonês"
+
+msgid "translation.language.ru"
+msgstr "Russo"
+
+msgid "translation.language.it"
+msgstr "Italiano"
+
+msgid "translation.language.ar"
+msgstr "Árabe"
+
+msgid "translation.language.other"
+msgstr "Outro idioma"

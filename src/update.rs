@@ -395,6 +395,9 @@ fn stage_binary(
     Ok(fresh)
 }
 
+// Only the executable is swapped: on Windows the CTranslate2 DLLs sit next
+// to it, are laid down by the installer and do not change between releases.
+//
 // Old binary aside, new one in, and the old one back if that fails. A
 // running executable can be renamed on every platform this ships on.
 fn swap_in(exe: &std::path::Path, fresh: &std::path::Path) -> Result<(), String> {

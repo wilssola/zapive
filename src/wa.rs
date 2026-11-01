@@ -146,6 +146,7 @@ pub enum Cmd {
     // Decodes an embedded thumbnail (link previews, video posters).
     DecodeThumb { id: String, bytes: Vec<u8>, link: bool },
     DecodePreview { id: String, bytes: Vec<u8> },
+    LinkPreview { jid: String, id: String, text: String, url: String },
     FetchAvatar(String),
     // The full-size picture for the info panel.
     AvatarLarge(String),
@@ -1177,6 +1178,8 @@ async fn executor(
     let mut media_key = crate::vault::KeyHandle::default();
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
+    let link_cache = Arc::new(std::sync::Mutex::new(crate::link_preview::Cache::default()));
+    let link_sem = Arc::new(tokio::sync::Semaphore::new(2));
     while let Some(cmd) = cmd_rx.recv().await {
         let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
         match cmd {
@@ -1274,6 +1277,21 @@ async fn executor(
                     ui_apply(move |b| b.on_media_preview(&id, img));
                 });
             }
+            Cmd::LinkPreview { jid, id, text, url } => {
+                let cache = link_cache.clone();
+                let sem = link_sem.clone();
+                tokio::spawn(async move {
+                    let permit = tokio::time::timeout(std::time::Duration::from_secs(20), sem.acquire_owned()).await;
+                    let preview = if let Ok(Ok(permit)) = permit {
+                        tokio::task::spawn_blocking(move || {
+                            let _permit = permit;
+                            if SESSION_EPOCH.load(Ordering::SeqCst) != epoch { return None; }
+                            cache.lock().ok()?.get(&url, epoch)
+                        }).await.ok().flatten()
+                    } else { None };
+                    crate::bridge::wa_apply_at(epoch, move |b| b.on_link_preview(&jid, &id, &text, preview));
+                });
+            }
             Cmd::DecodeThumb { id, bytes, link } => {
                 tokio::spawn(async move {
                     if let Some(img) =
@@ -1282,7 +1300,9 @@ async fn executor(
                             .ok()
                             .flatten()
                     {
-                        ui_apply(move |b| b.on_thumb(&id, link, img));
+                        crate::bridge::wa_apply_at(epoch, move |b| b.on_thumb(&id, link, img));
+                    } else if link {
+                        crate::bridge::wa_apply_at(epoch, move |b| b.on_media_missing(&id));
                     }
                 });
             }
@@ -2430,8 +2450,8 @@ async fn executor(
                         .ok()
                         .flatten();
                     match img {
-                        Some(img) => ui_apply(move |b| b.on_thumb(&id, true, img)),
-                        None => ui_apply(move |b| b.on_media_missing(&id)),
+                        Some(img) => crate::bridge::wa_apply_at(epoch, move |b| b.on_thumb(&id, true, img)),
+                        None => crate::bridge::wa_apply_at(epoch, move |b| b.on_media_missing(&id)),
                     }
                 });
             }

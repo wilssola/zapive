@@ -648,9 +648,6 @@ msgstr "Reply privately"
 msgid "message.menu.forward"
 msgstr "Forward"
 
-msgid "message.menu.copy_text"
-msgstr "Copy text"
-
 msgid "message.menu.copy_image"
 msgstr "Copy image"
 
@@ -1614,3 +1611,216 @@ msgstr "Download stickers automatically."
 
 msgid "settings.downloads.videos.description"
 msgstr "Download videos automatically."
+
+msgid "chat.message.always_translate_from"
+msgstr "Always translate from {}"
+
+msgid "chat.message.copy_original_text"
+msgstr "Copy original text"
+
+msgid "chat.message.copy_translation"
+msgstr "Copy translation"
+
+msgid "chat.message.hide_translation"
+msgstr "Hide translation"
+
+msgid "chat.message.never_translate_from"
+msgstr "Never translate from {}"
+
+msgid "chat.message.translate"
+msgstr "Translate message"
+
+msgid "chat.message.translated"
+msgstr "Translated"
+
+msgid "chat.message.translated_from"
+msgstr "Translated ({})"
+
+msgid "chat.message.translating"
+msgstr "Translating…"
+
+msgid "translation.models.choose_different_languages"
+msgstr "Choose different source and target languages to install a model."
+
+msgid "translation.models.install"
+msgstr "Install model"
+
+msgid "translation.models.install_pair"
+msgstr "Install model: {} → {}"
+
+msgid "translation.models.installed_title"
+msgstr "Installed models"
+
+msgid "translation.models.none_installed"
+msgstr "No translation models installed."
+
+msgid "translation.models.refresh"
+msgstr "Refresh"
+
+msgid "translation.models.source_language"
+msgstr "Model source language"
+
+msgid "translation.models.source_language_description"
+msgstr "Choose the language to download without changing automatic detection."
+
+msgid "translation.models.title"
+msgstr "Translation models"
+
+msgid "translation.pairs.refresh_hint"
+msgstr "Refresh to list available language pairs."
+
+msgid "translation.pairs.title"
+msgstr "Available language pairs"
+
+msgid "translation.service.start"
+msgstr "Start"
+
+msgid "translation.service.stop"
+msgstr "Stop"
+
+msgid "translation.service.stop_description"
+msgstr "Start it again whenever you need local translation."
+
+msgid "translation.service.stop_title"
+msgstr "Stop translation service"
+
+msgid "translation.service.stopped"
+msgstr "Stopped"
+
+msgid "translation.service.title"
+msgstr "Translation service"
+
+msgid "translation.service.working"
+msgstr "Working…"
+
+msgid "translation.settings.category_description"
+msgstr "Local translation with Argos"
+
+msgid "translation.settings.hint"
+msgstr "Messages are translated locally with Argos. The translation service runs in the background without opening a window."
+
+msgid "translation.settings.source_language"
+msgstr "Source language"
+
+msgid "translation.settings.source_language_description"
+msgstr "Use auto to detect the message language."
+
+msgid "translation.settings.target_language"
+msgstr "Target language"
+
+msgid "translation.settings.target_language_description"
+msgstr "Translate messages into this language."
+
+msgid "translation.settings.title"
+msgstr "Translation"
+
+msgid "translation.error.model_invalid"
+msgstr "The model file is missing or invalid. Download and install the model again in Settings."
+
+msgid "translation.error.install_failed"
+msgstr "Could not install the translation model. Check available disk space and folder permissions, then try again."
+
+msgid "translation.error.catalog_invalid"
+msgstr "The translation model catalog is invalid. Refresh the catalog and try again."
+
+msgid "translation.error.download_insecure"
+msgstr "The translation download was blocked because it is not secure. Refresh the catalog or update the app."
+
+msgid "translation.error.download_too_large"
+msgstr "The translation download exceeds the supported size. Refresh the catalog or choose another model."
+
+msgid "translation.error.engine_unavailable"
+msgstr "The translation engine could not start. Restart it in Settings."
+
+msgid "translation.error.source_required"
+msgstr "Choose the source language in Settings."
+
+msgid "translation.error.model_missing"
+msgstr "Install a model for this language pair in Settings."
+
+msgid "translation.error.busy"
+msgstr "Translation is busy. Try again shortly."
+
+msgid "translation.error.timeout"
+msgstr "Translation timed out. Try restarting it."
+
+msgid "translation.error.too_long"
+msgstr "This message is too long to translate."
+
+msgid "translation.error.network_tls_certificate"
+msgstr "The translation server certificate could not be verified. Check your system certificates, clock and HTTPS proxy."
+
+msgid "translation.error.network_tls"
+msgstr "A secure connection to the translation server could not be established."
+
+msgid "translation.error.network_access_denied"
+msgstr "The operating system denied the app's translation network connection. Check application network permissions."
+
+msgid "translation.error.network_http_unauthorized"
+msgstr "The translation download server requires authentication (HTTP 401)."
+
+msgid "translation.error.network_http_forbidden"
+msgstr "The translation download server refused the request (HTTP 403)."
+
+msgid "translation.error.network_proxy_auth"
+msgstr "The proxy requires authentication for translation downloads (HTTP 407). Check your proxy settings."
+
+msgid "translation.error.network_unavailable"
+msgstr "The translation server is temporarily unavailable or limiting requests. Try again later."
+
+msgid "translation.error.network_not_found"
+msgstr "The translation download was not found. Refresh the catalog and try again."
+
+msgid "translation.error.download_failed"
+msgstr "Could not download translation data. Check your connection and try again."
+
+msgid "translation.error.unavailable"
+msgstr "Other language"
+
+msgid "translation.error.model_unsupported"
+msgstr "This translation model is not supported. Install a different model in Settings."
+
+msgid "translation.service.ready"
+msgstr "Ready"
+
+msgid "translation.service.unavailable"
+msgstr "Unavailable"
+
+msgid "translation.status.cancelled"
+msgstr "Translation cancelled. Try again."
+
+msgid "translation.models.installing"
+msgstr "Downloading and installing the model…"
+
+msgid "translation.language.en"
+msgstr "English"
+
+msgid "translation.language.pt"
+msgstr "Portuguese"
+
+msgid "translation.language.es"
+msgstr "Spanish"
+
+msgid "translation.language.fr"
+msgstr "French"
+
+msgid "translation.language.de"
+msgstr "German"
+
+msgid "translation.language.zh"
+msgstr "Chinese"
+
+msgid "translation.language.ja"
+msgstr "Japanese"
+
+msgid "translation.language.ru"
+msgstr "Russian"
+
+msgid "translation.language.it"
+msgstr "Italian"
+
+msgid "translation.language.ar"
+msgstr "Arabic"
+
+msgid "translation.language.other"
+msgstr "Other language"

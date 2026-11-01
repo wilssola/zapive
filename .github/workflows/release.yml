@@ -135,7 +135,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils cmake build-essential
+      # Outside Windows ct2rs compiles CTranslate2 and SentencePiece from
+      # source (SentencePiece also on Windows): CMake and a C++17 toolchain.
+      - name: CMake (macOS)
+        if: runner.os == 'macOS'
+        run: command -v cmake >/dev/null || brew install cmake
+      # Windows links the official CTranslate2 DLL instead (ct2rs' own build
+      # is static-CRT and cannot be linked with the rest of the executable).
+      - name: CTranslate2 DLL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/fetch-ctranslate2.ps1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
