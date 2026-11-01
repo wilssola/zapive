@@ -74,48 +74,47 @@ struct TranslationEntry {
     automatic: bool,
 }
 
-fn translation_text(en: &str, pt: &str) -> String {
-    if crate::i18n::current_locale() == crate::i18n::Locale::Pt { pt.into() } else { en.into() }
-}
-
 fn translation_language_name(code: &str) -> String {
-    let (en, pt) = match code {
-        "en" => ("English", "Inglês"), "pt" => ("Portuguese", "Português"),
-        "es" => ("Spanish", "Espanhol"), "fr" => ("French", "Francês"),
-        "de" => ("German", "Alemão"), "zh" => ("Chinese", "Chinês"),
-        "ja" => ("Japanese", "Japonês"), "ru" => ("Russian", "Russo"),
-        "it" => ("Italian", "Italiano"), "ar" => ("Arabic", "Árabe"),
-        _ => ("Other language", "Outro idioma"),
-    };
-    translation_text(en, pt)
+    t(match code {
+        "en" => "translation.language.en",
+        "pt" => "translation.language.pt",
+        "es" => "translation.language.es",
+        "fr" => "translation.language.fr",
+        "de" => "translation.language.de",
+        "zh" => "translation.language.zh",
+        "ja" => "translation.language.ja",
+        "ru" => "translation.language.ru",
+        "it" => "translation.language.it",
+        "ar" => "translation.language.ar",
+        _ => "translation.language.other",
+    })
 }
 
 fn translation_error(code: &str) -> String {
-    let (en, pt) = match code {
-        "worker_outdated" | "network_managed_by_app" => ("The translation helper needs updating. Restart the app to load the updated helper.", "O auxiliar de tradução precisa ser atualizado. Reinicie o aplicativo para carregar o auxiliar atualizado."),
-        "invalid_model_archive" | "invalid_model_file" | "model_file_missing" => ("The model file is missing or invalid. Download and install the model again in Settings.", "O arquivo do modelo está ausente ou é inválido. Baixe e instale o modelo novamente nas Configurações."),
-        "model_install_failed" => ("Could not install the translation model. Check available disk space and folder permissions, then try again.", "Não foi possível instalar o modelo de tradução. Verifique o espaço em disco e as permissões da pasta e tente novamente."),
-        "invalid_catalog" => ("The translation model catalog is invalid. Refresh the catalog and try again.", "O catálogo de modelos de tradução é inválido. Atualize o catálogo e tente novamente."),
-        "insecure_download" => ("The translation download was blocked because it is not secure. Refresh the catalog or update the app.", "O download de tradução foi bloqueado por não ser seguro. Atualize o catálogo ou o aplicativo."),
-        "download_too_large" => ("The translation download exceeds the supported size. Refresh the catalog or choose another model.", "O download de tradução excede o tamanho permitido. Atualize o catálogo ou escolha outro modelo."),
-        "worker_unavailable" => ("The translation helper is missing or could not start. Check the application installation.", "O auxiliar de tradução não foi encontrado ou não pôde iniciar. Verifique a instalação do aplicativo."),
-        "source_required" => ("Choose the source language in Settings.", "Selecione o idioma de origem nas Configurações."),
-        "model_not_installed" | "pair_unavailable" => ("Install a model for this language pair in Settings.", "Instale um modelo para este par de idiomas nas Configurações."),
-        "worker_busy" => ("Translation is busy. Try again shortly.", "A tradução está ocupada. Tente novamente em instantes."),
-        "worker_timeout" => ("Translation timed out. Try restarting it.", "A tradução demorou demais. Tente reiniciá-la."),
-        "request_too_large" => ("This message is too long to translate.", "Esta mensagem é longa demais para traduzir."),
-        "network_tls_certificate" => ("The translation server certificate could not be verified. Check your system certificates, clock and HTTPS proxy.", "Não foi possível verificar o certificado do servidor de tradução. Verifique os certificados do sistema, o relógio e o proxy HTTPS."),
-        "network_tls" => ("A secure connection to the translation server could not be established.", "Não foi possível estabelecer uma conexão segura com o servidor de tradução."),
-        "network_access_denied" => ("The operating system denied the app's translation network connection. Check application network permissions.", "O sistema operacional negou a conexão de rede de tradução do aplicativo. Verifique as permissões de rede do aplicativo."),
-        "network_http_unauthorized" => ("The translation download server requires authentication (HTTP 401).", "O servidor de download de tradução exige autenticação (HTTP 401)."),
-        "network_http_forbidden" => ("The translation download server refused the request (HTTP 403).", "O servidor de download de tradução recusou a solicitação (HTTP 403)."),
-        "network_proxy_auth" => ("The proxy requires authentication for translation downloads (HTTP 407). Check your proxy settings.", "O proxy exige autenticação para os downloads de tradução (HTTP 407). Verifique as configurações do proxy."),
-        "network_rate_limited" | "network_server" => ("The translation server is temporarily unavailable or limiting requests. Try again later.", "O servidor de tradução está temporariamente indisponível ou limitando solicitações. Tente novamente mais tarde."),
-        "network_not_found" => ("The translation download was not found. Refresh the catalog and try again.", "O download de tradução não foi encontrado. Atualize o catálogo e tente novamente."),
-        "model_download_failed" | "network_failed" | "network_timeout" | "network_dns" | "network_refused" | "network_interrupted" | "network_unreachable" | "network_http" => ("Could not download translation data. Check your connection and try again.", "Não foi possível baixar os dados de tradução. Verifique sua conexão e tente novamente."),
-        _ => ("Translation is unavailable. Check the installation and restart it in Settings.", "A tradução está indisponível. Verifique a instalação e reinicie nas Configurações."),
-    };
-    translation_text(en, pt)
+    t(match code {
+        "invalid_model_archive" | "invalid_model_file" | "model_file_missing" => "translation.error.model_invalid",
+        "model_install_failed" => "translation.error.install_failed",
+        "invalid_catalog" => "translation.error.catalog_invalid",
+        "insecure_download" => "translation.error.download_insecure",
+        "download_too_large" => "translation.error.download_too_large",
+        "worker_unavailable" => "translation.error.engine_unavailable",
+        "source_required" => "translation.error.source_required",
+        "model_not_installed" | "pair_unavailable" => "translation.error.model_missing",
+        "worker_busy" => "translation.error.busy",
+        "worker_timeout" => "translation.error.timeout",
+        "request_too_large" => "translation.error.too_long",
+        "network_tls_certificate" => "translation.error.network_tls_certificate",
+        "network_tls" => "translation.error.network_tls",
+        "network_access_denied" => "translation.error.network_access_denied",
+        "network_http_unauthorized" => "translation.error.network_http_unauthorized",
+        "network_http_forbidden" => "translation.error.network_http_forbidden",
+        "network_proxy_auth" => "translation.error.network_proxy_auth",
+        "network_rate_limited" | "network_server" => "translation.error.network_unavailable",
+        "network_not_found" => "translation.error.network_not_found",
+        "model_download_failed" | "network_failed" | "network_timeout" | "network_dns" | "network_refused" | "network_interrupted" | "network_unreachable" | "network_http" => "translation.error.download_failed",
+        "model_unsupported" => "translation.error.model_unsupported",
+        _ => "translation.error.unavailable",
+    })
 }
 
 fn translation_eligible(m: &StoredMessage) -> bool {
@@ -573,8 +572,12 @@ fn apply_now(f: impl FnOnce(&mut Bridge)) {
 // scroll write triggering load-older); deferring one tick avoids the
 // re-entrant borrow.
 fn defer(f: impl FnOnce(&mut Bridge) + 'static) {
+    defer_after(Duration::ZERO, f);
+}
+
+fn defer_after(delay: Duration, f: impl FnOnce(&mut Bridge) + 'static) {
     let cell = RefCell::new(Some(f));
-    slint::Timer::single_shot(Duration::ZERO, move || {
+    slint::Timer::single_shot(delay, move || {
         if let Some(f) = cell.borrow_mut().take() {
             apply_now(f);
         }
@@ -1124,7 +1127,7 @@ fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_reset_preview(|| defer(|b| b.reset_preview()));
     ui.on_paste_clipboard(|| defer(|b| b.handle_paste()));
-    ui.on_picker_opened(|| defer(|b| b.load_sticker_panel()));
+    ui.on_picker_opened(|| defer_after(Duration::from_millis(200), |b| b.load_sticker_panel()));
     ui.on_picker_closed(|| defer(|_| {}));
     ui.on_sticker_send(|id| {
         let id = id.to_string();
@@ -1447,8 +1450,8 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             if let Some(jid) = b.current_jid.clone() {
                 b.ask_confirm(
-                    t("confirm.clearTitle"),
-                    t("confirm.clearBody"),
+                    t("confirm.clear_title"),
+                    t("confirm.clear_body"),
                     t("confirm.clear"),
                     ConfirmAction::ClearChat(jid),
                 );
@@ -1459,8 +1462,8 @@ fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             if let Some(jid) = b.current_jid.clone() {
                 b.ask_confirm(
-                    t("confirm.deleteChatTitle"),
-                    t("confirm.deleteChatBody"),
+                    t("confirm.delete_chat_title"),
+                    t("confirm.delete_chat_body"),
                     t("confirm.delete"),
                     ConfirmAction::DeleteChat(jid),
                 );
@@ -1472,8 +1475,8 @@ fn wire_callbacks(ui: &AppWindow) {
             if let Some(jid) = b.current_jid.clone() {
                 let name = b.store.chat_name(&jid);
                 b.ask_confirm(
-                    ta("confirm.exitTitle", &[&name]),
-                    t("confirm.exitBody"),
+                    ta("confirm.exit_title", &[&name]),
+                    t("confirm.exit_body"),
                     t("confirm.exit"),
                     ConfirmAction::ExitGroup(jid),
                 );
@@ -1642,7 +1645,7 @@ impl Bridge {
         self.translation_monitor = None;
         self.ui.set_translation_running(false);
         self.ui.set_translation_busy(false);
-        self.ui.set_translation_status(translation_text("Stopped", "Parado").into());
+        self.ui.set_translation_status(t("translation.service.stopped").into());
         self.ui.set_translation_detail("".into());
         self.ui.set_translation_models("".into());
         self.ui.set_translation_pairs("".into());
@@ -1689,7 +1692,7 @@ impl Bridge {
         if matches!(op, "restart" | "stop") {
             self.translation_gen = self.translation_gen.wrapping_add(1);
             for e in self.translation_cache.values_mut() {
-                if e.busy { e.busy = false; e.error = translation_text("Translation cancelled. Try again.", "Tradução cancelada. Tente novamente."); }
+                if e.busy { e.busy = false; e.error = t("translation.status.cancelled"); }
             }
             if let Some(jid) = self.current_jid.clone() { self.rebuild_conversation(&jid); }
         }
@@ -1699,7 +1702,7 @@ impl Bridge {
         let stopped = op == "stop";
         self.ui.set_translation_busy(true);
         self.ui.set_translation_detail(if op == "install" {
-            translation_text("Downloading and installing the model…", "Baixando e instalando o modelo…")
+            t("translation.models.installing")
         } else { String::new() }.into());
         log::info!("[translation] action={op} source={} target={}", model_source.unwrap_or(&self.translation_settings.source), self.translation_settings.target);
         let result = self.translation.request(serde_json::json!({"op":op,
@@ -1712,7 +1715,7 @@ impl Bridge {
                         log::info!("[translation] action completed");
                         b.ui.set_translation_detail("".into());
                         b.ui.set_translation_running(b.translation.status()["running"].as_bool().unwrap_or(false));
-                        b.ui.set_translation_status(if stopped { translation_text("Stopped", "Parado") } else { translation_text("Ready", "Pronto") }.into());
+                        b.ui.set_translation_status(if stopped { t("translation.service.stopped") } else { t("translation.service.ready") }.into());
                         if let Some(models) = value["models"].as_str() { b.ui.set_translation_models(b.translation_pairs_label(models).into()); }
                         if let Some(pairs) = value["pairs"].as_str() { b.ui.set_translation_pairs(b.translation_pairs_label(pairs).into()); }
                         if !stopped {
@@ -1737,7 +1740,7 @@ impl Bridge {
         log::error!("[translation] operation failed: {error}");
         self.ui.set_translation_busy(false);
         self.ui.set_translation_running(self.translation.status()["running"].as_bool().unwrap_or(false));
-        self.ui.set_translation_status(translation_text("Unavailable", "Indisponível").into());
+        self.ui.set_translation_status(t("translation.service.unavailable").into());
         self.ui.set_translation_detail(translation_error(error).into());
         if self.ui.get_translation_running() { self.monitor_translation(self.translation_gen); }
     }
@@ -1855,7 +1858,7 @@ impl Bridge {
                 let running = b.translation.status()["running"].as_bool().unwrap_or(false);
                 if running && !b.ui.get_translation_running() {
                     b.ui.set_translation_running(true);
-                    b.ui.set_translation_status(translation_text("Ready", "Pronto").into());
+                    b.ui.set_translation_status(t("translation.service.ready").into());
                     b.monitor_translation(generation);
                 } else if !running { b.translation_failed("runtime_failed"); }
                 if b.translation_settings.source == key.2 && b.translation_settings.target == key.3 {
@@ -2000,7 +2003,7 @@ impl Bridge {
     fn handle_pairing(&mut self, phone: &str) {
         let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
         if digits.len() < 8 {
-            self.ui.set_pairing_code(t("error.invalidNumber").into());
+            self.ui.set_pairing_code(t("error.invalid_number").into());
             return;
         }
         self.ui.set_pairing_code(t("pairing.generating").into());
@@ -2011,12 +2014,12 @@ impl Bridge {
 
     pub fn on_qr(&mut self, code: &str) {
         self.ui.set_qr_image(qr_image(code));
-        self.ui.set_status_text(t("status.scanQr").into());
+        self.ui.set_status_text(t("status.scan_qr").into());
     }
 
     pub fn on_pairing_code(&mut self, pretty: &str) {
         self.ui.set_pairing_code(pretty.into());
-        self.ui.set_status_text(t("status.pairingHint").into());
+        self.ui.set_status_text(t("status.pairing_hint").into());
     }
 
     pub fn on_pairing_failed(&mut self) {
@@ -2077,17 +2080,17 @@ impl Bridge {
         let conflict = kind == "conflict";
         self.ui.set_alert_title(
             t(if conflict {
-                "alert.conflictTitle"
+                "alert.conflict_title"
             } else {
-                "alert.offlineTitle"
+                "alert.offline_title"
             })
             .into(),
         );
         self.ui.set_alert_text(
             t(if conflict {
-                "alert.conflictBody"
+                "alert.conflict_body"
             } else {
-                "alert.offlineBody"
+                "alert.offline_body"
             })
             .into(),
         );
@@ -2124,7 +2127,7 @@ impl Bridge {
 
     fn logout(&mut self, wipe: bool) {
         self.wipe_on_logout = wipe;
-        self.ui.set_status_text(t("status.loggingOut").into());
+        self.ui.set_status_text(t("status.logging_out").into());
         self.wa.send(Cmd::Logout);
     }
 
@@ -2338,7 +2341,7 @@ impl Bridge {
         }
         // A call belongs to the account it runs on.
         if self.call.is_some() {
-            self.ui.set_status_text(t("account.inCall").into());
+            self.ui.set_status_text(t("account.in_call").into());
             return;
         }
         self.reset_translation();
@@ -2387,9 +2390,9 @@ impl Bridge {
             t("account.new")
         };
         self.ask_confirm(
-            ta("account.removeTitle", &[&label]),
-            t("account.removeBody"),
-            t("account.removeAction"),
+            ta("account.remove_title", &[&label]),
+            t("account.remove_body"),
+            t("account.remove_action"),
             ConfirmAction::RemoveAccount(id.to_string()),
         );
     }
@@ -3028,7 +3031,7 @@ impl Bridge {
         let result = serde_json::to_string(&preparation).map_err(|e| e.to_string()).and_then(|json| {
             self.vault.as_ref().ok_or("vault unavailable".to_string())?.set_checked(&key, &json)
         });
-        if result.is_err() { self.message_action_failed(&t("outbox.storageFailed")); return false; }
+        if result.is_err() { self.message_action_failed(&t("outbox.storage_failed")); return false; }
         self.show_preparation(&preparation, "outbox.preparing");
         if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
         true
@@ -3069,7 +3072,7 @@ impl Bridge {
         entries.push(crate::outbox::Entry::new(id.to_string(), preparation.jid.clone(), std::sync::Arc::new(message.clone()), now_secs()));
         let json = match serde_json::to_string(&entries) { Ok(json) => json, Err(_) => return };
         let saved = self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[("store:outbox", &json)], &[&key]).is_ok());
-        if !saved { self.message_action_failed(&t("outbox.storageFailed")); return; }
+        if !saved { self.message_action_failed(&t("outbox.storage_failed")); return; }
         self.outbox = entries;
         self.preparation_states.remove(id);
         if let Some(messages) = self.store.messages.get_mut(&preparation.jid) { messages.retain(|message| message.id != id); }
@@ -3116,7 +3119,7 @@ impl Bridge {
         let mut entries = self.outbox.clone();
         entries.push(entry);
         if self.persist_outbox(&entries).is_err() {
-            self.message_action_failed(&t("outbox.storageFailed"));
+            self.message_action_failed(&t("outbox.storage_failed"));
             return false;
         }
         self.outbox = entries;
@@ -3133,7 +3136,7 @@ impl Bridge {
         let mut entries = self.outbox.clone();
         entries[index].state = State::Sending;
         if self.persist_outbox(&entries).is_err() {
-            self.message_action_failed(&t("outbox.storageFailed"));
+            self.message_action_failed(&t("outbox.storage_failed"));
             return;
         }
         self.outbox = entries;
@@ -4221,7 +4224,7 @@ impl Bridge {
             // The collapsed roster notice opens the group info on click;
             // an invite-link join offers to share the recent history.
             clickable: system
-                && (m.text == t("notice.membersChanged") || m.id.starts_with("sys:invite:")),
+                && (m.text == t("notice.members_changed") || m.id.starts_with("sys:invite:")),
             // Saved contacts show their address-book name without the ~.
             senderLabel: if group && !sender_jid.is_empty() && !self.store.is_saved(&sender_jid) {
                 format!("~ {}", self.store.chat_name(&sender_jid)).into()
@@ -4517,7 +4520,7 @@ impl Bridge {
             rows.push(MemberItem {
                 jid: "all".into(),
                 name: all_label.into(),
-                number: t("mention.allHint").into(),
+                number: t("mention.all_hint").into(),
                 hasAvatar: false,
                 avatar: empty_image(),
                 initial: "@".into(),
@@ -5028,7 +5031,7 @@ impl Bridge {
             && ok
         {
             let who = crate::wa_map::notice_name(&self.store, &member);
-            let body = ta("notice.historyShared", &[&who]);
+            let body = ta("notice.history_shared", &[&who]);
             self.add_system_message(
                 &group,
                 &format!("sys:shared:{}", now_secs()),
@@ -5863,7 +5866,7 @@ impl Bridge {
                     "reject" => "call.declined",
                     "timeout" => {
                         if call.outgoing {
-                            "call.noAnswer"
+                            "call.no_answer"
                         } else {
                             "call.missed"
                         }
@@ -5948,14 +5951,14 @@ impl Bridge {
         let detail = t(match state {
             "incoming" => {
                 if video {
-                    "call.incomingVideo"
+                    "call.incoming_video"
                 } else {
-                    "call.incomingVoice"
+                    "call.incoming_voice"
                 }
             }
             "outgoing" => "call.calling",
             "connecting" => "call.connecting",
-            "active" => "call.inCall",
+            "active" => "call.in_call",
             _ => "call.ended",
         });
         self.queue_avatar(&jid);
@@ -6436,9 +6439,9 @@ impl Bridge {
         self.set_ring(Some(crate::call::Ring::In));
         let name = self.store.chat_name(&jid);
         let detail = t(if video {
-            "call.incomingVideo"
+            "call.incoming_video"
         } else {
-            "call.incomingVoice"
+            "call.incoming_voice"
         });
         // The ring and the call window stay; only the banner obeys the setting.
         if self.notifications {
@@ -7007,7 +7010,7 @@ impl Bridge {
         if let Some(meta) = self.store.chats.get_mut(&jid) {
             meta.left = true;
         }
-        let body = t("notice.youLeft");
+        let body = t("notice.you_left");
         self.add_system_message(&jid, &format!("sys:left:{}", now_secs()), now_secs(), body);
         if Some(&jid) == self.current_jid.as_ref() {
             self.apply_chat_settings_ui();
@@ -7386,19 +7389,19 @@ impl Bridge {
             for_everyone: all_mine,
         });
         self.ui
-            .set_confirm_title(ta("confirm.deleteTitle", &[&count]).into());
-        self.ui.set_confirm_text(t("confirm.deleteBody").into());
+            .set_confirm_title(ta("confirm.delete_title", &[&count]).into());
+        self.ui.set_confirm_text(t("confirm.delete_body").into());
         self.ui.set_confirm_action(
             t(if all_mine {
-                "confirm.deleteEveryone"
+                "confirm.delete_everyone"
             } else {
-                "confirm.deleteMe"
+                "confirm.delete_me"
             })
             .into(),
         );
         self.ui.set_confirm_secondary(
             if all_mine {
-                t("confirm.deleteMe")
+                t("confirm.delete_me")
             } else {
                 String::new()
             }
@@ -7521,7 +7524,7 @@ impl Bridge {
         if !failed.is_empty() {
             let names: Vec<String> = failed.iter().map(|j| self.store.chat_name(j)).collect();
             self.ui
-                .set_status_text(ta("members.addFailed", &[&names.join(", ")]).into());
+                .set_status_text(ta("members.add_failed", &[&names.join(", ")]).into());
         }
     }
 
@@ -7805,7 +7808,7 @@ impl Bridge {
     pub fn on_gif_results(&mut self, results: Vec<(String, String, crate::media::Decoded)>) {
         self.gif_url_by_id.clear();
         if results.is_empty() {
-            self.ui.set_gif_hint(t("gif.noResults").into());
+            self.ui.set_gif_hint(t("gif.no_results").into());
             self.gif_model.set_vec(Vec::new());
             return;
         }
@@ -7911,7 +7914,7 @@ impl Bridge {
         self.ui.set_pdf_total_w(0.0);
         self.ui.set_pdf_engine_missing(false);
         self.ui.set_pdf_installing(false);
-        self.ui.set_pdf_status(t("pdf.loading").into());
+        self.ui.set_pdf_status(t("pdf.opening").into());
         self.ui.set_pdf_zoom_label("100%".into());
         self.ui.set_pdf_open(true);
         self.pdf.send(crate::pdf::PdfReq::Open {
@@ -7935,7 +7938,7 @@ impl Bridge {
             return;
         }
         self.ui.set_pdf_engine_missing(true);
-        self.ui.set_pdf_status(t("pdf.engineMissing").into());
+        self.ui.set_pdf_status(t("pdf.engine_missing").into());
     }
 
     pub fn on_pdf_engine_installed(&mut self, result: Result<(), String>) {
@@ -7951,7 +7954,7 @@ impl Bridge {
             }
             Err(e) => self
                 .ui
-                .set_pdf_status(ta("pdf.installFailed", &[&e]).into()),
+                .set_pdf_status(ta("pdf.install_failed", &[&e]).into()),
         }
     }
 
@@ -8583,7 +8586,7 @@ impl Bridge {
                     return;
                 }
                 let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
-                let toast_title = if self.notify_previews { title.clone() } else { t("notify.appName") };
+                let toast_title = if self.notify_previews { title.clone() } else { t("notify.app_name") };
                 let mut payload = crate::platform::ToastPayload {
                     token: Some(token.clone()),
                     reply: true,
@@ -8607,7 +8610,7 @@ impl Bridge {
                     }
                     text
                 } else {
-                    t("notify.newMessage")
+                    t("notify.new_message")
                 };
                 if let Some(path) = &payload.thumbnail {
                     self.notification_thumbnails.insert(token.clone(), path.clone());
@@ -8635,13 +8638,13 @@ impl Bridge {
                 let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
                 if count == 0 || (self.notify_previews && names.is_empty()) { return; }
                 let text = if !self.notify_previews {
-                    ta("notify.newMessages", &[&count.to_string(), ""])
+                    ta("notify.new_messages", &[&count.to_string(), ""])
                 } else if names.len() == 1 {
-                    ta("notify.fromOne", &[&count.to_string(), names[0]])
+                    ta("notify.from_one", &[&count.to_string(), names[0]])
                 } else {
-                    ta("notify.newMessages", &[&count.to_string(), &names.join(", ")])
+                    ta("notify.new_messages", &[&count.to_string(), &names.join(", ")])
                 };
-                crate::platform::toast(&t("notify.appName"), &text, crate::platform::ToastPayload::default());
+                crate::platform::toast(&t("notify.app_name"), &text, crate::platform::ToastPayload::default());
             }
         }
     }
@@ -8784,7 +8787,7 @@ impl Bridge {
                 self.ui.set_pin_set(true);
                 t("pin.saved")
             }
-            Err(crate::vault::PinError::WrongPin) => t("pin.wrongCurrent"),
+            Err(crate::vault::PinError::WrongPin) => t("pin.wrong_current"),
             Err(crate::vault::PinError::BadFormat) => t("pin.format"),
         };
         self.ui.set_settings_status(status.into());
@@ -8797,7 +8800,7 @@ impl Bridge {
                 self.ui.set_pin_set(false);
                 t("pin.removed")
             }
-            Err(_) => t("pin.wrongCurrent"),
+            Err(_) => t("pin.wrong_current"),
         };
         self.ui.set_settings_status(status.into());
     }
@@ -9119,14 +9122,14 @@ impl Bridge {
             }
             if action == "cancel" {
                 if self.outbox[index].state != crate::outbox::State::Queued {
-                    self.message_action_failed(&t("outbox.cannotCancel"));
+                    self.message_action_failed(&t("outbox.cannot_cancel"));
                     return;
                 }
                 let entry = self.outbox[index].clone();
                 let mut entries = self.outbox.clone();
                 entries.remove(index);
                 if self.persist_outbox(&entries).is_err() {
-                    self.message_action_failed(&t("outbox.storageFailed"));
+                    self.message_action_failed(&t("outbox.storage_failed"));
                     return;
                 }
                 self.outbox = entries;
@@ -9748,7 +9751,7 @@ impl Bridge {
                     },
                 );
             }
-            None => self.ui.set_status_text(t("rec.noMic").into()),
+            None => self.ui.set_status_text(t("rec.no_mic").into()),
         }
     }
 
@@ -9809,10 +9812,10 @@ fn chat_matches_archive(archived: bool, tab: &str, searching: bool) -> bool {
 }
 
 fn group_typing_status(names: &[String], overflow: bool) -> String {
-    if overflow { return t("presence.groupMany"); }
+    if overflow { return t("presence.group_many"); }
     let first_names = names.iter().take(5)
         .filter_map(|name| name.split_whitespace().next()).collect::<Vec<_>>().join(", ");
-    ta(if names.len() == 1 { "presence.groupOne" } else { "presence.groupSome" }, &[&first_names])
+    ta(if names.len() == 1 { "presence.group_one" } else { "presence.group_some" }, &[&first_names])
 }
 
 fn typing_participants(members: &HashMap<String, (u64, String)>) -> (Vec<String>, i32) {
@@ -9892,22 +9895,16 @@ mod message_action_tests {
     }
 
     #[test]
-    fn translation_outdated_helper_requires_app_restart() {
-        let expected = translation_text(
-            "The translation helper needs updating. Restart the app to load the updated helper.",
-            "O auxiliar de tradução precisa ser atualizado. Reinicie o aplicativo para carregar o auxiliar atualizado.",
-        );
-        assert_eq!(translation_error("worker_outdated"), expected);
-        assert_eq!(translation_error("network_managed_by_app"), expected);
-        assert_ne!(expected, translation_error("worker_unavailable"));
+    fn translation_unsupported_models_have_their_own_message() {
+        let unsupported = translation_error("model_unsupported");
+        assert_eq!(unsupported, t("translation.error.model_unsupported"));
+        assert_ne!(unsupported, translation_error("invalid_model_file"));
+        assert_ne!(unsupported, translation_error("unknown"));
     }
 
     #[test]
     fn translation_invalid_model_errors_suggest_reinstallation() {
-        let expected = translation_text(
-            "The model file is missing or invalid. Download and install the model again in Settings.",
-            "O arquivo do modelo está ausente ou é inválido. Baixe e instale o modelo novamente nas Configurações.",
-        );
+        let expected = t("translation.error.model_invalid");
         for code in ["invalid_model_archive", "invalid_model_file", "model_file_missing"] {
             assert_eq!(translation_error(code), expected);
         }
@@ -9943,11 +9940,11 @@ mod message_action_tests {
     #[test]
     fn group_header_typing_uses_first_names_and_plural_forms() {
         let names = vec!["Ana Silva".to_string(), "  Bruno Costa".to_string()];
-        assert_eq!(group_typing_status(&names[..1], false), ta("presence.groupOne", &["Ana"]));
-        assert_eq!(group_typing_status(&names, false), ta("presence.groupSome", &["Ana, Bruno"]));
-        assert_eq!(group_typing_status(&names, true), t("presence.groupMany"));
+        assert_eq!(group_typing_status(&names[..1], false), ta("presence.group_one", &["Ana"]));
+        assert_eq!(group_typing_status(&names, false), ta("presence.group_some", &["Ana, Bruno"]));
+        assert_eq!(group_typing_status(&names, true), t("presence.group_many"));
         let names = vec!["Ana Silva".to_string(); 5];
-        assert_eq!(group_typing_status(&names, false), ta("presence.groupSome", &["Ana, Ana, Ana, Ana, Ana"]));
+        assert_eq!(group_typing_status(&names, false), ta("presence.group_some", &["Ana, Ana, Ana, Ana, Ana"]));
     }
 
     #[test]
@@ -10079,10 +10076,10 @@ fn copy_body(m: &StoredMessage) -> String {
         MessageKind::Text | MessageKind::System => m.text.clone(),
         MessageKind::Image if m.sticker => t("preview.sticker"),
         MessageKind::Image | MessageKind::Video if !m.text.is_empty() => {
-            format!("{} {}", t("export.mediaOmitted"), m.text)
+            format!("{} {}", t("export.media_omitted"), m.text)
         }
-        MessageKind::Doc => format!("{} ({})", t("export.mediaOmitted"), m.text),
-        _ => t("export.mediaOmitted"),
+        MessageKind::Doc => format!("{} ({})", t("export.media_omitted"), m.text),
+        _ => t("export.media_omitted"),
     }
 }
 

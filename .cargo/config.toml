@@ -1,2 +1,7 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=-crt-static"]
+
+# Where the Windows build finds ctranslate2.lib (scripts/fetch-ctranslate2.ps1
+# puts it there). Only the Windows ct2rs `system` build reads it.
+[env]
+LIBRARY_PATH = { value = "vendor/ctranslate2-4.8.4", relative = true }

@@ -15,6 +15,8 @@ export component DialogButton inherits TouchArea {
         background: root.primary
             ? (root.has-hover ? (root.danger ? #c9302c : Theme.accent.darker(0.15)) : (root.danger ? #ea0038 : Theme.accent))
             : (root.has-hover ? Theme.hover : transparent);
+        opacity: root.pressed ? 0.84 : 1;
+        animate background, opacity { duration: Theme.motion-fast; easing: ease-out; }
         btn-text := Text {
             text: root.label;
             color: root.primary ? white : Theme.accent;

@@ -40,7 +40,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\..\target\release\zapive.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\target\release\translation\*"; DestDir: "{app}\translation"; Flags: ignoreversion recursesubdirs createallsubdirs
+; CTranslate2 and its OpenMP runtime (scripts\fetch-ctranslate2.ps1). The
+; self-updater only replaces zapive.exe, so these stay as installed.
+Source: "..\..\vendor\ctranslate2-4.8.4\ctranslate2.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\vendor\ctranslate2-4.8.4\libiomp5md.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Zapive"; Filename: "{app}\zapive.exe"

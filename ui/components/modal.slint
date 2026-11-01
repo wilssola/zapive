@@ -1,0 +1,32 @@
+// Modal overlay: fade + scale animations on open/close, dismiss on outside click.
+export component ModalLayer inherits Rectangle {
+    in property <bool> open;
+    in property <bool> dismissible: true;
+    in property <brush> scrim: #00000088;
+    callback dismiss();
+    out property <float> progress: root.open ? 1.0 : 0.0;
+    animate progress {
+        duration: root.open ? 180ms : 140ms;
+        easing: root.open ? ease-out : ease-in;
+    }
+    out property <bool> mounted: root.open || root.progress > 0.001;
+    visible: root.mounted;
+    Rectangle {
+        background: root.scrim;
+        opacity: root.progress;
+        width: 100%;
+        height: 100%;
+    }
+    TouchArea {
+        enabled: root.open;
+        clicked => {
+            if (root.dismissible) {
+                root.dismiss();
+            }
+        }
+    }
+    @children
+    TouchArea {
+        visible: !root.open;
+    }
+}

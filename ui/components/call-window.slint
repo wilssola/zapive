@@ -133,14 +133,14 @@ export component CallWindow inherits Window {
             alignment: center;
             spacing: root.state == "incoming" ? 44px : 12px;
             if root.state == "incoming": CallAction {
-                label: @tr("Decline");
+                label: @tr("call.incoming.decline");
                 icon: @image-url("../icons/phone.svg");
                 tint: #ea0038;
                 rotated: true;
                 clicked => { root.decline(); }
             }
             if root.state == "incoming": CallAction {
-                label: @tr("Accept");
+                label: @tr("call.incoming.accept");
                 icon: root.video-call
                     ? @image-url("../icons/video.svg")
                     : @image-url("../icons/phone.svg");
@@ -150,7 +150,7 @@ export component CallWindow inherits Window {
             // The camera can only be switched once the call is up. It
             // lights up when the peer has asked for video.
             if root.state == "active": CallAction {
-                label: root.video-on ? @tr("Stop video") : @tr("Video");
+                label: root.video-on ? @tr("call.controls.stop_video") : @tr("call.controls.video");
                 icon: @image-url("../icons/video.svg");
                 tint: root.video-wanted
                     ? #00a884
@@ -160,14 +160,14 @@ export component CallWindow inherits Window {
             }
             // Muting only means something once the media plane is up.
             if root.state == "active": CallAction {
-                label: root.muted ? @tr("Unmute") : @tr("Mute");
+                label: root.muted ? @tr("call.controls.unmute") : @tr("call.controls.mute");
                 icon: @image-url("../icons/microphone.svg");
                 tint: root.muted ? #ea0038 : (Theme.dark ? #2a3942 : #d1d7db);
                 icon-tint: root.muted ? #ffffff : Theme.text;
                 clicked => { root.toggle-mute(); }
             }
             if root.state != "incoming" && root.state != "ended": CallAction {
-                label: @tr("End");
+                label: @tr("call.controls.end");
                 icon: @image-url("../icons/phone.svg");
                 tint: #ea0038;
                 rotated: true;

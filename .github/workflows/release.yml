@@ -135,16 +135,22 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils cmake build-essential
+      # Outside Windows ct2rs compiles CTranslate2 and SentencePiece from
+      # source (SentencePiece also on Windows): CMake and a C++17 toolchain.
+      - name: CMake (macOS)
+        if: runner.os == 'macOS'
+        run: command -v cmake >/dev/null || brew install cmake
+      # Windows links the official CTranslate2 DLL instead (ct2rs' own build
+      # is static-CRT and cannot be linked with the rest of the executable).
+      - name: CTranslate2 DLL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/fetch-ctranslate2.ps1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --locked
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Build translation runtime
-        run: python packaging/translation/build.py
 
       # ---- Windows: sign, then wrap the exe in an installer that creates
       # ---- the Start Menu (and optional Desktop) shortcuts.
@@ -166,9 +172,7 @@ jobs:
       - name: Sign binary (self-signed)
         if: runner.os == 'Windows' && env.WINDOWS_PFX_BASE64 != ''
         shell: pwsh
-        run: |
-          packaging\windows\sign.ps1 -Path target\release\zapive.exe
-          packaging\windows\sign.ps1 -Path target\release\translation\zapive-translate.exe
+        run: packaging\windows\sign.ps1 -Path target\release\zapive.exe
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -230,19 +234,15 @@ jobs:
           identity='-'
           [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
           codesign --force --identifier io.github.wilssola.Zapive --sign "$identity" target/release/zapive
-          rm -rf target/release/translation
-          cp -R build/Zapive.app/Contents/MacOS/translation target/release/translation
 
+      # The self-updater downloads this bare-binary zip; on Windows it is
+      # zipped after signing, so updated installs stay signed.
       - name: Updater payload
         shell: bash
         run: |
           mkdir -p dist
           cd target/release
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" translation
-          else
-            zip -r -y "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" translation
-          fi
+          7z a "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}" || zip "../../dist/zapive-${{ matrix.target }}.zip" "${{ matrix.bin }}"
       - uses: actions/upload-artifact@v7
         with:
           name: zapive-${{ matrix.target }}
