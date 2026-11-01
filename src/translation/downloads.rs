@@ -1,7 +1,8 @@
 use super::models::{
     Catalog, Check, Pair, code, install_archive, installed, plan_route, random_hex,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::net::IpAddr;
@@ -18,6 +19,51 @@ pub(super) const INDEX: &str =
     "https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json";
 const CATALOG_LIMIT: u64 = 8 * 1024 * 1024;
 const MODEL_LIMIT: u64 = 512 * 1024 * 1024;
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Receives install progress as JSON (`phase`, `step`, `steps`, `downloaded`, `total`).
+pub(super) type Progress<'a> = &'a dyn Fn(Value);
+type Report<'a> = &'a dyn Fn(u64, Option<u64>);
+
+/// Lets one progress update through per interval; the final one always passes.
+struct Throttle {
+    interval: Duration,
+    last: Cell<Option<Instant>>,
+}
+
+impl Throttle {
+    fn new(interval: Duration) -> Self {
+        Self { interval, last: Cell::new(None) }
+    }
+
+    fn ready(&self, now: Instant, last: bool) -> bool {
+        let due = last
+            || self
+                .last
+                .get()
+                .is_none_or(|at| now.saturating_duration_since(at) >= self.interval);
+        if due {
+            self.last.set(Some(now));
+        }
+        due
+    }
+}
+
+struct Counting<'a, R> {
+    inner: R,
+    read: u64,
+    total: Option<u64>,
+    report: Report<'a>,
+}
+
+impl<R: Read> Read for Counting<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.read += n as u64;
+        (self.report)(self.read, self.total);
+        Ok(n)
+    }
+}
 
 pub(super) fn catalog_file(models: &Path) -> Result<PathBuf, String> {
     Ok(models
@@ -85,7 +131,7 @@ pub(super) fn read_catalog(models: &Path, check: Check<'_>) -> Result<Option<Cat
 
 /// Downloads the argospm index, validates it and replaces the cached copy.
 pub(super) fn refresh(models: &Path, check: Check<'_>) -> Result<Catalog, String> {
-    let file = download(INDEX, true, models, check)?;
+    let file = download(INDEX, true, models, check, &|_, _| {})?;
     let mut bytes = Vec::new();
     copy(
         &mut std::fs::File::open(&file.0)
@@ -111,6 +157,7 @@ pub(super) fn install(
     source: &str,
     target: &str,
     check: Check<'_>,
+    progress: Progress<'_>,
 ) -> Result<(), String> {
     if !code(source) || !code(target) || source == target {
         return Err("invalid_language".into());
@@ -124,16 +171,33 @@ pub(super) fn install(
         catalog = refresh(models, check)?;
     }
     let plan = plan_route(source, target, &catalog, &installed).ok_or("pair_unavailable")?;
-    for pair in plan {
+    let missing: Vec<Pair> = plan.into_iter().filter(|p| !installed.contains(p)).collect();
+    let steps = missing.len();
+    for (index, pair) in missing.into_iter().enumerate() {
         check()?;
-        if installed.contains(&pair) {
-            continue;
-        }
+        let step = |phase: &str, downloaded: u64, total: Option<u64>| {
+            progress(json!({
+                "phase": phase,
+                "step": index + 1,
+                "steps": steps,
+                "source": pair.0,
+                "target": pair.1,
+                "downloaded": downloaded,
+                "total": total.unwrap_or(0),
+            }))
+        };
+        step("download", 0, None);
+        let throttle = Throttle::new(PROGRESS_INTERVAL);
+        let report = |downloaded: u64, total: Option<u64>| {
+            if throttle.ready(Instant::now(), Some(downloaded) == total) {
+                step("download", downloaded, total);
+            }
+        };
         let links = catalog.get(&pair).ok_or("pair_unavailable")?;
         let mut failure = "model_download_failed".to_string();
         let mut downloaded = None;
         for link in links {
-            match download(link, false, models, check) {
+            match download(link, false, models, check, &report) {
                 Ok(file) => {
                     downloaded = Some(file);
                     break;
@@ -146,6 +210,7 @@ pub(super) fn install(
         }
         let file = downloaded.ok_or(failure)?;
         check()?;
+        step("install", 0, None);
         log::info!("[translation] installing local model");
         install_archive(models, &file.0, &pair.0, &pair.1, check)?;
         installed.insert(pair);
@@ -346,6 +411,7 @@ fn download(
     catalog: bool,
     models: &Path,
     check: Check<'_>,
+    report: Report<'_>,
 ) -> Result<Temporary, String> {
     if !allowed(input, catalog, false) {
         return Err("insecure_download".into());
@@ -408,17 +474,22 @@ fn download(
                 if status != 200 {
                     return Err(http_error(status).into());
                 }
-                if response
+                let length = response
                     .headers()
                     .get("content-length")
                     .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .is_some_and(|n| n > limit)
-                {
+                    .and_then(|s| s.parse::<u64>().ok());
+                if length.is_some_and(|n| n > limit) {
                     return Err("download_too_large".into());
                 }
+                report(0, length);
                 let bytes = copy(
-                    &mut response.body_mut().as_reader(),
+                    &mut Counting {
+                        inner: response.body_mut().as_reader(),
+                        read: 0,
+                        total: length,
+                        report,
+                    },
                     &mut file,
                     limit,
                     &|| {
@@ -543,6 +614,32 @@ mod tests {
             assert!(!public_ip(ip.parse().unwrap()));
         }
         assert!(public_ip("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn progress_is_throttled_but_reports_completion() {
+        let throttle = Throttle::new(Duration::from_millis(200));
+        let start = Instant::now();
+        assert!(throttle.ready(start, false));
+        assert!(!throttle.ready(start + Duration::from_millis(50), false));
+        assert!(!throttle.ready(start + Duration::from_millis(199), false));
+        assert!(throttle.ready(start + Duration::from_millis(200), false));
+        assert!(throttle.ready(start + Duration::from_millis(210), true));
+        assert!(!throttle.ready(start + Duration::from_millis(220), false));
+
+        let seen = std::cell::RefCell::new(Vec::new());
+        let report = |read: u64, total: Option<u64>| seen.borrow_mut().push((read, total));
+        let mut reader = Counting {
+            inner: Cursor::new(vec![0; 100 * 1024]),
+            read: 0,
+            total: Some(100 * 1024),
+            report: &report,
+        };
+        let mut output = Vec::new();
+        copy(&mut reader, &mut output, MODEL_LIMIT, &|| Ok(())).unwrap();
+        let seen = seen.into_inner();
+        assert_eq!(seen.first(), Some(&(64 * 1024, Some(100 * 1024))));
+        assert_eq!(seen.iter().rev().nth(1), Some(&(100 * 1024, Some(100 * 1024))));
     }
 
     #[test]

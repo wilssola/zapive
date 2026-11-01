@@ -156,14 +156,25 @@ impl Engine {
             .into_iter()
             .map(|result| {
                 let tokens = result.hypotheses.into_iter().next().unwrap_or_default();
-                let decoded = self
-                    .sentencepiece
-                    .decode_pieces(&tokens)
-                    .map_err(|_| "runtime_failed".to_string())?;
+                let decoded = detokenize(&tokens);
                 Ok(strip_prefix(&decoded, &self.target_prefix).trim().to_string())
             })
             .collect()
     }
+}
+
+fn detokenize(pieces: &[String]) -> String {
+    let joined: String = pieces
+        .iter()
+        .filter(|piece| !matches!(piece.as_str(), "<unk>" | "<s>" | "</s>" | "<pad>"))
+        .map(String::as_str)
+        .collect();
+    joined
+        .replace('\u{2581}', " ")
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn strip_prefix<'a>(value: &'a str, prefix: &str) -> &'a str {
@@ -231,6 +242,17 @@ fn chunk_by(paragraph: &str, size: usize) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detokenize_turns_sentencepiece_markers_into_spaces() {
+        let pieces: Vec<String> = ["\u{2581}É", "\u{2581}difícil", "\u{2581}para", "\u{2581}nós", ",", "\u{2581}IP", "."]
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        assert_eq!(detokenize(&pieces), "É difícil para nós, IP.");
+        let glued: Vec<String> = vec!["\u{2581}você\u{2581}\u{2581}deve".into(), "</s>".into()];
+        assert_eq!(detokenize(&glued), "você deve");
+    }
 
     #[test]
     fn sentences_split_after_terminal_punctuation_and_whitespace() {

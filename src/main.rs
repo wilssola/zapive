@@ -14,6 +14,7 @@ mod i18n;
 mod logging;
 mod link_preview;
 mod markup;
+mod mcp;
 mod media;
 mod video;
 mod paths;
@@ -33,7 +34,7 @@ use slint::ComponentHandle;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
-static RT: OnceLock<Runtime> = OnceLock::new();
+pub(crate) static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn main() {
     paths::ensure_dirs();

@@ -45,6 +45,7 @@ impl Bridge {
         self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
         self.load_translation_settings();
+        self.load_mcp();
         self.restore_outbox();
         self.expire_notification_tokens();
         println!(

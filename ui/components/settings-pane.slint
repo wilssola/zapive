@@ -1,4 +1,4 @@
-import { Button, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ProgressIndicator, ScrollView } from "std-widgets.slint";
 import { DialogButton } from "dialog-button.slint";
 import { IconButton } from "icon-button.slint";
 import { ModalLayer } from "modal.slint";
@@ -8,7 +8,7 @@ import { SettingsCard } from "settings-card.slint";
 import { SettingsRow } from "settings-row.slint";
 import { Theme } from "theme.slint";
 import { Toggle } from "toggle.slint";
-import { AccountItem, ReleaseItem } from "types.slint";
+import { AccountItem, ReleaseItem, TranslationModelItem } from "types.slint";
 
 export component SettingsLayer inherits ModalLayer {
     in-out property <string> theme-style;
@@ -56,6 +56,11 @@ export component SettingsLayer inherits ModalLayer {
     pure callback settings-matches(string) -> bool;
     in property <bool> pin-set;
     in property <bool> autostart;
+    in property <bool> mcp-enabled;
+    in property <string> mcp-url;
+    in property <string> mcp-token;
+    in property <string> mcp-status;
+    property <bool> mcp-token-visible: false;
     in property <string> settings-status;
     in property <string> translation-status;
     in property <string> translation-detail;
@@ -63,13 +68,23 @@ export component SettingsLayer inherits ModalLayer {
     in property <bool> translation-running;
     in property <string> translation-target;
     in property <string> translation-source;
-    in property <string> translation-models;
+    in property <[TranslationModelItem]> translation-installed;
     in property <string> translation-pairs;
+    in property <bool> translation-installing;
+    in property <float> translation-progress;
+    in property <string> translation-progress-text;
+    in property <int> translation-pair-state;
+    in property <string> translation-pair-detail;
     callback translation-action(string);
     callback translation-install(string);
+    callback translation-remove(string, string);
+    callback translation-model-selected(string);
     in-out property <string> translation-model-source;
     callback translation-language(string, string);
     callback autostart-changed(bool);
+    callback mcp-changed(bool);
+    callback mcp-copy-config();
+    callback mcp-regenerate-token();
     callback save-pin(string, string);
     callback remove-pin(string);
     callback logout();
@@ -182,7 +197,7 @@ export component SettingsLayer inherits ModalLayer {
                             VerticalLayout {
                                 alignment: center; spacing: 4px;
                                 Text {
-                                    text: root.settings-query != "" ? @tr("settings.search.results_title") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : root.settings-section == "translation" ? 9 : 1].title;
+                                    text: root.settings-query != "" ? @tr("settings.search.results_title") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : root.settings-section == "translation" ? 9 : root.settings-section == "mcp" ? 10 : 1].title;
                                     color: Theme.text; font-size: 20px; font-weight: 700;
                                 }
                                 Text {
@@ -214,6 +229,111 @@ export component SettingsLayer inherits ModalLayer {
                                     on: root.autostart;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.autostart-changed(!root.autostart); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "mcp")) || (root.settings-query != "" && root.settings-matches(@tr("settings.mcp.title") + " " + @tr("settings.mcp.enable") + " " + @tr("settings.mcp.description") + " MCP AI " + @tr("settings.mcp.url") + " " + @tr("settings.mcp.token") + " " + @tr("settings.mcp.copy_config") + " " + @tr("settings.mcp.regenerate_token")))): SettingsCard {
+                            title: @tr("settings.mcp.title");
+                            hint: @tr("settings.mcp.warning");
+                            SettingsRow {
+                                label: @tr("settings.mcp.enable");
+                                detail: @tr("settings.mcp.description");
+                                icon: @image-url("../icons/message-circle.svg");
+                                Toggle {
+                                    label: @tr("settings.mcp.enable");
+                                    on: root.mcp-enabled;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.mcp-changed(!root.mcp-enabled); }
+                                }
+                            }
+                            if root.mcp-enabled: VerticalLayout {
+                                padding: 14px;
+                                padding-top: 6px;
+                                spacing: 10px;
+                                alignment: start;
+                                Text {
+                                    text: @tr("settings.mcp.url");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                }
+                                Rectangle {
+                                    height: 36px;
+                                    border-radius: 8px;
+                                    background: Theme.hover;
+                                    border-width: 1px;
+                                    border-color: url-input.has-focus ? Theme.accent : Theme.border;
+                                    animate border-color { duration: Theme.motion-fast; easing: ease-out; }
+                                    url-input := TextInput {
+                                        x: 10px;
+                                        width: parent.width - 20px;
+                                        height: parent.height;
+                                        vertical-alignment: center;
+                                        text: root.mcp-url;
+                                        read-only: true;
+                                        single-line: true;
+                                        font-size: 13px;
+                                        color: Theme.text;
+                                        selection-background-color: Theme.accent;
+                                        selection-foreground-color: white;
+                                        accessible-role: text-input;
+                                        accessible-label: @tr("settings.mcp.url");
+                                    }
+                                }
+                                Text {
+                                    text: @tr("settings.mcp.token");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Rectangle {
+                                        height: 36px;
+                                        horizontal-stretch: 1;
+                                        border-radius: 8px;
+                                        background: Theme.hover;
+                                        border-width: 1px;
+                                        border-color: token-input.has-focus ? Theme.accent : Theme.border;
+                                        animate border-color { duration: Theme.motion-fast; easing: ease-out; }
+                                        token-input := TextInput {
+                                            x: 10px;
+                                            width: parent.width - 20px;
+                                            height: parent.height;
+                                            vertical-alignment: center;
+                                            text: root.mcp-token;
+                                            input-type: root.mcp-token-visible ? InputType.text : InputType.password;
+                                            read-only: true;
+                                            single-line: true;
+                                            font-size: 13px;
+                                            color: Theme.text;
+                                            selection-background-color: Theme.accent;
+                                            selection-foreground-color: white;
+                                            accessible-role: text-input;
+                                            accessible-label: @tr("settings.mcp.token");
+                                        }
+                                    }
+                                    DialogButton {
+                                        label: root.mcp-token-visible ? @tr("settings.mcp.hide_token") : @tr("settings.mcp.show_token");
+                                        clicked => { root.mcp-token-visible = !root.mcp-token-visible; }
+                                    }
+                                }
+                                if root.mcp-status != "": Text {
+                                    text: root.mcp-status;
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    DialogButton {
+                                        label: @tr("settings.mcp.copy_config");
+                                        primary: true;
+                                        clicked => { root.mcp-copy-config(); }
+                                    }
+                                    DialogButton {
+                                        label: @tr("settings.mcp.regenerate_token");
+                                        clicked => { root.mcp-regenerate-token(); }
+                                    }
                                 }
                             }
                         }
@@ -582,7 +702,7 @@ export component SettingsLayer inherits ModalLayer {
                                 enabled: !root.translation-busy;
                                 model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
                                 current-value: root.translation-model-source;
-                                selected(value) => { root.translation-model-source = value; }
+                                selected(value) => { root.translation-model-selected(value); }
                             }
                         }
                         SettingsRow {
@@ -590,20 +710,60 @@ export component SettingsLayer inherits ModalLayer {
                             detail: root.translation-detail != "" ? root.translation-detail
                                 : root.translation-model-source == root.translation-target
                                 ? @tr("translation.models.choose_different_languages")
-                                : @tr("translation.models.install_pair", root.translation-model-source, root.translation-target);
+                                : @tr("translation.models.install_pair", root.translation-model-source, root.translation-target)
+                                    + (root.translation-pair-detail != "" ? " · " + root.translation-pair-detail : "");
+                            if root.translation-installing: DialogButton {
+                                label: @tr("translation.models.cancel");
+                                clicked => { root.translation-action("cancel"); }
+                            }
                             DialogButton {
-                                label: root.translation-busy ? @tr("translation.service.working") : @tr("translation.models.install");
-                                enabled: !root.translation-busy && root.translation-model-source != root.translation-target;
+                                label: root.translation-installing ? @tr("translation.models.installing_button")
+                                    : root.translation-busy ? @tr("translation.service.working")
+                                    : root.translation-pair-state == 2 ? @tr("translation.models.installed")
+                                    : @tr("translation.models.install");
+                                enabled: !root.translation-busy && root.translation-model-source != root.translation-target
+                                    && root.translation-pair-state != 2 && root.translation-pair-state != 3;
+                                opacity: self.enabled ? 1 : 0.5;
+                                animate opacity { duration: Theme.motion-fast; easing: ease-out; }
                                 clicked => { root.translation-install(root.translation-model-source); }
+                            }
+                        }
+                        if root.translation-installing: VerticalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            padding-bottom: 10px;
+                            spacing: 6px;
+                            ProgressIndicator {
+                                height: 6px;
+                                progress: max(0, root.translation-progress);
+                                indeterminate: root.translation-progress < 0;
+                            }
+                            Text {
+                                text: (root.translation-progress >= 0 ? @tr("translation.models.progress_percent", round(root.translation-progress * 100)) + " · " : "")
+                                    + root.translation-progress-text;
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                wrap: word-wrap;
                             }
                         }
                         SettingsRow {
                             label: @tr("translation.models.installed_title");
-                            detail: root.translation-models != "" ? root.translation-models : @tr("translation.models.none_installed");
+                            detail: root.translation-installed.length == 0 ? @tr("translation.models.none_installed") : "";
                             DialogButton {
                                 label: @tr("translation.models.refresh");
                                 enabled: !root.translation-busy;
                                 clicked => { root.translation-action("refresh"); }
+                            }
+                        }
+                        for model in root.translation-installed: SettingsRow {
+                            label: model.label;
+                            detail: model.size;
+                            DialogButton {
+                                label: @tr("translation.models.remove");
+                                enabled: !root.translation-busy;
+                                opacity: self.enabled ? 1 : 0.5;
+                                animate opacity { duration: Theme.motion-fast; easing: ease-out; }
+                                clicked => { root.translation-remove(model.source, model.target); }
                             }
                         }
                         SettingsRow {

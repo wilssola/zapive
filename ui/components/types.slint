@@ -126,6 +126,14 @@ export struct AccountItem {
     active: bool,
 }
 
+// One installed local translation model.
+export struct TranslationModelItem {
+    source: string,
+    target: string,
+    label: string,
+    size: string,
+}
+
 export struct StickerCell {
     id: string,
     pic: image,

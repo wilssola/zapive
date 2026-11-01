@@ -124,6 +124,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         translation_monitor: None,
         translation_cache: HashMap::new(),
         translation_settings: TranslationSettings::default(),
+        translation_pairs: TranslationPairs::default(),
         chats_model,
         messages_model,
         current_jid: None,
@@ -240,6 +241,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         preparations_active: HashSet::new(),
         outbox: Vec::new(),
         outbox_connected: false,
+        mcp: None,
         update_manual: false,
         status_model,
         calls_model,
@@ -277,6 +279,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
 pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_translation_action(|action| defer(move |b| b.translation_action(&action)));
     ui.on_translation_install(|source| defer(move |b| b.install_translation_model(&source)));
+    ui.on_translation_remove(|source, target| defer(move |b| b.remove_translation_model(&source, &target)));
+    ui.on_translation_model_selected(|source| defer(move |b| b.translation_model_selected(&source)));
     ui.on_translation_language(|kind, value| defer(move |b| b.translation_language(&kind, &value)));
     ui.set_status_text(t("status.connecting").into());
 
@@ -341,6 +345,9 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let category = category.to_string();
         defer(move |b| b.handle_privacy_blur(&category, enabled));
     });
+    ui.on_mcp_changed(|enabled| defer(move |b| b.handle_mcp(enabled)));
+    ui.on_mcp_copy_config(|| defer(|b| b.mcp_copy_config()));
+    ui.on_mcp_regenerate_token(|| defer(|b| b.mcp_regenerate_token()));
     ui.on_autostart_changed(|on| {
         defer(move |b| b.handle_autostart(on));
     });

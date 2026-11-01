@@ -133,11 +133,83 @@ pub(super) fn pairs_label<'a>(pairs: impl IntoIterator<Item = &'a Pair>) -> Stri
         .join(",")
 }
 
+/// Bytes used by a directory tree; symbolic links are not followed.
+pub(super) fn disk_size(dir: &Path) -> u64 {
+    let mut total = 0;
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            } else if meta.is_dir() {
+                pending.push(entry.path());
+            } else {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
 pub(super) fn status(models: &Path, catalog: &Catalog) -> Value {
+    let installed = installed(models);
+    let list: Vec<Value> = installed
+        .iter()
+        .map(|((source, target), dir)| {
+            json!({ "source": source, "target": target, "size": disk_size(dir) })
+        })
+        .collect();
     json!({
-        "models": pairs_label(installed(models).keys()),
+        "models": pairs_label(installed.keys()),
         "pairs": pairs_label(catalog.keys()),
+        "installed": list,
     })
+}
+
+/// True when `path` resolves to a direct child of the canonical `root`.
+fn inside(root: &Path, path: &Path) -> bool {
+    fs::canonicalize(path).is_ok_and(|path| path.parent() == Some(root))
+}
+
+/// Deletes every installed copy of `source -> target`. Only real directories
+/// directly inside the models root are touched; links are never followed.
+pub(super) fn remove(models: &Path, source: &str, target: &str) -> Result<(), String> {
+    if !code(source) || !code(target) {
+        return Err("invalid_language".into());
+    }
+    let root = fs::canonicalize(models).map_err(|_| "model_not_installed")?;
+    let entries = fs::read_dir(&root).map_err(|_| "model_remove_failed")?;
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            continue;
+        }
+        let Ok(info) = read_meta(&path) else {
+            continue;
+        };
+        if info.from != source || info.to != target {
+            continue;
+        }
+        if !inside(&root, &path) {
+            return Err("model_remove_failed".into());
+        }
+        fs::remove_dir_all(&path).map_err(|_| "model_remove_failed")?;
+        removed += 1;
+    }
+    if removed == 0 {
+        return Err("model_not_installed".into());
+    }
+    Ok(())
 }
 
 fn archive_error<E>(_: E) -> String {
@@ -554,5 +626,31 @@ mod tests {
         ] {
             assert!(parse_meta(bad).is_err());
         }
+    }
+
+    #[test]
+    fn remove_deletes_only_matching_models_inside_the_root() {
+        let root = scratch("remove");
+        let models = root.join("models");
+        let file = root.join("a.argosmodel");
+        archive(&file, &good(), None);
+        install_archive(&models, &file, "en", "pt", &|| Ok(())).unwrap();
+        let outside = root.join("outside");
+        fs::create_dir_all(outside.join("model")).unwrap();
+        fs::write(outside.join("metadata.json"), META).unwrap();
+        let dir = installed(&models)[&("en".to_string(), "pt".to_string())].clone();
+        assert!(disk_size(&dir) >= 9);
+        assert_eq!(status(&models, &Catalog::new())["installed"][0]["source"], "en");
+        assert_eq!(remove(&models, "../x", "pt").unwrap_err(), "invalid_language");
+        assert_eq!(remove(&models, "pt", "en").unwrap_err(), "model_not_installed");
+        remove(&models, "en", "pt").unwrap();
+        assert!(installed(&models).is_empty());
+        assert!(models.is_dir() && outside.join("metadata.json").is_file());
+        assert_eq!(remove(&models, "en", "pt").unwrap_err(), "model_not_installed");
+        assert_eq!(
+            remove(&root.join("missing"), "en", "pt").unwrap_err(),
+            "model_not_installed"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }
