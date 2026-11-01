@@ -1826,3 +1826,6 @@ msgstr "Árabe"
 
 msgid "translation.language.other"
 msgstr "Outro idioma"
+
+msgid "translation.error.runtime_missing"
+msgstr "A biblioteca de tradução não está na instalação do Zapive. Reinstale o Zapive para usar a tradução."
