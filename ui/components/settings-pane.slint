@@ -1,0 +1,752 @@
+import { Button, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { DialogButton } from "dialog-button.slint";
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { AccountRow } from "rows/account.slint";
+import { MenuRow } from "rows/menu.slint";
+import { SettingsCard } from "settings-card.slint";
+import { SettingsRow } from "settings-row.slint";
+import { Theme } from "theme.slint";
+import { Toggle } from "toggle.slint";
+import { AccountItem, ReleaseItem } from "types.slint";
+
+export component SettingsLayer inherits ModalLayer {
+    in-out property <string> theme-style;
+    in property <bool> notifications;
+    in property <bool> notify-previews;
+    in property <bool> blur-names;
+    in property <bool> blur-photos;
+    in property <bool> blur-messages;
+    in property <bool> blur-media;
+    callback style-changed(string);
+    callback notifications-changed(bool);
+    callback notify-previews-changed(bool);
+    callback privacy-blur-changed(string, bool);
+    in-out property <string> theme-mode;
+    in-out property <string> language-mode;
+    callback theme-changed(string);
+    callback language-changed(string);
+    in property <[string]> mic-devices;
+    in property <[string]> speaker-devices;
+    in property <[string]> camera-devices;
+    in-out property <string> mic-device;
+    in-out property <string> speaker-device;
+    in-out property <string> camera-device;
+    callback device-changed(string, string);
+    in property <int> update-state;
+    in property <string> update-version;
+    in property <string> update-error;
+    in property <string> app-version;
+    in property <[ReleaseItem]> releases;
+    in property <bool> changelog-loading;
+    in property <bool> changelog-loaded;
+    in property <bool> changelog-more;
+    in property <string> changelog-error;
+    in property <bool> changelog-has-new;
+    in property <bool> changelog-verified;
+    callback show-whats-new();
+    callback changelog-load(bool);
+    callback update-check();
+    callback update-apply();
+    callback update-restart();
+    in-out property <bool> settings-open;
+    in-out property <string> settings-section;
+    in-out property <string> settings-query;
+    in property <[{ key: string, title: string, detail: string, icon: image }]> settings-categories;
+    pure callback settings-matches(string) -> bool;
+    in property <bool> pin-set;
+    in property <bool> autostart;
+    in property <string> settings-status;
+    in property <string> translation-status;
+    in property <string> translation-detail;
+    in property <bool> translation-busy;
+    in property <bool> translation-running;
+    in property <string> translation-target;
+    in property <string> translation-source;
+    in property <string> translation-models;
+    in property <string> translation-pairs;
+    callback translation-action(string);
+    callback translation-install(string);
+    in-out property <string> translation-model-source;
+    callback translation-language(string, string);
+    callback autostart-changed(bool);
+    callback save-pin(string, string);
+    callback remove-pin(string);
+    callback logout();
+    in property <[AccountItem]> accounts;
+    in property <bool> can-add-account;
+    callback switch-account(string);
+    callback add-account();
+    callback remove-account(string);
+    in property <bool> send-receipts;
+    in property <bool> apply-deletions;
+    callback send-receipts-changed(bool);
+    callback apply-deletions-changed(bool);
+    in property <bool> auto-download-photos;
+    callback auto-download-photos-changed(bool);
+    in property <bool> auto-download-audio;
+    callback auto-download-audio-changed(bool);
+    in property <bool> auto-download-video;
+    callback auto-download-video-changed(bool);
+    in property <bool> auto-download-documents;
+    callback auto-download-documents-changed(bool);
+    in property <bool> auto-download-stickers;
+    callback auto-download-stickers-changed(bool);
+    in property <length> win-width;
+
+    if root.mounted: Rectangle {
+        width: 100%;
+        height: 100%;
+        x: (1 - root.progress) * 16px;
+        opacity: root.progress;
+        background: Theme.dark ? #091419 : Theme.sidebar;
+        TouchArea { }
+        HorizontalLayout {
+            spacing: 0;
+            Rectangle {
+                width: min(280px, root.win-width * 0.3);
+                background: Theme.dark ? #081217 : Theme.sidebar;
+                clip: true;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 12px;
+                    Text {
+                        height: 42px;
+                        text: @tr("settings.title"); color: Theme.text;
+                        font-size: 20px; font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    LineEdit {
+                        height: 36px;
+                        placeholder-text: @tr("settings.search.placeholder");
+                        text <=> root.settings-query;
+                        accessible-label: @tr("settings.search.placeholder");
+                    }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 4px;
+                            alignment: start;
+                            for category in root.settings-categories: Rectangle {
+                                height: 62px;
+                                border-radius: 8px;
+                                background: root.settings-section == category.key ? Theme.accent.with-alpha(0.2)
+                                    : category-touch.has-hover ? Theme.hover : transparent;
+                                Rectangle {
+                                    x: 0px; width: 2px; y: 9px; height: parent.height - 18px;
+                                    background: root.settings-section == category.key ? Theme.accent : transparent;
+                                }
+                                HorizontalLayout {
+                                    padding: 8px; spacing: 12px;
+                                    Rectangle {
+                                        width: 38px; height: 38px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 19px;
+                                        background: Theme.hover;
+                                        Image {
+                                            x: 9px; y: 9px; width: 20px; height: 20px;
+                                            source: category.icon;
+                                            colorize: root.settings-section == category.key ? Theme.accent : Theme.icon;
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center; spacing: 4px;
+                                        Text { text: category.title; color: Theme.text; font-size: 14px; overflow: elide; }
+                                        Text { text: category.detail; color: Theme.text-dim; font-size: 11px; overflow: elide; }
+                                    }
+                                }
+                                category-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    accessible-role: button;
+                                    accessible-label: category.title;
+                                    clicked => {
+                                        root.settings-section = category.key;
+                                        root.settings-query = "";
+                                        if (category.key == "updates" && !root.changelog-loaded) { root.changelog-load(false); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Theme.border; }
+            Rectangle {
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    spacing: 0;
+                    Rectangle {
+                        height: 78px;
+                        HorizontalLayout {
+                            padding-left: 20px; padding-right: 12px;
+                            VerticalLayout {
+                                alignment: center; spacing: 4px;
+                                Text {
+                                    text: root.settings-query != "" ? @tr("settings.search.results_title") : root.settings-categories[root.settings-section == "account" ? 0 : root.settings-section == "appearance" ? 2 : root.settings-section == "notifications" ? 3 : root.settings-section == "privacy" ? 4 : root.settings-section == "calls" ? 5 : root.settings-section == "downloads" ? 6 : root.settings-section == "security" ? 7 : root.settings-section == "updates" ? 8 : root.settings-section == "translation" ? 9 : 1].title;
+                                    color: Theme.text; font-size: 20px; font-weight: 700;
+                                }
+                                Text {
+                                    text: root.settings-query != "" ? @tr("settings.search.results_subtitle") : @tr("settings.search.default_subtitle");
+                                    color: Theme.text-dim; font-size: 12px;
+                                }
+                            }
+                            IconButton {
+                                icon: @image-url("../icons/arrow-left.svg");
+                                clicked => { root.settings-open = false; }
+                            }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+                    }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        padding: 20px;
+                        padding-top: 18px;
+                        spacing: 20px;
+                        alignment: start;
+                        if ((root.settings-query == "" && (root.settings-section == "general")) || (root.settings-query != "" && root.settings-matches(@tr("settings.general.startup.title") + " " + @tr("settings.general.launch_at_login")))): SettingsCard {
+                            title: @tr("settings.general.startup.title");
+                            SettingsRow {
+                                label: @tr("settings.general.launch_at_login");
+                                detail: @tr("settings.general.startup.description");
+                                icon: @image-url("../icons/settings.svg");
+                                Toggle {
+                                    on: root.autostart;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.autostart-changed(!root.autostart); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "appearance")) || (root.settings-query != "" && root.settings-matches(@tr("settings.appearance.title") + " " + @tr("settings.appearance.theme") + " " + @tr("settings.appearance.style") + " " + @tr("settings.language.title")))): SettingsCard {
+                            title: @tr("settings.appearance.title");
+                            SettingsRow {
+                                label: @tr("settings.appearance.theme");
+                                detail: @tr("settings.appearance.theme.description");
+                                icon: @image-url("../icons/eye.svg");
+                                ComboBox {
+                                    width: min(210px, root.win-width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: [@tr("settings.appearance.theme_dark"), @tr("settings.appearance.theme_light"), @tr("settings.language.system")];
+                                    current-value: root.theme-mode == "dark" ? @tr("settings.appearance.theme_dark") : root.theme-mode == "light" ? @tr("settings.appearance.theme_light") : @tr("settings.language.system");
+                                    selected(value) => {
+                                        root.theme-mode = value == @tr("settings.appearance.theme_dark") ? "dark" : value == @tr("settings.appearance.theme_light") ? "light" : "system";
+                                        root.theme-changed(root.theme-mode);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.appearance.style");
+                                detail: @tr("settings.appearance.style.description");
+                                icon: @image-url("../icons/list-details.svg");
+                                ComboBox {
+                                    width: min(210px, root.win-width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: [@tr("settings.appearance.style_glass"), @tr("settings.appearance.style_opaque")];
+                                    current-value: root.theme-style == "glass" ? @tr("settings.appearance.style_glass") : @tr("settings.appearance.style_opaque");
+                                    selected(value) => {
+                                        root.theme-style = value == @tr("settings.appearance.style_glass") ? "glass" : "opaque";
+                                        root.style-changed(root.theme-style);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.language.title");
+                                detail: @tr("settings.language.description");
+                                icon: @image-url("../icons/users.svg");
+                                ComboBox {
+                                    width: min(210px, root.win-width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: ["Português", "English", @tr("settings.language.system")];
+                                    current-value: root.language-mode == "pt" ? "Português" : root.language-mode == "en" ? "English" : @tr("settings.language.system");
+                                    selected(value) => {
+                                        root.language-mode = value == "Português" ? "pt" : value == "English" ? "en" : "system";
+                                        root.language-changed(root.language-mode);
+                                    }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "calls")) || (root.settings-query != "" && root.settings-matches(@tr("settings.calls.title") + " " + @tr("settings.calls.microphone") + " " + @tr("settings.calls.speaker") + " " + @tr("settings.calls.camera")))): SettingsCard {
+                            title: @tr("settings.calls.title");
+                            hint: @tr("settings.calls.devices_hint");
+                            SettingsRow {
+                                label: @tr("settings.calls.microphone");
+                                icon: @image-url("../icons/microphone.svg");
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.mic-devices;
+                                    current-value: root.mic-device;
+                                    selected(value) => {
+                                        root.mic-device = value;
+                                        root.device-changed("mic", value);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.calls.speaker");
+                                icon: @image-url("../icons/volume.svg");
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.speaker-devices;
+                                    current-value: root.speaker-device;
+                                    selected(value) => {
+                                        root.speaker-device = value;
+                                        root.device-changed("speaker", value);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.calls.camera");
+                                icon: @image-url("../icons/video.svg");
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.camera-devices;
+                                    current-value: root.camera-device;
+                                    selected(value) => {
+                                        root.camera-device = value;
+                                        root.device-changed("camera", value);
+                                    }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "privacy")) || (root.settings-query != "" && root.settings-matches(@tr("settings.privacy.title") + " " + @tr("settings.privacy.read_receipts") + " " + @tr("settings.privacy.apply_deletions") + " " + @tr("settings.privacy.blur_names") + " " + @tr("settings.privacy.blur_photos") + " " + @tr("settings.privacy.blur_messages") + " " + @tr("settings.privacy.blur_media")))): SettingsCard {
+                            title: @tr("settings.privacy.title");
+                            hint: @tr("settings.privacy.hint");
+                            SettingsRow {
+                                label: @tr("settings.privacy.read_receipts");
+                                detail: @tr("settings.privacy.read_receipts.description");
+                                icon: @image-url("../icons/check.svg");
+                                Toggle {
+                                    on: root.send-receipts;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.send-receipts-changed(!root.send-receipts); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.privacy.apply_deletions");
+                                detail: @tr("settings.privacy.apply_deletions.description");
+                                icon: @image-url("../icons/trash.svg");
+                                Toggle {
+                                    on: root.apply-deletions;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.apply-deletions-changed(!root.apply-deletions); }
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                Text {
+                                    text: @tr("settings.privacy.blur_hint");
+                                    color: Theme.text-dim;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.privacy.blur_names");
+                                detail: @tr("settings.privacy.blur_names.description");
+                                Toggle {
+                                    label: @tr("settings.privacy.blur_names");
+                                    on: root.blur-names;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("names", !root.blur-names); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.privacy.blur_photos");
+                                detail: @tr("settings.privacy.blur_photos.description");
+                                Toggle {
+                                    label: @tr("settings.privacy.blur_photos");
+                                    on: root.blur-photos;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("photos", !root.blur-photos); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.privacy.blur_messages");
+                                detail: @tr("settings.privacy.blur_messages.description");
+                                Toggle {
+                                    label: @tr("settings.privacy.blur_messages");
+                                    on: root.blur-messages;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("messages", !root.blur-messages); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.privacy.blur_media");
+                                detail: @tr("settings.privacy.blur_media.description");
+                                Toggle {
+                                    label: @tr("settings.privacy.blur_media");
+                                    on: root.blur-media;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.privacy-blur-changed("media", !root.blur-media); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("settings.category.notifications.title") + " " + @tr("settings.notifications.enabled") + " " + @tr("settings.notifications.previews")))): SettingsCard {
+                            title: @tr("settings.category.notifications.title");
+                            SettingsRow {
+                                label: @tr("settings.notifications.enabled");
+                                icon: @image-url("../icons/bell.svg");
+                                detail: @tr("settings.notifications.enabled.description");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.notifications.enabled");
+                                    on: root.notifications;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.notifications-changed(!root.notifications); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.notifications.previews");
+                                icon: @image-url("../icons/message-circle.svg");
+                                detail: @tr("settings.notifications.previews.description");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.notifications.previews");
+                                    on: root.notify-previews;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.notify-previews-changed(!root.notify-previews); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "security")) || (root.settings-query != "" && root.settings-matches(@tr("settings.security.title") + " " + @tr("security.unlock.pin_placeholder")))): SettingsCard {
+                            title: @tr("settings.security.title");
+                            VerticalLayout {
+                                padding: 14px;
+                                padding-top: 10px;
+                                spacing: 10px;
+                                alignment: start;
+                                Text {
+                                    text: root.pin-set
+                                        ? @tr("settings.security.pin_enabled_hint")
+                                        : @tr("settings.security.pin_disabled_hint");
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                                current-pin := LineEdit {
+                                    height: root.pin-set ? 36px : 0px;
+                                    visible: root.pin-set;
+                                    input-type: password;
+                                    placeholder-text: @tr("settings.security.current_pin");
+                                }
+                                new-pin := LineEdit {
+                                    height: 36px;
+                                    input-type: password;
+                                    placeholder-text: @tr("settings.security.new_pin");
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    alignment: start;
+                                    Button {
+                                        height: 34px;
+                                        text: root.pin-set ? @tr("settings.security.change_pin") : @tr("settings.security.set_pin");
+                                        primary: true;
+                                        clicked => {
+                                            root.save-pin(current-pin.text, new-pin.text);
+                                            new-pin.text = "";
+                                        }
+                                    }
+                                    Button {
+                                        visible: root.pin-set;
+                                        height: 34px;
+                                        text: @tr("settings.security.remove_pin");
+                                        clicked => {
+                                            root.remove-pin(current-pin.text);
+                                            current-pin.text = "";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "downloads")) || (root.settings-query != "" && root.settings-matches(@tr("settings.downloads.title") + " " + @tr("settings.downloads.photos") + " " + @tr("settings.downloads.audio") + " " + @tr("settings.downloads.videos") + " " + @tr("settings.downloads.documents") + " " + @tr("settings.downloads.stickers")))): SettingsCard {
+                            title: @tr("settings.downloads.title");
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                padding-top: 8px;
+                                padding-bottom: 4px;
+                                Text { text: @tr("settings.downloads.voice_hint"); color: Theme.text-dim; font-size: 12px; wrap: word-wrap; }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.downloads.photos");
+                                detail: @tr("settings.downloads.photos.description");
+                                icon: @image-url("../icons/photo.svg");
+                                Toggle {
+                                    on: root.auto-download-photos;
+                                    clicked => { root.auto-download-photos-changed(!root.auto-download-photos); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.downloads.audio");
+                                detail: @tr("settings.downloads.audio.description");
+                                icon: @image-url("../icons/music.svg");
+                                Toggle {
+                                    on: root.auto-download-audio;
+                                    clicked => { root.auto-download-audio-changed(!root.auto-download-audio); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.downloads.videos");
+                                detail: @tr("settings.downloads.videos.description");
+                                icon: @image-url("../icons/video.svg");
+                                Toggle {
+                                    on: root.auto-download-video;
+                                    clicked => { root.auto-download-video-changed(!root.auto-download-video); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.downloads.documents");
+                                detail: @tr("settings.downloads.documents.description");
+                                icon: @image-url("../icons/file-text.svg");
+                                Toggle {
+                                    on: root.auto-download-documents;
+                                    clicked => { root.auto-download-documents-changed(!root.auto-download-documents); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.downloads.stickers");
+                                detail: @tr("settings.downloads.stickers.description");
+                                icon: @image-url("../icons/sticker-2.svg");
+                                Toggle {
+                                    on: root.auto-download-stickers;
+                                    clicked => { root.auto-download-stickers-changed(!root.auto-download-stickers); }
+                                }
+                            }
+                        }
+                    if ((root.settings-query == "" && root.settings-section == "translation") || (root.settings-query != "" && root.settings-matches(@tr("translation.settings.title") + " " + @tr("translation.settings.category_description") + " " + @tr("translation.settings.source_language") + " " + @tr("translation.settings.target_language") + " " + @tr("translation.models.title")))): SettingsCard {
+                        title: @tr("translation.settings.title");
+                        hint: @tr("translation.settings.hint");
+                        SettingsRow {
+                            label: @tr("translation.service.title");
+                            detail: (root.translation-status == "Stopped" ? @tr("translation.service.stopped") : root.translation-status)
+                                + (root.translation-detail != "" ? " · " + root.translation-detail : "");
+                            icon: @image-url("../icons/translate.svg");
+                            DialogButton {
+                                label: root.translation-busy ? @tr("translation.service.working") : root.translation-running ? @tr("update.action.restart") : @tr("translation.service.start");
+                                enabled: !root.translation-busy;
+                                clicked => { root.translation-action(root.translation-running ? "restart" : "start"); }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.service.stop_title");
+                            detail: @tr("translation.service.stop_description");
+                            DialogButton {
+                                label: @tr("translation.service.stop");
+                                enabled: root.translation-running || root.translation-busy;
+                                clicked => { root.translation-action("stop"); }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.settings.source_language");
+                            detail: @tr("translation.settings.source_language_description");
+                            ComboBox {
+                                width: min(210px, root.win-width * 0.25);
+                                height: 34px;
+                                y: (parent.height - self.height) / 2;
+                                enabled: !root.translation-busy;
+                                model: ["auto", "en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
+                                current-value: root.translation-source;
+                                selected(value) => { root.translation-language("source", value); }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.settings.target_language");
+                            detail: @tr("translation.settings.target_language_description");
+                            ComboBox {
+                                width: min(210px, root.win-width * 0.25);
+                                height: 34px;
+                                y: (parent.height - self.height) / 2;
+                                enabled: !root.translation-busy;
+                                model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
+                                current-value: root.translation-target;
+                                selected(value) => { root.translation-language("target", value); }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.models.source_language");
+                            detail: @tr("translation.models.source_language_description");
+                            ComboBox {
+                                width: min(210px, root.win-width * 0.25);
+                                height: 34px;
+                                y: (parent.height - self.height) / 2;
+                                enabled: !root.translation-busy;
+                                model: ["en", "pt", "es", "fr", "de", "zh", "ja", "ru", "it", "ar"];
+                                current-value: root.translation-model-source;
+                                selected(value) => { root.translation-model-source = value; }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.models.title");
+                            detail: root.translation-detail != "" ? root.translation-detail
+                                : root.translation-model-source == root.translation-target
+                                ? @tr("translation.models.choose_different_languages")
+                                : @tr("translation.models.install_pair", root.translation-model-source, root.translation-target);
+                            DialogButton {
+                                label: root.translation-busy ? @tr("translation.service.working") : @tr("translation.models.install");
+                                enabled: !root.translation-busy && root.translation-model-source != root.translation-target;
+                                clicked => { root.translation-install(root.translation-model-source); }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.models.installed_title");
+                            detail: root.translation-models != "" ? root.translation-models : @tr("translation.models.none_installed");
+                            DialogButton {
+                                label: @tr("translation.models.refresh");
+                                enabled: !root.translation-busy;
+                                clicked => { root.translation-action("refresh"); }
+                            }
+                        }
+                        SettingsRow {
+                            label: @tr("translation.pairs.title");
+                            detail: root.translation-pairs != "" ? root.translation-pairs : @tr("translation.pairs.refresh_hint");
+                        }
+                    }
+                        if ((root.settings-query == "" && (root.settings-section == "updates")) || (root.settings-query != "" && root.settings-matches(@tr("settings.about.title") + " " + @tr("settings.category.updates.title")))): SettingsCard {
+                            title: @tr("settings.about.title");
+                            SettingsRow {
+                                label: "Zapive";
+                                detail: root.update-state == 1 ? @tr("settings.about.update_available", root.update-version)
+                                    : root.update-state == 2 ? @tr("settings.about.update_downloading_button")
+                                    : root.update-state == 3 ? @tr("settings.about.update_restart_required", root.update-version)
+                                    : root.update-state == 4 ? @tr("settings.about.update_failed", root.update-error)
+                                    : @tr("settings.about.version", root.app-version);
+                                DialogButton {
+                                    y: (parent.height - self.height) / 2;
+                                    primary: root.update-state != 0;
+                                    enabled: root.update-state != 2;
+                                    label: root.update-state == 1 ? @tr("settings.about.update_action")
+                                        : root.update-state == 2 ? @tr("settings.about.update_downloading_button")
+                                        : root.update-state == 3 ? @tr("settings.about.restart_action")
+                                        : root.update-state == 4 ? @tr("settings.about.retry_action")
+                                        : @tr("settings.about.check_updates");
+                                    clicked => {
+                                        if (root.update-state == 1 || root.update-state == 4) { root.update-apply(); }
+                                        else if (root.update-state == 3) { root.update-restart(); }
+                                        else if (root.update-state == 0) { root.update-check(); }
+                                    }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("update.whats_new.title") + " " + @tr("settings.category.updates.title")))): SettingsCard {
+                            title: @tr("update.whats_new.title");
+                            hint: @tr("update.release.newer_versions_hint");
+                            SettingsRow {
+                                label: root.update-state == 3 ? @tr("settings.about.update_restart_required", root.update-version)
+                                    : root.changelog-has-new || root.update-state > 0 ? @tr("update.version.available_title")
+                                    : root.changelog-verified ? @tr("update.release.up_to_date") : @tr("settings.updates.whats_new");
+                                detail: @tr("update.release.installed_version", root.app-version);
+                                DialogButton {
+                                    label: @tr("update.whats_new.title");
+                                    clicked => { root.show-whats-new(); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && root.settings-section == "updates") || (root.settings-query != "" && root.settings-matches(@tr("update.release.history.title") + " changelog"))): SettingsCard {
+                            title: @tr("update.release.history.title");
+                            hint: @tr("update.release.original_language_hint");
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                alignment: start;
+                                HorizontalLayout {
+                                    alignment: start;
+                                    DialogButton {
+                                        label: root.changelog-loading ? @tr("pdf.loading") : root.changelog-loaded ? @tr("update.release.refresh_history") : @tr("update.release.load_history");
+                                        enabled: !root.changelog-loading;
+                                        clicked => { root.changelog-load(true); }
+                                    }
+                                }
+                                if root.changelog-error != "": Text {
+                                    text: root.changelog-error;
+                                    color: Theme.text-dim;
+                                    wrap: word-wrap;
+                                }
+                                if root.changelog-loaded && !root.changelog-loading && root.releases.length == 0 && root.changelog-error == "": Text {
+                                    text: @tr("update.release.empty_history");
+                                    color: Theme.text-dim;
+                                    wrap: word-wrap;
+                                }
+                                for release in root.releases: VerticalLayout {
+                                    if !release.newer: VerticalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    Text {
+                                        text: release.installed ? @tr("update.release.installed_version_suffix", release.tag) : release.tag;
+                                        color: Theme.text;
+                                        font-size: 15px;
+                                        font-weight: 700;
+                                        wrap: word-wrap;
+                                    }
+                                    Text { text: release.date; color: Theme.text-dim; font-size: 12px; }
+                                    Text {
+                                        text: release.notes != "" ? release.notes : @tr("update.release.notes_empty");
+                                        color: Theme.text;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
+                                    Rectangle { height: 1px; background: Theme.border; }
+                                    }
+                                }
+                                if root.changelog-more: HorizontalLayout {
+                                    alignment: start;
+                                    DialogButton {
+                                        label: @tr("update.release.load_older");
+                                        enabled: !root.changelog-loading;
+                                        clicked => { root.changelog-load(false); }
+                                    }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "account")) || (root.settings-query != "" && root.settings-matches(@tr("settings.account.title") + " " + @tr("settings.account.logout_action")))): SettingsCard {
+                            title: @tr("settings.account.title");
+                            for acc in root.accounts: AccountRow {
+                                account: acc;
+                                clicked => { if (!acc.active) { root.switch-account(acc.id); } }
+                                remove => { root.remove-account(acc.id); }
+                            }
+                            if root.can-add-account: MenuRow {
+                                icon: @image-url("../icons/user-plus.svg");
+                                label: @tr("account.menu.add");
+                                clicked => { root.add-account(); }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.account.logout_description");
+                                DialogButton {
+                                    y: (parent.height - self.height) / 2;
+                                    primary: true;
+                                    danger: true;
+                                    label: @tr("settings.account.logout_action");
+                                    clicked => { root.logout(); }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.settings-status != "": Rectangle {
+                    height: status-text.preferred-height + 20px;
+                    background: #ffbc38.with-alpha(0.12);
+                    status-text := Text {
+                        x: 24px;
+                        y: 10px;
+                        width: parent.width - 48px;
+                        text: root.settings-status;
+                        color: #ffbc38;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+        }
+    }
+}

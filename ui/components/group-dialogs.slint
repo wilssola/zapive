@@ -1,0 +1,353 @@
+import { LineEdit, ListView, VerticalBox } from "std-widgets.slint";
+import { Avatar } from "avatar.slint";
+import { DialogButton } from "dialog-button.slint";
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { MemberRow } from "rows/member.slint";
+import { Theme } from "theme.slint";
+import { ChatItem, MemberItem } from "types.slint";
+
+export component ShareLayer inherits ModalLayer {
+    in property <string> share-name;
+    in property <image> share-avatar;
+    in property <bool> share-has-avatar;
+    in property <string> share-initial;
+    in property <int> share-color-idx;
+    in property <bool> share-sending;
+    callback share-accept();
+    callback share-cancel();
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: 500px;
+        height: share-col.preferred-height + 48px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        TouchArea { }
+        share-col := VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+            width: parent.width;
+            HorizontalLayout {
+                alignment: center;
+                Avatar {
+                    width: 66px;
+                    height: 66px;
+                    src: root.share-avatar;
+                    has-image: root.share-has-avatar;
+                    initial: root.share-initial;
+                    color-idx: root.share-color-idx;
+                }
+            }
+            Text {
+                text: @tr("chat.history_share.title", root.share-name);
+                color: Theme.text;
+                font-size: 18px;
+                font-weight: 700;
+                wrap: word-wrap;
+                width: parent.width - 48px;
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                alignment: start;
+                Text {
+                    text: root.share-name + " ";
+                    color: Theme.text;
+                    font-size: 14px;
+                }
+                Text {
+                    text: @tr("chat.history_share.prefix");
+                    color: Theme.text;
+                    font-size: 14px;
+                }
+                Text {
+                    text: @tr("chat.history_share.highlight");
+                    color: Theme.accent;
+                    font-size: 14px;
+                }
+                Text {
+                    text: @tr("chat.history_share.suffix");
+                    color: Theme.text;
+                    font-size: 14px;
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                DialogButton {
+                    label: @tr("chat.history_share.cancel");
+                    clicked => { root.share-cancel(); }
+                }
+                DialogButton {
+                    label: root.share-sending ? @tr("chat.history_share.sending") : @tr("chat.history_share.send");
+                    primary: true;
+                    enabled: !root.share-sending;
+                    clicked => { root.share-accept(); }
+                }
+            }
+        }
+    }
+}
+
+export component NewListLayer inherits ModalLayer {
+    callback menu-new-list(string);
+    in-out property <bool> new-list-open;
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: 380px;
+        height: list-col.preferred-height + 44px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        TouchArea { }
+        list-col := VerticalLayout {
+            padding: 22px;
+            spacing: 14px;
+            width: parent.width;
+            Text {
+                text: @tr("chat.list.new_title");
+                color: Theme.text;
+                font-size: 17px;
+                font-weight: 700;
+            }
+            Text {
+                text: @tr("chat.list.new_hint");
+                color: Theme.text-dim;
+                font-size: 13px;
+                wrap: word-wrap;
+                width: parent.width - 44px;
+            }
+            new-list-name := LineEdit {
+                placeholder-text: @tr("chat.list.name_placeholder");
+                accepted => {
+                    root.menu-new-list(self.text);
+                    self.text = "";
+                    root.new-list-open = false;
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                DialogButton {
+                    label: @tr("chat.list.new_cancel");
+                    clicked => { root.new-list-open = false; }
+                }
+                DialogButton {
+                    label: @tr("chat.list.create");
+                    primary: true;
+                    clicked => {
+                        root.menu-new-list(new-list-name.text);
+                        new-list-name.text = "";
+                        root.new-list-open = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component MemberPickLayer inherits ModalLayer {
+    in-out property <bool> member-pick-open;
+    in property <[MemberItem]> member-rows;
+    in property <int> member-count;
+    callback member-search(string);
+    callback member-toggle(string);
+    callback member-confirm();
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: 420px;
+        height: 560px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        TouchArea { }
+        VerticalBox {
+            padding: 18px;
+            spacing: 10px;
+            HorizontalLayout {
+                Text {
+                    text: @tr("group.add_member.title");
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    icon: @image-url("../icons/x.svg");
+                    clicked => { root.member-pick-open = false; }
+                }
+            }
+            LineEdit {
+                placeholder-text: @tr("group.add_member.search_placeholder");
+                edited => { root.member-search(self.text); }
+            }
+            ListView {
+                for m in root.member-rows: MemberRow {
+                    item: m;
+                    pickable: true;
+                    clicked => { root.member-toggle(m.jid); }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                Text {
+                    text: @tr("group.add_member.selected_count.one" | "group.add_member.selected_count.other" % root.member-count);
+                    color: Theme.text-dim;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                DialogButton {
+                    label: @tr("group.add_member.confirm");
+                    primary: true;
+                    enabled: root.member-count > 0;
+                    clicked => { root.member-confirm(); }
+                }
+            }
+        }
+    }
+}
+
+export component ForwardLayer inherits ModalLayer {
+    in-out property <bool> forward-open;
+    in property <[ChatItem]> forward-rows;
+    in property <string> forward-preview-text;
+    in property <image> forward-preview-image;
+    in property <bool> forward-preview-has-image;
+    callback forward-search(string);
+    callback forward-to(string);
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: 420px;
+        height: 540px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        border-radius: 12px;
+        TouchArea { }
+        VerticalBox {
+            padding: 18px;
+            spacing: 10px;
+            HorizontalLayout {
+                Text {
+                    text: @tr("message.forward.title");
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    icon: @image-url("../icons/x.svg");
+                    clicked => { root.forward-open = false; }
+                }
+            }
+            Rectangle {
+                height: 38px;
+                border-radius: 19px;
+                background: Theme.pill;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../icons/search.svg");
+                            colorize: Theme.text-dim;
+                            width: 16px;
+                            height: 16px;
+                        }
+                    }
+                    fwd-search := TextInput {
+                        color: Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        single-line: true;
+                        edited => { root.forward-search(self.text); }
+                    }
+                }
+                if fwd-search.text == "": Text {
+                    text: @tr("message.forward.search_placeholder");
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                    x: 40px;
+                    vertical-alignment: center;
+                    height: parent.height;
+                }
+            }
+            ListView {
+                for chat[i] in root.forward-rows: Rectangle {
+                    height: 56px;
+                    background: fwd-touch.has-hover ? Theme.hover : transparent;
+                    border-radius: 8px;
+                    fwd-touch := TouchArea {
+                        clicked => { root.forward-to(chat.jid); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Avatar {
+                                width: 40px;
+                                height: 40px;
+                                src: chat.avatar;
+                                has-image: chat.hasAvatar;
+                                initial: chat.initial;
+                                color-idx: chat.colorIdx;
+                            }
+                        }
+                        Text {
+                            text: chat.name;
+                            color: Theme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                height: 56px;
+                border-radius: 8px;
+                background: Theme.pill;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 10px;
+                    if root.forward-preview-has-image: Image {
+                        source: root.forward-preview-image;
+                        width: 40px;
+                        height: 40px;
+                        image-fit: cover;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    Text {
+                        text: root.forward-preview-text;
+                        color: Theme.text-dim;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+    }
+}
