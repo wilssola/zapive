@@ -204,6 +204,27 @@ mod raw_proto {
     }
 }
 
+// The level of a one-to-one message is whatever the peer reached. In a
+// group the delivered/read ticks need EVERY other member: the value is the
+// lowest level across the roster, and an unknown roster never goes past
+// the server ack (2) so the bubble cannot turn blue early.
+pub fn aggregate_status(group: bool, current: u32, incoming: u32, receipts: &HashMap<String, ParticipantReceipt>, others: &[String]) -> u32 {
+    if !group {
+        return current.max(incoming);
+    }
+    if others.is_empty() {
+        return current.max(incoming.min(2));
+    }
+    let lowest = others.iter()
+        .map(|jid| receipts.get(jid).map_or(0, ParticipantReceipt::status))
+        .min()
+        .unwrap_or(0);
+    // played (5) counts as read for the blue ticks
+    current.max(lowest.min(5))
+}
+
+// ReceiptType-independent core of the mapping: what a receipt's kind means
+// for the ticks. `None` = not a delivery state (retry, errors, ...).
 pub fn ticks_for(m: &StoredMessage) -> (&'static str, bool) {
     if !m.from_me {
         return ("", false);
@@ -1331,10 +1352,18 @@ impl Store {
     pub fn apply_receipt(&mut self, jid: &str, id: &str, participant: &str, status: u32, timestamp: i64) -> bool {
         let participant = self.canon_owned(&normalize_jid(participant));
         if participant.is_empty() || self.self_jids.iter().any(|s| self.canon(s) == participant) { return false; }
+        if !self.messages.get(jid).and_then(|v| v.iter().find(|m| m.id == id)).is_some_and(|m| m.from_me) { return false; }
         let Some(m) = self.messages.get_mut(jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return false; };
-        if !m.from_me { return false; }
         m.receipts.entry(participant).or_default().promote(status, timestamp);
-        m.status = m.status.max(status);
+        let group = is_group(jid);
+        let roster: Vec<String> = if group {
+            self.members.get(jid).map(|list| list.iter().map(|member| self.canon_owned(&normalize_jid(&member.jid))).collect()).unwrap_or_default()
+        } else { Vec::new() };
+        let me = self.self_jids.clone();
+        let Some(m) = self.messages.get_mut(jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return false; };
+        let others: Vec<String> = roster.into_iter().filter(|j| !me.iter().any(|s| s == j)).collect();
+        let next = aggregate_status(group, m.status, status, &m.receipts, &others);
+        m.status = m.status.max(next);
         self.dirty_jids.insert(jid.into());
         true
     }
@@ -2022,7 +2051,8 @@ mod tests {
         let receipt = &restored.receipts["person@s.whatsapp.net"];
         assert_eq!(receipt.delivered, Some(300));
         assert_eq!(receipt.read, Some(400));
-        assert_eq!(restored.status, 4);
+        // `other` has not received it, so the group as a whole is not read.
+        assert!(restored.status < 3);
         let mut only_read = ParticipantReceipt::default();
         only_read.promote(4, 500);
         assert_eq!(only_read.status(), 4);

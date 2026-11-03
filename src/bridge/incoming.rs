@@ -459,6 +459,22 @@ impl Bridge {
         self.schedule_save();
     }
 
+    // Another device of ours read (or played) these messages: nothing is
+    // unread here for that chat any more.
+    pub fn on_read_elsewhere(&mut self, chat: &str, ids: &[String]) {
+        let jid = self.store.canon_owned(&normalize_jid(chat));
+        if ids.is_empty() { return; }
+        if let Some(vault) = &self.vault { for id in ids { self.store.hydrate_id(vault, &jid, id); } }
+        let newest_incoming = self.store.messages_for(&jid).iter().rev().find(|m| !m.from_me && m.kind != MessageKind::System).map(|m| m.id.clone());
+        if let Some(newest) = newest_incoming && ids.contains(&newest) {
+            self.on_mark_read(&jid, true);
+        } else if let Some(meta) = self.store.chats.get_mut(&jid) {
+            meta.unread = meta.unread.saturating_sub(ids.len() as u32);
+            if meta.unread == 0 { meta.mentioned = false; }
+            self.schedule_refresh_chats();
+        }
+    }
+
     pub fn on_mark_read(&mut self, jid: &str, read: bool) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
         if let Some(meta) = self.store.chats.get_mut(&jid) {

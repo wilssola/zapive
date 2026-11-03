@@ -657,6 +657,40 @@ fn fail_call(reason: &str) {
     ui_apply(move |b| b.on_call_failed(&reason));
 }
 
+// What a receipt kind means for the ticks: 2 = sent to the server only
+// (a downgraded delivery ack, never past that), 3 delivered, 4 read,
+// 5 played; 0 = not a delivery state.
+pub(crate) fn receipt_status(kind: &ReceiptType) -> u32 {
+    match kind {
+        ReceiptType::Sent => 2,
+        ReceiptType::Delivered => 3,
+        ReceiptType::Read => 4,
+        ReceiptType::Played => 5,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+
+    #[test]
+    fn receipt_kinds_map_to_tick_levels() {
+        assert_eq!(receipt_status(&ReceiptType::Sent), 2);
+        assert_eq!(receipt_status(&ReceiptType::Delivered), 3);
+        assert_eq!(receipt_status(&ReceiptType::Read), 4);
+        assert_eq!(receipt_status(&ReceiptType::Played), 5);
+    }
+
+    #[test]
+    fn other_kinds_never_touch_the_ticks() {
+        for kind in [ReceiptType::Retry, ReceiptType::ServerError, ReceiptType::ReadSelf, ReceiptType::PlayedSelf,
+            ReceiptType::Sender, ReceiptType::Inactive, ReceiptType::PeerMsg, ReceiptType::HistorySync, ReceiptType::Other("x".into())] {
+            assert_eq!(receipt_status(&kind), 0, "{kind:?}");
+        }
+    }
+}
+
 // Sync event tap on the library's dispatch thread: converts each event
 // into UI work (via ui_apply) or a command back to the executor.
 struct Pump {
@@ -730,12 +764,20 @@ impl EventHandler for Pump {
                 crate::bridge::wa_apply_at(self.epoch, move |b| b.on_outbox_ack(&id, error));
             }
             Event::Receipt(receipt) => {
-                let status = match receipt.r#type {
-                    ReceiptType::Delivered => 3,
-                    ReceiptType::Read => 4,
-                    ReceiptType::Played => 5,
-                    _ => 0,
-                };
+                match receipt.r#type {
+                    ReceiptType::Retry | ReceiptType::EncRekeyRetry | ReceiptType::ServerError => {
+                        eprintln!("[receipt] {:?} for {} message(s)", receipt.r#type, receipt.message_ids.len());
+                    }
+                    ReceiptType::ReadSelf | ReceiptType::PlayedSelf => {
+                        // Read on another device of ours: the local unread goes away.
+                        let chat = receipt.source.chat.to_non_ad_string();
+                        let ids: Vec<String> = receipt.message_ids.iter().map(|i| i.to_string()).collect();
+                        ui_apply(move |b| b.on_read_elsewhere(&chat, &ids));
+                        return;
+                    }
+                    _ => {}
+                }
+                let status = receipt_status(&receipt.r#type);
                 if status == 0 {
                     return;
                 }
