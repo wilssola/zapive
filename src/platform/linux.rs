@@ -78,6 +78,9 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
         notification.image_path(&path.to_string_lossy());
     }
     if let Some(token) = payload.token {
+        // "default" is the body click; servers only report it when the
+        // notification registered the action.
+        notification.action("default", &crate::i18n::t("notify.open"));
         if payload.play {
             notification.action(&format!("play:{token}"), &crate::i18n::t("notify.play"));
         }
@@ -86,14 +89,25 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
         }
         std::thread::spawn(move || {
             let Ok(handle) = notification.show() else { return };
-            let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
-                if let notify_rust::NotificationResponse::Action(action) = response {
-                    if let Some((action, token)) = action.split_once(':') {
-                        let token = token.to_string();
-                        if action == "play" {
-                            crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+            let _ = handle.wait_for_response(move |response: &notify_rust::NotificationResponse| {
+                use notify_rust::NotificationResponse as Response;
+                let open = |token: String| {
+                    crate::bridge::ui_apply(move |bridge| bridge.on_notification_activated(&token));
+                };
+                match response {
+                    Response::Default => open(token),
+                    Response::Action(action) if action == "default" => open(token),
+                    Response::Action(action) => {
+                        if let Some((kind, action_token)) = action.split_once(':') {
+                            let action_token = action_token.to_string();
+                            match kind {
+                                "play" => crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&action_token)),
+                                "reply" => open(action_token),
+                                _ => {}
+                            }
                         }
                     }
+                    _ => {}
                 }
             });
         });

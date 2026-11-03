@@ -326,6 +326,9 @@ msgstr "New message"
 msgid "notify.reply"
 msgstr "Reply"
 
+msgid "notify.open"
+msgstr "Abrir"
+
 msgid "notify.play"
 msgstr "Play"
 

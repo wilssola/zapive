@@ -5,11 +5,18 @@ pub(super) const NOTIFICATION_TOKEN_TTL: Duration = Duration::from_secs(60);
 
 pub(super) const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
 
+
 #[derive(Clone)]
 pub(super) struct NotificationToken {
     pub(super) jid: String,
     pub(super) msg_id: String,
     pub(super) expires: SystemTime,
+}
+
+// A token only opens something while it is fresh and still points at a
+// chat and a message this session knows about.
+pub(super) fn token_usable(expires: SystemTime, now: SystemTime, chat_known: bool, message_known: bool) -> bool {
+    expires > now && chat_known && message_known
 }
 
 // Every media kind gets a translated one-liner in notifications.
@@ -129,7 +136,7 @@ impl Bridge {
                     }
                 });
             }
-            n => {
+            _ => {
                 if self.vault.as_ref().is_none_or(|vault| vault.locked()) { return; }
                 let mut names: Vec<&str> = Vec::new();
                 if self.notify_previews {
@@ -149,7 +156,21 @@ impl Bridge {
                 } else {
                     ta("notify.new_messages", &[&count.to_string(), &names.join(", ")])
                 };
-                crate::platform::toast(&t("notify.app_name"), &text, crate::platform::ToastPayload::default());
+                // When every banner in the group belongs to one chat, a
+                // click opens that chat; otherwise it only raises the app.
+                let live: Vec<&(String, String, String, String)> = queue.iter()
+                    .filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted()))
+                    .collect();
+                let single_chat = live.first().map(|entry| entry.2.clone())
+                    .filter(|jid| live.iter().all(|entry| &entry.2 == jid));
+                let mut payload = crate::platform::ToastPayload::default();
+                if let Some(jid) = single_chat
+                    && let Some(last) = live.last().map(|entry| entry.3.clone())
+                {
+                    if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                    payload.token = self.register_notification_token(&jid, &last);
+                }
+                crate::platform::toast(&t("notify.app_name"), &text, payload);
             }
         }
     }
@@ -201,18 +222,35 @@ impl Bridge {
         if let Some(path) = self.notification_thumbnails.remove(token) {
             let _ = std::fs::remove_file(path);
         }
-        if item.expires <= SystemTime::now()
-            || !self.store.chats.contains_key(&item.jid)
-            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
-        {
+        let chat_known = self.store.chats.contains_key(&item.jid);
+        let message_known = self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id);
+        if !token_usable(item.expires, SystemTime::now(), chat_known, message_known) {
             return None;
         }
         Some(item)
     }
 
+    // Bring the window back from the tray or the taskbar. Showing goes
+    // through Slint, which tracks visibility itself; the platform call then
+    // wins the foreground the click entitles us to.
+    pub(super) fn raise_main_window(&mut self) {
+        let _ = self.ui.show();
+        crate::platform::focus_window();
+    }
+
+    // A click on a toast that has no conversation attached (grouped
+    // summaries, call banners): just bring the app forward. Only the
+    // Windows toast reports a token-less body click.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn on_notification_open_app(&mut self) {
+        self.raise_main_window();
+    }
+
     pub fn on_notification_activated(&mut self, token: &str) {
+        self.raise_main_window();
         let Some(item) = self.take_notification_token(token) else { return };
         self.open_dm(&item.jid, None);
+        self.raise_main_window();
     }
 
     pub fn on_notification_play(&mut self, token: &str) {
@@ -281,5 +319,30 @@ impl Bridge {
         });
         self.spin_audio_at(0.0);
         self.sync_mini_player();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_is_usable_only_when_fresh_and_resolvable() {
+        let now = SystemTime::now();
+        let later = now + Duration::from_secs(1);
+        let earlier = now - Duration::from_secs(1);
+        assert!(token_usable(later, now, true, true));
+        assert!(!token_usable(now, now, true, true));
+        assert!(!token_usable(earlier, now, true, true));
+        assert!(!token_usable(later, now, false, true));
+        assert!(!token_usable(later, now, true, false));
+        assert!(!token_usable(later, now, false, false));
+    }
+
+    #[test]
+    fn default_ttl_leaves_the_toast_clickable_for_a_minute() {
+        let now = SystemTime::now();
+        assert!(token_usable(now + NOTIFICATION_TOKEN_TTL, now + Duration::from_secs(59), true, true));
+        assert!(!token_usable(now + NOTIFICATION_TOKEN_TTL, now + Duration::from_secs(61), true, true));
     }
 }
