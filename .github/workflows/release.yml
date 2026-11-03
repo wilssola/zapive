@@ -9,17 +9,21 @@ on:
   push:
     branches: [master]
 
+# Least privilege: read-only by default. Only `version` (pushes the bump
+# commit and the tag) and `release` (creates the GitHub release) write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
       version: ${{ steps.bump.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Compute next version
@@ -112,13 +116,15 @@ jobs:
             target: macos-aarch64
             bin: zapive
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     env:
-      # Signing is optional throughout: each step runs only when its
-      # certificate secret exists, so forks still release unsigned.
-      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
-      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
-      MACOS_P12_BASE64: ${{ secrets.MACOS_P12_BASE64 }}
-      MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
+      # Signing is optional throughout: each signing step runs only when
+      # its certificate secret exists, so forks still release unsigned.
+      # Only these booleans live at job level; the secrets themselves are
+      # passed to the individual steps that use them, never to the build.
+      WINDOWS_SIGNING: ${{ secrets.WINDOWS_PFX_BASE64 != '' }}
+      MACOS_SIGNING: ${{ secrets.MACOS_P12_BASE64 != '' }}
       # Azure Artifact Signing (formerly Trusted Signing; the action kept
       # the old name) is optional: the signing steps only run when the
       # secrets are configured, so forks and local setups still release
@@ -128,7 +134,7 @@ jobs:
     steps:
       # The tag points at the version-bump commit the version job pushed,
       # so the build compiles exactly what the tag says.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.version.outputs.tag }}
       - name: Desktop libraries (Linux)
@@ -147,8 +153,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/fetch-ctranslate2.ps1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build
         run: cargo build --release --locked
 
@@ -170,7 +176,10 @@ jobs:
       #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
       #     timestamp-digest: SHA256
       - name: Sign binary (self-signed)
-        if: runner.os == 'Windows' && env.WINDOWS_PFX_BASE64 != ''
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNING == 'true'
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
         shell: pwsh
         run: packaging\windows\sign.ps1 -Path target\release\zapive.exe
       - name: Build installer (Windows)
@@ -179,7 +188,10 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.version }} packaging\windows\zapive.iss
       - name: Sign installer (self-signed)
-        if: runner.os == 'Windows' && env.WINDOWS_PFX_BASE64 != ''
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNING == 'true'
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
         shell: pwsh
         run: packaging\windows\sign.ps1 -Path dist\Zapive-Setup-${{ needs.version.outputs.version }}.exe
       # - name: Sign installer (Azure Artifact Signing)
@@ -205,7 +217,10 @@ jobs:
 
       # ---- macOS: .app bundle (icon + no Terminal window) inside a DMG.
       - name: Import signing certificate (macOS)
-        if: runner.os == 'macOS' && env.MACOS_P12_BASE64 != ''
+        if: runner.os == 'macOS' && env.MACOS_SIGNING == 'true'
+        env:
+          MACOS_P12_BASE64: ${{ secrets.MACOS_P12_BASE64 }}
+          MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
         run: |
           keychain="$RUNNER_TEMP/zapive.keychain-db"
           p12="$RUNNER_TEMP/zapive.p12"
@@ -222,7 +237,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           identity='-'
-          [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
+          [ "$MACOS_SIGNING" = true ] && identity='Zapive Self-Signed'
           bash packaging/macos/make-bundle.sh "${{ needs.version.outputs.version }}" "$identity"
 
       # The updater swaps this binary into the installed bundle, so it has
@@ -232,7 +247,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           identity='-'
-          [ -n "$MACOS_P12_BASE64" ] && identity='Zapive Self-Signed'
+          [ "$MACOS_SIGNING" = true ] && identity='Zapive Self-Signed'
           codesign --force --identifier io.github.wilssola.Zapive --sign "$identity" target/release/zapive
 
       # The self-updater downloads this zip; on Windows it is zipped after
@@ -250,7 +265,7 @@ jobs:
             files="$files ctranslate2.dll libiomp5md.dll"
           fi
           7z a "../../dist/zapive-${{ matrix.target }}.zip" $files || zip "../../dist/zapive-${{ matrix.target }}.zip" $files
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: zapive-${{ matrix.target }}
           path: dist/*
@@ -259,11 +274,13 @@ jobs:
     needs: [version, build]
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           merge-multiple: true
       - name: Test changelog generator
