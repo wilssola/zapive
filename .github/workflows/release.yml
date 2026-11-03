@@ -271,21 +271,14 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PYTHONUTF8: "1"
         run: |
-          tag="${{ needs.version.outputs.tag }}"
-          python3 .github/scripts/generate_changelog.py --to-tag "$tag" --output notes.md
-          # Checksums: listed in the notes and shipped as an asset, so a
-          # download can always be verified against the release page.
-          sha256sum Zapive-* zapive-*.zip > SHA256SUMS.txt
-          {
-            echo
-            echo "## SHA-256"
-            echo '```'
-            cat SHA256SUMS.txt
-            echo '```'
-          } >> notes.md
-          gh release create "$tag" \
-            --repo "${{ github.repository }}" \
-            --title "Zapive $tag" \
-            --notes-file notes.md \
-            Zapive-* zapive-*.zip SHA256SUMS.txt
+          # One call builds the notes (grouped by category, with commit/PR
+          # links, contributors, breaking-change migration text and the
+          # compare link), SHA256SUMS.txt in `sha256sum` format (the in-app
+          # updater parses it) and the downloads/verification section. That
+          # last section sits under a SHA-256 heading, which the app's
+          # "what's new" view hides.
+          python3 .github/scripts/generate_changelog.py             --repository "$GITHUB_REPOSITORY"             --to-tag "$TAG"             --assets-dir .             --checksums-output SHA256SUMS.txt             --output notes.md
+          gh release create "$TAG"             --repo "$GITHUB_REPOSITORY"             --title "Zapive $TAG"             --notes-file notes.md             Zapive-* zapive-*.zip SHA256SUMS.txt
