@@ -58,6 +58,7 @@ impl Bridge {
             mentioned: mentioned && unread > 0,
             pinned: meta.map(|c| c.pinned > 0).unwrap_or(false),
             muted: meta.map(|c| c.is_muted()).unwrap_or(false),
+            silenced_call: self.silenced_for(jid),
         }
     }
 

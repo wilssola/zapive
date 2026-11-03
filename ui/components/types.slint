@@ -36,6 +36,8 @@ export struct ChatItem {
     mentioned: bool,
     pinned: bool,
     muted: bool,
+    // A call from this chat is being held back (silenced).
+    silenced-call: bool,
 }
 
 // A message found by search, in the sidebar (name = chat) or inside the
@@ -138,6 +140,48 @@ export struct StickerCell {
     id: string,
     pic: image,
     ready: bool,
+}
+
+export struct PollOption {
+    name: string,
+    votes: int,
+    voted: bool,
+    // Newline separated names of who picked this option.
+    voters: string,
+}
+
+export struct PinnedItem {
+    msg-id: string,
+    sender: string,
+    text: string,
+}
+
+export struct StarredItem {
+    jid: string,
+    msg-id: string,
+    chat-name: string,
+    sender: string,
+    text: string,
+    time: string,
+    avatar: image,
+}
+
+// An incoming call held back by the anti-spam rule, shown inside its chat.
+export struct SilencedCall {
+    id: string,
+    // "Incoming call - silenced", localized by the host.
+    name: string,
+    // "Voice call" / "Video call", localized by the host.
+    kind: string,
+    caller: string,
+    video: bool,
+    group: bool,
+    time: string,
+}
+
+export struct ReactionTab {
+    emoji: string,
+    count: int,
 }
 
 export struct MessageItem {

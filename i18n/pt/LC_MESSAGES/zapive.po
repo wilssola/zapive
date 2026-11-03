@@ -1930,3 +1930,36 @@ msgstr "Parado"
 
 msgid "settings.mcp.status_error"
 msgstr "Não foi possível iniciar o servidor: {0}"
+
+
+
+
+
+msgid "call.silenced.title"
+msgstr "Chamada recebida - silenciada"
+
+msgid "call.silenced.video"
+msgstr "Chamada de vídeo"
+
+msgid "call.silenced.voice"
+msgstr "Chamada de voz"
+
+
+
+msgid "settings.calls.silence_repeat"
+msgstr "Silenciar chamadas repetidas"
+
+msgid "settings.calls.silence_repeat_desc"
+msgstr "Se você dispensou uma chamada de alguém, novas chamadas dessa pessoa nos próximos N minutos não tocam nem abrem janela; só aparecem na conversa."
+
+msgid "settings.calls.silence_minutes"
+msgstr "Tempo de silêncio"
+
+msgid "settings.calls.silence_minutes_option"
+msgstr "{0} minutos"
+
+msgid "call.silenced.answer"
+msgstr "Atender"
+
+msgid "call.silenced.decline"
+msgstr "Recusar"

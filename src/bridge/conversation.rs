@@ -133,6 +133,8 @@ impl Bridge {
             self.ui.invoke_set_composer(draft.text.into(), cursor);
         }
         self.ui.set_selected_jid(jid.into());
+        self.refresh_pinned();
+        self.refresh_silenced_calls();
         self.ui.set_stick_bottom(true);
         self.ui.set_chat_menu_open(false);
         if let Some(meta) = self.store.chats.get_mut(jid) {

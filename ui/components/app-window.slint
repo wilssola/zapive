@@ -18,11 +18,15 @@ import { MessageMenuLayer } from "message-menu.slint";
 import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
 import { SettingsLayer } from "settings-pane.slint";
+import { SilencedCallBanner } from "silenced-call-banner.slint";
+import { Wallpaper } from "wallpaper.slint";
+import { ShortcutsLayer } from "shortcuts-dialog.slint";
+import { StarredLayer } from "starred-panel.slint";
 import { Splash } from "splash.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
-import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell, TranslationModelItem } from "types.slint";
+import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, SilencedCall, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell, TranslationModelItem } from "types.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
@@ -39,6 +43,15 @@ export component AppWindow inherits Window {
     in-out property <bool> notifications: true;
     in-out property <bool> notify-previews: false;
     in-out property <bool> message-sound: true;
+    // Call anti-spam (Settings > Calls). Minutes: 2, 5, 10 or 30.
+    in-out property <bool> call-silence-repeat: true;
+    in-out property <int> call-silence-minutes: 10;
+    callback call-silence-repeat-changed(bool);
+    callback call-silence-minutes-changed(int);
+    // Calls held back for the open chat, with the two buttons' callbacks.
+    in property <[SilencedCall]> silenced-calls;
+    callback answer-silenced-call(string);
+    callback decline-silenced-call(string);
     in-out property <bool> blur-names: false;
     in-out property <bool> blur-photos: false;
     in-out property <bool> blur-messages: false;
@@ -1579,6 +1592,14 @@ export component AppWindow inherits Window {
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
+                                    if chat.silenced-call: Image {
+                                        source: @image-url("../icons/phone.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 13px;
+                                        height: 13px;
+                                        y: (parent.height - self.height) / 2;
+                                        accessible-role: none;
+                                    }
                                     Text {
                                         text: chat.time;
                                         color: chat.unread > 0 ? Theme.accent : Theme.text-dim;
@@ -1916,7 +1937,7 @@ export component AppWindow inherits Window {
                                 root.message-menu-open = true;
                             }
                         }
-                        property <length> header-offset: i == 0 ? contact-header.height : 0px;
+                        property <length> header-offset: i == 0 ? contact-header.height + (root.pinned-items.length > 0 ? 40px : 0px) + root.silenced-calls.length * 56px : 0px;
                         // The row crossing the top edge names the day in
                         // the floating pill. Rows sit in viewport
                         // coordinates; the ListView re-anchors every
@@ -3755,6 +3776,30 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // Calls held back by the anti-spam rule, stacked under the pinned strip.
+            if root.chat-open && root.silenced-calls.length > 0: VerticalLayout {
+                x: 0px;
+                y: contact-header.height - 6px + (root.pinned-items.length > 0 ? 44px : 0px);
+                width: parent.width;
+                spacing: 0px;
+                for call in root.silenced-calls: SilencedCallBanner {
+                    call: call;
+                    answer => { root.answer-silenced-call(call.id); }
+                    decline => { root.decline-silenced-call(call.id); }
+                }
+            }
+
+            // Pinned message strip, just under the floating header.
+            if root.chat-open && root.pinned-items.length > 0: PinnedBanner {
+                x: 0px;
+                y: contact-header.height - 6px;
+                width: parent.width;
+                items: root.pinned-items;
+                index <=> root.pinned-index;
+                open-pinned(a0) => { root.open-pinned(a0); }
+                unpin(a0) => { root.unpin-message(a0); }
+            }
+
             if root.chat-open && root.sync-banner != "": Rectangle {
                 y: contact-header.height + 4px;
                 width: parent.width;
@@ -4223,6 +4268,8 @@ export component AppWindow inherits Window {
         theme-style <=> root.theme-style;
         notifications: root.notifications;
         notify-previews: root.notify-previews;
+        call-silence-repeat: root.call-silence-repeat;
+        call-silence-minutes: root.call-silence-minutes;
         message-sound: root.message-sound;
         blur-names: root.blur-names;
         blur-photos: root.blur-photos;
@@ -4232,6 +4279,8 @@ export component AppWindow inherits Window {
         notifications-changed(a0) => { root.notifications-changed(a0); }
         message-sound-changed(a0) => { root.message-sound-changed(a0); }
         notify-previews-changed(a0) => { root.notify-previews-changed(a0); }
+        call-silence-repeat-changed(a0) => { root.call-silence-repeat = a0; root.call-silence-repeat-changed(a0); }
+        call-silence-minutes-changed(a0) => { root.call-silence-minutes = a0; root.call-silence-minutes-changed(a0); }
         privacy-blur-changed(a0, a1) => { root.privacy-blur-changed(a0, a1); }
         theme-mode <=> root.theme-mode;
         language-mode <=> root.language-mode;

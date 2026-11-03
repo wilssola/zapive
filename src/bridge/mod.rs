@@ -243,6 +243,11 @@ pub struct Bridge {
     call_ui: Option<CallWindow>,
     call: Option<ActiveCall>,
     call_timer: slint::Timer,
+    // Call anti-spam, RAM only: caller jid -> when we last dismissed them.
+    call_dismissed: HashMap<String, i64>,
+    silenced_calls: Vec<SilencedCall>,
+    call_silence_repeat: bool,
+    call_silence_minutes: u32,
     ringer: Option<crate::call::Ringer>,
     requested_channels: HashSet<String>,
     // Sticker/GIF pickers and the video overlay.

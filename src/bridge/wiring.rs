@@ -250,6 +250,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         call_ui: None,
         call: None,
         call_timer: slint::Timer::default(),
+        call_dismissed: HashMap::new(),
+        silenced_calls: Vec::new(),
+        call_silence_repeat: true,
+        call_silence_minutes: 10,
         ringer: None,
         requested_channels: HashSet::new(),
         sticker_model,
@@ -342,6 +346,22 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.handle_style(&style));
     });
     ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
+    ui.on_call_silence_repeat_changed(|enabled| defer(move |b| b.handle_call_silence_repeat(enabled)));
+    ui.on_call_silence_minutes_changed(|minutes| defer(move |b| b.handle_call_silence_minutes(minutes)));
+    ui.on_answer_silenced_call(|id| {
+        let id = id.to_string();
+        defer(move |b| b.answer_silenced_call(&id));
+    });
+    ui.on_decline_silenced_call(|id| {
+        let id = id.to_string();
+        defer(move |b| b.decline_silenced_call(&id));
+    });
+    ui.on_wallpaper_reset(|| defer(|b| b.reset_wallpaper()));
+    ui.on_wallpaper_hex_entered(|fg, hex| {
+        let hex = hex.to_string();
+        defer(move |b| b.wallpaper_hex_entered(fg, &hex));
+    });
+    ui.on_wallpaper_colors_changed(|bg, fg| defer(move |b| b.handle_wallpaper_colors(bg, fg)));
     ui.on_message_sound_changed(|enabled| defer(move |b| b.handle_message_sound(enabled)));
     ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
     ui.on_privacy_blur_changed(|category, enabled| {

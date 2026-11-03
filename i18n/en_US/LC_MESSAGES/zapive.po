@@ -1928,3 +1928,36 @@ msgstr "Stopped"
 
 msgid "settings.mcp.status_error"
 msgstr "Could not start the server: {0}"
+
+
+
+
+
+msgid "call.silenced.title"
+msgstr "Incoming call - silenced"
+
+msgid "call.silenced.video"
+msgstr "Video call"
+
+msgid "call.silenced.voice"
+msgstr "Voice call"
+
+
+
+msgid "settings.calls.silence_repeat"
+msgstr "Silence repeated calls"
+
+msgid "settings.calls.silence_repeat_desc"
+msgstr "If you dismissed a call from someone, new calls from them in the next N minutes won't ring or open a window; they only show in the chat."
+
+msgid "settings.calls.silence_minutes"
+msgstr "Silence window"
+
+msgid "settings.calls.silence_minutes_option"
+msgstr "{0} minutes"
+
+msgid "call.silenced.answer"
+msgstr "Answer"
+
+msgid "call.silenced.decline"
+msgstr "Decline"
