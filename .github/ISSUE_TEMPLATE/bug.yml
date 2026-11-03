@@ -1,0 +1,58 @@
+name: Relatar um bug
+description: Algo no Zapive não funciona como esperado.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Não cole conversas, nomes, números de telefone, tokens ou o conteúdo de `vault.db`/`wa.db`.**
+        Se precisar mostrar a interface, use o modo demonstração (`zapive --demo`) ou borre os dados pessoais.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: O que aconteceu
+      description: Descreva o problema e o que você esperava ver.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. Abra...
+        2. Clique em...
+        3. Veja o erro
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão do Zapive
+      description: Em Configurações, ou com a tag da release instalada (por exemplo, v0.26.2).
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema operacional
+      options: [Windows, Linux, macOS, Outro]
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Versão do sistema
+      placeholder: Windows 11 23H2, Ubuntu 24.04 (Wayland), macOS 15...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log (opcional)
+      description: |
+        Trechos de `zapive.log` na pasta de dados do app (veja o README). Rode com `ZAPIVE_LOG=debug` se precisar.
+        Remova números, nomes e qualquer conteúdo de mensagens antes de colar.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Capturas de tela (opcional)
+      description: Sem dados reais; prefira o modo `--demo`.

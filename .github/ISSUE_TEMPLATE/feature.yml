@@ -1,0 +1,36 @@
+name: Sugerir uma funcionalidade
+description: Uma ideia para melhorar o Zapive.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qual problema isso resolve
+      description: Descreva a situação de uso, não apenas a solução.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Como você imagina a solução
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Plataformas afetadas
+      multiple: true
+      options: [Windows, Linux, macOS]
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: Procurei nas issues abertas e fechadas e não encontrei um pedido igual.
+          required: true
+        - label: Não estou pedindo envio automático de mensagens, chamadas ou status em nome do usuário sem ação explícita.
+          required: false
