@@ -3,6 +3,7 @@ name = "zapive"
 version = "0.26.2"
 edition = "2024"
 description = "Native WhatsApp desktop client"
+license = "MIT"
 publish = false
 
 [features]
