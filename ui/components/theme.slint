@@ -1,34 +1,82 @@
+// Design tokens. Every surface colour is resolved here for the four
+// combinations of dark/light and glass/opaque, so components never branch on
+// the style themselves. `glass` is driven by AppWindow (native backdrop live,
+// glass style chosen, window focused); when false the opaque palette is used.
 export global Theme {
     in-out property <bool> dark: true;
+    in-out property <bool> glass: false;
 
     out property <duration> motion-fast: 120ms;
     out property <duration> motion-normal: 200ms;
     out property <duration> motion-slow: 300ms;
 
+    // ---------- Liquid Glass tokens ----------
+    // Large, quiet surfaces (rail, sidebar, headers, conversation).
+    out property <color> glass-fill: dark ? #121c2466 : #ffffffa6;
+    // Floating surfaces that must stay legible over anything (menus,
+    // popovers, dialogs, settings, info panel).
+    out property <color> glass-fill-strong: dark ? #1a263290 : #ffffffe6;
+    // Controls resting on a glass surface (search field, cards, chips).
+    out property <color> glass-fill-soft: dark ? #ffffff16 : #ffffffb8;
+    // The bright 1px edge that catches the light.
+    out property <color> glass-rim: dark ? #ffffff2a : #ffffff;
+    out property <color> glass-rim-soft: dark ? #ffffff1c : #ffffffcc;
+    // Soft diagonal sheen laid over a glass surface.
+    out property <brush> glass-sheen: dark
+        ? @linear-gradient(135deg, #ffffff24 0%, #ffffff08 38%, #ffffff00 60%, #ffffff10 100%)
+        : @linear-gradient(135deg, #ffffffb0 0%, #ffffff40 38%, #ffffff00 60%, #ffffff60 100%);
+    out property <color> glass-shadow: dark ? #00000066 : #1b2d4040;
+    out property <color> glass-divider: dark ? #ffffff18 : #1b2d4026;
+    out property <length> glass-blur: 24px;
+
+    // ---------- Surfaces ----------
     out property <color> bg: dark ? #111b21 : #f0f2f5;
-    out property <color> panel: dark ? #202c33 : #ffffff;
-    out property <color> header: dark ? #202c33 : #f0f2f5;
-    out property <color> sidebar: dark ? #111b21 : #ffffff;
-    out property <color> text: dark ? #e9edef : #111b21;
-    out property <color> text-dim: dark ? #8696a0 : #667781;
-    out property <color> border: dark ? #222d34 : #e0e4e7;
-    out property <color> hover: dark ? #202c33 : #f5f6f6;
-    out property <color> selected: dark ? #2a3942 : #f0f2f5;
+    out property <color> panel: glass ? glass-fill-strong : (dark ? #202c33 : #ffffff);
+    out property <color> header: glass ? glass-fill : (dark ? #202c33 : #f0f2f5);
+    out property <color> sidebar: glass ? glass-fill : (dark ? #111b21 : #ffffff);
+    out property <color> rail: glass ? glass-fill : (dark ? #1c2c35 : #f0f2f5);
+    // Search field and other inputs.
+    out property <color> field: glass ? glass-fill-soft : (dark ? #1e2b34 : #ffffff);
+    out property <color> field-border: glass ? glass-rim-soft : (dark ? #2b3b46 : #e0e4e7);
+    // A grouped card (settings).
+    out property <color> card: glass ? glass-fill-soft : (dark ? #101f27 : #ffffff);
+    // Mid-tone fill for small chips/tiles resting on a surface.
+    out property <color> tile: glass ? (dark ? #ffffff1c : #ffffffb0) : (dark ? #293944 : #f0f2f5);
+    // Wells inside a bubble or panel (media placeholders...).
+    out property <color> well: glass ? (dark ? #0000002e : #1b2d4014) : (dark ? #172126 : #dfe5e8);
+
+    out property <color> text: dark ? #e9edef : (glass ? #0b141a : #111b21);
+    out property <color> text-dim: glass ? (dark ? #b4c2ca : #43545e) : (dark ? #8696a0 : #667781);
+    out property <color> border: glass ? glass-divider : (dark ? #222d34 : #e0e4e7);
+    out property <color> hover: glass ? (dark ? #ffffff16 : #ffffff99) : (dark ? #202c33 : #f5f6f6);
+    out property <color> selected: glass ? (dark ? #ffffff26 : #ffffffbf) : (dark ? #2a3942 : #f0f2f5);
     out property <color> conv-bg: dark ? #101c23 : #efeae2;
-    out property <brush> conv-background: dark
-        ? @linear-gradient(145deg, #15252e 0%, #101c23 55%, #0d181e 100%)
-        : conv-bg;
-    out property <color> day-bg: dark ? #1b2a33 : #ffffff;
-    out property <color> day-border: dark ? #263741 : #e0e4e7;
-    out property <color> conversation-divider: dark ? #293b45 : #d5dcd9;
-    out property <color> bubble-in: dark ? #1f2e37 : #ffffff;
-    out property <color> bubble-out: dark ? #005c4b : #d9fdd3;
-    out property <color> bubble-text: dark ? #e9edef : #111b21;
-    out property <color> time-out: dark ? #99beb5 : #587a68;
+    out property <brush> conv-background: glass
+        ? (dark ? @linear-gradient(145deg, #1a2f3a40 0%, #10202966 55%, #0b151b40 100%)
+                : @linear-gradient(145deg, #ffffff50 0%, #efeae240 100%))
+        : (dark ? @linear-gradient(145deg, #15252e 0%, #101c23 55%, #0d181e 100%) : conv-bg);
+    out property <color> day-bg: glass ? glass-fill-strong : (dark ? #1b2a33 : #ffffff);
+    out property <color> day-border: glass ? (dark ? glass-rim-soft : #1b2d4026) : (dark ? #263741 : #e0e4e7);
+    out property <color> conversation-divider: glass ? glass-divider : (dark ? #293b45 : #d5dcd9);
+    out property <color> bubble-in: glass ? (dark ? #2b3f4f88 : #ffffffee) : (dark ? #1f2e37 : #ffffff);
+    out property <color> bubble-out: glass ? (dark ? #00826ad0 : #d3f6cdf0) : (dark ? #005c4b : #d9fdd3);
+    out property <color> bubble-rim: glass ? (dark ? #ffffff2a : #1b2d4029) : transparent;
+    out property <color> bubble-text: dark ? #f1f5f6 : #0b141a;
+    out property <color> time-out: glass ? (dark ? #d6efe8 : #3d5f4f) : (dark ? #99beb5 : #587a68);
+    // View / Save as under a file: must clear AA on the outgoing bubble.
+    out property <color> bubble-action: dark ? #ffffff : #005c4b;
     out property <color> accent: dark ? #00a884 : #008069;
-    out property <color> chip-bg: dark ? #202c33 : #f0f2f5;
-    out property <color> chip-active-bg: dark ? #0a332c : #d9fdd3;
+    // Accent for text/icons (brighter on dark so it stays AA).
+    out property <color> accent-text: dark ? #39d99b : #008069;
+    out property <color> chip-bg: glass ? glass-fill-soft : (dark ? #202c33 : #f0f2f5);
+    out property <color> chip-active-bg: glass ? (dark ? #00a88442 : #00806522) : (dark ? #164737 : #d9fdd3);
+    out property <color> chip-active-border: dark ? #239b66 : #008069;
+    out property <color> rail-active: glass ? (dark ? #00a88440 : #00806526) : (dark ? #1a3d37 : #d9fdd3);
+    out property <color> chat-active: glass ? (dark ? #00a88430 : #00806522) : (dark ? #182f30 : #e2f3e9);
+    out property <color> chat-active-border: dark ? #255044 : #a6d8bf;
     out property <color> icon: dark ? #aebac1 : #54656f;
-    out property <color> pill: dark ? #233138 : #ffffff;
+    out property <color> pill: glass ? glass-fill-strong : (dark ? #233138 : #ffffff);
     out property <color> sender: dark ? #39c8ed : #027eb5;
+    out property <color> danger: dark ? #f47783 : #d93a49;
+    out property <color> scrim: glass ? (dark ? #0000004d : #1b2d4033) : #00000088;
 }

@@ -14,12 +14,14 @@ export component DialogButton inherits TouchArea {
         border-radius: 18px;
         background: root.primary
             ? (root.has-hover ? (root.danger ? #c9302c : Theme.accent.darker(0.15)) : (root.danger ? #ea0038 : Theme.accent))
-            : (root.has-hover ? Theme.hover : transparent);
+            : (root.has-hover ? Theme.selected : Theme.glass ? Theme.glass-fill-soft : transparent);
+        border-width: root.primary || !Theme.glass ? 0px : 1px;
+        border-color: Theme.glass-rim-soft;
         opacity: root.pressed ? 0.84 : 1;
         animate background, opacity { duration: Theme.motion-fast; easing: ease-out; }
         btn-text := Text {
             text: root.label;
-            color: root.primary ? white : Theme.accent;
+            color: root.primary ? white : Theme.accent-text;
             font-size: 14px;
             font-weight: 700;
             width: parent.width;

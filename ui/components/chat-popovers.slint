@@ -33,9 +33,16 @@ export component PickerLayer inherits ModalLayer {
         height: 320px;
         opacity: root.progress;
         background: Theme.panel;
-        border-radius: 10px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 16px;
         drop-shadow-blur: 8px;
-        drop-shadow-color: #00000055;
+        drop-shadow-color: Theme.glass-shadow;
         TouchArea { }
 
         VerticalLayout {
@@ -264,9 +271,16 @@ export component ChatMenuLayer inherits ModalLayer {
         width: 260px;
         height: chat-menu-col.preferred-height + 12px;
         background: Theme.panel;
-        border-radius: 10px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 16px;
         drop-shadow-blur: 10px;
-        drop-shadow-color: #00000066;
+        drop-shadow-color: Theme.glass-shadow;
         opacity: root.progress;
         TouchArea { }
 
@@ -435,9 +449,16 @@ export component AttachLayer inherits ModalLayer {
         height: menu-col.preferred-height + 16px;
         opacity: root.progress;
         background: Theme.panel;
-        border-radius: 10px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 16px;
         drop-shadow-blur: 8px;
-        drop-shadow-color: #00000055;
+        drop-shadow-color: Theme.glass-shadow;
         TouchArea { }
 
         menu-col := VerticalLayout {
@@ -481,6 +502,13 @@ export component ChatSearchLayer inherits ModalLayer {
         x: parent.width - self.width + (1 - root.progress) * self.width;
         opacity: root.progress;
         background: Theme.panel;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
         TouchArea { }
         VerticalBox {
             padding: 0;

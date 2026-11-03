@@ -29,11 +29,12 @@ export component MessageMenuLayer inherits ModalLayer {
         width: 264px;
         height: min(root.win-height - 16px, message-menu-items.preferred-height + 12px);
         border-radius: 12px;
-        background: Theme.dark ? (root.theme-style == "glass" ? #222c32f5 : #222c32) : Theme.panel;
+        background: Theme.panel;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
         border-width: 1px;
-        border-color: Theme.dark ? #ffffff18 : Theme.border;
+        border-color: Theme.glass ? Theme.glass-rim : (Theme.dark ? #ffffff18 : Theme.border);
         drop-shadow-blur: 24px;
-        drop-shadow-color: #00000066;
+        drop-shadow-color: Theme.glass-shadow;
         TouchArea { }
         ScrollView {
             x: 6px; y: 6px;
@@ -174,7 +175,7 @@ export component MessageMenuLayer inherits ModalLayer {
                     label: @tr("message.menu.details");
                     clicked => { root.message-menu-open = false; root.message-action(root.menu-message.id, "details"); }
                 }
-                Rectangle { height: 1px; background: Theme.dark ? #ffffff18 : Theme.border; }
+                Rectangle { height: 1px; background: Theme.border; }
                 MenuRow {
                     height: 34px;
                     icon: @image-url("../icons/trash.svg");

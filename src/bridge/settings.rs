@@ -7,6 +7,7 @@ impl Bridge {
         if let Some(vault) = &self.vault {
             vault.setting_set("theme_style", style);
         }
+        self.sync_call_theme();
         #[cfg(windows)]
         crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
     }
@@ -66,6 +67,7 @@ impl Bridge {
             "light" => self.ui.set_dark_theme(false),
             _ => self.ui.set_dark_theme(crate::platform::system_dark()),
         }
+        self.sync_call_theme();
         #[cfg(windows)]
         crate::platform::set_title_bar_theme(self.ui.get_dark_theme(), self.ui.get_glass());
     }

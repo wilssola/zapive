@@ -108,19 +108,27 @@ export component SettingsLayer inherits ModalLayer {
     in property <bool> auto-download-stickers;
     callback auto-download-stickers-changed(bool);
     in property <length> win-width;
+    // Cards stay <= 760px wide and centred in the area right of the category list.
+    property <length> content-margin: max(20px, (root.win-width - min(280px, root.win-width * 0.3) - 1px - 760px) / 2);
 
     if root.mounted: Rectangle {
         width: 100%;
         height: 100%;
         x: (1 - root.progress) * 16px;
         opacity: root.progress;
-        background: Theme.dark ? #091419 : Theme.sidebar;
+        background: Theme.glass ? Theme.glass-fill : (Theme.dark ? #091419 : Theme.sidebar);
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            background: Theme.glass-sheen;
+        }
         TouchArea { }
         HorizontalLayout {
             spacing: 0;
             Rectangle {
                 width: min(280px, root.win-width * 0.3);
-                background: Theme.dark ? #081217 : Theme.sidebar;
+                background: Theme.glass ? Theme.glass-fill-soft.with-alpha(0.05) : (Theme.dark ? #081217 : Theme.sidebar);
                 clip: true;
                 VerticalLayout {
                     padding: 12px;
@@ -193,7 +201,7 @@ export component SettingsLayer inherits ModalLayer {
                     Rectangle {
                         height: 78px;
                         HorizontalLayout {
-                            padding-left: 20px; padding-right: 12px;
+                            padding-left: max(20px, root.content-margin); padding-right: 12px;
                             VerticalLayout {
                                 alignment: center; spacing: 4px;
                                 Text {
@@ -215,8 +223,11 @@ export component SettingsLayer inherits ModalLayer {
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
-                        padding: 20px;
+                        // Keep the cards a readable width and centred on wide windows.
+                        padding-left: max(20px, root.content-margin);
+                        padding-right: max(20px, root.content-margin);
                         padding-top: 18px;
+                        padding-bottom: 20px;
                         spacing: 20px;
                         alignment: start;
                         if ((root.settings-query == "" && (root.settings-section == "general")) || (root.settings-query != "" && root.settings-matches(@tr("settings.general.startup.title") + " " + @tr("settings.general.launch_at_login")))): SettingsCard {

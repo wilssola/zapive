@@ -21,7 +21,16 @@ export component CallAction inherits TouchArea {
                 height: 60px;
                 border-radius: 30px;
                 background: root.tint;
-                opacity: root.has-hover ? 0.85 : 1.0;
+                border-width: Theme.glass ? 1px : 0px;
+                border-color: Theme.glass-rim;
+                opacity: root.pressed ? 0.7 : root.has-hover ? 0.88 : 1.0;
+                animate opacity { duration: Theme.motion-fast; easing: ease-out; }
+                if Theme.glass: Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    border-radius: parent.border-radius;
+                    background: Theme.glass-sheen;
+                }
                 Image {
                     source: root.icon;
                     colorize: root.icon-tint;

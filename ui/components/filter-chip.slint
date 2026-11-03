@@ -11,8 +11,8 @@ export component FilterChip inherits TouchArea {
         height: parent.height;
         border-radius: 14px;
         border-width: 1px;
-        border-color: root.active ? (Theme.dark ? #239b66 : Theme.accent) : Theme.border;
-        background: root.active ? (Theme.dark ? #164737 : Theme.chip-active-bg)
+        border-color: root.active ? Theme.chip-active-border : Theme.glass ? Theme.glass-rim-soft : Theme.border;
+        background: root.active ? Theme.chip-active-bg
             : root.has-hover ? Theme.selected : Theme.chip-bg;
         opacity: root.pressed ? 0.84 : 1;
         animate background, border-color, opacity { duration: Theme.motion-fast; easing: ease-out; }

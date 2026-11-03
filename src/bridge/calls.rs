@@ -103,6 +103,21 @@ impl Bridge {
 
     // Created the first time a call needs it, then reused: building a
     // window is expensive and the callbacks only get wired once.
+    // The main window's `glass` output also requires the window to be
+    // focused (`window-active`), which it is not once a call window takes
+    // the focus; the backdrop and the chosen style are what decide the look.
+    pub(super) fn main_glass(&self) -> bool {
+        self.ui.get_native_backdrop() && self.ui.get_theme_style() == "glass"
+    }
+
+    // Keeps an open call window in step with the appearance settings.
+    pub(super) fn sync_call_theme(&self) {
+        if let Some(win) = self.call_ui.as_ref() {
+            win.set_dark_theme(self.ui.get_dark_theme());
+            win.set_glass(self.main_glass());
+        }
+    }
+
     pub(super) fn call_window(&mut self) -> Option<CallWindow> {
         if let Some(win) = &self.call_ui {
             return Some(win.clone_strong());
@@ -158,6 +173,7 @@ impl Bridge {
         };
         // The call window carries its own copy of the theme global.
         win.set_dark_theme(dark);
+        win.set_glass(self.main_glass());
         win.set_state(state.into());
         win.set_peer_name(name.clone().into());
         win.set_detail(detail.into());

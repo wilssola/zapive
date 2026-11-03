@@ -10,8 +10,8 @@ export component SpecialMessage inherits Rectangle {
     property <bool> poll: message.cardKind == "poll";
     property <bool> view-once: message.cardKind == "view-once";
     property <color> surface: message.fromMe
-        ? (Theme.dark ? #003c32 : #c9edc6)
-        : (Theme.dark ? #182831 : #f3f6f5);
+        ? (Theme.glass ? Theme.bubble-out : Theme.dark ? #003c32 : #c9edc6)
+        : (Theme.glass ? Theme.glass-fill-soft : Theme.dark ? #182831 : #f3f6f5);
     height: card-layout.preferred-height;
     border-radius: 12px;
     background: root.view-once

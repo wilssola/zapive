@@ -31,7 +31,8 @@ export component DetailsLayer inherits ModalLayer {
             height: parent.height;
             x: parent.width - self.width + (1 - root.progress) * self.width;
             opacity: root.progress;
-            background: Theme.dark ? #1b252dee : Theme.panel;
+            background: Theme.panel;
+            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
             border-width: 1px;
             border-color: Theme.border;
             TouchArea { }
@@ -142,10 +143,17 @@ export component MessageDialogLayer inherits ModalLayer {
             height: message-dialog-col.preferred-height + 40px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            border-radius: 12px;
+            border-radius: 20px;
             opacity: root.progress;
             transform-scale: 0.96 + 0.04 * root.progress;
             background: Theme.panel;
+            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+            border-width: Theme.glass ? 1px : 0px;
+            border-color: Theme.glass-rim;
+            if Theme.glass: Rectangle {
+                border-radius: parent.border-radius;
+                background: Theme.glass-sheen;
+            }
             TouchArea { }
             message-dialog-col := VerticalLayout {
                 padding: 20px;
@@ -199,7 +207,14 @@ export component ConfirmLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         TouchArea { }
         confirm-col := VerticalLayout {
             padding: 22px;
@@ -256,7 +271,14 @@ export component ReactionsLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         TouchArea { }
         VerticalBox {
             padding: 18px;
