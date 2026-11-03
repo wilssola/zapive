@@ -106,6 +106,7 @@ impl Bridge {
         }
         self.scroll_up_fetch = false;
         self.schedule_refresh_chats();
+        self.finish_loading();
         if chunk.on_demand || self.history_pending {
             self.sync_batches += 1;
         }

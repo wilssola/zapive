@@ -226,6 +226,7 @@ fn main() {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("[wa] failed to start: {e}");
+            ui.set_app_loading(false);
             ui.set_screen("login".into());
             ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
             ui.run().expect("event loop failed");
@@ -259,6 +260,7 @@ fn main() {
             Ok(()) => bridge::ui_apply(move |b| b.boot(app_vault, registered)),
             Err(e) => {
                 eprintln!("[vault] open failed: {e}");
+                ui.set_app_loading(false);
                 ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
             }
         }

@@ -274,6 +274,8 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     // Update checks start here, not at boot: the banner must also reach
     // the lock and login screens.
     apply_now(|b| b.once(10_000, |b| b.update_tick()));
+    // Safety net: whatever goes wrong during startup, the splash goes away.
+    apply_now(|b| b.once(8_000, |b| b.finish_loading()));
 }
 
 pub(super) fn wire_callbacks(ui: &AppWindow) {

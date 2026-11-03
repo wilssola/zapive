@@ -61,6 +61,12 @@ impl Bridge {
         self.refresh_accounts();
         self.refresh_labels();
         self.refresh_chats();
+        // Nothing to wait for on the login screen or when the stored chat
+        // list is already on screen; a fresh pairing keeps the splash until
+        // the first sync chunk or the safety timeout.
+        if !registered || !self.store.chats.is_empty() {
+            self.finish_loading();
+        }
         self.refresh_statuses();
         self.refresh_calls();
         // Chats stored before the search index existed get indexed from
@@ -95,6 +101,14 @@ impl Bridge {
         self.vault = Some(vault);
         self.pending_registered = registered;
         self.ui.set_screen("locked".into());
+        self.finish_loading();
+    }
+
+    // Drops the startup splash. Safe to call any number of times.
+    pub(super) fn finish_loading(&mut self) {
+        if self.ui.get_app_loading() {
+            self.ui.set_app_loading(false);
+        }
     }
 
     pub(super) fn handle_pairing(&mut self, phone: &str) {
@@ -110,6 +124,7 @@ impl Bridge {
     // ---- WhatsApp events (called through ui_apply) ----
 
     pub fn on_qr(&mut self, code: &str) {
+        self.finish_loading();
         self.ui.set_qr_image(qr_image(code));
         self.ui.set_status_text(t("status.scan_qr").into());
     }
@@ -174,6 +189,7 @@ impl Bridge {
     // Errors the user must act on get a modal instead of a silent retry
     // loop in the status line.
     pub fn on_fatal(&mut self, kind: &str) {
+        self.finish_loading();
         let conflict = kind == "conflict";
         self.ui.set_alert_title(
             t(if conflict {
@@ -203,6 +219,7 @@ impl Bridge {
     }
 
     pub fn on_logged_out(&mut self) {
+        self.finish_loading();
         self.registered = false;
         self.ui.set_pairing_mode(false);
         self.ui.set_pairing_code("".into());
