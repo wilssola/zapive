@@ -46,6 +46,30 @@ impl Bridge {
         }
     }
 
+    // Chime for a live incoming message, like WhatsApp Web: independent of
+    // the desktop-notification switch, quiet for muted chats, offline
+    // backlog and the conversation being read right now.
+    pub(super) fn play_message_sound(&self, jid: &str, mentions_me: bool, timestamp: i64, system_message: bool) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        let ctx = crate::sound::ChimeContext {
+            setting_on: self.ui.get_message_sound(),
+            from_me: false,
+            system_message,
+            vault_locked: self.vault.as_ref().is_none_or(|vault| vault.locked()),
+            chat_muted: self.store.chats.get(jid).is_some_and(|chat| chat.is_muted()),
+            mentions_me,
+            age_secs: (timestamp > 0).then_some(now - timestamp),
+            chat_open: self.current_jid.as_deref() == Some(jid),
+            window_focused: self.ui.get_window_active(),
+            since_last: crate::sound::since_last_chime(),
+        };
+        if crate::sound::should_chime(&ctx) {
+            crate::sound::play_message();
+        }
+    }
+
     pub(super) fn flush_notifications(&mut self) {
         self.notify_queued = false;
         let queue = std::mem::take(&mut self.notify_queue);

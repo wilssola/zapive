@@ -1480,6 +1480,12 @@ msgstr "Show notifications"
 msgid "settings.notifications.enabled.description"
 msgstr "When turned off, no banners appear for messages or calls. Unread counts still update."
 
+msgid "settings.notifications.sound"
+msgstr "Message sounds"
+
+msgid "settings.notifications.sound_desc"
+msgstr "Play a short sound when a new message arrives, even if notifications are off."
+
 msgid "settings.notifications.previews.description"
 msgstr "Turn off to hide message content and media in notifications."
 

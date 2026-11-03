@@ -342,6 +342,7 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.handle_style(&style));
     });
     ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
+    ui.on_message_sound_changed(|enabled| defer(move |b| b.handle_message_sound(enabled)));
     ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
     ui.on_privacy_blur_changed(|category, enabled| {
         let category = category.to_string();

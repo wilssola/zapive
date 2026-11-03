@@ -261,6 +261,7 @@ impl Bridge {
             if from_me { self.on_outbox_ack(&stored.id, None); }
             if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, &stored.id); }
             let mentions_me = stored.mentions_me;
+            let system_message = stored.kind == MessageKind::System;
             let sender = stored.sender_jid.clone();
             let translation_id = stored.id.clone();
             if !self.store.add_message(stored) {
@@ -269,6 +270,7 @@ impl Bridge {
             self.request_translation(&jid, &translation_id, true);
             if !from_me {
                 self.clear_participant_typing(&jid, &sender);
+                self.play_message_sound(&jid, mentions_me, info.timestamp.timestamp(), system_message);
             }
             if Some(&jid) == self.current_jid.as_ref() {
                 self.push_message_row(&jid);

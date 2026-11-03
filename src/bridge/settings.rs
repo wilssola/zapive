@@ -24,6 +24,13 @@ impl Bridge {
         }
     }
 
+    pub(super) fn handle_message_sound(&mut self, enabled: bool) {
+        self.ui.set_message_sound(enabled);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("message_sound", if enabled { "1" } else { "0" });
+        }
+    }
+
     pub(super) fn handle_notify_previews(&mut self, enabled: bool) {
         self.notify_previews = enabled;
         self.ui.set_notify_previews(enabled);

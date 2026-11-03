@@ -14,6 +14,7 @@ export component SettingsLayer inherits ModalLayer {
     in-out property <string> theme-style;
     in property <bool> notifications;
     in property <bool> notify-previews;
+    in property <bool> message-sound;
     in property <bool> blur-names;
     in property <bool> blur-photos;
     in property <bool> blur-messages;
@@ -21,6 +22,7 @@ export component SettingsLayer inherits ModalLayer {
     callback style-changed(string);
     callback notifications-changed(bool);
     callback notify-previews-changed(bool);
+    callback message-sound-changed(bool);
     callback privacy-blur-changed(string, bool);
     in-out property <string> theme-mode;
     in-out property <string> language-mode;
@@ -522,7 +524,7 @@ export component SettingsLayer inherits ModalLayer {
                                 }
                             }
                         }
-                        if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("settings.category.notifications.title") + " " + @tr("settings.notifications.enabled") + " " + @tr("settings.notifications.previews")))): SettingsCard {
+                        if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("settings.category.notifications.title") + " " + @tr("settings.notifications.enabled") + " " + @tr("settings.notifications.previews") + " " + @tr("settings.notifications.sound")))): SettingsCard {
                             title: @tr("settings.category.notifications.title");
                             SettingsRow {
                                 label: @tr("settings.notifications.enabled");
@@ -546,6 +548,18 @@ export component SettingsLayer inherits ModalLayer {
                                     on: root.notify-previews;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.notify-previews-changed(!root.notify-previews); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.notifications.sound");
+                                icon: @image-url("../icons/volume.svg");
+                                detail: @tr("settings.notifications.sound_desc");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.notifications.sound");
+                                    on: root.message-sound;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.message-sound-changed(!root.message-sound); }
                                 }
                             }
                         }

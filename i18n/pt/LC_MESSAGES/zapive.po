@@ -1480,6 +1480,12 @@ msgstr "Mostrar notificações"
 msgid "settings.notifications.enabled.description"
 msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
 
+msgid "settings.notifications.sound"
+msgstr "Sons de mensagem"
+
+msgid "settings.notifications.sound_desc"
+msgstr "Toca um som curto quando chega uma nova mensagem, mesmo com as notificações desativadas."
+
 msgid "settings.notifications.previews.description"
 msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
 

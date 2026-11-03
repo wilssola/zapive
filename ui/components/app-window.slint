@@ -38,6 +38,7 @@ export component AppWindow inherits Window {
     in-out property <string> theme-style: "glass";
     in-out property <bool> notifications: true;
     in-out property <bool> notify-previews: false;
+    in-out property <bool> message-sound: true;
     in-out property <bool> blur-names: false;
     in-out property <bool> blur-photos: false;
     in-out property <bool> blur-messages: false;
@@ -46,6 +47,7 @@ export component AppWindow inherits Window {
     callback style-changed(string);
     callback notifications-changed(bool);
     callback notify-previews-changed(bool);
+    callback message-sound-changed(bool);
     // True until the first chat list is ready; shows the splash.
     in-out property <bool> app-loading: true;
     callback privacy-blur-changed(string, bool);
@@ -4212,12 +4214,14 @@ export component AppWindow inherits Window {
         theme-style <=> root.theme-style;
         notifications: root.notifications;
         notify-previews: root.notify-previews;
+        message-sound: root.message-sound;
         blur-names: root.blur-names;
         blur-photos: root.blur-photos;
         blur-messages: root.blur-messages;
         blur-media: root.blur-media;
         style-changed(a0) => { root.style-changed(a0); }
         notifications-changed(a0) => { root.notifications-changed(a0); }
+        message-sound-changed(a0) => { root.message-sound-changed(a0); }
         notify-previews-changed(a0) => { root.notify-previews-changed(a0); }
         privacy-blur-changed(a0, a1) => { root.privacy-blur-changed(a0, a1); }
         theme-mode <=> root.theme-mode;
