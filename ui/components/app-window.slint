@@ -504,7 +504,7 @@ export component AppWindow inherits Window {
 
     // Settings
     in-out property <bool> settings-open: false;
-    property <string> settings-section: "general";
+    in-out property <string> settings-section: "general";
     property <string> settings-query: "";
     property <[{ key: string, title: string, detail: string, icon: image }]> settings-categories: [
         { key: "account", title: @tr("settings.category.account.title"), detail: @tr("settings.category.account.description"), icon: @image-url("../icons/users.svg") },
@@ -655,6 +655,15 @@ export component AppWindow inherits Window {
     public function focus-preview-caption() { image-editor.focus-caption(); }
     changed preview-open => {
         if (!root.preview-open) { image-editor.clear(); }
+    }
+
+    // Colourful stand-in for the OS backdrop; only the demo screenshots set it.
+    in property <image> demo-backdrop;
+    if root.demo-backdrop.width > 0: Image {
+        source: root.demo-backdrop;
+        image-fit: fill;
+        width: 100%;
+        height: 100%;
     }
 
     // ---------- Lock screen ----------

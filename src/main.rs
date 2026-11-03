@@ -9,6 +9,8 @@ mod sound;
 mod bridge;
 mod call;
 mod camera;
+#[cfg(feature = "demo")]
+mod demo;
 mod emoji;
 mod fonts;
 mod i18n;
@@ -38,6 +40,17 @@ use tokio::runtime::Runtime;
 pub(crate) static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn main() {
+    // Demo mode comes first: it redirects the data directories before any
+    // code can open the real vault or cache.
+    #[cfg(feature = "demo")]
+    if demo::requested() {
+        std::process::exit(demo::run());
+    }
+    #[cfg(not(feature = "demo"))]
+    if std::env::args().any(|a| a == "--demo" || a.starts_with("--demo-")) {
+        eprintln!("this build has no demo mode; rebuild with `--features demo`");
+        std::process::exit(2);
+    }
     paths::ensure_dirs();
     media::clean_notification_thumbnails();
     logging::install();
