@@ -185,6 +185,10 @@ export struct ReactionTab {
 }
 
 export struct MessageItem {
+    poll-options: [PollOption],
+    poll-multi: bool,
+    poll-total: int,
+    poll-can-vote: bool,
     sendState: string,
     sendPending: bool,
     sendRetry: bool,

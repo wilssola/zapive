@@ -1931,6 +1931,48 @@ msgstr "Parado"
 msgid "settings.mcp.status_error"
 msgstr "Não foi possível iniciar o servidor: {0}"
 
+msgid "chat.attach.poll"
+msgstr "Enquete"
+
+msgid "poll.composer.title"
+msgstr "Nova enquete"
+
+msgid "poll.composer.question"
+msgstr "Pergunta"
+
+msgid "poll.composer.question_placeholder"
+msgstr "Faça uma pergunta"
+
+msgid "poll.composer.options"
+msgstr "Opções"
+
+msgid "poll.composer.option_placeholder"
+msgstr "Opção"
+
+msgid "poll.composer.add_option"
+msgstr "Adicionar opção"
+
+msgid "poll.composer.remove_option"
+msgstr "Remover opção"
+
+msgid "poll.composer.multiple"
+msgstr "Permitir várias respostas"
+
+msgid "poll.composer.send"
+msgstr "Enviar enquete"
+
+msgid "poll.hint.single"
+msgstr "Selecione uma opção"
+
+msgid "poll.hint.multiple"
+msgstr "Selecione uma ou mais opções"
+
+msgid "poll.votes.view"
+msgstr "Ver votos"
+
+msgid "poll.votes.hide"
+msgstr "Ocultar votos"
+
 
 
 

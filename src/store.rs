@@ -97,6 +97,92 @@ pub struct StoredMessage {
     // as prost bytes in base64.
     #[serde(default, with = "raw_proto", skip_serializing_if = "Option::is_none")]
     pub raw: Option<Arc<wa::Message>>,
+    // Poll messages only. The secret derives every vote's key; it lives in
+    // the same encrypted history row as the message. Base64, 32 bytes.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub poll_secret: String,
+    // Poll messages only: voter jid -> the option hashes (hex) they picked.
+    // A newer vote replaces the older one, so only the latest is kept.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub poll_votes: HashMap<String, PollVote>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Debug)]
+pub struct PollVote {
+    pub options: Vec<String>,
+    pub timestamp_ms: i64,
+}
+
+// One poll option as the bubble shows it.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct PollTally {
+    pub name: String,
+    pub votes: usize,
+    pub voted: bool,
+    // Display names, in the order the votes came in.
+    pub voters: Vec<String>,
+}
+
+pub fn poll_option_hash(name: &str) -> String {
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(name.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+// Counts the stored votes per option. `me` is the key a vote of ours is
+// stored under; `name_of` turns a voter jid into what the sheet shows.
+pub fn tally_poll(
+    options: &[String],
+    votes: &HashMap<String, PollVote>,
+    me: &str,
+    name_of: impl Fn(&str) -> String,
+) -> Vec<PollTally> {
+    let mut ordered: Vec<(&String, &PollVote)> = votes.iter().collect();
+    ordered.sort_by(|a, b| a.1.timestamp_ms.cmp(&b.1.timestamp_ms).then_with(|| a.0.cmp(b.0)));
+    options
+        .iter()
+        .map(|name| {
+            let hash = poll_option_hash(name);
+            let mut tally = PollTally { name: name.clone(), ..Default::default() };
+            for (voter, vote) in &ordered {
+                if vote.options.iter().any(|picked| *picked == hash) {
+                    tally.votes += 1;
+                    if voter.as_str() == me {
+                        tally.voted = true;
+                        tally.voters.push(name_of("me"));
+                    } else {
+                        tally.voters.push(name_of(voter));
+                    }
+                }
+            }
+            tally
+        })
+        .collect()
+}
+
+// Distinct people who voted for at least one option.
+pub fn poll_voter_count(votes: &HashMap<String, PollVote>) -> usize {
+    votes.values().filter(|vote| !vote.options.is_empty()).count()
+}
+
+// The option names a vote should carry after `me` toggles `index`: single
+// choice replaces the pick (or clears it when it was the pick), multi
+// choice flips just that one. Out-of-range indexes change nothing.
+pub fn next_poll_selection(options: &[String], current: &[String], index: usize, multi: bool) -> Option<Vec<String>> {
+    let name = options.get(index)?;
+    let picked = current.iter().any(|existing| existing == name);
+    let mut next: Vec<String> = if multi {
+        options.iter().filter(|option| current.iter().any(|c| c == *option) && *option != name).cloned().collect()
+    } else {
+        Vec::new()
+    };
+    if !picked {
+        next.push(name.clone());
+    }
+    if multi {
+        next.sort_by_key(|option| options.iter().position(|o| o == option));
+    }
+    Some(next)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1223,6 +1309,37 @@ impl Store {
         out
     }
 
+    // Stores `voter`'s latest vote for a poll. Older votes (by sender
+    // timestamp) never overwrite newer ones, so a replayed or reordered
+    // stanza cannot resurrect a pick the voter already changed.
+    pub fn apply_poll_vote(&mut self, jid: &str, poll_id: &str, voter: &str, options: Vec<String>, timestamp_ms: i64) -> bool {
+        let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == poll_id)) else {
+            return false;
+        };
+        if let Some(existing) = m.poll_votes.get(voter)
+            && existing.timestamp_ms >= timestamp_ms
+        {
+            return false;
+        }
+        m.poll_votes.insert(voter.to_string(), PollVote { options, timestamp_ms });
+        self.dirty_jids.insert(jid.to_string());
+        true
+    }
+
+    // Starred messages across the cached chats, newest first. Messages of
+    // cold chats are not loaded here; the caller hydrates them by id.
+    pub fn starred_messages(&self, only_chat: Option<&str>) -> Vec<&StoredMessage> {
+        let mut list: Vec<&StoredMessage> = self
+            .messages
+            .iter()
+            .filter(|(jid, _)| only_chat.is_none_or(|chat| chat == jid.as_str()))
+            .flat_map(|(_, list)| list.iter())
+            .filter(|m| m.starred && !m.deleted && m.kind != MessageKind::System)
+            .collect();
+        list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+        list
+    }
+
     pub fn set_starred(&mut self, jid: &str, id: &str, starred: bool) -> bool {
         if starred {
             self.starred_ids.insert(id.to_string());
@@ -2205,5 +2322,209 @@ mod tests {
         // anything already set.
         assert!(!store.mark_revoked("a@g.us", "1"));
         assert!(!store.mark_deleted("a@g.us", "2"));
+    }
+    fn receipt(level: u32) -> ParticipantReceipt {
+        let mut r = ParticipantReceipt::default();
+        r.promote(level, 10);
+        r
+    }
+
+    #[test]
+    fn group_turns_blue_only_when_every_other_member_read() {
+        let others = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let mut got: HashMap<String, ParticipantReceipt> = HashMap::new();
+        got.insert("a".into(), receipt(4));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &others), 2);
+        got.insert("b".into(), receipt(4));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &others), 2);
+        got.insert("c".into(), receipt(3));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &others), 3);
+        got.insert("c".into(), receipt(5));
+        assert_eq!(aggregate_status(true, 3, 4, &got, &others), 4);
+    }
+
+    #[test]
+    fn group_with_unknown_roster_never_passes_the_server_ack() {
+        let mut got: HashMap<String, ParticipantReceipt> = HashMap::new();
+        got.insert("a".into(), receipt(4));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &[]), 2);
+        assert_eq!(aggregate_status(true, 1, 3, &got, &[]), 2);
+    }
+
+    #[test]
+    fn direct_chat_takes_the_highest_and_never_regresses() {
+        let got: HashMap<String, ParticipantReceipt> = HashMap::new();
+        assert_eq!(aggregate_status(false, 2, 4, &got, &[]), 4);
+        assert_eq!(aggregate_status(false, 4, 3, &got, &[]), 4);
+    }
+
+    #[test]
+    fn apply_receipt_in_a_group_waits_for_the_whole_roster() {
+        let mut store = Store::default();
+        store.set_self(&["me@s.whatsapp.net"]);
+        store.members.insert("g@g.us".into(), ["me@s.whatsapp.net", "a@s.whatsapp.net", "b@s.whatsapp.net"].iter()
+            .map(|j| Member { jid: j.to_string(), phone: String::new(), name: String::new(), admin: false }).collect());
+        let mut m = text_msg("g@g.us", "1", "hi");
+        m.from_me = true;
+        m.status = 2;
+        store.add_message(m);
+        store.apply_receipt("g@g.us", "1", "a@s.whatsapp.net", 4, 5);
+        assert_eq!(store.messages_for("g@g.us")[0].status, 2);
+        store.apply_receipt("g@g.us", "1", "b@s.whatsapp.net", 4, 6);
+        assert_eq!(store.messages_for("g@g.us")[0].status, 4);
+    }
+
+    fn poll_msg(id: &str, ts: i64) -> StoredMessage {
+        let mut m = text_msg("a@g.us", id, "poll");
+        m.timestamp = ts;
+        m
+    }
+
+    fn votes(entries: &[(&str, &[&str], i64)]) -> HashMap<String, PollVote> {
+        entries
+            .iter()
+            .map(|(voter, picked, ts)| {
+                (voter.to_string(), PollVote { options: picked.iter().map(|name| poll_option_hash(name)).collect(), timestamp_ms: *ts })
+            })
+            .collect()
+    }
+
+    fn names(options: &[&str]) -> Vec<String> {
+        options.iter().map(|o| o.to_string()).collect()
+    }
+
+    #[test]
+    fn tally_counts_votes_per_option_and_flags_mine() {
+        let options = names(&["Pizza", "Sushi", "Tacos"]);
+        let all = votes(&[("me", &["Pizza"], 3), ("a@s.whatsapp.net", &["Pizza", "Tacos"], 1), ("b@s.whatsapp.net", &["Sushi"], 2)]);
+        let tally = tally_poll(&options, &all, "me", |jid| if jid == "me" { "You".into() } else { jid.split('@').next().unwrap().to_string() });
+        assert_eq!(tally[0].votes, 2);
+        assert!(tally[0].voted);
+        assert_eq!(tally[0].voters, vec!["a".to_string(), "You".to_string()]);
+        assert_eq!(tally[1].votes, 1);
+        assert!(!tally[1].voted);
+        assert_eq!(tally[2].votes, 1);
+        assert_eq!(tally[2].voters, vec!["a".to_string()]);
+        assert_eq!(poll_voter_count(&all), 3);
+    }
+
+    #[test]
+    fn tally_ignores_unknown_hashes_and_empty_votes() {
+        let options = names(&["Yes", "No"]);
+        let mut all = votes(&[("a", &["Maybe"], 1), ("b", &[], 2)]);
+        all.insert("c".into(), PollVote { options: vec!["zz".into()], timestamp_ms: 3 });
+        let tally = tally_poll(&options, &all, "me", |jid| jid.to_string());
+        assert!(tally.iter().all(|t| t.votes == 0 && !t.voted));
+        assert_eq!(poll_voter_count(&all), 2);
+    }
+
+    #[test]
+    fn selection_single_choice_replaces_and_toggles_off() {
+        let options = names(&["A", "B", "C"]);
+        assert_eq!(next_poll_selection(&options, &[], 1, false), Some(names(&["B"])));
+        assert_eq!(next_poll_selection(&options, &names(&["A"]), 2, false), Some(names(&["C"])));
+        assert_eq!(next_poll_selection(&options, &names(&["B"]), 1, false), Some(Vec::new()));
+    }
+
+    #[test]
+    fn selection_multi_choice_flips_one_and_keeps_option_order() {
+        let options = names(&["A", "B", "C"]);
+        assert_eq!(next_poll_selection(&options, &names(&["C"]), 0, true), Some(names(&["A", "C"])));
+        assert_eq!(next_poll_selection(&options, &names(&["A", "C"]), 2, true), Some(names(&["A"])));
+        assert_eq!(next_poll_selection(&options, &names(&["A"]), 0, true), Some(Vec::new()));
+    }
+
+    #[test]
+    fn selection_rejects_out_of_range_index() {
+        let options = names(&["A", "B"]);
+        assert_eq!(next_poll_selection(&options, &[], 2, false), None);
+        assert_eq!(next_poll_selection(&[], &[], 0, true), None);
+    }
+
+    #[test]
+    fn newer_vote_replaces_older_and_stale_votes_are_dropped() {
+        let mut store = Store::default();
+        store.add_message(poll_msg("p", 10));
+        assert!(store.apply_poll_vote("a@g.us", "p", "a", vec!["x".into()], 100));
+        assert!(!store.apply_poll_vote("a@g.us", "p", "a", vec!["y".into()], 50));
+        assert!(!store.apply_poll_vote("a@g.us", "p", "a", vec!["y".into()], 100));
+        assert!(store.apply_poll_vote("a@g.us", "p", "a", vec!["y".into()], 101));
+        assert_eq!(store.messages_for("a@g.us")[0].poll_votes["a"].options, vec!["y".to_string()]);
+        assert!(!store.apply_poll_vote("a@g.us", "missing", "a", vec![], 1));
+    }
+
+    #[test]
+    fn active_pins_drop_expired_and_sort_newest_first() {
+        let mut expired = poll_msg("old", 1);
+        expired.pinned_until = 99;
+        let mut soon = poll_msg("soon", 2);
+        soon.pinned_until = 200;
+        let mut later = poll_msg("later", 3);
+        later.pinned_until = 900;
+        let unpinned = poll_msg("plain", 4);
+        let mut deleted = poll_msg("gone", 5);
+        deleted.pinned_until = 900;
+        deleted.deleted = true;
+        let list = vec![expired, soon, later, unpinned, deleted];
+        let ids: Vec<&str> = active_pins(&list, 100).iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["later", "soon"]);
+        assert!(active_pins(&list, 1000).is_empty());
+        assert!(active_pins(&list, 200).iter().all(|m| m.id == "later"));
+    }
+
+    #[test]
+    fn adjacent_selection_wraps_in_both_directions() {
+        assert_eq!(adjacent_index(Some(0), 3, 1), Some(1));
+        assert_eq!(adjacent_index(Some(2), 3, 1), Some(0));
+        assert_eq!(adjacent_index(Some(0), 3, -1), Some(2));
+        assert_eq!(adjacent_index(Some(1), 3, -1), Some(0));
+        assert_eq!(adjacent_index(Some(0), 1, 1), Some(0));
+        assert_eq!(adjacent_index(Some(0), 1, -1), Some(0));
+    }
+
+    #[test]
+    fn adjacent_selection_without_current_starts_at_the_ends() {
+        assert_eq!(adjacent_index(None, 4, 1), Some(0));
+        assert_eq!(adjacent_index(None, 4, -1), Some(3));
+        assert_eq!(adjacent_index(None, 0, 1), None);
+        assert_eq!(adjacent_index(Some(0), 0, -1), None);
+    }
+
+    #[test]
+    fn shortcut_index_is_bounds_checked() {
+        assert_eq!(shortcut_index(0, 3), Some(0));
+        assert_eq!(shortcut_index(2, 3), Some(2));
+        assert_eq!(shortcut_index(3, 3), None);
+        assert_eq!(shortcut_index(8, 0), None);
+        assert_eq!(shortcut_index(-1, 5), None);
+    }
+
+    #[test]
+    fn starred_messages_are_newest_first_and_filterable() {
+        let mut store = Store::default();
+        for (jid, id, ts, starred) in [("a@g.us", "1", 10, true), ("a@g.us", "2", 30, true), ("b@g.us", "3", 20, true), ("b@g.us", "4", 40, false)] {
+            let mut m = text_msg(jid, id, "x");
+            m.timestamp = ts;
+            m.starred = starred;
+            store.add_message(m);
+        }
+        let all: Vec<&str> = store.starred_messages(None).iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(all, vec!["2", "3", "1"]);
+        let one: Vec<&str> = store.starred_messages(Some("a@g.us")).iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(one, vec!["2", "1"]);
+    }
+
+    #[test]
+    fn reaction_groups_order_by_count_and_skip_empty() {
+        let mut reactions = HashMap::new();
+        reactions.insert("a".to_string(), "👍".to_string());
+        reactions.insert("b".to_string(), "❤".to_string());
+        reactions.insert("c".to_string(), "👍".to_string());
+        reactions.insert("d".to_string(), String::new());
+        let groups = reaction_groups(&reactions);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, "👍");
+        assert_eq!(groups[0].1, vec!["a".to_string(), "c".to_string()]);
+        assert_eq!(groups[1].0, "❤");
     }
 }

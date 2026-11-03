@@ -178,6 +178,17 @@ pub enum Cmd {
     Edit { jid: String, id: String, text: String },
     PinMessage { jid: String, id: String, from_me: bool, participant: Option<String>, pin: bool },
     MarkUnread(String),
+    // Polls. `selectable` is 0 for "any number" and 1 for single choice.
+    // The secret that comes back is stored with the poll so votes open.
+    CreatePoll { jid: String, question: String, options: Vec<String>, selectable: u32 },
+    // A received vote, still encrypted. The bridge supplies the poll's
+    // secret; decrypting happens here because it needs the LID/PN map.
+    DecryptVote {
+        jid: String, poll_id: String, creator: String, voter: String, secret: Vec<u8>,
+        payload: Vec<u8>, iv: Vec<u8>, timestamp_ms: i64,
+    },
+    // Replaces my pick with exactly `options` (names; empty clears it).
+    PollVote { jid: String, id: String, creator: String, secret: Vec<u8>, options: Vec<String> },
     Star { jid: String, id: String, from_me: bool, participant: Option<String>, starred: bool },
     // "Send message viewed" (opt-in, off by default): blue ticks and the
     // blue mic. `sender` is the group participant a receipt is addressed
@@ -1405,6 +1416,52 @@ async fn executor(
                     match result {
                         Ok(_) => ui_apply(move |b| b.on_message_pin(&jid, &id, if pin { crate::store::now_secs() + 604800 } else { 0 })),
                         Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    }
+                });
+            }
+            Cmd::CreatePoll { jid, question, options, selectable } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let Some(chat) = parse_jid(&jid) else {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
+                    };
+                    match client.polls().create(chat, &question, &options, selectable).await {
+                        Ok((sent, secret)) => {
+                            let id = sent.message_id.clone();
+                            let message = (*sent.message).clone();
+                            crate::bridge::wa_apply_at(epoch, move |b| b.on_poll_created(&jid, &id, message, &secret));
+                        }
+                        Err(e) => action_failed(epoch, format!("[wa] poll failed: {e}")),
+                    }
+                });
+            }
+            Cmd::DecryptVote { jid, poll_id, creator, voter, secret, payload, iv, timestamp_ms } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let (Some(creator_jid), Some(voter_jid)) = (parse_jid(&creator), parse_jid(&voter)) else { return };
+                    let ciphertext = whatsapp_rust::features::PollVoteCiphertext { enc_payload: &payload, enc_iv: &iv };
+                    match client.polls().decrypt_vote(ciphertext, &secret, &poll_id, &creator_jid, &voter_jid).await {
+                        Ok(hashes) => {
+                            let picked: Vec<String> = hashes.iter()
+                                .map(|hash| hash.iter().map(|byte| format!("{byte:02x}")).collect())
+                                .collect();
+                            crate::bridge::wa_apply_at(epoch, move |b| b.on_poll_vote(&jid, &poll_id, &voter, picked, timestamp_ms));
+                        }
+                        Err(e) => eprintln!("[wa] poll vote could not be opened: {e}"),
+                    }
+                });
+            }
+            Cmd::PollVote { jid, id, creator, secret, options } => {
+                let client = session.client.clone();
+                tokio::spawn(async move {
+                    let (Some(chat), Some(creator_jid)) = (parse_jid(&jid), parse_jid(&creator)) else {
+                        action_failed(epoch, "Invalid destination JID");
+                        return;
+                    };
+                    match client.polls().vote(chat, &id, &creator_jid, &secret, &options).await {
+                        Ok(_) => crate::bridge::wa_apply_at(epoch, move |b| b.on_poll_vote_sent(&jid, &id, &options)),
+                        Err(e) => action_failed(epoch, format!("[wa] poll vote failed: {e}")),
                     }
                 });
             }

@@ -437,6 +437,7 @@ export component AttachLayer inherits ModalLayer {
     callback attach-image();
     callback attach-audio();
     callback attach-doc();
+    callback attach-poll();
     in property <length> conv-x;
     in property <length> conv-y;
     in property <length> conv-h;
@@ -468,6 +469,11 @@ export component AttachLayer inherits ModalLayer {
                 icon: @image-url("../icons/file-text.svg");
                 label: @tr("chat.attach.document");
                 clicked => { root.attach-open = false; root.attach-doc(); }
+            }
+            MenuRow {
+                icon: @image-url("../icons/list-details.svg");
+                label: @tr("chat.attach.poll");
+                clicked => { root.attach-open = false; root.attach-poll(); }
             }
             MenuRow {
                 icon: @image-url("../icons/photo.svg");

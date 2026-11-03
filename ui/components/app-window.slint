@@ -17,6 +17,9 @@ import { ConfirmLayer, DetailsLayer, MessageDialogLayer, ReactionsLayer } from "
 import { MessageMenuLayer } from "message-menu.slint";
 import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
+import { DropOverlay } from "drop-overlay.slint";
+import { PinnedBanner } from "pinned-banner.slint";
+import { PollComposerLayer } from "poll-composer.slint";
 import { SettingsLayer } from "settings-pane.slint";
 import { SilencedCallBanner } from "silenced-call-banner.slint";
 import { Wallpaper } from "wallpaper.slint";
@@ -334,6 +337,48 @@ export component AppWindow inherits Window {
     callback mini-audio-close();
     callback load-older();
     callback paste-clipboard();
+
+    // ---------- Polls (F1) ----------
+    in-out property <bool> poll-composer-open: false;
+    callback open-poll-composer();
+    callback create-poll(string, [string], bool);
+    callback poll-vote(string, int);
+
+    // ---------- Starred messages (F2) ----------
+    in-out property <bool> starred-open: false;
+    in property <[StarredItem]> starred-items;
+    // True while the panel lists only the open chat.
+    in-out property <bool> starred-current-only: false;
+    callback open-starred(bool);
+    callback open-starred-item(string, string);
+
+    // ---------- Pinned messages (F3) ----------
+    in property <[PinnedItem]> pinned-items;
+    in-out property <int> pinned-index: 0;
+    callback open-pinned(string);
+    callback unpin-message(string);
+
+    // ---------- Keyboard shortcuts (F4) ----------
+    in-out property <bool> shortcuts-open: false;
+    in property <bool> is-macos: false;
+    callback open-chat-at(int);
+    callback select-adjacent-chat(int);
+    callback toggle-archive-current();
+    callback toggle-mute-current();
+    callback edit-last-message();
+
+    // ---------- Reaction details (F5) ----------
+    in property <[ReactionTab]> reaction-tabs;
+    callback remove-own-reaction(string);
+    in-out property <string> reactions-msg-id;
+
+    // ---------- File drop (F6) ----------
+    in property <bool> file-drag-hover: false;
+    // Files queued for review; 0 or 1 means a single file.
+    in property <int> staged-count: 0;
+    in-out property <int> staged-index: 0;
+    in property <[image]> staged-thumbs;
+    callback staged-select(int);
     callback open-dm(string);
     callback request-forward(string);
 
@@ -977,7 +1022,9 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
-                if (root.whats-new-open) { root.whats-new-open = false; }
+                if (root.shortcuts-open) { root.shortcuts-open = false; }
+                else if (root.poll-composer-open) { root.poll-composer-open = false; }
+                else if (root.whats-new-open) { root.whats-new-open = false; }
                 else if (root.video-open) { root.close-video(); }
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
@@ -2438,6 +2485,7 @@ export component AppWindow inherits Window {
                                     message: msg;
                                     privacy-hidden: (root.blur-messages || (root.blur-names && msg.cardKind == "contact") || (root.blur-media && (msg.cardKind == "location" || msg.cardKind == "live-location"))) && !row-hover.has-hover;
                                     details => { root.message-action(msg.id, "details"); }
+                                    vote(i) => { root.poll-vote(msg.id, i); }
                                 }
 
                                 if msg.kind == "doc": VerticalLayout {
@@ -3994,6 +4042,7 @@ export component AppWindow inherits Window {
         attach-image() => { root.attach-image(); }
         attach-audio() => { root.attach-audio(); }
         attach-doc() => { root.attach-doc(); }
+        attach-poll() => { root.poll-composer-open = true; root.open-poll-composer(); }
         conv-x: conv-pane.absolute-position.x;
         conv-y: conv-pane.absolute-position.y;
         conv-h: conv-pane.height;
@@ -4239,6 +4288,32 @@ export component AppWindow inherits Window {
         reactions-title: root.reactions-title;
         reactions-open <=> root.reactions-open;
         open-dm(a0) => { root.open-dm(a0); }
+        remove-own-reaction() => { root.remove-own-reaction(root.reactions-msg-id); }
+    }
+
+    // ---------- Polls / starred / shortcuts ----------
+    poll-composer-layer := PollComposerLayer {
+        open: root.poll-composer-open && root.chat-open;
+        scrim: Theme.scrim;
+        dismiss => { root.poll-composer-open = false; }
+        poll-composer-open <=> root.poll-composer-open;
+        create-poll(a0, a1, a2) => { root.create-poll(a0, a1, a2); }
+    }
+    starred-layer := StarredLayer {
+        open: root.starred-open && root.screen == "main";
+        scrim: transparent;
+        dismiss => { root.starred-open = false; }
+        starred-open <=> root.starred-open;
+        starred-items: root.starred-items;
+        current-only: root.starred-current-only;
+        open-starred-item(a0, a1) => { root.open-starred-item(a0, a1); }
+    }
+    shortcuts-layer := ShortcutsLayer {
+        open: root.shortcuts-open;
+        scrim: Theme.scrim;
+        dismiss => { root.shortcuts-open = false; }
+        shortcuts-open <=> root.shortcuts-open;
+        is-macos: root.is-macos;
     }
 
     // ---------- Forward picker ----------

@@ -42,6 +42,8 @@ mod message_actions;
 mod notifications;
 mod outbox;
 mod overlays;
+mod panels;
+mod polls;
 mod selection;
 mod session;
 mod settings;

@@ -1929,6 +1929,48 @@ msgstr "Stopped"
 msgid "settings.mcp.status_error"
 msgstr "Could not start the server: {0}"
 
+msgid "chat.attach.poll"
+msgstr "Poll"
+
+msgid "poll.composer.title"
+msgstr "New poll"
+
+msgid "poll.composer.question"
+msgstr "Question"
+
+msgid "poll.composer.question_placeholder"
+msgstr "Ask a question"
+
+msgid "poll.composer.options"
+msgstr "Options"
+
+msgid "poll.composer.option_placeholder"
+msgstr "Option"
+
+msgid "poll.composer.add_option"
+msgstr "Add option"
+
+msgid "poll.composer.remove_option"
+msgstr "Remove option"
+
+msgid "poll.composer.multiple"
+msgstr "Allow multiple answers"
+
+msgid "poll.composer.send"
+msgstr "Send poll"
+
+msgid "poll.hint.single"
+msgstr "Select one option"
+
+msgid "poll.hint.multiple"
+msgstr "Select one or more options"
+
+msgid "poll.votes.view"
+msgstr "View votes"
+
+msgid "poll.votes.hide"
+msgstr "Hide votes"
+
 
 
 

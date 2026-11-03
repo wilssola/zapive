@@ -564,6 +564,40 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         });
     });
     ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
+    ui.on_open_starred(|current_only| defer(move |b| b.open_starred(current_only)));
+    ui.on_open_starred_item(|jid, id| {
+        let (jid, id) = (jid.to_string(), id.to_string());
+        defer(move |b| b.open_starred_item(&jid, &id));
+    });
+    ui.on_open_pinned(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_pinned(&id));
+    });
+    ui.on_unpin_message(|id| {
+        let id = id.to_string();
+        defer(move |b| b.unpin_message(&id));
+    });
+    ui.on_open_chat_at(|position| defer(move |b| b.open_chat_at(position)));
+    ui.on_select_adjacent_chat(|delta| defer(move |b| b.select_adjacent_chat(delta)));
+    ui.on_toggle_archive_current(|| defer(|b| b.toggle_archive_current()));
+    ui.on_toggle_mute_current(|| defer(|b| b.toggle_mute_current()));
+    ui.on_edit_last_message(|| defer(|b| b.edit_last_message()));
+    ui.on_remove_own_reaction(|id| {
+        let id = id.to_string();
+        defer(move |b| b.remove_own_reaction(&id));
+    });
+    ui.on_open_poll_composer(|| defer(|b| {
+        if b.current_jid.is_some() { b.ui.set_poll_composer_open(true); }
+    }));
+    ui.on_create_poll(|question, options, multi| {
+        let question = question.to_string();
+        let options: Vec<String> = options.iter().map(|option| option.to_string()).collect();
+        defer(move |b| b.create_poll(&question, &options, multi));
+    });
+    ui.on_poll_vote(|id, index| {
+        let id = id.to_string();
+        defer(move |b| b.poll_vote(&id, index));
+    });
     ui.on_open_quote(|jid, id| {
         let (jid, id) = (jid.to_string(), id.to_string());
         defer(move |b| {

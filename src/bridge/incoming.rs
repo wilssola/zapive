@@ -169,6 +169,14 @@ impl Bridge {
                 if valid { self.on_message_edit(&chat, id, edited, pm.timestamp_ms.map(|t| t / 1000).unwrap_or_else(|| info.timestamp.timestamp())); }
                 continue;
             }
+            if let Some(vote) = content.poll_update_message.as_option()
+                && vote.vote.is_set()
+            {
+                let voter = if info.source.is_from_me { self.self_jid.clone() } else { info.source.sender.to_non_ad_string() };
+                let at = vote.sender_timestamp_ms.unwrap_or_else(|| info.timestamp.timestamp_millis());
+                self.receive_poll_vote(&chat, &voter, vote, at);
+                continue;
+            }
             if let Some(pin) = content.pin_in_chat_message.as_option()
                 && let Some(id) = pin.key.as_option().and_then(|k| k.id.as_deref())
             {

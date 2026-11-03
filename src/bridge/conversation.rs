@@ -445,6 +445,7 @@ impl Bridge {
             String::new()
         };
         let card = crate::wa_map::special_card(m);
+        let (poll_options, poll_multi, poll_total, poll_can_vote) = self.poll_rows(m);
         let card_picture = card.thumbnail.and_then(card_thumbnail);
         let (styled, has_styled, plain, links) = self.styled_for(m);
         let link_host = host_of(&m.link_url);
@@ -454,6 +455,7 @@ impl Bridge {
         let tr = self.translation_entry(m);
         let source = tr.map(|e| e.source.as_str()).unwrap_or("");
         MessageItem {
+            poll_options: slint::ModelRc::new(VecModel::from(poll_options)), poll_multi, poll_total, poll_can_vote,
             translationText: tr.filter(|e| !e.hidden).map(|e| e.text.as_str()).unwrap_or("").into(),
             translationLabel: tr.filter(|e| !e.text.is_empty()).map(|e| format!("{} → {}", translation_language_name(&e.source), translation_language_name(&self.translation_settings.target))).unwrap_or_default().into(),
             translationBusy: tr.is_some_and(|e| e.busy),

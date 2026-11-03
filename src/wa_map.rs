@@ -269,6 +269,40 @@ pub fn compatibility_card(content: &wa::Message) -> Option<String> {
     None
 }
 
+// The base64 message secret a poll creation carries in its context info.
+// Empty for anything that is not a poll, or a poll that came without one.
+pub fn poll_secret_of(message: &wa::Message) -> String {
+    use base64::Engine as _;
+    let content = display_content(message).unwrap_or(message);
+    if poll_of(content).is_none() {
+        return String::new();
+    }
+    let secret = message.message_context_info.as_option().and_then(|info| info.message_secret.as_deref())
+        .or_else(|| content.message_context_info.as_option().and_then(|info| info.message_secret.as_deref()));
+    match secret {
+        Some(bytes) if bytes.len() == 32 => base64::engine::general_purpose::STANDARD.encode(bytes),
+        _ => String::new(),
+    }
+}
+
+fn poll_of(content: &wa::Message) -> Option<&wa::message::PollCreationMessage> {
+    content.poll_creation_message.as_option()
+        .or_else(|| content.poll_creation_message_v2.as_option())
+        .or_else(|| content.poll_creation_message_v3.as_option())
+        .or_else(|| content.poll_creation_message_v5.as_option())
+        .or_else(|| content.poll_creation_message_v6.as_option())
+}
+
+// (question, option names, selectable count) of a poll message.
+pub fn poll_definition(message: &wa::Message) -> Option<(String, Vec<String>, u32)> {
+    let content = display_content(message).unwrap_or(message);
+    let poll = poll_of(content)?;
+    let options: Vec<String> = poll.options.iter().take(12)
+        .map(|option| card_text(option.option_name.as_deref().unwrap_or("")))
+        .filter(|name| !name.is_empty()).collect();
+    Some((card_text(poll.name.as_deref().unwrap_or("")), options, poll.selectable_options_count.unwrap_or(0)))
+}
+
 fn has_unsupported_content(content: &wa::Message) -> bool {
     use whatsapp_rust::waproto::buffa::Message as _;
     let mut remaining = content.clone();
@@ -545,6 +579,8 @@ pub fn system_message(chat: &str, id: &str, timestamp: i64, text: String) -> Sto
         status: 0,
         reactions: HashMap::new(),
         raw: None,
+        poll_secret: String::new(),
+        poll_votes: HashMap::new(),
     }
 }
 
@@ -698,6 +734,8 @@ pub fn normalize(
         status: if meta.from_me { status.max(2) } else { 0 },
         reactions: reactions.clone(),
         raw: displayable.map(|_| Arc::new(message.clone())),
+        poll_secret: poll_secret_of(message),
+        poll_votes: HashMap::new(),
     };
 
     if displayable.is_none() {
@@ -850,6 +888,8 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         status: 0,
         reactions: HashMap::new(),
         raw: displayable.map(|_| inbound.message.clone()),
+        poll_secret: String::new(),
+        poll_votes: HashMap::new(),
     })
 }
 
