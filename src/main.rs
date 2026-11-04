@@ -863,7 +863,7 @@ fn video_selftest() {
 // Task Manager renders whatever garbage WM_GETICON hands back. Stamp the
 // real .ico onto every window this process owns.
 #[cfg(windows)]
-fn stamp_window_icons() {
+pub(crate) fn stamp_window_icons() {
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM};
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{
