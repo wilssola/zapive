@@ -3262,12 +3262,15 @@ export component AppWindow inherits Window {
                         if (row-hover.has-hover || root.react-bar-id == msg.id)
                             && !root.select-mode && msg.kind != "system": Rectangle {
                             y: bubble.y + 4px;
+                            // Sized by its buttons, never a guessed width: a
+                            // fixed width let the last icon spill onto the
+                            // bubble of outgoing messages.
+                            width: actions-row.preferred-width;
                             x: msg.fromMe
-                                ? max(0px, bubble.x - self.width - 6px)
-                                : bubble.x + bubble.width + 6px;
-                            width: root.can-translate(msg) && !msg-row.has-translation ? 128px : 96px;
+                                ? max(0px, bubble.x - self.width - 8px)
+                                : bubble.x + bubble.width + 8px;
                             height: 28px;
-                            HorizontalLayout {
+                            actions-row := HorizontalLayout {
                                 spacing: 4px;
                                 IconButton {
                                     icon: @image-url("../icons/mood-smile.svg");
@@ -3843,7 +3846,9 @@ export component AppWindow inherits Window {
                 visible: root.chat-open;
                 height: 80px;
 
-                background: Theme.glass ? @linear-gradient(180deg, Theme.glass-fill-strong 0%, Theme.glass-fill-strong 75%, #00000000 100%) : Theme.dock;
+                // Transparent: the header pill floats over the conversation
+                // like the composer, no strip behind it.
+                background: transparent;
                 Rectangle {
                     x: 12px;
                     y: 8px;
