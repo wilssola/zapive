@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential xvfb
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential xvfb libxkbcommon-x11-0
       - name: CMake (macOS; CTranslate2 is built from source)
         if: runner.os == 'macOS'
         run: command -v cmake >/dev/null || brew install cmake
