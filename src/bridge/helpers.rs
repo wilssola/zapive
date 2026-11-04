@@ -106,6 +106,49 @@ pub(super) fn message_editable(m: &StoredMessage) -> bool {
         && (0..900).contains(&(now_secs() - m.timestamp))
 }
 
+// What Settings > Automatic downloads allows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct AutoDownload {
+    pub(super) photos: bool,
+    pub(super) audio: bool,
+    pub(super) video: bool,
+    pub(super) documents: bool,
+    pub(super) stickers: bool,
+}
+
+// Whether a message's media is fetched (or opened from the local cache)
+// without the user tapping it. The settings gate what OTHER people send:
+// media I sent myself, from this computer or from my phone, is never held
+// behind a download tap, and a copy already in the cache is always shown.
+pub(super) fn should_auto_download(
+    kind: MessageKind,
+    sticker: bool,
+    voice: bool,
+    from_me: bool,
+    cached: bool,
+    allowed: AutoDownload,
+) -> bool {
+    if kind == MessageKind::Text || cached {
+        return true;
+    }
+    if kind == MessageKind::System {
+        return false;
+    }
+    if from_me || voice {
+        return true;
+    }
+    if sticker {
+        return allowed.stickers;
+    }
+    match kind {
+        MessageKind::Image => allowed.photos,
+        MessageKind::Audio => allowed.audio,
+        MessageKind::Video => allowed.video,
+        MessageKind::Doc => allowed.documents,
+        _ => false,
+    }
+}
+
 pub(super) fn needs_media(m: &StoredMessage) -> bool {
     !m.deleted
         && (m.kind != MessageKind::Text && m.kind != MessageKind::System
@@ -215,6 +258,143 @@ pub(super) fn color_idx_of(jid: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OFF: AutoDownload = AutoDownload {
+        photos: false,
+        audio: false,
+        video: false,
+        documents: false,
+        stickers: false,
+    };
+    const ON: AutoDownload = AutoDownload {
+        photos: true,
+        audio: true,
+        video: true,
+        documents: true,
+        stickers: true,
+    };
+
+    #[test]
+    fn my_own_media_is_never_held_behind_a_tap() {
+        for (n, kind) in [
+            MessageKind::Image,
+            MessageKind::Video,
+            MessageKind::Audio,
+            MessageKind::Doc,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                should_auto_download(kind, false, false, true, false, OFF),
+                "kind #{n}"
+            );
+        }
+        assert!(should_auto_download(
+            MessageKind::Image,
+            true,
+            false,
+            true,
+            false,
+            OFF
+        ));
+    }
+
+    #[test]
+    fn other_peoples_media_follows_the_settings() {
+        assert!(!should_auto_download(
+            MessageKind::Image,
+            false,
+            false,
+            false,
+            false,
+            OFF
+        ));
+        assert!(should_auto_download(
+            MessageKind::Image,
+            false,
+            false,
+            false,
+            false,
+            ON
+        ));
+        let photos_only = AutoDownload {
+            photos: true,
+            ..OFF
+        };
+        assert!(should_auto_download(
+            MessageKind::Image,
+            false,
+            false,
+            false,
+            false,
+            photos_only
+        ));
+        assert!(!should_auto_download(
+            MessageKind::Video,
+            false,
+            false,
+            false,
+            false,
+            photos_only
+        ));
+        assert!(!should_auto_download(
+            MessageKind::Image,
+            true,
+            false,
+            false,
+            false,
+            photos_only
+        ));
+    }
+
+    #[test]
+    fn a_cached_copy_and_voice_notes_always_show() {
+        assert!(should_auto_download(
+            MessageKind::Image,
+            false,
+            false,
+            false,
+            true,
+            OFF
+        ));
+        assert!(should_auto_download(
+            MessageKind::Audio,
+            false,
+            true,
+            false,
+            false,
+            OFF
+        ));
+        assert!(!should_auto_download(
+            MessageKind::Audio,
+            false,
+            false,
+            false,
+            false,
+            OFF
+        ));
+    }
+
+    #[test]
+    fn text_follows_link_previews_and_system_rows_never_download() {
+        assert!(should_auto_download(
+            MessageKind::Text,
+            false,
+            false,
+            false,
+            false,
+            OFF
+        ));
+        assert!(!should_auto_download(
+            MessageKind::System,
+            false,
+            false,
+            true,
+            false,
+            ON
+        ));
+    }
 
     #[test]
     fn document_types_use_extension_and_mime_fallback() {

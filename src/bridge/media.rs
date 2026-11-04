@@ -366,22 +366,18 @@ impl Bridge {
                 .as_option()
                 .is_some_and(|a| a.ptt == Some(true))
         });
-        let enabled = if m.sticker {
-            self.ui.get_auto_download_stickers()
-        } else {
-            match m.kind {
-                MessageKind::Image => self.ui.get_auto_download_photos(),
-                MessageKind::Audio => self.ui.get_auto_download_audio(),
-                MessageKind::Video => self.ui.get_auto_download_video(),
-                MessageKind::Doc => self.ui.get_auto_download_documents(),
-                _ => false,
-            }
+        let allowed = AutoDownload {
+            photos: self.ui.get_auto_download_photos(),
+            audio: self.ui.get_auto_download_audio(),
+            video: self.ui.get_auto_download_video(),
+            documents: self.ui.get_auto_download_documents(),
+            stickers: self.ui.get_auto_download_stickers(),
         };
         let cached = m
             .raw
             .as_ref()
             .is_some_and(|raw| crate::media::cached_path(&m.id, &m.mimetype, raw).1);
-        if enabled || voice || cached || m.kind == MessageKind::Text {
+        if should_auto_download(m.kind, m.sticker, voice, m.from_me, cached, allowed) {
             self.request_media(m);
         }
     }
