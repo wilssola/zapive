@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) const NOTIFICATION_TOKEN_TTL: Duration = Duration::from_secs(60);
 
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows toast has a reply box
 pub(super) const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
 
 #[derive(Clone)]
@@ -378,6 +379,7 @@ impl Bridge {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows toast has a reply box
     pub fn on_notification_reply(&mut self, token: &str, text: &str) {
         let Some(item) = self.take_notification_token(token) else {
             return;

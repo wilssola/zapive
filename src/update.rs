@@ -476,6 +476,7 @@ const RUNTIME_FILES: &[&str] = &["ctranslate2.dll", "libiomp5md.dll"];
 
 // Unpacks the named files that the zip holds into `stage`. A zip without
 // them (an old release) just yields fewer files; nothing here is fatal.
+#[cfg_attr(not(windows), allow(dead_code))] // runtime DLLs exist only on Windows; tests cover it everywhere
 fn extract_named(
     zip: &std::path::Path,
     names: &[&str],
@@ -506,6 +507,7 @@ fn extract_named(
     found
 }
 
+#[cfg_attr(not(windows), allow(dead_code))] // runtime DLLs exist only on Windows; tests cover it everywhere
 fn same_content(a: &std::path::Path, b: &std::path::Path) -> bool {
     use sha2::Digest as _;
     let sum = |path: &std::path::Path| std::fs::read(path).map(sha2::Sha256::digest);
@@ -518,6 +520,7 @@ fn same_content(a: &std::path::Path, b: &std::path::Path) -> bool {
 // Puts `fresh` at `dest` unless `dest` already holds the same bytes. A
 // loaded DLL cannot be overwritten or deleted on Windows but can be renamed,
 // so the current file is moved aside (and swept at the next launch) first.
+#[cfg_attr(not(windows), allow(dead_code))] // runtime DLLs exist only on Windows; tests cover it everywhere
 fn place_file(dest: &std::path::Path, fresh: &std::path::Path) -> Result<bool, String> {
     if dest.is_file() && same_content(dest, fresh) {
         return Ok(false);
