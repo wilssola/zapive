@@ -162,7 +162,15 @@ jobs:
         run: ./scripts/fetch-ctranslate2.ps1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release
+      # Thin LTO over 16 codegen units builds several times faster than the
+      # local fat-LTO/1-unit profile, for a slightly larger binary.
       - name: Build
+        env:
+          CARGO_INCREMENTAL: 0
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
         run: cargo build --release --locked
 
       # ---- Windows: sign, then wrap the exe in an installer that creates
