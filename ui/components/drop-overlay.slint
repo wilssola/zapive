@@ -1,0 +1,59 @@
+import { Theme } from "theme.slint";
+
+// Full conversation-area veil shown while files are dragged over the window.
+export component DropOverlay inherits Rectangle {
+    in property <bool> active;
+    visible: root.active || self.opacity > 0.001;
+    opacity: root.active ? 1.0 : 0.0;
+    animate opacity { duration: Theme.motion-normal; easing: ease-out; }
+    background: Theme.glass ? Theme.glass-fill-strong : Theme.panel.with-alpha(0.94);
+    backdrop-blur: Theme.glass ? 32px : 0px;
+    // Swallow pointer input so nothing underneath reacts while dragging.
+    TouchArea { enabled: root.active; }
+    Rectangle {
+        x: 24px;
+        y: 24px;
+        width: parent.width - 48px;
+        height: parent.height - 48px;
+        border-radius: 28px;
+        border-width: 2px;
+        border-color: Theme.accent-text.with-alpha(0.8);
+        background: Theme.accent.with-alpha(0.08);
+        VerticalLayout {
+            alignment: center;
+            spacing: 14px;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 84px;
+                    height: 84px;
+                    border-radius: 42px;
+                    background: Theme.accent.with-alpha(0.2);
+                    border-width: 1px;
+                    border-color: Theme.glass-rim;
+                    Image {
+                        source: @image-url("../icons/photo.svg");
+                        colorize: Theme.accent-text;
+                        width: 38px;
+                        height: 38px;
+                        x: 23px;
+                        y: 23px;
+                    }
+                }
+            }
+            Text {
+                text: @tr("drop.overlay.title");
+                color: Theme.text;
+                font-size: 22px;
+                font-weight: 700;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: @tr("drop.overlay.hint");
+                color: Theme.text-dim;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

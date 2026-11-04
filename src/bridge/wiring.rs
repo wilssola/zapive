@@ -230,6 +230,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         preview_jid: None,
         preview_generation: 0,
         preview_busy: false,
+        staged_files: Vec::new(),
+        staged_total: 0,
+        staged_document: None,
+        staged_position: 0,
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
@@ -664,7 +668,8 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let caption = caption.to_string();
         defer(move |b| b.confirm_send_image(&caption));
     });
-    ui.on_cancel_send_image(|| defer(|b| b.cancel_preview()));
+    ui.on_cancel_send_image(|| defer(|b| { b.clear_staged(); b.cancel_preview(); }));
+    ui.on_staged_select(|_| defer(|b| b.skip_staged()));
     ui.on_crop_preview(|x, y, w, h| {
         defer(move |b| b.edit_preview(crate::media::PreviewEdit::Crop(x, y, w, h)));
     });

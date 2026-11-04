@@ -276,6 +276,7 @@ impl Bridge {
             }
         }
         self.original_image = None;
+        self.staged_document = None;
         self.preview_jid = None;
         self.preview_busy = false;
         self.ui.set_preview_busy(false);
@@ -365,6 +366,9 @@ impl Bridge {
         if self.preview_busy || self.current_jid != self.preview_jid {
             return;
         }
+        if self.confirm_staged_document() {
+            return;
+        }
         let path = self.pending_image.take();
         let origin = self.original_image.as_ref().map(|path| path.to_string_lossy().into_owned());
         self.cancel_preview();
@@ -378,6 +382,7 @@ impl Bridge {
             path,
             caption: (!caption.is_empty()).then(|| caption.to_string()),
         });
+        self.next_staged();
     }
 
     // Fired on any Ctrl+V while a chat is open; only acts when the

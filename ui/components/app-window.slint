@@ -3983,6 +3983,14 @@ export component AppWindow inherits Window {
                 }
             }
 
+            drop-overlay := DropOverlay {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.file-drag-hover && root.chat-open && root.screen == "main";
+            }
+
             preview-layer := ModalLayer {
                 open: root.preview-open && root.chat-open;
                 scrim: transparent;
@@ -3995,6 +4003,10 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     picture: root.preview-image;
                     busy: root.preview-busy;
+                    count: root.staged-count;
+                    index: root.staged-index;
+                    thumbs: root.staged-thumbs;
+                    select(i) => { root.staged-index = i; root.staged-select(i); }
                     cancel => { root.cancel-send-image(); }
                     send(caption) => { root.confirm-send-image(caption); }
                     crop(x, y, w, h) => { root.crop-preview(x, y, w, h); }

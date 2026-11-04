@@ -190,6 +190,7 @@ fn main() {
                 }
                 _ => {}
             }
+            bridge::handle_file_drop_event(event);
             if let WindowEvent::Focused(focused) = event {
                 if let Some(ui) = handle.upgrade() {
                     ui.set_window_active(*focused);

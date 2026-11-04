@@ -1934,6 +1934,15 @@ msgstr "Não foi possível iniciar o servidor: {0}"
 msgid "chat.attach.poll"
 msgstr "Enquete"
 
+msgid "drop.overlay.title"
+msgstr "Solte os arquivos para enviar"
+
+msgid "drop.overlay.hint"
+msgstr "Solte para revisar antes de enviar"
+
+msgid "image.review.counter"
+msgstr "{0} de {1}"
+
 msgid "pinned.banner.count"
 msgstr "{0} de {1}"
 

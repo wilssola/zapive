@@ -102,6 +102,7 @@ impl Bridge {
         let switching_chat = self.current_jid.as_deref() != Some(jid);
         if switching_chat {
             self.save_composer(true);
+            self.clear_staged();
             self.cancel_preview();
             let unread = self.store.chats.get(jid).map_or(0, |meta| meta.unread) as usize;
             self.unread_boundary = if unread > 0 {

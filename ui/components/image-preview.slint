@@ -58,6 +58,12 @@ export component ImagePreview inherits Rectangle {
     property <float> text-x: 0.1;
     property <float> text-y: 0.1;
     property <bool> selected: false;
+    // Files queued for review: 0 or 1 is a single file; more shows a counter
+    // and a thumbnail strip.
+    in property <int> count: 0;
+    in property <int> index: 0;
+    in property <[image]> thumbs;
+    callback select(int);
     callback cancel();
     callback send(string);
     callback crop(float, float, float, float);
@@ -77,7 +83,7 @@ export component ImagePreview inherits Rectangle {
         root.stroke-path = "";
         root.drawing = false;
     }
-    background: Theme.dark ? #10191f : #f0f2f5;
+    background: Theme.viewer;
     TouchArea { }
     VerticalLayout {
         padding: 16px;
@@ -87,6 +93,24 @@ export component ImagePreview inherits Rectangle {
             IconButton {
                 icon: @image-url("../icons/x.svg");
                 clicked => { root.cancel(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if root.count > 1: Rectangle {
+                width: counter.preferred-width + 24px;
+                height: 32px;
+                y: 7px;
+                border-radius: 16px;
+                background: Theme.glass ? Theme.glass-fill-soft : Theme.tile;
+                border-width: 1px;
+                border-color: Theme.glass ? Theme.glass-rim-soft : Theme.border;
+                counter := Text {
+                    text: @tr("image.review.counter", root.index + 1, root.count);
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
             Rectangle { horizontal-stretch: 1; }
             Rectangle {

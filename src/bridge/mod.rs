@@ -33,6 +33,7 @@ mod chats;
 mod composer;
 mod conversation;
 mod documents;
+mod dropped;
 mod helpers;
 mod history;
 mod incoming;
@@ -62,6 +63,7 @@ use self::notifications::*;
 use self::selection::*;
 use self::stickers::*;
 use self::translation::*;
+pub use self::dropped::handle_file_drop_event;
 pub use self::wiring::{install, replay_link_press};
 
 pub struct Bridge {
@@ -220,6 +222,12 @@ pub struct Bridge {
     preview_jid: Option<String>,
     preview_generation: u64,
     preview_busy: bool,
+    // Images dropped together, waiting for their turn in the review.
+    staged_files: Vec<std::path::PathBuf>,
+    staged_total: usize,
+    // A dropped non-image file currently shown in the review.
+    staged_document: Option<std::path::PathBuf>,
+    staged_position: usize,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String, String)>,

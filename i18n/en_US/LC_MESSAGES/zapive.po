@@ -1932,6 +1932,15 @@ msgstr "Could not start the server: {0}"
 msgid "chat.attach.poll"
 msgstr "Poll"
 
+msgid "drop.overlay.title"
+msgstr "Drop files to send"
+
+msgid "drop.overlay.hint"
+msgstr "Release to review them before sending"
+
+msgid "image.review.counter"
+msgstr "{0} of {1}"
+
 msgid "pinned.banner.count"
 msgstr "{0} of {1}"
 
