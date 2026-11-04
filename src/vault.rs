@@ -731,7 +731,9 @@ impl Vault {
 }
 
 fn derive_kek(pin: &str, salt: &[u8]) -> Key {
-    let params = scrypt::Params::new(17, 8, 1, 32).expect("valid scrypt params");
+    // The low-level scrypt() takes its output length from `kek` (32 bytes), so
+    // these are the same parameters and the same key as before scrypt 0.12.
+    let params = scrypt::Params::new(17, 8, 1).expect("valid scrypt params");
     let mut kek = Zeroizing::new([0u8; 32]);
     scrypt::scrypt(pin.as_bytes(), salt, &params, &mut kek[..]).expect("scrypt cannot fail");
     kek
@@ -807,6 +809,14 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pin_kek_stays_compatible_with_scrypt_0_11() {
+        let actual = derive_kek("1234", b"zapive-test-salt");
+        let expected = "d2f3de990301323a44735efb6988b9a8ab7ea8e14314c61bc52960813d91a1a7";
+        let hex: String = actual.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(hex, expected);
+    }
 
     struct TempVault {
         vault: Vault,

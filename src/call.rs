@@ -47,27 +47,34 @@ pub fn devices() -> Devices {
 // The names to show in the picker. A device that disappears between the
 // listing and the call falls back to the system default.
 pub fn input_names() -> Vec<String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
     cpal::default_host()
         .input_devices()
-        .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+        .map(|devices| devices.filter_map(|d| device_name(&d)).collect())
         .unwrap_or_default()
 }
 
 pub fn output_names() -> Vec<String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
     cpal::default_host()
         .output_devices()
-        .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+        .map(|devices| devices.filter_map(|d| device_name(&d)).collect())
         .unwrap_or_default()
 }
 
+// cpal 0.18 replaced `Device::name()` with a description; the saved device
+// preference stays the same human-readable name it always was.
+fn device_name(device: &cpal::Device) -> Option<String> {
+    use cpal::traits::DeviceTrait;
+    device.description().ok().map(|d| d.name().to_string())
+}
+
 fn input_device(name: &str) -> Option<cpal::Device> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
     let host = cpal::default_host();
     if !name.is_empty()
         && let Ok(mut found) = host.input_devices()
-        && let Some(picked) = found.find(|d| d.name().is_ok_and(|n| n == name))
+        && let Some(picked) = found.find(|d| device_name(d).is_some_and(|n| n == name))
     {
         return Some(picked);
     }
@@ -75,11 +82,11 @@ fn input_device(name: &str) -> Option<cpal::Device> {
 }
 
 fn output_device(name: &str) -> Option<cpal::Device> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
     let host = cpal::default_host();
     if !name.is_empty()
         && let Ok(mut found) = host.output_devices()
-        && let Some(picked) = found.find(|d| d.name().is_ok_and(|n| n == name))
+        && let Some(picked) = found.find(|d| device_name(d).is_some_and(|n| n == name))
     {
         return Some(picked);
     }
@@ -234,11 +241,11 @@ fn build_input(
     let device = input_device(name)?;
     let config = device.default_input_config().ok()?;
     let channels = config.channels() as usize;
-    let mut resampler = Resampler::new(config.sample_rate().0, CALL_RATE);
+    let mut resampler = Resampler::new(config.sample_rate(), CALL_RATE);
     let mut frame: Vec<i16> = Vec::with_capacity(FRAME);
     let stream = device
         .build_input_stream(
-            &config.config(),
+            config.config(),
             move |data: &[f32], _| {
                 for block in data.chunks(channels) {
                     resampler.push(block.iter().sum::<f32>() / channels.max(1) as f32);
@@ -277,10 +284,10 @@ fn build_output(spk_rx: async_channel::Receiver<Vec<i16>>, name: &str) -> Option
     let device = output_device(name)?;
     let config = device.default_output_config().ok()?;
     let channels = config.channels() as usize;
-    let mut resampler = Resampler::new(CALL_RATE, config.sample_rate().0);
+    let mut resampler = Resampler::new(CALL_RATE, config.sample_rate());
     let stream = device
         .build_output_stream(
-            &config.config(),
+            config.config(),
             move |out: &mut [f32], _| {
                 while let Ok(frame) = spk_rx.try_recv() {
                     for sample in frame {
@@ -375,7 +382,7 @@ impl Ringer {
         // The ring belongs on the same speaker the call will use.
         let device = output_device(&devices().speaker)?;
         let config = device.default_output_config().ok()?;
-        let rate = config.sample_rate().0 as f32;
+        let rate = config.sample_rate() as f32;
         let channels = config.channels() as usize;
         let period = kind.period();
         // Loud enough to be heard across the room, quiet enough not to
@@ -384,7 +391,7 @@ impl Ringer {
         let mut t = 0f32;
         let stream = device
             .build_output_stream(
-                &config.config(),
+                config.config(),
                 move |out: &mut [f32], _| {
                     for block in out.chunks_mut(channels) {
                         let sample = (kind.sample(t) * gain).clamp(-1.0, 1.0);

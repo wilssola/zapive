@@ -126,13 +126,13 @@ pub fn play_message() {
             let Ok(config) = device.default_output_config() else {
                 return;
             };
-            let rate = config.sample_rate().0;
+            let rate = config.sample_rate();
             let channels = config.channels() as usize;
             let samples = chime_samples(rate.max(8_000));
             let length = samples.len();
             let mut cursor = 0usize;
             let Ok(stream) = device.build_output_stream(
-                &config.config(),
+                config.config(),
                 move |out: &mut [f32], _| {
                     for frame in out.chunks_mut(channels) {
                         let value = samples.get(cursor).copied().unwrap_or(0.0);

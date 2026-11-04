@@ -332,7 +332,7 @@ impl Player {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
         let device = cpal::default_host().default_output_device()?;
         let config = device.default_output_config().ok()?;
-        let out_rate = config.sample_rate().0;
+        let out_rate = config.sample_rate();
         let channels = config.channels() as usize;
         // The buffer is mono at OUT_RATE; a mismatched device rate plays
         // with nearest-sample scaling.
@@ -348,7 +348,7 @@ impl Player {
         let mut frac = 0.0f64;
         let stream = device
             .build_output_stream(
-                &config.config(),
+                config.config(),
                 move |out: &mut [f32], _| {
                     let mut cursor = cb.cursor.load(Ordering::Relaxed);
                     let gain = f32::from_bits(cb.gain.load(Ordering::Relaxed));
@@ -430,13 +430,13 @@ impl Recorder {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
         let device = cpal::default_host().default_input_device()?;
         let config = device.default_input_config().ok()?;
-        let rate = config.sample_rate().0;
+        let rate = config.sample_rate();
         let channels = config.channels() as usize;
         let samples = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = samples.clone();
         let stream = device
             .build_input_stream(
-                &config.config(),
+                config.config(),
                 move |data: &[f32], _| {
                     if let Ok(mut buf) = sink.lock() {
                         buf.extend_from_slice(data);
