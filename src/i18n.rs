@@ -334,6 +334,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(target_os = "macos", ignore = "winit must create the event loop on the main thread")]
     fn bundled_translation_runtime_selects_both_locales() {
         let _lock = LOCALE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _ui = crate::AppWindow::new().expect("create Slint component");
