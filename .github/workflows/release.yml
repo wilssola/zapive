@@ -297,5 +297,14 @@ jobs:
           # updater parses it) and the downloads/verification section. That
           # last section sits under a SHA-256 heading, which the app's
           # "what's new" view hides.
-          python3 .github/scripts/generate_changelog.py             --repository "$GITHUB_REPOSITORY"             --to-tag "$TAG"             --assets-dir .             --checksums-output SHA256SUMS.txt             --output notes.md
-          gh release create "$TAG"             --repo "$GITHUB_REPOSITORY"             --title "Zapive $TAG"             --notes-file notes.md             Zapive-* zapive-*.zip SHA256SUMS.txt
+          python3 .github/scripts/generate_changelog.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --to-tag "$TAG" \
+            --assets-dir . \
+            --checksums-output SHA256SUMS.txt \
+            --output notes.md
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Zapive $TAG" \
+            --notes-file notes.md \
+            Zapive-* zapive-*.zip SHA256SUMS.txt
