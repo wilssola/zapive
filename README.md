@@ -191,11 +191,31 @@ The details, including the MCP risks, are in
 
 ## Performance
 
-| Metric | Value (Windows, measured by the maintainers) |
-| --- | --- |
-| Executable | about 37 MB (Windows also ships the CTranslate2 DLLs) |
-| RAM at start | about 140 MB |
-| RAM connected, ~900 chats | about 180 MB |
+Measured with the reproducible harness in [`scripts/bench`](scripts/bench)
+on the release build in demo mode (offline mock chats), Windows 11 26H2, Ryzen 7
+9800X3D, 100 % scale. Full method and raw numbers:
+[docs/benchmarks.md](docs/benchmarks.md).
+
+| Metric | Value |
+| --- | ---: |
+| Time to first window (median of 5 cold starts) | 210 ms |
+| Working set 3 s after start | 76.6 MB |
+| Private bytes 3 s after start | 44.5 MB |
+| Idle CPU, window visible / minimized / hidden | 0 % |
+| CPU while scrolling a chat | 0.05 % of one core |
+| Liquid Glass vs opaque style | about +10 MB working set |
+| Release executable (single file, LTO, stripped) | 104.7 MiB, plus `ctranslate2.dll` on Windows |
+
+The latest optimisation round cut memory by about 12 %:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Working set at +3 s | 87.6 MB | 76.6 MB (−12.6 %) |
+| Private bytes at +3 s | 50.5 MB | 44.5 MB (−11.9 %) |
+| Idle working set, glass | 88.2 MB | 76.5 MB |
+
+Demo mode has no account, so a connected account with many chats, avatars
+and media uses more memory than these figures.
 
 Chats load lazily. Opening a chat, or resting the pointer on one for
 120 ms, loads its latest messages from the vault, and at most 8 chats stay
