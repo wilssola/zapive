@@ -385,6 +385,11 @@ fn configure(ui: &AppWindow, options: &Options) {
         }
     }
     ui.set_app_loading(options.page == Page::Splash);
+    // Shows the chat-row drop target as if files were dragged over a row.
+    if let Some(name) = value_of("--demo-drop-row") {
+        let jid = demo_jid_of(&ui, &name);
+        ui.set_drop_target_jid(jid.into());
+    }
     if std::env::args().any(|a| a == "--demo-privacy-blur") {
         ui.set_blur_names(true);
         ui.set_blur_messages(true);
@@ -453,4 +458,15 @@ fn start_bench(ui: &AppWindow, mode: &str) -> slint::Timer {
         },
     );
     timer
+}
+
+// The jid of the first chat-list row whose name contains `name`.
+fn demo_jid_of(ui: &AppWindow, name: &str) -> String {
+    use slint::Model;
+    let chats = ui.get_chats();
+    (0..chats.row_count())
+        .filter_map(|i| chats.row_data(i))
+        .find(|chat| chat.name.contains(name))
+        .map(|chat| chat.jid.to_string())
+        .unwrap_or_default()
 }
