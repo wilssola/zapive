@@ -354,17 +354,18 @@ impl Bridge {
                 self.push_message_row(&jid);
                 self.send_view_receipts(&jid);
             } else if !from_me {
-                let mut muted = false;
+                let mut quiet = false;
                 if let Some(meta) = self.store.chats.get_mut(&jid) {
                     meta.unread += 1;
                     if mentions_me {
                         meta.mentioned = true;
                     }
-                    muted = meta.is_muted();
+                    quiet =
+                        crate::sound::is_quiet_chat(meta.is_muted(), meta.archived, mentions_me);
                 }
-                // A muted chat still counts unread; it just stays quiet,
-                // unless someone tagged us.
-                if muted && !mentions_me {
+                // A muted or archived chat still counts unread; it just stays
+                // quiet (no banner), unless someone tagged us.
+                if quiet {
                     continue;
                 }
                 if let Some(m) = self.store.messages_for(&jid).last().cloned() {
