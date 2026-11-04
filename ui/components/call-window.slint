@@ -166,7 +166,7 @@ export component CallWindow inherits Window {
                 icon: @image-url("../icons/video.svg");
                 tint: root.video-wanted
                     ? #00a884
-                    : (root.video-on ? #2a3942 : (root.glass ? (Theme.dark ? #ffffff26 : #ffffffb0) : (Theme.dark ? #2a3942 : #d1d7db)));
+                    : (root.video-on ? #2a3942 : Theme.control);
                 icon-tint: root.video-wanted || root.video-on ? #ffffff : Theme.text;
                 clicked => { root.toggle-video(); }
             }
@@ -174,7 +174,7 @@ export component CallWindow inherits Window {
             if root.state == "active": CallAction {
                 label: root.muted ? @tr("call.controls.unmute") : @tr("call.controls.mute");
                 icon: @image-url("../icons/microphone.svg");
-                tint: root.muted ? #ea0038 : (root.glass ? (Theme.dark ? #ffffff26 : #ffffffb0) : (Theme.dark ? #2a3942 : #d1d7db));
+                tint: root.muted ? #ea0038 : Theme.control;
                 icon-tint: root.muted ? #ffffff : Theme.text;
                 clicked => { root.toggle-mute(); }
             }

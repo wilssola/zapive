@@ -1,4 +1,4 @@
-import { Button, ComboBox, LineEdit, ProgressIndicator, ScrollView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ProgressIndicator, ScrollView, Slider } from "std-widgets.slint";
 import { DialogButton } from "dialog-button.slint";
 import { IconButton } from "icon-button.slint";
 import { ModalLayer } from "modal.slint";
@@ -130,8 +130,7 @@ export component SettingsLayer inherits ModalLayer {
         height: 100%;
         x: (1 - root.progress) * 16px;
         opacity: root.progress;
-        background: Theme.glass ? Theme.glass-fill : (Theme.dark ? #091419 : Theme.sidebar);
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        background: Theme.glass ? Theme.glass-fill-cover : (Theme.dark ? #091419 : Theme.sidebar);
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {

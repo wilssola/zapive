@@ -50,10 +50,9 @@ export component InfoLayer inherits ModalLayer {
         border-radius: 18px;
         border-width: 1px;
         border-color: Theme.glass ? Theme.glass-rim : (Theme.dark ? #1c3038 : Theme.border);
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
         drop-shadow-blur: Theme.glass ? 28px : 0px;
         drop-shadow-color: Theme.glass-shadow;
-        background: Theme.glass ? Theme.glass-fill-soft : (Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel);
+        background: Theme.glass ? Theme.glass-fill-cover : (Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel);
         clip: true;
         if Theme.glass: Rectangle {
             width: parent.width;

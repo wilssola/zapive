@@ -353,9 +353,14 @@ export component ReactionsLayer inherits ModalLayer {
                 }
             }
             Rectangle { height: 1px; background: Theme.border; }
-            ListView {
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                alignment: start;
                 for r in root.reaction-rows: Rectangle {
-                    height: 56px;
+                    visible: root.active-tab == "" || r.emoji == root.active-tab;
+                    height: root.active-tab == "" || r.emoji == root.active-tab ? 56px : 0px;
+                    clip: true;
                     background: react-row.has-hover ? Theme.hover : transparent;
                     react-row := TouchArea {
                         mouse-cursor: pointer;
@@ -408,6 +413,7 @@ export component ReactionsLayer inherits ModalLayer {
                             }
                         }
                     }
+                }
                 }
             }
         }

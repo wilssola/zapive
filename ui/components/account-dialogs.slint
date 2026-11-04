@@ -111,7 +111,7 @@ export component AccountLayer inherits ModalLayer {
             MenuRow {
                 icon: @image-url("../icons/logout.svg");
                 label: @tr("account.menu.logout");
-                tint: #f05d4d;
+                tint: Theme.danger-solid;
                 clicked => {
                     root.account-menu-open = false;
                     root.logout();

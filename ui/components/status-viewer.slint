@@ -62,7 +62,7 @@ export component SvLayer inherits ModalLayer {
                     border-radius: 36px;
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    background: root.sv-video-ready ? #000000a0 : #00000050;
+                    background: root.sv-video-ready ? Theme.media-chip : Theme.media-chip-soft;
                     TouchArea {
                         mouse-cursor: pointer;
                         enabled: root.sv-video-ready;
