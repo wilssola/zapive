@@ -56,8 +56,12 @@ Yes, one-to-one voice and video calls. Group calls aren't supported yet.
 Yes, up to five accounts, one connected at a time.
 
 ### Can I vote in polls or create them?
-Not yet. Polls are shown with a note to answer them on the phone. See the
-"Not yet supported" list in [features.md](features.md#not-yet-supported).
+Yes. Create a poll from the attach menu, vote by clicking an option, and
+use **View votes** to see who picked what; see [features.md](features.md#polls).
+
+### Are there keyboard shortcuts?
+Yes. Press `Ctrl+/` (`Cmd+/` on macOS) for the full list; see
+[features.md](features.md#keyboard).
 
 ### How do I get updates?
 Zapive updates itself from GitHub Releases, after checking each download
@@ -72,6 +76,5 @@ English or Portuguese, following the system by default (**Settings →
 General → Language**). Contributions of new languages are welcome.
 
 ### What's the license?
-The repository doesn't have an open-source license yet, so all rights are
-reserved by the author. Bundled third-party components keep their own
+Zapive is open source under the [MIT License](../LICENSE). Bundled third-party components keep their own
 licenses.

@@ -1,18 +1,18 @@
-## Por quê
+## Why
 
-Qual problema isto resolve? Link para a issue, se houver (`Closes #123`).
+What problem does this solve? Link the issue, if there is one (`Closes #123`).
 
-## O que mudou
+## What changed
 
-Resumo da mudança. Se houver incompatibilidade, explique a migração.
+A summary of the change. If anything is incompatible, explain the migration.
 
-## Como foi verificado
+## How it was verified
 
-Comandos executados e plataformas testadas. Para mudanças de interface, inclua capturas feitas com `zapive --demo` (nunca com dados reais).
+Commands you ran and platforms you tested. For UI changes, include screenshots taken with `zapive --demo` (never with real data).
 
-- [ ] `cargo fmt --all -- --check` nos arquivos alterados
-- [ ] `cargo clippy --locked --all-targets` sem novos avisos
+- [ ] `cargo fmt --all -- --check` on the changed files
+- [ ] `cargo clippy --locked --all-targets` with no new warnings
 - [ ] `cargo test --locked`
-- [ ] Textos novos passam pelo i18n (`i18n/en_US` e `i18n/pt`, ids semânticos)
-- [ ] Commits seguem o padrão do `AGENTS.md` (`tipo(escopo): descrição`; `!` e `BREAKING CHANGE:` se incompatível)
-- [ ] Nenhum segredo, token, conversa, nome ou número real no diff, nos logs ou nas capturas
+- [ ] New strings go through i18n (`i18n/en_US` and `i18n/pt`, semantic ids)
+- [ ] Commits follow `AGENTS.md` (`type(scope): description`, English type and Portuguese description; `!` and `BREAKING CHANGE:` if incompatible)
+- [ ] No secrets, tokens, conversations, names or real numbers in the diff, logs or screenshots

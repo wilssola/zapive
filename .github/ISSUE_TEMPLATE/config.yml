@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Vulnerabilidade de segurança
+  - name: Security vulnerability
     url: https://github.com/wilssola/zapive/security/advisories/new
-    about: Reporte falhas de segurança em particular, nunca em uma issue pública. Veja SECURITY.md.
-  - name: Como contribuir
+    about: Report security issues privately, never in a public issue. See SECURITY.md.
+  - name: How to contribute
     url: https://github.com/wilssola/zapive/blob/master/CONTRIBUTING.md
-    about: Compilação, verificações e padrão de commits.
+    about: Building, checks and the commit convention.

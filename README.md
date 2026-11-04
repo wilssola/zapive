@@ -6,7 +6,7 @@ One executable, no browser engine, private by default.</p>
 <p align="center">
   <a href="https://github.com/wilssola/zapive/actions/workflows/build.yml"><img src="https://github.com/wilssola/zapive/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
   <a href="https://github.com/wilssola/zapive/releases/latest"><img src="https://img.shields.io/github/v/release/wilssola/zapive?label=release" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: proprietary">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20Linux%20%C2%B7%20macOS-informational" alt="Platforms: Windows, Linux, macOS">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Slint-orange" alt="Built with Rust and Slint">
 </p>
@@ -65,6 +65,12 @@ data only.
 | ![Dark opaque](docs/screenshots/chat-dark-opaque.png) | ![Light opaque](docs/screenshots/chat-light-opaque.png) |
 | **Settings** | **Contact / group info** |
 | ![Settings](docs/screenshots/settings.png) | ![Info panel](docs/screenshots/info-panel.png) |
+| **Polls** | **Creating a poll** |
+| ![Poll with results](docs/screenshots/poll.png) | ![Poll composer](docs/screenshots/poll-composer.png) |
+| **Starred messages** | **Reaction details** |
+| ![Starred messages](docs/screenshots/starred.png) | ![Reactions](docs/screenshots/reactions.png) |
+| **Drag and drop** | **Keyboard shortcuts** |
+| ![Dropping files](docs/screenshots/drop.png) | ![Shortcuts](docs/screenshots/shortcuts.png) |
 | **Linking a phone** | **Loading** |
 | ![Login](docs/screenshots/login.png) | ![Splash](docs/screenshots/splash.png) |
 
@@ -104,6 +110,13 @@ Full details are in [docs/features.md](docs/features.md).
 - WhatsApp formatting (`*bold*`, `_italic_`, `~strike~`, ```` ```mono``` ````),
   replies with a quote, reactions, forwarding, editing, starring, pinning
   and deleting (for me or for everyone).
+- **Polls:** create them (up to 12 options, single or multiple answers),
+  vote, and see live results with who voted for what.
+- **Starred messages** panel (all chats or the current one), a **pinned
+  messages banner** under the chat header, and **reaction details**
+  grouped by emoji.
+- Group read receipts turn blue only when **every** member has read the
+  message.
 - `@` mentions with a member picker, per-chat drafts, link previews, and a
   multi-message selection mode with copy, forward, delete and export.
 - Disappearing messages (off, 24 h, 7 days, 90 days), group member
@@ -115,6 +128,8 @@ Full details are in [docs/features.md](docs/features.md).
 - Photos, videos, GIFs, stickers, documents and voice notes, sent and
   received. You can crop a photo before sending, paste an image from the
   clipboard, and send a photo as view-once.
+- **Drag and drop** up to 10 files onto the window and review each one
+  before it is sent.
 - Voice notes at 1x, 1.5x, 2x, 2.5x and 3x with the pitch preserved (WSOLA)
   and real waveforms. Recording encodes straight to Ogg/Opus.
 - Streaming video player with seek, volume and keyboard controls, an image
@@ -146,6 +161,10 @@ Full details are in [docs/features.md](docs/features.md).
 **Appearance and desktop**
 - Liquid Glass (translucent) or Opaque style; dark, light or system theme;
   English or Portuguese UI.
+- **Chat wallpaper** with custom background and doodle colours (presets
+  or any hex value) and doodle intensity.
+- **Keyboard shortcuts** for switching, archiving and muting chats,
+  searching and editing, with a `Ctrl+/` help screen.
 - Native notifications where a click opens the chat, inline reply and a
   play button for voice notes on Windows (open and play on Linux), and a
   message chime you can switch off. See [docs/notifications.md](docs/notifications.md).
@@ -231,16 +250,13 @@ See [docs/demo-mode.md](docs/demo-mode.md).
 
 ## Not yet supported
 
-- Creating polls, voting, and seeing poll results (polls are shown with a
-  note to open them on the phone).
-- Group calls; starring and pinning lists or banners; reaction details.
+- Group calls, call links and screen sharing; posting statuses.
 - Blocking contacts, creating groups, invite links and `wa.me` deep links.
 - Locked chats, auto-lock after inactivity, proxy settings, and
   typing/last-seen privacy settings.
 - Sticker packs (import or create), interactive/business messages, sending
   locations, broadcast lists, albums.
-- A keyboard shortcut help screen; full screen-reader coverage; more UI
-  languages.
+- Full screen-reader coverage; more UI languages.
 - macOS notifications have no actions, and clicking one does not open the
   chat yet. Linux and macOS builds are tested less than Windows.
 
@@ -259,8 +275,7 @@ building, demo mode, releases, troubleshooting and FAQ.
 
 ## License
 
-The repository has no open-source license yet: all rights are reserved by
-the author. Third-party components keep their own licenses, including
+Zapive is open source under the [MIT License](LICENSE). Third-party components keep their own licenses, including
 [Tabler Icons](https://github.com/tabler/tabler-icons) (MIT), Noto Color
 Emoji (OFL) and the Unicode emoji data.
 

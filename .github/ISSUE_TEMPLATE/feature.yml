@@ -1,36 +1,36 @@
-name: Sugerir uma funcionalidade
-description: Uma ideia para melhorar o Zapive.
+name: Suggest a feature
+description: An idea to improve Zapive.
 labels: [enhancement]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Qual problema isso resolve
-      description: Descreva a situação de uso, não apenas a solução.
+      label: What problem does this solve
+      description: Describe the situation where you need it, not only the solution.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Como você imagina a solução
+      label: How you imagine the solution
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternativas consideradas
+      label: Alternatives considered
   - type: dropdown
     id: platform
     attributes:
-      label: Plataformas afetadas
+      label: Affected platforms
       multiple: true
       options: [Windows, Linux, macOS]
   - type: checkboxes
     id: scope
     attributes:
-      label: Antes de enviar
+      label: Before submitting
       options:
-        - label: Procurei nas issues abertas e fechadas e não encontrei um pedido igual.
+        - label: I searched open and closed issues and found no similar request.
           required: true
-        - label: Não estou pedindo envio automático de mensagens, chamadas ou status em nome do usuário sem ação explícita.
+        - label: I am not asking for messages, calls or statuses to be sent automatically on the user's behalf without an explicit action.
           required: false

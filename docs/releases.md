@@ -33,14 +33,16 @@ feat(storage)!: alterar o formato do histórico local
 
 | Type | Section in the notes | Version bump |
 | --- | --- | --- |
-| `feat` | Novidades | minor |
-| `fix` | Correções | patch |
-| `perf`, `refactor` | Melhorias | patch |
-| `security` | Segurança | patch |
+| `feat` | Novidades (new features) | minor |
+| `fix` | Correções (fixes) | patch |
+| `perf`, `refactor` | Melhorias (improvements) | patch |
+| `security` | Segurança (security) | patch |
 | `chore` | hidden | **none** |
 | `ci`, `build`, `test`, `docs`, `style` | hidden | patch (they still count) |
-| any type with `!` | **Alterações importantes** (with "Migração:") | **major** |
-| unknown type / non-conventional | Outras alterações | patch |
+| any type with `!` | **Alterações importantes** (breaking changes, each with "Migração:", the migration) | **major** |
+| unknown type / non-conventional | Outras alterações (other changes) | patch |
+
+The section names are shown as the generator writes them, in Portuguese.
 
 Don't label a feature as `chore` to hide it. Don't bump versions or create
 `chore(release)` commits by hand: the pipeline does that.
@@ -70,16 +72,16 @@ Don't label a feature as `chore` to hide it. Don't bump versions or create
 Standard library only. It reads the git range (the previous `v*` tag up to
 the target) and renders Markdown with **Portuguese headings**:
 
-```
-## Alterações importantes          breaking changes, each with "Migração:"
-## Novidades
-## Melhorias
-## Correções
-## Segurança
-## Outras alterações
-## Contribuidores                  bots excluded, GitHub handles from noreply e-mails
-**Changelog completo**: compare link
-## Downloads e verificação (SHA-256)   only with --assets-dir
+```text
+## Alterações importantes          breaking changes, each with "Migração:" (migration)
+## Novidades                       new features
+## Melhorias                       improvements
+## Correções                       fixes
+## Segurança                       security
+## Outras alterações               other changes
+## Contribuidores                  contributors; bots excluded, GitHub handles from noreply e-mails
+**Changelog completo**: full compare link
+## Downloads e verificação (SHA-256)   downloads and verification; only with --assets-dir
 ```
 
 - The **scope** becomes a bold label: `- **messages**: preservar o texto…`.

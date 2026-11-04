@@ -1,58 +1,58 @@
-name: Relatar um bug
-description: Algo no Zapive não funciona como esperado.
+name: Report a bug
+description: Something in Zapive doesn't work as expected.
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        **Não cole conversas, nomes, números de telefone, tokens ou o conteúdo de `vault.db`/`wa.db`.**
-        Se precisar mostrar a interface, use o modo demonstração (`zapive --demo`) ou borre os dados pessoais.
+        **Do not paste conversations, names, phone numbers, tokens or the contents of `vault.db`/`wa.db`.**
+        If you need to show the interface, use demo mode (`zapive --demo`) or blur any personal data.
   - type: textarea
     id: what-happened
     attributes:
-      label: O que aconteceu
-      description: Descreva o problema e o que você esperava ver.
+      label: What happened
+      description: Describe the problem and what you expected to see.
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Como reproduzir
+      label: Steps to reproduce
       placeholder: |
-        1. Abra...
-        2. Clique em...
-        3. Veja o erro
+        1. Open...
+        2. Click...
+        3. See the error
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Versão do Zapive
-      description: Em Configurações, ou com a tag da release instalada (por exemplo, v0.26.2).
+      label: Zapive version
+      description: Shown in Settings, or the tag of the installed release (for example, v0.26.2).
     validations:
       required: true
   - type: dropdown
     id: os
     attributes:
-      label: Sistema operacional
-      options: [Windows, Linux, macOS, Outro]
+      label: Operating system
+      options: [Windows, Linux, macOS, Other]
     validations:
       required: true
   - type: input
     id: os-version
     attributes:
-      label: Versão do sistema
+      label: OS version
       placeholder: Windows 11 23H2, Ubuntu 24.04 (Wayland), macOS 15...
   - type: textarea
     id: logs
     attributes:
-      label: Log (opcional)
+      label: Log (optional)
       description: |
-        Trechos de `zapive.log` na pasta de dados do app (veja o README). Rode com `ZAPIVE_LOG=debug` se precisar.
-        Remova números, nomes e qualquer conteúdo de mensagens antes de colar.
+        Excerpts from `zapive.log` in the app's data folder (see docs/troubleshooting.md). Run with `ZAPIVE_LOG=debug` if needed.
+        Remove phone numbers, names and any message content before pasting.
       render: text
   - type: textarea
     id: screenshots
     attributes:
-      label: Capturas de tela (opcional)
-      description: Sem dados reais; prefira o modo `--demo`.
+      label: Screenshots (optional)
+      description: No real data; prefer `--demo` mode.

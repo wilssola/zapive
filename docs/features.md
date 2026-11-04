@@ -6,6 +6,9 @@ each feature. Anything not listed here is in
 
 - [Chat list](#chat-list)
 - [Conversations](#conversations)
+- [Polls](#polls)
+- [Starred and pinned messages](#starred-and-pinned-messages)
+- [Reactions](#reactions)
 - [Writing and sending](#writing-and-sending)
 - [Media](#media)
 - [Voice notes](#voice-notes)
@@ -39,9 +42,8 @@ each feature. Anything not listed here is in
 ## Conversations
 
 - Bubbles for text, images, video, GIFs, stickers, voice notes, audio,
-  documents, contacts (vCard), locations and live locations, polls (shown
-  with a note to answer them on the phone), view-once media and
-  system notices.
+  documents, contacts (vCard), locations and live locations,
+  [polls](#polls), view-once media and system notices.
 - Group bubbles show the sender name in a stable colour.
 - **Message menu:** reply, reply privately (groups), react, forward, copy,
   copy image, copy link, save as, edit (your messages), pin or unpin, star
@@ -54,6 +56,10 @@ each feature. Anything not listed here is in
   - You can delete your own messages for everyone, or any message for
     yourself.
 - **Message details** show the timestamps and delivery state.
+- **Delivery ticks in groups** follow every member: a message shows two
+  grey ticks once **all** other members have received it, and turns
+  **blue only when every member has read it**. Until the member list is
+  known, it stays at one tick, so it never turns blue early.
 - **Selection mode** (chat menu → Select messages, or drag over messages):
   copy (`Ctrl+C`), forward or delete several messages at once. Destructive
   actions ask for a second click.
@@ -64,6 +70,51 @@ each feature. Anything not listed here is in
 - **Link previews:** a card with the title and thumbnail. Zapive refuses
   to fetch addresses on your own computer or local network.
 - **Translation:** see [translation.md](translation.md).
+
+## Polls
+
+| A poll with results | Creating a poll |
+| --- | --- |
+| ![Poll (demo)](screenshots/poll.png) | ![Poll composer (demo)](screenshots/poll-composer.png) |
+
+- **Create** a poll from the attach menu → **Poll**: a question (up to
+  255 characters) and 2 to 12 options (up to 100 characters each), with
+  **Allow multiple answers** on or off. Blank and duplicate options are
+  dropped. Nothing is sent if the poll is invalid or you can't write in the
+  chat.
+- **Vote** by clicking an option. In single-choice polls a click replaces
+  your answer, and clicking your current answer again clears it. In
+  multiple-choice polls each click toggles one option. Your vote shows at
+  once and is synced to your other devices.
+- **Results** update live as votes arrive from other people and devices
+  (they are decrypted locally with the poll's key). **View votes** lists
+  who picked each option.
+- Polls you received before linking, or whose key isn't available, are
+  shown read-only.
+
+## Starred and pinned messages
+
+![Starred messages panel (demo)](screenshots/starred.png)
+
+- **Starred messages:** chat menu (⋮) → **Starred messages** lists stars
+  from **all chats**, and the info panel → **Starred in this chat** lists
+  only the open chat's. Each entry shows the sender, chat, time and a
+  snippet; clicking it opens the chat at that message. Stars sync with the
+  phone.
+- **Pinned banner:** a glass strip under the chat header shows the current
+  pinned message. Clicking it jumps to the message and moves on to the
+  next pin ("1 of 3"). Its menu can **Unpin**. Pins come from any device
+  and expire on schedule (Zapive pins for 7 days).
+
+## Reactions
+
+![Reaction details (demo)](screenshots/reactions.png)
+
+- Click the reaction badge under a bubble to open **reaction details**:
+  an **All** tab and one tab per emoji, each listing who reacted.
+- Your own entry says **You · Click to remove**; clicking it removes your
+  reaction.
+- React from the message menu with the quick row or the full emoji picker.
 
 ## Writing and sending
 
@@ -79,6 +130,13 @@ each feature. Anything not listed here is in
   from the attach menu. Paste an image with `Ctrl+V` to send it. Photos
   can be cropped in the preview before sending, get a caption, or be sent
   as **view-once**. Stickers are converted to 512 px WebP.
+- **Drag and drop:** drag files from your file manager onto the window
+  ("Drop files to send"). Up to **10 files** of up to **100 MB** each join
+  a review queue ("1 of 3"); folders, empty files and duplicates are
+  skipped. Images open in the editor (crop, caption), and other files show
+  a document card. Each item is sent only when you confirm it.
+
+  ![Dropping files (demo)](screenshots/drop.png)
 - **GIFs:** search through Openverse in the picker. The chosen GIF is sent
   as a looping MP4, like the phone apps do.
 - **Emoji picker** with the full Unicode set and colour emoji.
@@ -194,12 +252,24 @@ each feature. Anything not listed here is in
 
 | Keys | Action |
 | --- | --- |
+| `Ctrl+/` | Show or hide the shortcut list |
+| `Ctrl+1` … `Ctrl+9` | Open chat 1 to 9 of the visible list |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous chat |
+| `Alt+↓` / `Alt+↑` | Next / previous chat (alternative) |
+| `Ctrl+E` | Archive or unarchive the open chat |
+| `Ctrl+Shift+M` | Mute or unmute the open chat |
+| `Ctrl+F` | Search chats |
+| `Ctrl+Shift+F` | Search in this chat |
+| `↑` (empty composer) | Edit your last message |
 | `Enter` / `Shift+Enter` | Send / new line |
-| `Ctrl+F` | Focus search |
 | `Ctrl+V` | Paste text or an image (an image opens the send preview) |
 | `Ctrl+C` | Copy the selected messages (selection mode) |
-| `Esc` | Close the topmost overlay (what's new, video, lightbox, PDF, menus, dialogs, send preview) |
+| `Esc` | Close the topmost panel (what's new, video, lightbox, PDF, menus, dialogs, send preview) |
 | `Space` / `K`, `←` `→`, `↑` `↓`, `M` | Video: play/pause, seek, volume, mute |
+
+On macOS, `Cmd` replaces `Ctrl` in the shortcut list.
+
+![Keyboard shortcuts (demo)](screenshots/shortcuts.png)
 
 ## Settings reference
 
@@ -209,8 +279,8 @@ filters them.
 | Section | Options |
 | --- | --- |
 | Account | Log out (keep or erase conversations) |
-| General | Start at login, interface language (System, English, Português; restart to apply) |
-| Appearance | Theme (Dark, Light, System) · Style (Liquid Glass, Opaque); see [appearance.md](appearance.md) |
+| General | Start at login, interface language (System, English, Portuguese; restart to apply) |
+| Appearance | Theme (Dark, Light, System) · Style (Liquid Glass, Opaque) · Chat wallpaper (background colour, doodle colour, intensity, reset); see [appearance.md](appearance.md) |
 | Notifications | Banners on/off · Show message previews · Message sound; see [notifications.md](notifications.md) |
 | Privacy | Send read receipts (off) · Apply messages deleted by the sender (off) · Blur names, photos, message text, media |
 | Security | Set, change or remove the PIN |
@@ -224,14 +294,10 @@ filters them.
 
 Gaps we know about, not permanent decisions:
 
-- Creating polls, voting and seeing results.
 - Group calls, call links, screen sharing, posting statuses.
-- Lists of starred or pinned messages, a pinned banner in the chat, and a
-  view of who reacted.
 - Blocking contacts, creating groups, invite links, `wa.me` deep links.
 - Locked chats, auto-lock after inactivity, and a proxy.
 - Privacy settings for typing, last seen and online.
 - Importing or creating sticker packs, interactive or business messages,
   sending locations, broadcast lists, album grids.
-- A keyboard shortcut help screen, full screen-reader coverage, and more
-  than two UI languages.
+- Full screen-reader coverage, and more than two UI languages.

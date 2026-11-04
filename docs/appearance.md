@@ -48,9 +48,25 @@ The choice is stored as `theme_style` (`glass` or `opaque`).
 
 Stored as `theme` (`dark`, `light` or `system`).
 
+## Chat wallpaper
+
+**Settings → Appearance → Chat wallpaper** customises the doodle pattern
+behind conversations:
+
+- **Background colour** and **Doodle colour**: pick one of the presets
+  (light and dark tones) or type any `#rrggbb` value. Invalid values are
+  ignored.
+- **Intensity**: a slider for how strongly the doodles show.
+- A live preview with an incoming and an outgoing bubble shows the result.
+- **Reset to default** returns to the theme's own wallpaper, which follows
+  dark or light.
+
+Stored as `chat_wallpaper_bg` and `chat_wallpaper_fg` (hex; empty means the
+default).
+
 ## Language
 
-**Settings → General → Language:** System, English or Português. **System**
+**Settings → General → Language:** System, English or Portuguese. **System**
 uses the OS locale and falls back to English. Restart Zapive to apply the
 change.
 

@@ -1,73 +1,79 @@
-# Contribuindo com o Zapive
+# Contributing to Zapive
 
-Obrigado por querer ajudar. Este guia resume como compilar, verificar e enviar mudanças. Ao participar, você concorda com o [Código de Conduta](CODE_OF_CONDUCT.md). Falhas de segurança seguem a [SECURITY.md](SECURITY.md).
+Thanks for wanting to help. This guide covers how to build, check and submit changes. By taking part, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). Security issues follow [SECURITY.md](SECURITY.md).
 
-> **Regra de ouro:** nunca use dados reais em issues, testes, logs ou capturas de tela, e nunca envie mensagens, reações, status ou chamadas reais para testar. Use o modo demonstração.
+> **Golden rule:** never use real data in issues, tests, logs or screenshots, and never send real messages, reactions, statuses or calls to test something. Use demo mode.
 
-## Compilar
+## License
 
-Pré-requisitos: [Rust](https://rustup.rs) (o `rust-toolchain.toml` seleciona o canal `stable` com `rustfmt` e `clippy`).
+Zapive is open source under the [MIT License](LICENSE). By submitting a contribution (code, translations, documentation or assets), you agree that it is licensed under the MIT License as well, and you confirm that you have the right to contribute it.
 
-| Plataforma | Extra |
+## Building
+
+Prerequisites: [Rust](https://rustup.rs) (`rust-toolchain.toml` selects the `stable` channel with `rustfmt` and `clippy`).
+
+| Platform | Extra |
 | --- | --- |
-| Windows | MSVC Build Tools e `./scripts/fetch-ctranslate2.ps1` (baixa a DLL oficial do CTranslate2 para `vendor/`) |
+| Windows | MSVC Build Tools and `./scripts/fetch-ctranslate2.ps1` (downloads the official CTranslate2 DLL into `vendor/`) |
 | Linux | `libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential` |
-| macOS | `cmake` (o CTranslate2 é compilado do código-fonte) |
+| macOS | `cmake` (CTranslate2 is compiled from source) |
 
 ```sh
-cargo build --locked          # desenvolvimento
-cargo run --locked            # abre o app
+cargo build --locked          # development
+cargo run --locked            # run the app
 cargo build --release --locked
 ```
 
-## Verificações antes do PR
+More details are in [docs/building.md](docs/building.md).
+
+## Checks before opening a PR
 
 ```sh
-cargo fmt --all -- --check    # formatação (veja a nota abaixo)
+cargo fmt --all -- --check    # formatting (see the note below)
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-python3 -m unittest discover -s .github/scripts -p 'test_*.py'   # gerador de notas
+python3 -m unittest discover -s .github/scripts -p 'test_*.py'   # release-notes generator
 ```
 
-O repositório ainda carrega um passivo de formatação e de avisos do clippy anteriores a estes checks; por isso o job `fmt and clippy` do CI é informativo. Não reformate arquivos inteiros que você não alterou: isso polui o diff. Garanta que **o seu código** passa, e que o `cargo test` e a compilação nas plataformas do CI continuam verdes.
+The repository still carries formatting and clippy debt that predates these checks, so the CI `fmt and clippy` job is informational. Don't reformat whole files you didn't change, because that pollutes the diff. Make sure **your code** passes, and that `cargo test` and the builds on the CI platforms stay green.
 
-O CI (`.github/workflows/build.yml`) roda build e testes em Linux, macOS e Windows, `cargo audit` e o teste do gerador de notas.
+CI (`.github/workflows/build.yml`) runs the build and tests on Linux, macOS and Windows, plus `cargo audit` and the release-notes generator tests.
 
-## Modo demonstração
+## Demo mode
 
-`zapive --demo` abre o app com dados fictícios em um diretório de dados temporário e **nunca conecta ao WhatsApp**. Use-o para depurar a interface e para capturas de tela em issues e PRs, sem expor conversas reais.
+`zapive --demo` opens the app with invented data in a temporary data directory and **never connects to WhatsApp**. Build it with `cargo run --features demo -- --demo`. Use it to debug the UI and to take screenshots for issues and PRs without exposing real conversations. See [docs/demo-mode.md](docs/demo-mode.md).
 
-## Textos da interface e i18n
+## UI text and i18n
 
-Todo texto visível passa pelo i18n, com ids semânticos, nos arquivos `i18n/en_US/LC_MESSAGES/zapive.po` e `i18n/pt/LC_MESSAGES/zapive.po`. Não escreva textos fixos em `.slint` ou `.rs`.
+Every visible string goes through i18n with semantic ids, in `i18n/en_US/LC_MESSAGES/zapive.po` and `i18n/pt/LC_MESSAGES/zapive.po`. Don't hard-code text in `.slint` or `.rs` files.
 
-## Código
+## Code
 
-- Identificadores e comentários de código em inglês.
-- Siga o estilo do código vizinho; evite comentários que apenas repetem o código.
-- Verifique as dependências existentes antes de adicionar novas, e justifique cada nova dependência no PR.
+- Identifiers and code comments are in English.
+- Follow the style of the surrounding code, and avoid comments that only repeat what the code says.
+- Check the existing dependencies before adding new ones, and justify each new dependency in the PR.
 
 ## Commits
 
-O padrão completo está no [AGENTS.md](AGENTS.md); em resumo:
+The full convention is in [AGENTS.md](AGENTS.md). In short:
 
-- Conventional Commits: `tipo(escopo): descrição`, com o tipo em inglês minúsculo e a descrição em português, no infinitivo e sem ponto final.
-- Tipos: `feat`, `fix`, `perf`, `refactor`, `security` aparecem no changelog; `chore`, `ci`, `build`, `test`, `docs`, `style` ficam fora das notas.
-- Um commit por mudança lógica, compilável, com implementação, traduções e testes.
-- Incompatibilidades: `!` no título e `BREAKING CHANGE: ...` no corpo, explicando a migração.
-- Não altere versões nem crie `chore(release)`: o pipeline faz isso.
+- Conventional Commits: `type(scope): description`. The **type** and **scope** are in lower-case English. The **description is written in Portuguese**, preferably in the infinitive and with no final period (for example `fix(messages): preservar o texto quando o envio falhar`).
+- `feat`, `fix`, `perf`, `refactor` and `security` appear in the changelog. `chore`, `ci`, `build`, `test`, `docs` and `style` are left out of the notes.
+- Make one commit per logical change, keep each one compilable, and include its implementation, translations and tests.
+- For breaking changes, put `!` in the title and a `BREAKING CHANGE: ...` paragraph in the body that explains the migration.
+- Don't change versions or create `chore(release)` commits: the pipeline does that.
 
-### Como os commits viram release notes
+### How commits become release notes
 
-Cada push em `master` gera uma release automaticamente (`.github/workflows/release.yml`). Quanto melhor o commit, melhor a nota:
+Every push to `master` produces a release automatically (`.github/workflows/release.yml`). The better the commit, the better the note:
 
-- O **escopo** vira um rótulo em negrito (`**mensagens**: ...`).
-- Em `feat`, `fix`, `perf` e `security`, o **primeiro parágrafo do corpo** aparece como sub-tópico. Escreva-o para o usuário final.
-- O texto de `BREAKING CHANGE:` aparece na seção **Alterações importantes**, com a migração.
-- Links para o commit e para o PR, a lista de contribuidores e o link de comparação são adicionados automaticamente.
-- A release traz instaladores por plataforma, `SHA256SUMS.txt` e instruções de verificação.
+- The **scope** becomes a bold label (`**messages**: ...`).
+- For `feat`, `fix`, `perf` and `security`, the **first paragraph of the body** appears as a sub-item. Write it for end users.
+- The `BREAKING CHANGE:` text appears in the breaking-changes section, together with the migration.
+- Links to the commit and the PR, the contributor list and the compare link are added automatically.
+- Each release ships per-platform installers, `SHA256SUMS.txt` and verification instructions.
 
-Para ver o resultado localmente:
+See [docs/releases.md](docs/releases.md) for the details. To preview the result locally:
 
 ```sh
 python3 .github/scripts/generate_changelog.py --to-tag HEAD --output notes.md
@@ -75,6 +81,6 @@ python3 .github/scripts/generate_changelog.py --to-tag HEAD --output notes.md
 
 ## Pull requests
 
-- Parta de `master`, mantenha o PR focado e preencha o modelo.
-- Descreva o que testou e em quais sistemas. Mudanças visuais pedem capturas (feitas com `--demo`).
-- Não inclua segredos, `.env`, certificados, `vault.db`, `wa.db` ou logs sem sanitizar.
+- Branch from `master`, keep the PR focused, and fill in the template.
+- Describe what you tested and on which systems. Visual changes need screenshots, taken with `--demo`.
+- Don't include secrets, `.env` files, certificates, `vault.db`, `wa.db` or unsanitised logs.

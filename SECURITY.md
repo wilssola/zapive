@@ -1,34 +1,36 @@
-# Política de segurança
+# Security policy
 
-O Zapive guarda conversas, mídia e credenciais de sessão do WhatsApp no computador do usuário. Falhas de segurança merecem tratamento cuidadoso.
+Zapive stores WhatsApp conversations, media and session credentials on the user's computer, so security issues deserve careful handling.
 
-## Versões com correções
+## Supported versions
 
-Apenas a **última release** publicada em [Releases](https://github.com/wilssola/zapive/releases) recebe correções de segurança. O app se atualiza sozinho; peça a quem reporta que confirme o problema na versão mais recente.
+Only the **latest release** published on [Releases](https://github.com/wilssola/zapive/releases) receives security fixes. The app updates itself, so please confirm the problem on the latest version before reporting it.
 
-## Como reportar uma vulnerabilidade
+## Reporting a vulnerability
 
-**Não abra uma issue pública.** Use o relato privado do GitHub:
+**Do not open a public issue.** Use GitHub's private reporting:
 
-1. Abra <https://github.com/wilssola/zapive/security/advisories/new>.
-2. Descreva o impacto, os passos para reproduzir, a versão e o sistema operacional.
-3. Se possível, inclua uma sugestão de correção.
+1. Open <https://github.com/wilssola/zapive/security/advisories/new>.
+2. Describe the impact, the steps to reproduce, the version and the operating system.
+3. If you can, suggest a fix.
 
-**Nunca envie** conversas reais, números de telefone, tokens, o conteúdo de `vault.db`/`wa.db` ou chaves. Use dados fictícios; o modo `zapive --demo` roda com dados de exemplo e não conecta ao WhatsApp.
+**Never send** real conversations, phone numbers, tokens, the contents of `vault.db`/`wa.db`, or keys. Use invented data: `zapive --demo` runs with sample data and never connects to WhatsApp.
 
-## O que esperar
+## What to expect
 
-- Confirmação de recebimento em até 7 dias.
-- Avaliação e plano de correção em até 30 dias, conforme a gravidade.
-- Crédito no aviso de segurança, se você quiser.
-- Divulgação coordenada: publicamos o aviso junto com a release que corrige o problema.
+- An acknowledgement within 7 days.
+- An assessment and a fix plan within 30 days, depending on severity.
+- Credit in the security advisory, if you want it.
+- Coordinated disclosure: the advisory is published together with the release that fixes the problem.
 
-## Escopo
+## Scope
 
-Dentro do escopo: cofre local e criptografia em disco, índice de busca, atualizador (verificação do SHA-256), servidor MCP local (token e escuta apenas em `127.0.0.1`), tratamento de mídia e links recebidos, instaladores e o pipeline de release.
+In scope: the local vault and on-disk encryption, the search index, the updater (SHA-256 verification), the local MCP server (token, listening only on `127.0.0.1`), handling of received media and links, the installers and the release pipeline.
 
-Fora do escopo: falhas do próprio WhatsApp ou de seus servidores, do sistema operacional, e ataques que exigem acesso físico ao computador já desbloqueado.
+Out of scope: flaws in WhatsApp itself or its servers, flaws in the operating system, and attacks that require physical access to a computer that is already unlocked.
 
-## Dependências
+See [docs/privacy-and-security.md](docs/privacy-and-security.md) for the threat model.
 
-O CI executa `cargo audit` a cada pull request e semanalmente, e o Dependabot propõe atualizações de dependências e de actions.
+## Dependencies
+
+CI runs `cargo audit` on every pull request and weekly, and Dependabot proposes updates to dependencies and actions.

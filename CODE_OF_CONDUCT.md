@@ -1,29 +1,29 @@
-# Código de conduta
+# Code of Conduct
 
-## Nosso compromisso
+## Our pledge
 
-Queremos um projeto aberto e respeitoso para quem contribui, independentemente de experiência, identidade, origem, aparência ou opiniões.
+We want an open and respectful project for everyone who contributes, regardless of experience, identity, background, appearance or opinions.
 
-## Comportamento esperado
+## Expected behaviour
 
-- Tratar as pessoas com respeito e empatia.
-- Dar e receber críticas técnicas de forma construtiva, focando no código e não na pessoa.
-- Assumir boa-fé e pedir esclarecimentos antes de concluir o pior.
-- Respeitar a privacidade: nunca publicar conversas, números, nomes ou dados pessoais de terceiros em issues, PRs, logs ou capturas.
+- Treat people with respect and empathy.
+- Give and receive technical criticism constructively, focusing on the code and not on the person.
+- Assume good faith, and ask for clarification before assuming the worst.
+- Respect privacy: never publish other people's conversations, phone numbers, names or personal data in issues, PRs, logs or screenshots.
 
-## Comportamento inaceitável
+## Unacceptable behaviour
 
-- Assédio, discriminação, ameaças, insultos ou linguagem depreciativa.
-- Atenção sexual indesejada e intimidação.
-- Divulgar informações privadas de outras pessoas sem permissão.
-- Spam, autopromoção fora de contexto e qualquer conduta que seria considerada inadequada em um ambiente profissional.
+- Harassment, discrimination, threats, insults or demeaning language.
+- Unwanted sexual attention and intimidation.
+- Sharing other people's private information without permission.
+- Spam, off-topic self-promotion, and any conduct that would be considered inappropriate in a professional setting.
 
-## Aplicação
+## Enforcement
 
-Quem mantém o projeto pode editar, ocultar ou remover comentários, issues e contribuições que violem este código, e pode restringir a participação de quem o infringir repetidamente.
+Maintainers may edit, hide or remove comments, issues and contributions that violate this code, and may restrict participation by anyone who violates it repeatedly.
 
-Para reportar um problema de conduta, abra um [relato privado](https://github.com/wilssola/zapive/security/advisories/new) marcando-o como conduta ou procure diretamente quem mantém o repositório. Os relatos são tratados com confidencialidade.
+To report a conduct issue, open a [private report](https://github.com/wilssola/zapive/security/advisories/new) marked as a conduct issue, or contact the repository maintainers directly. Reports are handled confidentially.
 
-## Atribuição
+## Attribution
 
-Adaptado, em linhas gerais, do [Contributor Covenant](https://www.contributor-covenant.org/pt-br/version/2/1/code_of_conduct/), versão 2.1.
+Broadly adapted from the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/), version 2.1.
