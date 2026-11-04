@@ -6,7 +6,8 @@ use slint::{ModelRc, SharedString, VecModel};
 use super::art;
 use crate::i18n::{t, ta};
 use crate::{
-    AccountItem, AppWindow, CallItem, ChatItem, MemberItem, MessageItem, StickerCell,
+    AccountItem, AppWindow, CallItem, ChatItem, MemberItem, MessageItem, PinnedItem, PollOption, SilencedCall,
+    ReactionItem, ReactionTab, StarredItem, StickerCell,
 };
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
@@ -86,6 +87,7 @@ impl Row<'_> {
             mentioned: self.mentioned,
             pinned: self.pinned,
             muted: self.muted,
+            silenced_call: self.id == "demo-group-hikers" && std::env::args().any(|a| a == "--demo-silenced"),
         }
     }
 }
@@ -221,6 +223,36 @@ impl Msg {
         self
     }
 
+    fn pinned(mut self) -> Msg {
+        self.inner.pinned = true;
+        self
+    }
+
+    fn starred(mut self) -> Msg {
+        self.inner.starred = true;
+        self
+    }
+
+    fn poll(mut self, question: &str, options: &[(&str, i32, bool, &str)], multi: bool, total: i32) -> Msg {
+        self.inner.cardKind = "poll".into();
+        self.inner.cardTitle = question.into();
+        self.inner.poll_options = model(
+            options
+                .iter()
+                .map(|(name, votes, voted, voters)| PollOption {
+                    name: (*name).into(),
+                    votes: *votes,
+                    voted: *voted,
+                    voters: (*voters).into(),
+                })
+                .collect(),
+        );
+        self.inner.poll_multi = multi;
+        self.inner.poll_total = total;
+        self.inner.poll_can_vote = true;
+        self
+    }
+
     fn day(mut self, label: &str) -> Msg {
         self.inner.dayLabel = label.into();
         self
@@ -242,14 +274,14 @@ fn dm_messages(en: bool) -> Vec<MessageItem> {
     let today = t("day.today");
     let mut v = vec![
         Msg::text("m1", &l("Morning! Are we still on for the trail this weekend?", "Bom dia! Ainda vamos na trilha neste fim de semana?"), "09:02", false).first().day(&today),
-        Msg::text("m2", &l("Yes! The forecast looks great ☀️", "Vamos! A previsão está ótima ☀️"), "09:04", true).first().ticks("✓✓", true).react("👍", ""),
+        Msg::text("m2", &l("Yes! The forecast looks great ☀️", "Vamos! A previsão está ótima ☀️"), "09:04", true).first().ticks("✓✓", true).react("👍", "").pinned(),
         Msg::text("m4", &l("Sunrise from the ridge. Worth the 5 am alarm.", "Nascer do sol na crista. Valeu acordar às 5h."), "09:06", true).image(4, 330, 190).ticks("✓✓", true).react("❤️🔥", "2"),
         Msg::text("m5", &l("Wow, that is unreal 😍", "Uau, isso é surreal 😍"), "09:08", false).first().react("😮", ""),
         Msg::text("m6", "", "09:10", false).voice(&HELENA, "0:23", 8, 0.42),
-        Msg::text("m7", &l("Here is the route and the packing list", "Segue o roteiro e a lista de itens"), "09:14", true).first().document(&l("trail-route-and-packing.pdf", "roteiro-e-itens-da-trilha.pdf"), "PDF", "1.2 MB").ticks("✓✓", false),
+        Msg::text("m7", &l("Here is the route and the packing list", "Segue o roteiro e a lista de itens"), "09:14", true).first().document(&l("trail-route-and-packing.pdf", "roteiro-e-itens-da-trilha.pdf"), "PDF", "1.2 MB").ticks("✓✓", false).pinned().starred(),
         Msg::text("m8", &l("Perfect. Should I bring the tent too?", "Perfeito. Levo a barraca também?"), "09:30", false).first().reply(&t("reactions.you"), &l("Here is the route and the packing list", "Segue o roteiro e a lista de itens")),
         Msg::text("m9", &l("Just the small one. We will camp near the lake.", "Só a pequena. Vamos acampar perto do lago."), "09:39", true).first().ticks("✓✓", true),
-        Msg::text("m10", &l("Sounds perfect, see you there!", "Combinado, te vejo lá!"), "09:41", false).first(),
+        Msg::text("m10", &l("Sounds perfect, see you there!", "Combinado, te vejo lá!"), "09:41", false).first().starred(),
     ];
     for m in &mut v {
         if m.inner.fromMe && m.inner.firstOfRun {
@@ -263,12 +295,27 @@ fn group_messages(en: bool) -> Vec<MessageItem> {
     let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
     let today = t("day.today");
     let v = vec![
-        Msg::text("g1", &l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto."), "08:50", false).from(&NINA, true).first().day(&today),
+        Msg::text("g1", &l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto."), "08:50", false).from(&NINA, true).first().day(&today).pinned().starred(),
         Msg::text("g2", &l("I will bring maps and snacks 🥜", "Levo mapas e lanches 🥜"), "08:52", false).from(&THEO, true).first(),
         Msg::text("g3", &l("Count me in!", "Podem contar comigo!"), "08:55", false).from(&HELENA, true).first().react("🙌", ""),
         Msg::text("g4", "", "09:01", false).voice(&NINA, "0:23", 21, 0.0).from(&NINA, true).first(),
-        Msg::text("g5", &l("Last month's summit view, for motivation", "A vista do cume do mês passado, pra motivar"), "09:05", false).from(&IVY, true).first().image(6, 330, 190).react("😍🔥👏", "5"),
+        Msg::text("g5", &l("Last month's summit view, for motivation", "A vista do cume do mês passado, pra motivar"), "09:05", false).from(&IVY, true).first().image(6, 330, 190).react("😍🔥👏", "5").starred(),
         Msg::text("g6", &l("Who is bringing the thermos?", "Quem leva a garrafa térmica?"), "09:12", false).from(&NINA, true).first().reply(&l("Theo Marques", "Theo Marques"), &l("I will bring maps and snacks 🥜", "Levo mapas e lanches 🥜")),
+        Msg::text("g7", "", "09:20", false)
+            .poll(
+                &l("Which trail next Sunday?", "Qual trilha no próximo domingo?"),
+                &[
+                    ("Eagle Ridge", 6, true, "Nina, Theo, Ivy, Helena, Omar, You"),
+                    (&l("Cedar Falls", "Cachoeira do Cedro"), 4, true, "Nina, Ivy, Raul, You"),
+                    (&l("Lake Loop", "Volta do Lago"), 2, false, "Theo, Sofia"),
+                    (&l("Skip it, brunch instead", "Pular e fazer um brunch"), 1, false, "Omar"),
+                ],
+                true,
+                8,
+            )
+            .from(&THEO, true)
+            .first()
+            .pinned(),
     ];
     v.into_iter().map(|m| m.done(&today)).collect()
 }
@@ -301,6 +348,80 @@ fn media_grid() -> ModelRc<ModelRc<StickerCell>> {
         rows.push(model(cells));
     }
     model(rows)
+}
+
+fn pinned_items(en: bool, group: bool) -> Vec<PinnedItem> {
+    let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
+    let item = |id: &str, sender: &str, text: String| PinnedItem {
+        msg_id: id.into(),
+        sender: sender.into(),
+        text: text.into(),
+    };
+    if group {
+        vec![
+            item("g1", NINA.name, l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto.")),
+            item("g7", THEO.name, l("📊 Which trail next Sunday?", "📊 Qual trilha no próximo domingo?")),
+        ]
+    } else {
+        vec![
+            item("m2", &t("reactions.you"), l("Yes! The forecast looks great ☀️", "Vamos! A previsão está ótima ☀️")),
+            item("m7", &t("reactions.you"), l("📄 trail-route-and-packing.pdf", "📄 roteiro-e-itens-da-trilha.pdf")),
+        ]
+    }
+}
+
+fn starred_items(en: bool) -> Vec<StarredItem> {
+    let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
+    let item = |jid: &str, id: &str, chat: &str, who: &Person, text: String, time: &str| StarredItem {
+        jid: jid.into(),
+        msg_id: id.into(),
+        chat_name: chat.into(),
+        sender: who.name.into(),
+        text: text.into(),
+        time: time.into(),
+        avatar: art::avatar(who.seed),
+    };
+    vec![
+        item(HELENA.id, "m10", HELENA.name, &HELENA, l("Sounds perfect, see you there!", "Combinado, te vejo lá!"), "09:41"),
+        item("demo-group-hikers", "g1", "Sunday Hikers", &NINA, l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto."), "08:50"),
+        item("demo-group-hikers", "g5", "Sunday Hikers", &IVY, l("Last month's summit view, for motivation", "A vista do cume do mês passado, pra motivar"), "09:05"),
+        item("demo-group-design", "d1", "Design Crit", &THEO, l("Final palette: teal 600, slate 900, warm sand.", "Paleta final: verde-azulado 600, ardósia 900, areia quente."), "Yesterday"),
+        item(RAUL.id, "r1", RAUL.name, &RAUL, l("Invoice #2043 is attached, due on the 15th.", "Fatura nº 2043 em anexo, vence no dia 15."), "Mon"),
+        item("demo-group-trip", "t1", "Lisbon Trip ✈️", &SOFIA, l("Apartment address: Rua das Flores 12, 3rd floor.", "Endereço do apartamento: Rua das Flores 12, 3º andar."), "Fri"),
+    ]
+}
+
+// Who reacted to the group photo (message g5): five people, one of them me.
+fn reaction_rows(en: bool) -> Vec<ReactionItem> {
+    let _ = en;
+    let me = t("reactions.you");
+    [
+        (IVY.id, IVY.name.to_string(), "😍", IVY.seed, true, false),
+        (NINA.id, NINA.name.to_string(), "🔥", NINA.seed, true, false),
+        ("demo", me, "😍", 5, true, true),
+        (THEO.id, THEO.name.to_string(), "👏", THEO.seed, true, false),
+        (OMAR.id, OMAR.name.to_string(), "🔥", OMAR.seed, false, false),
+    ]
+    .into_iter()
+    .map(|(id, name, emoji, seed, photo, own)| ReactionItem {
+        jid: id.into(),
+        initial: initial(&name),
+        name: name.into(),
+        emoji: emoji.into(),
+        avatar: if photo { art::avatar(seed) } else { slint::Image::default() },
+        hasAvatar: photo,
+        colorIdx: color_idx(id),
+        own,
+    })
+    .collect()
+}
+
+fn reaction_tabs() -> Vec<ReactionTab> {
+    vec![
+        ReactionTab { emoji: "😍".into(), count: 2 },
+        ReactionTab { emoji: "🔥".into(), count: 2 },
+        ReactionTab { emoji: "👏".into(), count: 1 },
+    ]
 }
 
 fn calls(en: bool) -> Vec<CallItem> {
@@ -348,7 +469,7 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
     ui.set_chat_open(true);
     ui.set_conv_ready(true);
     ui.set_stick_bottom(true);
-    ui.set_current_can_send(true);
+    ui.set_current_can_send(!std::env::args().any(|a| a == "--demo-readonly"));
 
     let me = AccountItem {
         id: "demo".into(),
@@ -383,6 +504,7 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
         ui.set_current_is_group(true);
         ui.set_current_callable(false);
         ui.set_messages(model(group_messages(en)));
+        ui.set_reactions_title(ta("reactions.count", &["5"]).into());
 
         ui.set_info_name("Sunday Hikers".into());
         ui.set_info_id("".into());
@@ -425,4 +547,26 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
         ui.set_info_color_idx(color_idx(HELENA.id));
         ui.set_info_media(media_grid());
     }
+
+    ui.set_pinned_items(model(pinned_items(en, group)));
+    if std::env::args().any(|a| a == "--demo-silenced") {
+        ui.set_silenced_calls(model(vec![SilencedCall {
+            id: "demo-call".into(),
+            name: t("call.silenced.title").into(),
+            kind: t("call.silenced.voice").into(),
+            caller: if group { NINA.name.into() } else { slint::SharedString::default() },
+            video: false,
+            group,
+            time: "09:47".into(),
+        }]));
+    }
+    ui.set_pinned_index(0);
+    ui.set_starred_items(model(starred_items(en)));
+    ui.set_reaction_rows(model(reaction_rows(en)));
+    ui.set_reaction_tabs(model(reaction_tabs()));
+    ui.set_staged_count(0);
+    ui.set_file_drag_hover(false);
+    ui.set_poll_composer_open(false);
+    ui.set_starred_open(false);
+    ui.set_shortcuts_open(false);
 }

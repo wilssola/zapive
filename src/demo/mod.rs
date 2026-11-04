@@ -20,7 +20,7 @@ use std::time::Duration;
 use crate::{AppWindow, i18n};
 
 const DEFAULT_SIZE: (u32, u32) = (1440, 900);
-const SHOTS: [(&str, &str, &str, &str); 8] = [
+const SHOTS: [(&str, &str, &str, &str); 14] = [
     ("chat-dark-glass.png", "chat", "dark", "glass"),
     ("chat-light-glass.png", "chat", "light", "glass"),
     ("chat-dark-opaque.png", "chat", "dark", "opaque"),
@@ -29,6 +29,12 @@ const SHOTS: [(&str, &str, &str, &str); 8] = [
     ("info-panel.png", "info", "dark", "glass"),
     ("login.png", "login", "dark", "glass"),
     ("splash.png", "splash", "dark", "glass"),
+    ("poll.png", "poll", "dark", "glass"),
+    ("starred.png", "starred", "dark", "glass"),
+    ("shortcuts.png", "shortcuts", "dark", "glass"),
+    ("reactions.png", "reactions", "dark", "glass"),
+    ("drop.png", "drop", "dark", "glass"),
+    ("poll-composer.png", "poll-composer", "dark", "glass"),
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -38,6 +44,12 @@ enum Page {
     Info,
     Login,
     Splash,
+    Poll,
+    Starred,
+    Shortcuts,
+    Reactions,
+    Drop,
+    PollComposer,
 }
 
 struct Options {
@@ -75,7 +87,13 @@ fn parse() -> Result<Options, String> {
         Some("info") => Page::Info,
         Some("login") => Page::Login,
         Some("splash") => Page::Splash,
-        Some(other) => return Err(format!("unknown --demo-page `{other}` (chat|settings|info|login|splash)")),
+        Some("poll") => Page::Poll,
+        Some("starred") => Page::Starred,
+        Some("shortcuts") => Page::Shortcuts,
+        Some("reactions") => Page::Reactions,
+        Some("drop") => Page::Drop,
+        Some("poll-composer") => Page::PollComposer,
+        Some(other) => return Err(format!("unknown --demo-page `{other}` (chat|settings|info|login|splash|poll|starred|shortcuts|reactions|drop|poll-composer)")),
     };
     let dark = match value_of("--demo-theme").as_deref() {
         None | Some("dark") => true,
@@ -108,7 +126,7 @@ fn parse() -> Result<Options, String> {
         shot: value_of("--demo-shot").map(PathBuf::from),
         size,
         shots_all: value_of("--demo-shots-all").map(PathBuf::from),
-        group: page == Page::Info || std::env::args().any(|a| a == "--demo-group"),
+        group: matches!(page, Page::Info | Page::Poll | Page::Reactions) || std::env::args().any(|a| a == "--demo-group"),
     })
 }
 
@@ -130,8 +148,11 @@ fn isolate() -> PathBuf {
         if !cfg!(windows) {
             std::env::set_var("HOME", &root);
         }
-        // Deterministic pixels whatever the monitor's scaling.
-        std::env::set_var("SLINT_SCALE_FACTOR", "1");
+        // Deterministic pixels for screenshots; the live window keeps the
+        // system scale (or SLINT_SCALE_FACTOR if the caller set one).
+        if std::env::args().any(|a| a.starts_with("--demo-shot")) {
+            std::env::set_var("SLINT_SCALE_FACTOR", "1");
+        }
     }
     for dir in [crate::paths::data_dir(), crate::paths::cache_dir()] {
         if !dir.starts_with(&root) {
@@ -269,6 +290,17 @@ fn configure(ui: &AppWindow, options: &Options) {
         }
         Page::Info => ui.set_info_open(true),
         Page::Splash => {}
+        Page::Poll => {}
+        Page::Starred => ui.set_starred_open(true),
+        Page::Shortcuts => ui.set_shortcuts_open(true),
+        Page::Reactions => {
+            ui.set_reactions_open(true);
+        }
+        Page::Drop => {
+            ui.set_file_drag_hover(true);
+            ui.set_staged_count(3);
+        }
+        Page::PollComposer => ui.set_poll_composer_open(true),
         Page::Login => {
             ui.set_screen("login".into());
             ui.set_status_text(i18n::t("status.scan_qr").into());
