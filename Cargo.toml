@@ -101,7 +101,7 @@ pdfium-render = { version = "0.9", default-features = false, features = ["pdfium
 # OPUS-MT models (see src/translation). The SentencePiece tokenizer is driven
 # directly so Argos' own tokenization is kept. ct2rs itself is a per-target
 # dependency below.
-sentencepiece = "0.13"
+sentencepiece = "0.14"
 # Automatic source-language detection. Each compiled-in language embeds its
 # n-gram model in the executable (3-9 MB), so only the ten languages the
 # settings can translate from are enabled.
