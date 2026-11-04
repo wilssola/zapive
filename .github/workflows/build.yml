@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential xvfb
       - name: CMake (macOS; CTranslate2 is built from source)
         if: runner.os == 'macOS'
         run: command -v cmake >/dev/null || brew install cmake
@@ -54,14 +54,27 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build
         run: cargo build --locked
+      # Some tests create a real Slint window, which needs a display.
       - name: Test
-        run: cargo test --locked
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a cargo test --locked
+          else
+            cargo test --locked
+          fi
       # The offline mock-data mode is compiled out of releases, so it is
       # only ever built here.
       - name: Build (demo feature)
         run: cargo build --locked --features demo
       - name: Test (demo feature)
-        run: cargo test --locked --features demo
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a cargo test --locked --features demo
+          else
+            cargo test --locked --features demo
+          fi
 
   lint:
     name: fmt and clippy
