@@ -87,6 +87,7 @@ impl Bridge {
                 .chats
                 .get(jid)
                 .is_some_and(|chat| chat.is_muted()),
+            chat_archived: self.store.chats.get(jid).is_some_and(|chat| chat.archived),
             mentions_me,
             age_secs: (timestamp > 0).then_some(now - timestamp),
             chat_open: self.current_jid.as_deref() == Some(jid),
@@ -115,7 +116,7 @@ impl Bridge {
                 let Some(chat) = self.store.chats.get(&jid) else {
                     return;
                 };
-                if chat.is_muted() {
+                if chat.is_muted() || chat.archived {
                     return;
                 }
                 let message = self
@@ -203,7 +204,7 @@ impl Bridge {
                             .store
                             .chats
                             .get(jid)
-                            .is_some_and(|chat| !chat.is_muted())
+                            .is_some_and(|chat| !(chat.is_muted() || chat.archived))
                             && !names.contains(&title.as_str())
                         {
                             names.push(title);
@@ -219,7 +220,7 @@ impl Bridge {
                         self.store
                             .chats
                             .get(jid)
-                            .is_some_and(|chat| !chat.is_muted())
+                            .is_some_and(|chat| !(chat.is_muted() || chat.archived))
                     })
                     .count();
                 if count == 0 || (self.notify_previews && names.is_empty()) {
@@ -243,7 +244,7 @@ impl Bridge {
                         self.store
                             .chats
                             .get(jid)
-                            .is_some_and(|chat| !chat.is_muted())
+                            .is_some_and(|chat| !(chat.is_muted() || chat.archived))
                     })
                     .collect();
                 let single_chat = live

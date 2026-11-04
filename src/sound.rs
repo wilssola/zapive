@@ -56,6 +56,8 @@ pub struct ChimeContext {
     pub system_message: bool,
     pub vault_locked: bool,
     pub chat_muted: bool,
+    // Archived chats are quiet like muted ones: no chime, no banner.
+    pub chat_archived: bool,
     pub mentions_me: bool,
     // Seconds between the message timestamp and now; None when the
     // message carries no usable timestamp.
@@ -66,11 +68,17 @@ pub struct ChimeContext {
     pub since_last: Option<Duration>,
 }
 
+// A muted or archived chat stays quiet unless someone tagged me, the same
+// rule for the chime and for the desktop banner.
+pub fn is_quiet_chat(muted: bool, archived: bool, mentions_me: bool) -> bool {
+    (muted || archived) && !mentions_me
+}
+
 pub fn should_chime(ctx: &ChimeContext) -> bool {
     if !ctx.setting_on || ctx.from_me || ctx.system_message || ctx.vault_locked {
         return false;
     }
-    if ctx.chat_muted && !ctx.mentions_me {
+    if is_quiet_chat(ctx.chat_muted, ctx.chat_archived, ctx.mentions_me) {
         return false;
     }
     if ctx.age_secs.is_some_and(|age| age > MAX_LIVE_AGE_SECS) {
@@ -157,6 +165,7 @@ mod tests {
             system_message: false,
             vault_locked: false,
             chat_muted: false,
+            chat_archived: false,
             mentions_me: false,
             age_secs: Some(1),
             chat_open: false,
@@ -205,6 +214,33 @@ mod tests {
             mentions_me: true,
             ..live()
         }));
+    }
+
+    #[test]
+    fn archived_chats_are_quiet_unless_mentioned() {
+        assert!(!should_chime(&ChimeContext {
+            chat_archived: true,
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            chat_archived: true,
+            mentions_me: true,
+            ..live()
+        }));
+        assert!(!should_chime(&ChimeContext {
+            chat_archived: true,
+            chat_muted: true,
+            ..live()
+        }));
+    }
+
+    #[test]
+    fn quiet_chat_rule_is_shared_by_chime_and_banner() {
+        assert!(is_quiet_chat(false, true, false));
+        assert!(is_quiet_chat(true, false, false));
+        assert!(!is_quiet_chat(false, false, false));
+        assert!(!is_quiet_chat(false, true, true));
+        assert!(!is_quiet_chat(true, true, true));
     }
 
     #[test]
