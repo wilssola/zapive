@@ -191,6 +191,11 @@ fn main() {
                 _ => {}
             }
             bridge::handle_file_drop_event(event);
+            if let WindowEvent::Resized(size) = event {
+                // A minimized window reports a zero size.
+                let idle = size.width == 0 || size.height == 0;
+                bridge::ui_apply(move |b| b.set_window_idle(idle));
+            }
             if let WindowEvent::Focused(focused) = event {
                 if let Some(ui) = handle.upgrade() {
                     ui.set_window_active(*focused);

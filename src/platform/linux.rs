@@ -1,3 +1,6 @@
+// Only Windows has a working set to trim.
+pub fn trim_working_set() {}
+
 pub fn focus_window() {
     let _ = std::process::Command::new("wmctrl").args(["-a", "Zapive"]).spawn();
 }

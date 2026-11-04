@@ -113,6 +113,18 @@ fn raise(hwnd: HWND) {
     }
 }
 
+// Hands the pages nobody is touching back to Windows. Used after the window
+// has sat minimized for a while; they fault back in on demand.
+pub fn trim_working_set() {
+    unsafe {
+        let _ = windows::Win32::System::Threading::SetProcessWorkingSetSize(
+            windows::Win32::System::Threading::GetCurrentProcess(),
+            usize::MAX,
+            usize::MAX,
+        );
+    }
+}
+
 pub fn focus_window() {
     if let Some(hwnd) = find_own_window("Zapive") {
         raise(hwnd);

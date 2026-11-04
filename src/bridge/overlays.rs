@@ -123,6 +123,9 @@ impl Bridge {
         if self.zoom_frames.len() < 2 {
             return;
         }
+        if self.window_idle {
+            return;
+        }
         self.zoom_timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(66),

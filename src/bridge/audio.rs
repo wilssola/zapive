@@ -169,7 +169,7 @@ impl Bridge {
     }
 
     pub(super) fn ensure_audio_timer(&mut self) {
-        if self.audio_timer.running() {
+        if self.audio_timer.running() || self.audio.is_none() {
             return;
         }
         self.audio_timer.start(

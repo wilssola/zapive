@@ -22,6 +22,24 @@ pub(super) const MAX_ANIMATIONS: usize = 6;
 // How many chats keep their message lists in RAM at once.
 pub(super) const WARM_MAX: usize = 8;
 
+// Avatars are decoded at 112px already; this keeps a long session from
+// accumulating one per contact ever seen.
+pub(super) const AVATAR_CACHE_MAX: usize = 300;
+
+// Records `key` as the newest entry of an LRU order and returns the keys
+// that no longer fit within `max`.
+pub(super) fn touch_lru(order: &mut std::collections::VecDeque<String>, key: &str, max: usize) -> Vec<String> {
+    order.retain(|known| known != key);
+    order.push_back(key.to_string());
+    let mut evicted = Vec::new();
+    while order.len() > max {
+        if let Some(old) = order.pop_front() {
+            evicted.push(old);
+        }
+    }
+    evicted
+}
+
 impl Bridge {
     // ---- media (results arrive from the tokio side) ----
 
@@ -55,6 +73,11 @@ impl Bridge {
             (Some(decoded), _) => {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
+                // An evicted avatar is fetched again the next time a row asks.
+                for old in touch_lru(&mut self.avatar_order, jid, AVATAR_CACHE_MAX) {
+                    self.avatars.remove(&old);
+                    self.requested_avatars.remove(&old);
+                }
                 self.patch_avatar_everywhere(jid, &image);
                 self.refresh_message_details();
                 self.refresh_typing_members();
@@ -850,13 +873,19 @@ impl Bridge {
             };
             self.forget_animation(&oldest);
         }
-        if !self.anim_timer.running() {
-            self.anim_timer.start(
-                slint::TimerMode::Repeated,
-                Duration::from_millis(66),
-                || apply_now(|b| b.tick_animations()),
-            );
+        self.start_animation_timer();
+    }
+
+    // Runs only while something animates and the window is visible.
+    pub(super) fn start_animation_timer(&mut self) {
+        if self.window_idle || self.anim_timer.running() {
+            return;
         }
+        self.anim_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(66),
+            || apply_now(|b| b.tick_animations()),
+        );
     }
 
     // Removes an animation and its bytes, keeping the order queue in step.
@@ -926,5 +955,38 @@ impl Bridge {
         for jid in wanted {
             self.queue_avatar(&jid);
         }
+    }
+}
+
+#[cfg(test)]
+mod lru_tests {
+    use super::*;
+
+    #[test]
+    fn lru_evicts_the_oldest_and_refreshes_on_touch() {
+        let mut order = std::collections::VecDeque::new();
+        assert!(touch_lru(&mut order, "a", 3).is_empty());
+        assert!(touch_lru(&mut order, "b", 3).is_empty());
+        assert!(touch_lru(&mut order, "c", 3).is_empty());
+        assert!(touch_lru(&mut order, "a", 3).is_empty());
+        assert_eq!(touch_lru(&mut order, "d", 3), vec!["b".to_string()]);
+        assert_eq!(order.iter().cloned().collect::<Vec<_>>(), vec!["c", "a", "d"]);
+    }
+
+    #[test]
+    fn lru_never_exceeds_the_cap_and_has_no_duplicates() {
+        let mut order = std::collections::VecDeque::new();
+        for i in 0..1000 {
+            touch_lru(&mut order, &format!("k{}", i % 400), AVATAR_CACHE_MAX);
+            assert!(order.len() <= AVATAR_CACHE_MAX);
+        }
+        let unique: std::collections::HashSet<_> = order.iter().collect();
+        assert_eq!(unique.len(), order.len());
+    }
+
+    #[test]
+    fn byte_budget_is_a_hard_ceiling_below_the_old_worst_case() {
+        assert!(DECODE_CACHE_BYTES <= 64 * 1024 * 1024);
+        assert!(DECODE_CACHE_BYTES + ANIM_CACHE_BYTES < 330 * 1024 * 1024);
     }
 }

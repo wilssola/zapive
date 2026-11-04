@@ -110,6 +110,34 @@ impl Bridge {
         self.finish_loading();
     }
 
+    // The window went to the taskbar/tray (or came back). Cosmetic timers
+    // sleep meanwhile; after 30 s idle the working set is handed back.
+    pub fn set_window_idle(&mut self, idle: bool) {
+        if self.window_idle == idle {
+            return;
+        }
+        self.window_idle = idle;
+        if idle {
+            self.anim_timer.stop();
+            self.zoom_timer.stop();
+            let since = Instant::now();
+            self.idle_since = Some(since);
+            self.once(30_000, move |b| {
+                if b.window_idle && b.idle_since == Some(since) {
+                    crate::platform::trim_working_set();
+                }
+            });
+        } else {
+            self.idle_since = None;
+            if !self.animated.is_empty() {
+                self.start_animation_timer();
+            }
+            if !self.zoom_frames.is_empty() {
+                self.start_zoom_loop();
+            }
+        }
+    }
+
     // Drops the startup splash. Safe to call any number of times.
     pub(super) fn finish_loading(&mut self) {
         if self.ui.get_app_loading() {

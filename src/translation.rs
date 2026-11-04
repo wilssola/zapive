@@ -19,7 +19,8 @@ use models::{Catalog, Pair, code, plan_route};
 const QUEUE_CAPACITY: usize = 8;
 const MAX_REQUEST: usize = 128 * 1024;
 const MAX_TEXT: usize = 16_000;
-const MAX_ENGINES: usize = 2;
+const MAX_ENGINES: usize = 1;
+const ENGINE_IDLE: Duration = Duration::from_secs(300);
 const TRANSLATE_TIMEOUT: Duration = Duration::from_secs(180);
 type Done = Box<dyn FnOnce(Result<Value, String>) + Send>;
 type Progress = Box<dyn Fn(Value) + Send>;
@@ -177,16 +178,24 @@ fn cancelled(shared: &Mutex<State>, generation: u64) -> Result<(), String> {
 struct Core {
     engines: Vec<(PathBuf, engine::Engine)>,
     detector: Option<lingua::LanguageDetector>,
+    last_used: Option<Instant>,
+}
+
+// True once nothing has used the loaded engine for `idle`.
+fn engine_expired(last_used: Option<Instant>, now: Instant, idle: Duration) -> bool {
+    last_used.is_some_and(|at| now.saturating_duration_since(at) >= idle)
 }
 
 impl Core {
     fn reset(&mut self) {
         self.engines.clear();
         self.detector = None;
+        self.last_used = None;
     }
 
     /// The loaded engine for a package directory, most recently used last.
     fn engine(&mut self, dir: &Path) -> Result<&engine::Engine, String> {
+        self.last_used = Some(Instant::now());
         if let Some(index) = self.engines.iter().position(|(path, _)| path == dir) {
             let entry = self.engines.remove(index);
             self.engines.push(entry);
@@ -204,7 +213,23 @@ impl Core {
 
 fn serve(receiver: mpsc::Receiver<Task>, shared: Arc<Mutex<State>>, models: PathBuf) {
     let mut core = Core::default();
-    while let Ok(task) = receiver.recv() {
+    loop {
+        // While models are loaded, wake up now and then to drop them once
+        // they have sat unused; with nothing loaded just block.
+        let task = if core.engines.is_empty() && core.detector.is_none() {
+            match receiver.recv() { Ok(task) => task, Err(_) => break }
+        } else {
+            match receiver.recv_timeout(Duration::from_secs(30)) {
+                Ok(task) => task,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if engine_expired(core.last_used, Instant::now(), ENGINE_IDLE) {
+                        core.reset();
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             execute(&task, &shared, &models, &mut core)
         }));
@@ -584,5 +609,20 @@ mod tests {
         assert!(state.shutdown);
         assert!(!state.running);
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+
+    #[test]
+    fn engine_expires_only_after_the_idle_window() {
+        let now = Instant::now();
+        assert!(!engine_expired(None, now, ENGINE_IDLE));
+        assert!(!engine_expired(Some(now), now, ENGINE_IDLE));
+        assert!(engine_expired(Some(now), now + ENGINE_IDLE, ENGINE_IDLE));
+        assert!(!engine_expired(Some(now + ENGINE_IDLE), now, ENGINE_IDLE));
+        assert_eq!(MAX_ENGINES, 1);
     }
 }

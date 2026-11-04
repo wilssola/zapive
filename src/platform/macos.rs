@@ -1,3 +1,6 @@
+// Only Windows has a working set to trim.
+pub fn trim_working_set() {}
+
 pub fn focus_window() {
     let script = format!(
         "tell application \"System Events\" to set frontmost of (first process whose unix id is {}) to true",
