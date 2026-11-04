@@ -304,6 +304,36 @@ export component ImagePreview inherits Rectangle {
                 }
             }
         }
+        if root.count > 1: Rectangle {
+            height: 64px;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                for thumb[i] in root.thumbs: Rectangle {
+                    width: 56px;
+                    height: 56px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 10px;
+                    clip: true;
+                    border-width: root.index == i ? 2px : 1px;
+                    border-color: root.index == i ? Theme.accent-text : Theme.border;
+                    opacity: root.index == i ? 1.0 : 0.7;
+                    animate opacity { duration: Theme.motion-fast; }
+                    Image {
+                        source: thumb;
+                        width: parent.width;
+                        height: parent.height;
+                        image-fit: cover;
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: @tr("image.review.counter", i + 1, root.count);
+                        clicked => { root.select(i); }
+                    }
+                }
+            }
+        }
         HorizontalLayout {
             spacing: 12px;
             caption := LineEdit {
