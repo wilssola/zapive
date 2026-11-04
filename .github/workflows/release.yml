@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+# Back-to-back merges must release in order: a second push waits for the
+# first run instead of racing it (never cancel a run that already pushed
+# its version tag).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -307,4 +314,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "Zapive $TAG" \
             --notes-file notes.md \
+            --latest \
             Zapive-* zapive-*.zip SHA256SUMS.txt
