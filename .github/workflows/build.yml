@@ -2,7 +2,7 @@ name: build
 
 # Build, test and lint run on pull requests and manual runs (release.yml
 # builds master). Tests cover all three desktop platforms; formatting and
-# clippy are reported on Linux. The dependency audit also runs on pushes
+# clippy block the merge (Linux). The dependency audit also runs on pushes
 # to master and weekly, because new advisories appear without any change
 # to this repository.
 on:
@@ -81,10 +81,6 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Informational until the existing backlog is cleared (rustfmt has never
-    # been applied and clippy still reports warnings). Drop this line once
-    # `cargo fmt --check` and `cargo clippy -- -D warnings` pass on master.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Desktop libraries

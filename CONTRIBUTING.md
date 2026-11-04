@@ -35,7 +35,7 @@ cargo test --locked
 python3 -m unittest discover -s .github/scripts -p 'test_*.py'   # release-notes generator
 ```
 
-The repository still carries formatting and clippy debt that predates these checks, so the CI `fmt and clippy` job is informational. Don't reformat whole files you didn't change, because that pollutes the diff. Make sure **your code** passes, and that `cargo test` and the builds on the CI platforms stay green.
+The CI `fmt and clippy` job is **blocking**: the code must pass `cargo fmt --all -- --check` and `cargo clippy --locked --all-targets -- -D warnings` (also with `--features demo`). Fix warnings at the source; use a local `#[allow]` only with a short reason.
 
 CI (`.github/workflows/build.yml`) runs the build and tests on Linux, macOS and Windows, plus `cargo audit` and the release-notes generator tests.
 

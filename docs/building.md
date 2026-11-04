@@ -53,7 +53,7 @@ python3 -m unittest discover -s .github/scripts -p 'test_*.py'   # release-notes
 
 CI (`.github/workflows/build.yml`) runs on pull requests, on manual
 dispatch and weekly. It builds and tests on Linux, macOS and Windows, runs
-fmt and clippy on Linux (informational for now; see CONTRIBUTING), runs
+fmt and clippy on Linux (blocking), runs
 `cargo audit`, and tests the release-notes generator.
 
 ## Self-tests
