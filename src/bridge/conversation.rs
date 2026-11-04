@@ -284,8 +284,24 @@ impl Bridge {
         });
     }
 
-    pub(super) fn push_message_row(&mut self, jid: &str) {
+    pub(super) fn push_message_row(&mut self, jid: &str, id: &str) {
+        let shown: Vec<String> = (0..self.messages_model.row_count())
+            .filter_map(|i| self.messages_model.row_data(i))
+            .map(|row| row.id.to_string())
+            .collect();
         let list = self.store.messages_for(jid);
+        match plan_row(list, &shown, id) {
+            RowPlan::Skip => return,
+            RowPlan::Rebuild => {
+                let from_me = list.iter().any(|m| m.id == id && m.from_me);
+                self.rebuild_conversation(jid);
+                if from_me || self.ui.get_stick_bottom() {
+                    self.scroll_to_end();
+                }
+                return;
+            }
+            RowPlan::Append => {}
+        }
         let Some(stored) = list.last() else { return };
         let prev = list.len().checked_sub(2).and_then(|i| list.get(i));
         let row = self.to_row(stored, prev);
@@ -765,5 +781,63 @@ impl Bridge {
     pub(super) fn find_message(&self, id: &str) -> Option<&StoredMessage> {
         let jid = self.current_jid.as_ref()?;
         self.store.messages_for(jid).iter().find(|m| m.id == id)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RowPlan {
+    Skip,
+    Append,
+    Rebuild,
+}
+
+// The store keeps messages sorted by timestamp, so a message that arrives
+// out of order (phone clock skew, echo vs. server time, late delivery) is
+// not the last one. Appending `list.last()` then showed a neighbour twice.
+pub(super) fn plan_row(list: &[StoredMessage], shown: &[String], id: &str) -> RowPlan {
+    if shown.iter().any(|s| s == id) {
+        return RowPlan::Skip;
+    }
+    match list.iter().position(|m| m.id == id) {
+        None => RowPlan::Skip,
+        Some(i) if i + 1 == list.len() => RowPlan::Append,
+        Some(_) => RowPlan::Rebuild,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(id: &str, ts: i64) -> StoredMessage {
+        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", id, ts, "x".to_string());
+        m.kind = MessageKind::Text;
+        m
+    }
+
+    #[test]
+    fn out_of_order_message_does_not_duplicate_the_last_row() {
+        let mut store = crate::store::Store::default();
+        assert!(store.add_message(msg("new", 100)));
+        let shown = vec!["new".to_string()];
+        assert!(store.add_message(msg("late", 50)));
+        let list = store.messages_for("a@s.whatsapp.net");
+        // Old behaviour appended list.last() == "new", which is already shown.
+        assert_eq!(list.last().unwrap().id, "new");
+        assert_eq!(plan_row(list, &shown, "late"), RowPlan::Rebuild);
+        assert_eq!(plan_row(list, &shown, "new"), RowPlan::Skip);
+    }
+
+    #[test]
+    fn in_order_message_is_appended_once() {
+        let mut store = crate::store::Store::default();
+        store.add_message(msg("a", 1));
+        store.add_message(msg("b", 2));
+        let list = store.messages_for("a@s.whatsapp.net");
+        assert_eq!(plan_row(list, &["a".to_string()], "b"), RowPlan::Append);
+        assert_eq!(
+            plan_row(list, &["a".to_string(), "b".to_string()], "b"),
+            RowPlan::Skip
+        );
     }
 }

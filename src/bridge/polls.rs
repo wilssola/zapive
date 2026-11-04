@@ -150,8 +150,9 @@ impl Bridge {
         };
         stored.poll_secret = base64::engine::general_purpose::STANDARD.encode(secret);
         let target = stored.jid.clone();
+        let stored_id = stored.id.clone();
         if self.store.add_message(stored) && Some(&target) == self.current_jid.as_ref() {
-            self.push_message_row(&target);
+            self.push_message_row(&target, &stored_id);
         }
         self.schedule_refresh_chats();
         self.schedule_save();

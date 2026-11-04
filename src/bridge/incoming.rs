@@ -351,7 +351,7 @@ impl Bridge {
                 );
             }
             if Some(&jid) == self.current_jid.as_ref() {
-                self.push_message_row(&jid);
+                self.push_message_row(&jid, &translation_id);
                 self.send_view_receipts(&jid);
             } else if !from_me {
                 let mut muted = false;
