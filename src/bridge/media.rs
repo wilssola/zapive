@@ -47,8 +47,33 @@ pub(super) fn touch_lru(
 impl Bridge {
     // ---- media (results arrive from the tokio side) ----
 
+    // With "blur photos" on, every face handed to the UI is the cheap
+    // pre-blurred stand-in, so the UI never runs a per-frame blur for it.
     pub(super) fn avatar_for(&self, jid: &str) -> Option<slint::Image> {
+        if self.ui.get_blur_photos()
+            && let Some(blurred) = self.avatar_blurs.get(jid)
+        {
+            return Some(blurred.clone());
+        }
         self.avatars.get(jid).cloned().flatten()
+    }
+
+    // Re-pushes every known face, e.g. after "blur photos" was toggled, so
+    // rows switch between the real and the pre-blurred picture.
+    pub(super) fn repaint_avatars(&mut self) {
+        let jids: Vec<String> = self
+            .avatars
+            .iter()
+            .filter(|(_, image)| image.is_some())
+            .map(|(jid, _)| jid.clone())
+            .collect();
+        for jid in jids {
+            if let Some(image) = self.avatar_for(&jid) {
+                self.patch_avatar_everywhere(&jid, &image);
+            }
+        }
+        self.refresh_chats();
+        self.refresh_message_details();
     }
 
     pub(super) fn queue_avatar(&mut self, jid: &str) {
@@ -77,6 +102,8 @@ impl Bridge {
             (Some(decoded), _) => {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
+                self.avatar_blurs
+                    .insert(jid.to_string(), privacy_blurred_of(&decoded));
                 // Only faces outside the chat list (group members, status
                 // posters) are evictable. Chat-list rows are all requested by
                 // ensure_avatars(), so evicting one made it refetch, evict the
@@ -88,10 +115,12 @@ impl Bridge {
                             continue;
                         }
                         self.avatars.remove(&old);
+                        self.avatar_blurs.remove(&old);
                         self.requested_avatars.remove(&old);
                     }
                 }
-                self.patch_avatar_everywhere(jid, &image);
+                let shown = self.avatar_for(jid).unwrap_or(image);
+                self.patch_avatar_everywhere(jid, &shown);
                 self.refresh_message_details();
                 self.refresh_typing_members();
                 if jid == self.self_jid {

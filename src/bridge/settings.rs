@@ -112,6 +112,7 @@ impl Bridge {
             }
             "photos" => {
                 self.ui.set_blur_photos(enabled);
+                self.repaint_avatars();
                 "privacy_blur_photos"
             }
             "messages" => {

@@ -7,6 +7,23 @@ pub(super) fn image_of(d: &crate::media::Decoded) -> slint::Image {
     slint::Image::from_rgba8(buf)
 }
 
+// A blurhash-like stand-in for a privacy-blurred face: the picture shrunk to
+// a few pixels keeps its dominant colours (so contacts stay tellable apart)
+// but no detail. Scaled back up with smooth sampling it reads as a soft
+// blur, computed once per avatar instead of a backdrop blur every frame.
+pub(super) fn privacy_blurred_of(d: &crate::media::Decoded) -> slint::Image {
+    const GRID: u32 = 6;
+    const OUT: u32 = 48;
+    let Some(src) = image::RgbaImage::from_raw(d.w, d.h, d.rgba.clone()) else {
+        return image_of(d);
+    };
+    let tiny = image::imageops::resize(&src, GRID, GRID, image::imageops::FilterType::Triangle);
+    let soft = image::imageops::resize(&tiny, OUT, OUT, image::imageops::FilterType::CatmullRom);
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(OUT, OUT);
+    buf.make_mut_bytes().copy_from_slice(soft.as_raw());
+    slint::Image::from_rgba8(buf)
+}
+
 pub(super) fn card_thumbnail(bytes: &[u8]) -> Option<slint::Image> {
     if bytes.len() > 2 * 1024 * 1024 {
         return None;

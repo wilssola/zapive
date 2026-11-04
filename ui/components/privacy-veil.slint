@@ -1,16 +1,35 @@
 import { Theme } from "theme.slint";
 
-// Conditional privacy mask. Only instantiate while private content is hidden;
-// placing it last in a parent makes it a passive visual overlay while earlier
-// child hit targets continue to receive input.
+// Privacy mask drawn without any blur: an opaque cover in the surface colour
+// with soft "text-line" bars, so the shape of the content stays visible but
+// nothing can be read. A backdrop blur here was recomputed in software on
+// every frame for every visible row; this is a few plain fills.
+// Only instantiate it while the content is hidden; placed last in its
+// parent it is a passive overlay and earlier hit targets still get input.
 export component PrivacyVeil inherits Rectangle {
     in property <bool> active: true;
     in property <color> tint: Theme.panel;
     in property <length> radius: 0px;
+    // Kept for call sites; larger means a media cover rather than text bars.
     in property <length> blur: 8px;
+    property <bool> media: root.blur > 12px;
+    // A cover hides everything beneath (bubbles, media); a text veil sits
+    // over text its owner already made transparent.
+    in property <bool> cover: false;
+    property <length> bar: min(10px, max(4px, root.height * 0.42));
+    property <int> lines: root.media ? 0 : max(1, min(3, (root.height / 22px).floor()));
     visible: root.active;
     border-radius: root.radius;
     clip: true;
-    background: root.tint.with-alpha(0.45);
-    backdrop-blur: root.active ? root.blur : 0px;
+    // Text sites make their own text transparent and keep this see-through
+    // (glass); media and bubbles get an opaque cover.
+    background: root.media || root.cover ? root.tint.with-alpha(1) : root.tint.with-alpha(0.35);
+    for i in root.lines: Rectangle {
+        x: 2px;
+        y: (root.height - root.lines * (root.bar + 6px) + 6px) / 2 + i * (root.bar + 6px);
+        width: (root.width - 4px) * (i == root.lines - 1 && root.lines > 1 ? 0.6 : 1);
+        height: root.bar;
+        border-radius: root.bar / 2;
+        background: Theme.text-dim.with-alpha(0.28);
+    }
 }

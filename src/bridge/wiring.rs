@@ -157,6 +157,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         draft_sequence: 0,
         locked_backlog: Vec::new(),
         avatars: HashMap::new(),
+        avatar_blurs: HashMap::new(),
         requested_avatars: HashSet::new(),
         avatar_tries: HashMap::new(),
         media_inflight: HashSet::new(),
