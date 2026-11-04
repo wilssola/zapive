@@ -586,15 +586,16 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_submit_edit(|id, text| {
         let (id, text) = (id.to_string(), text.to_string());
         defer(move |b| {
-            if b.find_message(&id).is_some_and(message_editable) && !text.trim().is_empty() {
-                if let Some(jid) = b.current_jid.clone() {
-                    b.wa.send(Cmd::Edit {
-                        jid,
-                        id,
-                        text: text.trim().to_string(),
-                    });
-                    b.ui.set_message_dialog_open(false);
-                }
+            if b.find_message(&id).is_some_and(message_editable)
+                && !text.trim().is_empty()
+                && let Some(jid) = b.current_jid.clone()
+            {
+                b.wa.send(Cmd::Edit {
+                    jid,
+                    id,
+                    text: text.trim().to_string(),
+                });
+                b.ui.set_message_dialog_open(false);
             }
         });
     });

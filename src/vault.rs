@@ -721,11 +721,10 @@ impl Vault {
             if let Ok(mut stmt) = self
                 .conn
                 .prepare("SELECT DISTINCT jid FROM history WHERE account=?1")
+                && let Ok(rows) = stmt.query_map([self.account()], |row| row.get::<_, String>(0))
             {
-                if let Ok(rows) = stmt.query_map([self.account()], |row| row.get::<_, String>(0)) {
-                    for jid in rows.flatten() {
-                        out.push(format!("store:msgs:{jid}"));
-                    }
+                for jid in rows.flatten() {
+                    out.push(format!("store:msgs:{jid}"));
                 }
             }
             out.sort();
@@ -800,7 +799,7 @@ fn hex_encode(data: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(());
     }
     (0..s.len())

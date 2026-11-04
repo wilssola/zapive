@@ -275,14 +275,14 @@ impl Bridge {
     }
 
     pub fn on_outbox_result(&mut self, _jid: &str, id: &str, result: Result<(), String>) {
-        if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id) {
-            if result.is_err() {
-                entry.state = crate::outbox::State::Uncertain;
-                entry.error = t("outbox.uncertain");
-                let _ = self.persist_outbox(&self.outbox);
-                self.refresh_outbox_row(id);
-                self.dispatch_outbox();
-            }
+        if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id)
+            && result.is_err()
+        {
+            entry.state = crate::outbox::State::Uncertain;
+            entry.error = t("outbox.uncertain");
+            let _ = self.persist_outbox(&self.outbox);
+            self.refresh_outbox_row(id);
+            self.dispatch_outbox();
         }
     }
 
@@ -306,10 +306,10 @@ impl Bridge {
                 self.store.hydrate_id(vault, &entry.jid, id);
             }
             self.store.set_status(&entry.jid, id, 1);
-            if let Some(vault) = &self.vault {
-                if self.store.save_checked(vault).is_err() {
-                    return;
-                }
+            if let Some(vault) = &self.vault
+                && self.store.save_checked(vault).is_err()
+            {
+                return;
             }
             let remaining: Vec<_> = self
                 .outbox
@@ -337,10 +337,10 @@ impl Bridge {
         message: wa::Message,
         origin: Option<String>,
     ) {
-        if let Some(origin) = origin {
-            if let Some(vault) = &self.vault {
-                vault.setting_set(&format!("media-source:{id}"), &origin);
-            }
+        if let Some(origin) = origin
+            && let Some(vault) = &self.vault
+        {
+            vault.setting_set(&format!("media-source:{id}"), &origin);
         }
         self.echo_sent(jid, id, message);
     }
@@ -429,10 +429,10 @@ impl Bridge {
 
     pub(super) fn cancel_preview(&mut self) {
         self.preview_generation = self.preview_generation.wrapping_add(1);
-        if let Some(path) = self.pending_image.take() {
-            if self.original_image.as_ref() != Some(&path) {
-                let _ = std::fs::remove_file(path);
-            }
+        if let Some(path) = self.pending_image.take()
+            && self.original_image.as_ref() != Some(&path)
+        {
+            let _ = std::fs::remove_file(path);
         }
         self.original_image = None;
         self.staged_document = None;
@@ -492,10 +492,10 @@ impl Bridge {
         let Some(path) = self.original_image.clone() else {
             return;
         };
-        if let Some(edited) = self.pending_image.take() {
-            if edited != path {
-                let _ = std::fs::remove_file(edited);
-            }
+        if let Some(edited) = self.pending_image.take()
+            && edited != path
+        {
+            let _ = std::fs::remove_file(edited);
         }
         self.load_preview(path);
     }
@@ -528,10 +528,10 @@ impl Bridge {
                 b.preview_busy = false;
                 b.ui.set_preview_busy(false);
                 if let Some((path, image)) = result {
-                    if let Some(previous) = b.pending_image.replace(path) {
-                        if b.original_image.as_ref() != Some(&previous) {
-                            let _ = std::fs::remove_file(previous);
-                        }
+                    if let Some(previous) = b.pending_image.replace(path)
+                        && b.original_image.as_ref() != Some(&previous)
+                    {
+                        let _ = std::fs::remove_file(previous);
                     }
                     b.ui.set_preview_image(image_of(&image));
                 }

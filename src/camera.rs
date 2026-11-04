@@ -531,7 +531,7 @@ impl RemoteVideo {
             );
         }
         let (w, h) = yuv.dimensions();
-        if frame.orientation % 4 == 0 {
+        if frame.orientation.is_multiple_of(4) {
             let mut rgba = vec![0u8; w * h * 4];
             yuv.write_rgba8(&mut rgba);
             return Some(Decoded {

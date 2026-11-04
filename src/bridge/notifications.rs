@@ -431,7 +431,8 @@ impl Bridge {
                     sender: self.key_participant(&message),
                     ids: vec![item.msg_id.clone()],
                 });
-                self.store.mark_read_sent(&item.jid, &[item.msg_id.clone()]);
+                self.store
+                    .mark_read_sent(&item.jid, std::slice::from_ref(&item.msg_id));
             }
         }
         self.schedule_save();

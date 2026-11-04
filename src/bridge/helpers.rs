@@ -71,10 +71,12 @@ pub(super) fn document_type(m: &StoredMessage) -> String {
     if m.kind != MessageKind::Doc {
         return String::new();
     }
-    if let Some((_, ext)) = m.text.trim().rsplit_once('.') {
-        if !ext.is_empty() && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return ext.to_ascii_uppercase();
-        }
+    if let Some((_, ext)) = m.text.trim().rsplit_once('.')
+        && !ext.is_empty()
+        && ext.len() <= 10
+        && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+    {
+        return ext.to_ascii_uppercase();
     }
     match m.mimetype.split(';').next().unwrap_or_default().trim() {
         "application/pdf" => "PDF",

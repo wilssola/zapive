@@ -508,7 +508,7 @@ fn extract_named(
 
 fn same_content(a: &std::path::Path, b: &std::path::Path) -> bool {
     use sha2::Digest as _;
-    let sum = |path: &std::path::Path| std::fs::read(path).map(|bytes| sha2::Sha256::digest(bytes));
+    let sum = |path: &std::path::Path| std::fs::read(path).map(sha2::Sha256::digest);
     match (sum(a), sum(b)) {
         (Ok(x), Ok(y)) => x == y,
         _ => false,

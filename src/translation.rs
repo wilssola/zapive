@@ -411,10 +411,8 @@ fn validate_request(request: &Value) -> Result<(), String> {
                 return Err("empty_text".into());
             }
         }
-        Some("install" | "remove") => {
-            if !code(source) || !code(target) || source == target {
-                return Err("invalid_language".into());
-            }
+        Some("install" | "remove") if (!code(source) || !code(target) || source == target) => {
+            return Err("invalid_language".into());
         }
         _ => {}
     }

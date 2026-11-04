@@ -159,10 +159,11 @@ fn media_is_node_era(dir: &std::path::Path) -> bool {
             if path.is_file() {
                 return Some(path);
             }
-            if depth > 0 && path.is_dir() {
-                if let Some(found) = first_file(&path, depth - 1) {
-                    return Some(found);
-                }
+            if depth > 0
+                && path.is_dir()
+                && let Some(found) = first_file(&path, depth - 1)
+            {
+                return Some(found);
             }
         }
         None

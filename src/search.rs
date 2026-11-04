@@ -351,10 +351,10 @@ impl SearchIndex {
     }
 
     pub fn mark_complete(&mut self, jid: &str) {
-        if let Some(db) = &self.db {
-            if meta_set(db, &format!("complete:{jid}"), &[1]).is_ok() {
-                self.indexed.insert(jid.to_string());
-            }
+        if let Some(db) = &self.db
+            && meta_set(db, &format!("complete:{jid}"), &[1]).is_ok()
+        {
+            self.indexed.insert(jid.to_string());
         }
     }
 

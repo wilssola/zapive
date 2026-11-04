@@ -1388,11 +1388,13 @@ async fn prepare_attachment(
                         data = std::fs::read(&output).map_err(|e| e.to_string())?;
                     }
                     "voice" => {
-                        if data.len() % 4 != 0 || preparation.in_rate == 0 {
+                        if !data.len().is_multiple_of(4) || preparation.in_rate == 0 {
                             return Err("Invalid voice source".into());
                         }
                         let samples: Vec<f32> = data
-                            .chunks_exact(4)
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
                             .map(|bytes| {
                                 f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
                             })
@@ -1471,9 +1473,9 @@ async fn prepare_attachment(
             let sticker = wa::message::StickerMessage {
                 url: Some(upload.url),
                 direct_path: Some(upload.direct_path),
-                media_key: Some(upload.media_key.to_vec().into()),
-                file_enc_sha256: Some(upload.file_enc_sha256.to_vec().into()),
-                file_sha256: Some(upload.file_sha256.to_vec().into()),
+                media_key: Some(upload.media_key.to_vec()),
+                file_enc_sha256: Some(upload.file_enc_sha256.to_vec()),
+                file_sha256: Some(upload.file_sha256.to_vec()),
                 file_length: Some(len),
                 mimetype: Some("image/webp".into()),
                 width: Some(512),
@@ -1962,7 +1964,7 @@ async fn executor(
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "file".into()),
-                        caption: caption,
+                        caption,
                         origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
                         data,
                         in_rate: 0,
@@ -2393,7 +2395,11 @@ async fn executor(
                             Err(e) => eprintln!("[wa] group info failed: {e}"),
                         }
                     } else {
-                        match client.contacts().get_user_info(&[target.clone()]).await {
+                        match client
+                            .contacts()
+                            .get_user_info(std::slice::from_ref(&target))
+                            .await
+                        {
                             Ok(map) => {
                                 let about = map
                                     .get(&target)

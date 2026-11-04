@@ -152,7 +152,7 @@ pub fn tally_poll(
                 ..Default::default()
             };
             for (voter, vote) in &ordered {
-                if vote.options.iter().any(|picked| *picked == hash) {
+                if vote.options.contains(&hash) {
                     tally.votes += 1;
                     if voter.as_str() == me {
                         tally.voted = true;
@@ -733,13 +733,13 @@ impl Store {
             .push((from.to_string(), into.to_string()));
         self.older_cursors.remove(into);
         self.older_exhausted.remove(into);
-        if let Some(src) = self.drafts.remove(from) {
-            if self.drafts.get(into).is_none_or(|dst| {
+        if let Some(src) = self.drafts.remove(from)
+            && self.drafts.get(into).is_none_or(|dst| {
                 (!src.text.trim().is_empty(), src.promoted)
                     > (!dst.text.trim().is_empty(), dst.promoted)
-            }) {
-                self.drafts.insert(into.to_string(), src);
-            }
+            })
+        {
+            self.drafts.insert(into.to_string(), src);
         }
         if let Some(src) = self.chats.remove(from) {
             let dst = self.chats.get(into);
@@ -1686,7 +1686,7 @@ impl Store {
             }
         }
         let mut rows: Vec<_> = rows.into_iter().collect();
-        rows.sort_by(|a, b| self.chat_name(&a.0).cmp(&self.chat_name(&b.0)));
+        rows.sort_by_key(|a| self.chat_name(&a.0));
         (known, rows)
     }
 
@@ -1897,10 +1897,10 @@ impl Store {
                         .is_some_and(|chat| chat.timestamp == m.timestamp)
             })
             .map(|m| compute_preview(m, self));
-        if let Some(preview) = preview {
-            if let Some(chat) = self.chats.get_mut(jid) {
-                chat.preview = preview;
-            }
+        if let Some(preview) = preview
+            && let Some(chat) = self.chats.get_mut(jid)
+        {
+            chat.preview = preview;
         }
     }
 

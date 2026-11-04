@@ -8,16 +8,14 @@ impl Bridge {
         if self.ui.get_changelog_loading() {
             return;
         }
-        if !self.ui.get_changelog_loaded() {
-            if let Some(cached) = self.vault.as_ref().and_then(|v| v.get("release-history")) {
-                if let Ok((releases, page, more)) =
-                    serde_json::from_str::<(Vec<crate::update::ReleaseNote>, i32, bool)>(&cached)
-                {
-                    self.set_changelog(releases);
-                    self.ui.set_changelog_page(page.max(1));
-                    self.ui.set_changelog_more(more);
-                }
-            }
+        if !self.ui.get_changelog_loaded()
+            && let Some(cached) = self.vault.as_ref().and_then(|v| v.get("release-history"))
+            && let Ok((releases, page, more)) =
+                serde_json::from_str::<(Vec<crate::update::ReleaseNote>, i32, bool)>(&cached)
+        {
+            self.set_changelog(releases);
+            self.ui.set_changelog_page(page.max(1));
+            self.ui.set_changelog_more(more);
         }
         let page = if refresh || !self.ui.get_changelog_loaded() {
             1
@@ -46,12 +44,11 @@ impl Bridge {
                             }
                         }
                         let next_page = page.saturating_add(1).min(i32::MAX as u32) as i32;
-                        if let Some(vault) = &b.vault {
-                            if let Ok(cache) =
+                        if let Some(vault) = &b.vault
+                            && let Ok(cache) =
                                 serde_json::to_string(&(&releases, next_page, result.has_more))
-                            {
-                                vault.set("release-history", &cache);
-                            }
+                        {
+                            vault.set("release-history", &cache);
                         }
                         b.set_changelog(releases);
                         b.ui.set_changelog_page(next_page);

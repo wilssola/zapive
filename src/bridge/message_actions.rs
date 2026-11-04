@@ -574,10 +574,10 @@ impl Bridge {
             }
             "link" => {
                 let link = message_link(&m);
-                if !link.is_empty() {
-                    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(link)) {
-                        self.message_action_failed(&e.to_string());
-                    }
+                if !link.is_empty()
+                    && let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(link))
+                {
+                    self.message_action_failed(&e.to_string());
                 }
             }
             "save" => {
@@ -599,10 +599,10 @@ impl Bridge {
                         .into_owned()
                 };
                 std::thread::spawn(move || {
-                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file() {
-                        if let Err(e) = std::fs::copy(path, target) {
-                            ui_apply(move |b| b.message_action_failed(&e.to_string()));
-                        }
+                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file()
+                        && let Err(e) = std::fs::copy(path, target)
+                    {
+                        ui_apply(move |b| b.message_action_failed(&e.to_string()));
                     }
                 });
             }

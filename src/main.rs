@@ -216,12 +216,12 @@ fn main() {
                 let idle = size.width == 0 || size.height == 0;
                 bridge::ui_apply(move |b| b.set_window_idle(idle));
             }
-            if let WindowEvent::Focused(focused) = event {
-                if let Some(ui) = handle.upgrade() {
-                    ui.set_window_active(*focused);
-                    #[cfg(windows)]
-                    platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
-                }
+            if let WindowEvent::Focused(focused) = event
+                && let Some(ui) = handle.upgrade()
+            {
+                ui.set_window_active(*focused);
+                #[cfg(windows)]
+                platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
             }
             EventResult::Propagate
         });

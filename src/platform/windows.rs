@@ -238,13 +238,13 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
             "<input id=\"reply-input\" type=\"text\" placeHolderContent=\"{placeholder}\"/>"
         ));
     }
-    if let Some(path) = payload.thumbnail.as_deref() {
-        if let Ok(uri) = url::Url::from_file_path(path) {
-            image = format!(
-                "<image placement=\"appLogoOverride\" src=\"{}\"/>",
-                xml_escape(uri.as_str())
-            );
-        }
+    if let Some(path) = payload.thumbnail.as_deref()
+        && let Ok(uri) = url::Url::from_file_path(path)
+    {
+        image = format!(
+            "<image placement=\"appLogoOverride\" src=\"{}\"/>",
+            xml_escape(uri.as_str())
+        );
     }
     // Clicking the toast body reports the `launch` string. Without it the
     // arguments arrive empty and nothing knows which chat was clicked.

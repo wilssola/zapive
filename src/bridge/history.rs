@@ -86,11 +86,11 @@ impl Bridge {
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
-        if let Some(vault) = &self.vault {
-            if self.store.load_older(vault, &jid) {
-                self.prepend_older_rows(&jid);
-                return;
-            }
+        if let Some(vault) = &self.vault
+            && self.store.load_older(vault, &jid)
+        {
+            self.prepend_older_rows(&jid);
+            return;
         }
         // After a jump the list starts mid-conversation; the rows above it
         // are already in the store.

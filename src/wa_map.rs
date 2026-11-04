@@ -1125,14 +1125,13 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
             MessageKind::Image,
             clean_text(img.caption.as_deref().unwrap_or("")),
         )
-    } else if let Some(v) = content.video_message.as_option() {
+    } else {
+        let v = content.video_message.as_option()?;
         // Rendered from the embedded jpeg thumbnail.
         (
             MessageKind::Image,
             clean_text(v.caption.as_deref().unwrap_or("")),
         )
-    } else {
-        return None;
     };
     Some(StoredMessage {
         id: info.id.to_string(),

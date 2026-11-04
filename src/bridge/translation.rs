@@ -166,10 +166,10 @@ impl Bridge {
     }
 
     pub(super) fn save_translation_settings(&self) {
-        if let Some(vault) = &self.vault {
-            if let Ok(value) = serde_json::to_string(&self.translation_settings) {
-                vault.set("settings:translation", &value);
-            }
+        if let Some(vault) = &self.vault
+            && let Ok(value) = serde_json::to_string(&self.translation_settings)
+        {
+            vault.set("settings:translation", &value);
         }
     }
 
@@ -604,16 +604,16 @@ impl Bridge {
             return;
         }
         let key = self.translation_key(jid, id);
-        if let Some(e) = self.translation_cache.get_mut(&key) {
-            if e.original == m.text {
-                if automatic || e.busy {
-                    return;
-                }
-                if !e.text.is_empty() {
-                    e.hidden = false;
-                    self.refresh_translation_row(jid, id);
-                    return;
-                }
+        if let Some(e) = self.translation_cache.get_mut(&key)
+            && e.original == m.text
+        {
+            if automatic || e.busy {
+                return;
+            }
+            if !e.text.is_empty() {
+                e.hidden = false;
+                self.refresh_translation_row(jid, id);
+                return;
             }
         }
         if self.translation_cache.values().filter(|e| e.busy).count() >= 4 {
@@ -686,9 +686,8 @@ impl Bridge {
                 if b.translation_settings.source == key.2 && b.translation_settings.target == key.3 {
                     b.refresh_translation_row(&key.0, &key.1);
                 }
-                if automatic {
-                    if let Some(jid) = b.current_jid.clone() { b.auto_translate_chat(&jid); }
-                }
+                if automatic
+                    && let Some(jid) = b.current_jid.clone() { b.auto_translate_chat(&jid); }
             });
         });
         if let Err(error) = result {
@@ -723,10 +722,11 @@ impl Bridge {
         match action {
             "translation-hide" => entry.hidden = true,
             "translation-copy" => {
-                if !entry.hidden && !entry.text.is_empty() {
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        let _ = clipboard.set_text(entry.text.clone());
-                    }
+                if !entry.hidden
+                    && !entry.text.is_empty()
+                    && let Ok(mut clipboard) = arboard::Clipboard::new()
+                {
+                    let _ = clipboard.set_text(entry.text.clone());
                 }
             }
             "translation-always" | "translation-never" if !entry.source.is_empty() => {

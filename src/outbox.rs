@@ -163,7 +163,7 @@ mod tests {
         let media = wa::Message {
             image_message: MessageField::some(wa::message::ImageMessage {
                 caption: Some("photo".into()),
-                media_key: Some(vec![1, 2, 3].into()),
+                media_key: Some(vec![1, 2, 3]),
                 direct_path: Some("/media/photo".into()),
                 ..Default::default()
             }),

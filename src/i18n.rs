@@ -49,7 +49,7 @@ pub fn is_translation(id: &str, value: &str) -> bool {
     [catalogs.en.get(id), catalogs.pt.get(id)]
         .into_iter()
         .flatten()
-        .any(|entry| entry.forms.iter().any(|form| *form == value))
+        .any(|entry| entry.forms.contains(&value))
 }
 
 // Positional `{0}`, `{1}` arguments.
