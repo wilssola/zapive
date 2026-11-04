@@ -865,6 +865,38 @@ mod receipt_tests {
     use super::*;
 
     #[test]
+    fn a_pin_without_timestamp_stays_pinned() {
+        assert_eq!(pin_stamp(true, 0), 1);
+        assert_eq!(pin_stamp(true, -5), 1);
+        assert_eq!(pin_stamp(true, 1_700_000_000), 1_700_000_000);
+        assert_eq!(pin_stamp(false, 1_700_000_000), 0);
+    }
+
+    #[test]
+    fn history_sync_never_unpins() {
+        assert_eq!(history_pin(None), None);
+        assert_eq!(history_pin(Some(0)), None);
+        assert_eq!(history_pin(Some(3)), Some(3));
+    }
+
+    #[test]
+    fn history_chunk_keeps_pins_from_app_state() {
+        let mut store = crate::store::Store::default();
+        let jid = "5511999999999@s.whatsapp.net";
+        store.upsert_chat(jid, None, 0, None, Some(pin_stamp(true, 0)), None);
+        store.upsert_chat(
+            jid,
+            Some("Ana"),
+            10,
+            Some(0),
+            history_pin(Some(0)),
+            Some(false),
+        );
+        assert!(store.chats[jid].pinned > 0);
+        assert_eq!(store.sorted_chats()[0].jid, jid);
+    }
+
+    #[test]
     fn receipt_kinds_map_to_tick_levels() {
         assert_eq!(receipt_status(&ReceiptType::Sent), 2);
         assert_eq!(receipt_status(&ReceiptType::Delivered), 3);
@@ -1044,7 +1076,7 @@ impl EventHandler for Pump {
                                 .filter(|n| !n.is_empty()),
                             timestamp: conv.conversation_timestamp.unwrap_or(0) as i64,
                             unread: conv.unread_count,
-                            pinned: conv.pinned.map(|p| p as i64),
+                            pinned: history_pin(conv.pinned),
                             archived: conv.archived,
                         });
                         for hm in &conv.messages {
@@ -1139,8 +1171,8 @@ impl EventHandler for Pump {
             Event::PinUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let pinned = u.action.pinned.unwrap_or(false);
-                let ts = u.timestamp.timestamp();
-                ui_apply(move |b| b.on_chat_flag(&jid, Some(if pinned { ts } else { 0 }), None));
+                let stamp = pin_stamp(pinned, u.timestamp.timestamp());
+                ui_apply(move |b| b.on_chat_flag(&jid, Some(stamp), None));
             }
             Event::ArchiveUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
@@ -1281,6 +1313,26 @@ impl EventHandler for Pump {
             _ => {}
         }
     }
+}
+
+// Pin order for a chat: the time it was pinned, never 0 while pinned. The
+// sync action carries no usable timestamp on some pins (it decodes to the
+// epoch), and 0 means "not pinned" everywhere else.
+fn pin_stamp(pinned: bool, ts: i64) -> i64 {
+    if !pinned {
+        0
+    } else if ts > 0 {
+        ts
+    } else {
+        1
+    }
+}
+
+// History sync writes 0 for every chat that is not pinned there, which
+// would wipe pins already delivered by app-state sync. Only a positive
+// value is news; unpinning arrives as a PinUpdate.
+fn history_pin(pinned: Option<u32>) -> Option<i64> {
+    pinned.filter(|p| *p > 0).map(i64::from)
 }
 
 impl Pump {
