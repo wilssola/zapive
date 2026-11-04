@@ -2076,6 +2076,33 @@ msgstr "No starred messages"
 msgid "starred.empty.hint"
 msgstr "Star a message to find it here later."
 
+msgid "settings.wallpaper.title"
+msgstr "Chat wallpaper"
+
+msgid "settings.wallpaper.background"
+msgstr "Background colour"
+
+msgid "settings.wallpaper.doodles"
+msgstr "Doodle colour"
+
+msgid "settings.wallpaper.hex"
+msgstr "Hex colour"
+
+msgid "settings.wallpaper.intensity"
+msgstr "Intensity"
+
+msgid "settings.wallpaper.preview_in"
+msgstr "Incoming message"
+
+msgid "settings.wallpaper.preview_out"
+msgstr "Your message"
+
+msgid "settings.wallpaper.reset"
+msgstr "Default wallpaper"
+
+msgid "settings.wallpaper.reset_button"
+msgstr "Reset to default"
+
 
 
 

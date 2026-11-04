@@ -2078,6 +2078,33 @@ msgstr "Nenhuma mensagem favorita"
 msgid "starred.empty.hint"
 msgstr "Favorite uma mensagem para encontrá-la aqui depois."
 
+msgid "settings.wallpaper.title"
+msgstr "Papel de parede do chat"
+
+msgid "settings.wallpaper.background"
+msgstr "Cor de fundo"
+
+msgid "settings.wallpaper.doodles"
+msgstr "Cor dos desenhos"
+
+msgid "settings.wallpaper.hex"
+msgstr "Cor em hexadecimal"
+
+msgid "settings.wallpaper.intensity"
+msgstr "Intensidade"
+
+msgid "settings.wallpaper.preview_in"
+msgstr "Mensagem recebida"
+
+msgid "settings.wallpaper.preview_out"
+msgstr "Sua mensagem"
+
+msgid "settings.wallpaper.reset"
+msgstr "Papel de parede padrão"
+
+msgid "settings.wallpaper.reset_button"
+msgstr "Restaurar padrão"
+
 
 
 

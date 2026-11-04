@@ -64,6 +64,18 @@ export component AppWindow inherits Window {
     callback notifications-changed(bool);
     callback notify-previews-changed(bool);
     callback message-sound-changed(bool);
+    // Chat wallpaper (persisted by the host).
+    in-out property <color> wallpaper-bg: #efeae2;
+    in-out property <color> wallpaper-fg: #111b2114;
+    in-out property <bool> wallpaper-custom: false;
+    callback wallpaper-colors-changed(color, color);
+    callback wallpaper-reset();
+    // Hex text typed in settings (true = doodle colour); the host parses it
+    // and writes wallpaper-bg / wallpaper-fg back.
+    callback wallpaper-hex-entered(bool, string);
+    changed wallpaper-bg => { Theme.wp-custom-bg = self.wallpaper-bg; }
+    changed wallpaper-fg => { Theme.wp-custom-fg = self.wallpaper-fg; }
+    changed wallpaper-custom => { Theme.wp-custom = self.wallpaper-custom; }
     // True until the first chat list is ready; shows the splash.
     in-out property <bool> app-loading: true;
     callback privacy-blur-changed(string, bool);
@@ -77,6 +89,9 @@ export component AppWindow inherits Window {
         Palette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light;
         Theme.dark = root.dark-theme;
         Theme.glass = root.glass;
+        Theme.wp-custom-bg = root.wallpaper-bg;
+        Theme.wp-custom-fg = root.wallpaper-fg;
+        Theme.wp-custom = root.wallpaper-custom;
     }
 
     // Theme + language (resolved by the host)
@@ -1907,7 +1922,10 @@ export component AppWindow inherits Window {
 
         // Conversation pane
         conv-pane := Rectangle {
-            background: Theme.conv-background;
+            Wallpaper {
+                width: parent.width;
+                height: parent.height;
+            }
 
             HomeScreen {
                 visible: !root.chat-open;
@@ -4403,6 +4421,15 @@ export component AppWindow inherits Window {
         style-changed(a0) => { root.style-changed(a0); }
         notifications-changed(a0) => { root.notifications-changed(a0); }
         message-sound-changed(a0) => { root.message-sound-changed(a0); }
+        show-shortcuts() => { root.shortcuts-open = true; }
+        wallpaper-colors-changed(bg, fg) => {
+            root.wallpaper-bg = bg;
+            root.wallpaper-fg = fg;
+            root.wallpaper-custom = true;
+            root.wallpaper-colors-changed(bg, fg);
+        }
+        wallpaper-reset() => { root.wallpaper-custom = false; root.wallpaper-reset(); }
+        wallpaper-hex-entered(fg, hex) => { root.wallpaper-hex-entered(fg, hex); }
         notify-previews-changed(a0) => { root.notify-previews-changed(a0); }
         call-silence-repeat-changed(a0) => { root.call-silence-repeat = a0; root.call-silence-repeat-changed(a0); }
         call-silence-minutes-changed(a0) => { root.call-silence-minutes = a0; root.call-silence-minutes-changed(a0); }

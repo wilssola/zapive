@@ -8,6 +8,7 @@ import { SettingsCard } from "settings-card.slint";
 import { SettingsRow } from "settings-row.slint";
 import { Theme } from "theme.slint";
 import { Toggle } from "toggle.slint";
+import { Wallpaper } from "wallpaper.slint";
 import { AccountItem, ReleaseItem, TranslationModelItem } from "types.slint";
 
 export component SettingsLayer inherits ModalLayer {
@@ -114,6 +115,13 @@ export component SettingsLayer inherits ModalLayer {
     in property <bool> auto-download-stickers;
     callback auto-download-stickers-changed(bool);
     in property <length> win-width;
+    callback show-shortcuts();
+    callback wallpaper-colors-changed(color, color);
+    callback wallpaper-reset();
+    callback wallpaper-hex-entered(bool, string);
+    property <[color]> wp-bg-presets: [#efeae2, #e3f0ea, #e8eef9, #f6e9ee, #fff4d6, #0b1a20, #101c23, #1b1f2a, #1d2a22, #2a1d2a];
+    property <[color]> wp-fg-presets: [#111b21, #008069, #1b4f9c, #9c1b5a, #7a5200, #ffffff, #7be0c4, #9bbcf5, #f5a3c8, #ffd37a];
+    property <int> wp-alpha-pct: round(Theme.wp-base-fg.alpha * 100 / 255);
     // Cards stay <= 760px wide and centred in the area right of the category list.
     property <length> content-margin: max(20px, (root.win-width - min(280px, root.win-width * 0.3) - 1px - 760px) / 2);
 

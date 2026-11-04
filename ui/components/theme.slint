@@ -55,6 +55,17 @@ export global Theme {
         ? (dark ? @linear-gradient(145deg, #1a2f3a40 0%, #10202966 55%, #0b151b40 100%)
                 : @linear-gradient(145deg, #ffffff50 0%, #efeae240 100%))
         : (dark ? @linear-gradient(145deg, #15252e 0%, #101c23 55%, #0d181e 100%) : conv-bg);
+    // Chat wallpaper: colour + doodle ink. `wp-custom*` are pushed by AppWindow.
+    in-out property <bool> wp-custom: false;
+    in-out property <color> wp-custom-bg: #efeae2;
+    in-out property <color> wp-custom-fg: #111b2114;
+    out property <color> wp-default-bg: dark ? #0b1a20 : #efeae2;
+    out property <color> wp-default-fg: dark ? #ffffff10 : #111b2116;
+    out property <color> wp-base-bg: wp-custom ? wp-custom-bg : wp-default-bg;
+    out property <color> wp-base-fg: wp-custom ? wp-custom-fg : wp-default-fg;
+    // Translucent in glass so the backdrop still shows through.
+    out property <color> wallpaper-bg: glass ? wp-base-bg.with-alpha(dark ? 0.5 : 0.62) : wp-base-bg;
+    out property <color> wallpaper-fg: wp-base-fg;
     out property <color> day-bg: glass ? glass-fill-strong : (dark ? #1b2a33 : #ffffff);
     out property <color> day-border: glass ? (dark ? glass-rim-soft : #1b2d4026) : (dark ? #263741 : #e0e4e7);
     out property <color> conversation-divider: glass ? glass-divider : (dark ? #293b45 : #d5dcd9);

@@ -1,0 +1,22 @@
+import { Theme } from "theme.slint";
+
+// Chat background: a colour plus the doodle tile on top, recoloured. The tile
+// is white line-art on transparent, so `colorize` gives the exact ink colour.
+// Slint ignores image-fit when tiling and draws at 1 source pixel per logical
+// pixel, hence the 512px tile.
+export component Wallpaper inherits Rectangle {
+    in property <color> bg: Theme.wallpaper-bg;
+    in property <color> fg: Theme.wallpaper-fg;
+    background: root.bg;
+    clip: true;
+    Image {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("../wallpaper-tile.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+        colorize: root.fg;
+    }
+}
