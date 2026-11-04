@@ -77,10 +77,19 @@ impl Bridge {
             (Some(decoded), _) => {
                 let image = image_of(&decoded);
                 self.avatars.insert(jid.to_string(), Some(image.clone()));
-                // An evicted avatar is fetched again the next time a row asks.
-                for old in touch_lru(&mut self.avatar_order, jid, AVATAR_CACHE_MAX) {
-                    self.avatars.remove(&old);
-                    self.requested_avatars.remove(&old);
+                // Only faces outside the chat list (group members, status
+                // posters) are evictable. Chat-list rows are all requested by
+                // ensure_avatars(), so evicting one made it refetch, evict the
+                // next, and so on: an endless swap that flickered the list
+                // once there were more chats than the cap.
+                if !self.store.chats.contains_key(jid) {
+                    for old in touch_lru(&mut self.avatar_order, jid, AVATAR_CACHE_MAX) {
+                        if self.store.chats.contains_key(&old) {
+                            continue;
+                        }
+                        self.avatars.remove(&old);
+                        self.requested_avatars.remove(&old);
+                    }
                 }
                 self.patch_avatar_everywhere(jid, &image);
                 self.refresh_message_details();
