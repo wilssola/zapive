@@ -1704,7 +1704,7 @@ export component AppWindow inherits Window {
                                     spacing: 6px;
                                     Text {
                                         text: chat.name;
-                                        color: Theme.text;
+                                        color: root.blur-names && !touch.has-hover && !(root.demo-hover && root.demo-hover-x < 440px) ? transparent : Theme.text;
                                         font-size: 14px;
                                         font-weight: chat.jid == root.selected-jid || chat.unread > 0 ? 600 : 400;
                                         overflow: elide;
@@ -1741,7 +1741,8 @@ export component AppWindow inherits Window {
                                     }
                                     Text {
                                         text: chat.preview;
-                                        color: chat.draft ? Theme.warning : chat.typing ? Theme.accent : Theme.text-dim;
+                                        color: root.blur-messages && !touch.has-hover && !(root.demo-hover && root.demo-hover-x < 440px) ? transparent
+                                            : chat.draft ? Theme.warning : chat.typing ? Theme.accent : Theme.text-dim;
                                         font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
@@ -3173,6 +3174,7 @@ export component AppWindow inherits Window {
                             height: bubble.height - 2px;
                             visible: bubble.width > 2px && bubble.height > 2px;
                             radius: 6px;
+                            cover: true;
                             tint: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
                         }
                         translation-card := Rectangle {
@@ -3901,7 +3903,7 @@ export component AppWindow inherits Window {
                                 spacing: 4px;
                                 Text {
                                     text: root.current-chat-name;
-                                    color: Theme.text;
+                                    color: root.blur-names && !head-touch.has-hover ? transparent : Theme.text;
                                     font-size: 15px;
                                     font-weight: 600;
                                     overflow: elide;
@@ -3914,7 +3916,7 @@ export component AppWindow inherits Window {
                                 }
                                 if root.current-status != "": Text {
                                     text: root.current-status;
-                                    color: Theme.text-dim;
+                                    color: root.blur-names && !head-touch.has-hover ? transparent : Theme.text-dim;
                                     font-size: 11px;
                                     wrap: no-wrap;
                                     overflow: elide;

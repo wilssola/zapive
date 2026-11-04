@@ -1,4 +1,3 @@
-import { PrivacyVeil } from "privacy-veil.slint";
 import { Theme } from "theme.slint";
 export component Avatar inherits Rectangle {
     in property <image> src;
@@ -20,14 +19,8 @@ export component Avatar inherits Rectangle {
         height: parent.height;
         image-fit: cover;
     }
-    if root.privacy-blurred && !root.privacy-reveal && !root.demo-reveal: PrivacyVeil {
-        width: parent.width;
-        height: parent.height;
-        radius: parent.border-radius;
-        blur: 20px;
-        tint: Theme.glass ? Theme.glass-fill-soft : Theme.panel;
-    }
-    if !self.has-image: Text {
+    // Blurred: keep the colour (tells contacts apart), hide the letter.
+    if !self.has-image && !(root.privacy-blurred && !root.privacy-reveal && !root.demo-reveal): Text {
         text: root.initial;
         color: white;
         font-size: root.width * 0.4;
@@ -35,11 +28,5 @@ export component Avatar inherits Rectangle {
         height: parent.height;
         horizontal-alignment: center;
         vertical-alignment: center;
-    }
-    if !self.has-image && root.privacy-blurred && !root.privacy-reveal && !root.demo-reveal: PrivacyVeil {
-        width: parent.width;
-        height: parent.height;
-        radius: parent.border-radius;
-        tint: Theme.glass ? Theme.glass-fill-soft : Theme.panel;
     }
 }

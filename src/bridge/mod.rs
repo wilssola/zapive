@@ -128,6 +128,8 @@ pub struct Bridge {
     locked_backlog: Vec<LockedEvent>,
     // Media caches (pixels live UI-side; files live encrypted on disk).
     avatars: HashMap<String, Option<slint::Image>>,
+    // Privacy-blur stand-ins of `avatars`, same keys.
+    avatar_blurs: HashMap<String, slint::Image>,
     // Least recently stored first; bounds `avatars`.
     avatar_order: std::collections::VecDeque<String>,
     // The window is minimized or hidden: non-essential timers sleep.

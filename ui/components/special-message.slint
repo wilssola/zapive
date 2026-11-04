@@ -315,6 +315,7 @@ export component SpecialMessage inherits Rectangle {
         width: parent.width;
         height: parent.height;
         radius: 12px;
+        cover: true;
         tint: root.surface;
     }
     if root.privacy-hidden: PrivacyVeil {
@@ -323,6 +324,7 @@ export component SpecialMessage inherits Rectangle {
         width: parent.width - 2px;
         height: parent.height - 2px;
         radius: 11px;
+        cover: true;
         tint: root.surface;
     }
 }
