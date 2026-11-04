@@ -1046,6 +1046,7 @@ export component AppWindow inherits Window {
                 else if (root.picker-open) { root.picker-open = false; }
                 else if (root.attach-open) { root.attach-open = false; }
                 else if (root.select-mode) { root.select-cancel(); }
+                else if (root.starred-open) { root.starred-open = false; }
                 else if (root.info-open) { root.close-info(); }
                 else if (root.chat-search-open) { root.chat-search-close(); }
                 else if (root.chat-tab == "archived") {
@@ -3270,7 +3271,7 @@ export component AppWindow inherits Window {
                             border-color: Theme.conv-bg;
                             TouchArea {
                                 mouse-cursor: pointer;
-                                clicked => { root.show-reactions(msg.id); }
+                                clicked => { root.reactions-msg-id = msg.id; root.show-reactions(msg.id); }
                             }
                             // The emoji and the count apart: the emoji font
                             // has digits of its own.
@@ -4016,6 +4017,7 @@ export component AppWindow inherits Window {
         labels: root.labels;
         menu-add-member() => { root.menu-add-member(); }
         menu-search() => { root.menu-search(); }
+        menu-starred() => { root.starred-current-only = false; root.starred-open = true; root.open-starred(false); }
         menu-mute(a0) => { root.menu-mute(a0); }
         menu-ephemeral(a0) => { root.menu-ephemeral(a0); }
         menu-favorite() => { root.menu-favorite(); }
@@ -4053,6 +4055,7 @@ export component AppWindow inherits Window {
         open: root.info-open;
         scrim: Theme.scrim;
         dismiss => { root.close-info(); }
+        open-starred-here() => { root.starred-current-only = true; root.starred-open = true; root.open-starred(true); }
 
         current-callable: root.current-callable;
         start-call(a0) => { root.start-call(a0); }
@@ -4285,6 +4288,7 @@ export component AppWindow inherits Window {
         dismiss => { root.reactions-open = false; }
 
         reaction-rows: root.reaction-rows;
+        reaction-tabs: root.reaction-tabs;
         reactions-title: root.reactions-title;
         reactions-open <=> root.reactions-open;
         open-dm(a0) => { root.open-dm(a0); }

@@ -207,6 +207,7 @@ impl Bridge {
                 };
                 let avatar = self.avatar_for(&who);
                 ReactionItem {
+                    own: who == "me",
                     jid: who.clone().into(),
                     name: name.clone().into(),
                     emoji: clean_text(emoji).into(),
@@ -225,6 +226,7 @@ impl Bridge {
         }
         let count = rows.len();
         self.reactions_model.set_vec(rows);
+        self.refresh_reaction_tabs(id);
         self.ui
             .set_reactions_title(ta("reactions.count", &[&count.to_string()]).into());
         self.ui.set_reactions_open(true);
@@ -281,7 +283,7 @@ impl Bridge {
         if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
             m.pinned_until = until;
             self.store.dirty_jids.insert(jid.clone());
-            if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+            if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); self.refresh_pinned(); }
             self.schedule_save();
         }
     }

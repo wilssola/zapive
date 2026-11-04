@@ -26,6 +26,7 @@ export component InfoLayer inherits ModalLayer {
     in property <int> info-color-idx;
     in property <[[StickerCell]]> info-media;
     callback close-info();
+    callback open-starred-here();
     callback toggle-archive();
     callback clear-chat();
     in property <bool> current-left;
@@ -214,6 +215,11 @@ export component InfoLayer inherits ModalLayer {
                             }
                             Rectangle { height: 14px; }
                             Rectangle { height: 1px; background: Theme.border; }
+                        }
+                        MenuRow {
+                            icon: @image-url("../icons/star.svg");
+                            label: @tr("starred.title_chat");
+                            clicked => { root.open-starred-here(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/photo.svg");

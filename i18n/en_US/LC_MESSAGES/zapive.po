@@ -1932,6 +1932,18 @@ msgstr "Could not start the server: {0}"
 msgid "chat.attach.poll"
 msgstr "Poll"
 
+msgid "pinned.banner.count"
+msgstr "{0} of {1}"
+
+msgid "pinned.banner.label"
+msgstr "Pinned message"
+
+msgid "pinned.banner.menu"
+msgstr "Pinned message options"
+
+msgid "pinned.banner.unpin"
+msgstr "Unpin"
+
 msgid "poll.composer.title"
 msgstr "New poll"
 
@@ -1970,6 +1982,27 @@ msgstr "View votes"
 
 msgid "poll.votes.hide"
 msgstr "Hide votes"
+
+msgid "reactions.tab_all"
+msgstr "All {0}"
+
+msgid "reactions.click_to_remove"
+msgstr "Click to remove"
+
+msgid "starred.title"
+msgstr "Starred messages"
+
+msgid "starred.title_chat"
+msgstr "Starred in this chat"
+
+msgid "starred.close"
+msgstr "Close"
+
+msgid "starred.empty.title"
+msgstr "No starred messages"
+
+msgid "starred.empty.hint"
+msgstr "Star a message to find it here later."
 
 
 

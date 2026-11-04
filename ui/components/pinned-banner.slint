@@ -1,0 +1,133 @@
+import { IconButton } from "icon-button.slint";
+import { MenuRow } from "rows/menu.slint";
+import { Theme } from "theme.slint";
+import { PinnedItem } from "types.slint";
+
+// Glass strip under the chat header with the current pinned message.
+// Clicking it jumps to the message and advances to the next pinned one.
+export component PinnedBanner inherits Rectangle {
+    in property <[PinnedItem]> items;
+    in-out property <int> index;
+    callback open-pinned(string);
+    callback unpin(string);
+    property <bool> menu-open: false;
+    property <int> safe-index: root.items.length == 0 ? 0 : Math.min(root.index, root.items.length - 1);
+    property <PinnedItem> current: root.items[root.safe-index];
+    height: root.items.length > 0 ? 44px : 0px;
+    visible: root.items.length > 0;
+
+    Rectangle {
+        x: 12px;
+        width: parent.width - 24px;
+        height: 40px;
+        border-radius: 14px;
+        background: Theme.glass ? Theme.glass-fill-strong : Theme.panel;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: 1px;
+        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+        drop-shadow-blur: Theme.glass ? 14px : 0px;
+        drop-shadow-color: Theme.glass-shadow;
+        clip: true;
+        if Theme.glass: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        banner-touch := TouchArea {
+            mouse-cursor: pointer;
+            accessible-role: button;
+            
+            accessible-label: @tr("pinned.banner.label");
+            clicked => {
+                root.open-pinned(root.current.msg-id);
+                root.index = Math.mod(root.safe-index + 1, root.items.length);
+            }
+        }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 4px;
+            spacing: 10px;
+            Rectangle {
+                width: 3px;
+                height: 22px;
+                y: 9px;
+                border-radius: 1.5px;
+                background: Theme.accent;
+            }
+            Image {
+                source: @image-url("../icons/pin.svg");
+                colorize: Theme.accent-text;
+                width: 16px;
+                height: 16px;
+                y: (parent.height - self.height) / 2;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 0px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.current.sender;
+                    color: Theme.accent-text;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.current.text;
+                    color: Theme.text;
+                    font-size: 13px;
+                    overflow: elide;
+                }
+            }
+            if root.items.length > 1: Text {
+                text: @tr("pinned.banner.count", root.safe-index + 1, root.items.length);
+                color: Theme.text-dim;
+                font-size: 11.5px;
+                vertical-alignment: center;
+            }
+            IconButton {
+                width: 32px;
+                height: 32px;
+                y: 4px;
+                icon-size: 18px;
+                icon: @image-url("../icons/dots-vertical.svg");
+                accessible-role: button;
+                accessible-label: @tr("pinned.banner.menu");
+                clicked => { root.menu-open = !root.menu-open; }
+            }
+        }
+    }
+
+    if root.menu-open: TouchArea {
+        x: -2000px;
+        y: -2000px;
+        width: 4000px;
+        height: 4000px;
+        clicked => { root.menu-open = false; }
+    }
+    if root.menu-open: Rectangle {
+        x: parent.width - self.width - 16px;
+        y: 44px;
+        width: 180px;
+        height: 52px;
+        border-radius: 14px;
+        background: Theme.panel;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: 1px;
+        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: Theme.glass-shadow;
+        VerticalLayout {
+            padding: 6px;
+            MenuRow {
+                icon: @image-url("../icons/pin.svg");
+                label: @tr("pinned.banner.unpin");
+                clicked => {
+                    root.menu-open = false;
+                    root.unpin(root.current.msg-id);
+                }
+            }
+        }
+    }
+}

@@ -251,6 +251,7 @@ export component ChatMenuLayer inherits ModalLayer {
     in property <[LabelItem]> labels;
     callback menu-add-member();
     callback menu-search();
+    callback menu-starred();
     callback menu-mute(int);
     callback menu-ephemeral(int);
     callback menu-favorite();
@@ -303,6 +304,11 @@ export component ChatMenuLayer inherits ModalLayer {
                     icon: @image-url("../icons/search.svg");
                     label: @tr("chat.in_chat_search.placeholder");
                     clicked => { root.menu-search(); }
+                }
+                MenuRow {
+                    icon: @image-url("../icons/star.svg");
+                    label: @tr("starred.title");
+                    clicked => { root.chat-menu-open = false; root.menu-starred(); }
                 }
                 MenuRow {
                     icon: @image-url("../icons/checkbox.svg");

@@ -86,6 +86,8 @@ export struct LabelItem {
 }
 
 export struct ReactionItem {
+    // True for my own reaction (the row offers to remove it).
+    own: bool,
     jid: string,
     name: string,
     emoji: string,

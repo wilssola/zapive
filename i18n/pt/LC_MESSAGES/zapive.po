@@ -1934,6 +1934,18 @@ msgstr "Não foi possível iniciar o servidor: {0}"
 msgid "chat.attach.poll"
 msgstr "Enquete"
 
+msgid "pinned.banner.count"
+msgstr "{0} de {1}"
+
+msgid "pinned.banner.label"
+msgstr "Mensagem fixada"
+
+msgid "pinned.banner.menu"
+msgstr "Opções da mensagem fixada"
+
+msgid "pinned.banner.unpin"
+msgstr "Desafixar"
+
 msgid "poll.composer.title"
 msgstr "Nova enquete"
 
@@ -1972,6 +1984,27 @@ msgstr "Ver votos"
 
 msgid "poll.votes.hide"
 msgstr "Ocultar votos"
+
+msgid "reactions.tab_all"
+msgstr "Todas {0}"
+
+msgid "reactions.click_to_remove"
+msgstr "Clique para remover"
+
+msgid "starred.title"
+msgstr "Mensagens favoritas"
+
+msgid "starred.title_chat"
+msgstr "Favoritas desta conversa"
+
+msgid "starred.close"
+msgstr "Fechar"
+
+msgid "starred.empty.title"
+msgstr "Nenhuma mensagem favorita"
+
+msgid "starred.empty.hint"
+msgstr "Favorite uma mensagem para encontrá-la aqui depois."
 
 
 

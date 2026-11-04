@@ -14,7 +14,7 @@ use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
     DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
-    MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell,
+    MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;

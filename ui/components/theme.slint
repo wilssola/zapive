@@ -78,5 +78,29 @@ export global Theme {
     out property <color> pill: glass ? glass-fill-strong : (dark ? #233138 : #ffffff);
     out property <color> sender: dark ? #39c8ed : #027eb5;
     out property <color> danger: dark ? #f47783 : #d93a49;
+    // Floating side panels (info, starred): stronger than a quiet pane so
+    // the conversation behind never competes with their text.
+    // Panels laid over the conversation WITHOUT a backdrop blur: dense enough
+    // that the content behind never shows through the text.
+    out property <color> glass-fill-cover: dark ? #141f28f0 : #fafcfcf6;
+    out property <color> glass-fill-panel: dark ? #16222cb0 : #fffffff0;
+    // Composer dock and the fade under pinned content.
+    out property <color> dock: glass ? glass-fill : (dark ? #0b141a28 : #ffffff28);
+    // Full-pane viewers (PDF, image preview).
+    out property <color> viewer: glass ? glass-fill-strong : (dark ? #0b141a : #e9edef);
+    // Border that cuts a badge out of its icon (none on glass).
+    out property <color> badge-cut: glass ? #00000000 : rail;
+    // Small dark chip over media (duration, play button backing).
+    out property <color> media-chip: #000000a0;
+    out property <color> media-chip-soft: #00000050;
+    out property <color> media-track: #8696a060;
+    // Read ticks / playback progress.
+    out property <color> read: #53bdeb;
+    out property <color> selection: #3390ec;
+    out property <color> warning: #d99028;
+    out property <color> danger-solid: #f05d4d;
+    out property <color> send: #21885b;
+    // Round call controls at rest.
+    out property <color> control: glass ? (dark ? #ffffff26 : #ffffffb0) : (dark ? #2a3942 : #d1d7db);
     out property <color> scrim: glass ? (dark ? #0000004d : #1b2d4033) : #00000088;
 }
