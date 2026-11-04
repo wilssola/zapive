@@ -12,7 +12,7 @@ export component GlassPanel inherits Rectangle {
     // Draw the sheen (off for small controls where it would be noise).
     in property <bool> sheen: true;
     background: Theme.panel;
-    backdrop-blur: Theme.glass && root.blur ? Theme.glass-blur : 0px;
+    backdrop-blur: 0px;
     border-width: Theme.glass || root.outline ? 1px : 0px;
     border-color: Theme.glass ? Theme.glass-rim : Theme.border;
     if Theme.glass && root.sheen: Rectangle {

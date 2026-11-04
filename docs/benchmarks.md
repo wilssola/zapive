@@ -171,3 +171,77 @@ exe needing `ctranslate2.dll` and `libiomp5md.dll` beside it:
 ```powershell
 .\scripts\bench\Compare-Builds.ps1 -Exe C:\bin\size.exe,C:\bin\o3.exe -Runs 3 -Seconds 25
 ```
+
+## Real session, read-only attach (v0.28.1, installed build)
+
+The demo build idles at about 0 % CPU, but a logged-in installation with many
+chats does not. `scripts/bench/Attach-Zapive.ps1` samples an already-running
+process **without starting or touching it**: it only reads process counters
+(`Get-Process`) and queries thread names and start addresses with
+`THREAD_QUERY_*` rights. It reports CPU %, working set, private bytes, threads
+and the per-thread CPU breakdown (name, start address as `module+offset`).
+
+```powershell
+.\scripts\bench\Attach-Zapive.ps1 -AttachPid <pid> -Seconds 30 > attach.json
+```
+
+Two 30 s samples of the user's installed v0.28.1 (one real account, many
+chats; no chat content was captured, only counters and thread names):
+
+| | Sample 1 | Sample 2 |
+| --- | ---: | ---: |
+| CPU, % of one core (of 16 logical) | 416 | 309 |
+| CPU, worst single second | 1209 % | 1331 % |
+| Private bytes (MB) | 334 | 320 |
+| Working set (MB) | 224 | 217 |
+| Threads | 137 | 143 |
+| Handles | 1877 | 1847 |
+
+CPU alternates between near zero and bursts of 700 to 1300 % of a core, which
+looks like batches of work rather than a steady load.
+
+Thread breakdown (sample 2):
+
+| Threads by name | Count | CPU % of one core |
+| --- | ---: | ---: |
+| `tokio-rt-worker` | 130 | 291.5 |
+| `main` (UI thread, start `zapive.exe+0x281d2a0`) | 1 | 16.6 |
+| everything else (pdf, r2d2, softbuffer, 8 unnamed) | 12 | 0 |
+
+The ten busiest threads are all `tokio-rt-worker` with the same start address
+(`zapive.exe+0x17b7ad0`), each at about 2.8 to 3.0 % of a core, i.e. the load is
+spread thinly over about 100 threads instead of concentrated in a few.
+
+What this says:
+
+- The runtime is built with `worker_threads(4)` (`src/main.rs:120-124`), so
+  about 126 of those threads must be the **blocking pool**
+  (`tokio::task::spawn_blocking`, default limit 512 threads, 24 call sites in
+  `src/`, many in `src/wa.rs` for image, video and audio decode). Tokio gives
+  worker and blocking threads the same name.
+- Many short `spawn_blocking` jobs arriving in bursts (avatar and thumbnail
+  fetch plus decode) explain both the thread count and the burst pattern. The
+  avatar eviction loop fixed in `src/bridge/media.rs` is the leading suspect.
+- The UI thread is not the bottleneck (about 17 % of a core).
+- This is evidence, not proof: the demo has to reproduce it
+  (`Stress-Zapive.ps1`, below) before a before/after comparison is valid.
+
+## Stress scenario (800 chats, events, hover and scroll)
+
+`scripts/bench/Stress-Zapive.ps1` starts `zapive.exe --demo --demo-stress N`
+and drives the window with `SendInput` (pointer move and mouse wheel only,
+never clicks or keys) in three equal phases: wheel over the chat list, hover
+sweep down the list, wheel over the conversation. Before every action it checks
+that the window under the pointer belongs to the demo process, otherwise it
+skips that tick. It samples CPU, private bytes, working set and thread count
+every second for 60 s and reports per-phase CPU.
+
+```powershell
+cargo build --release --features demo
+.\scripts\bench\Stress-Zapive.ps1 -Chats 800 -Seconds 60 > stress.json
+```
+
+Status: **not run yet.** `--demo-stress` is not in `src/demo` at the time of
+writing; the script exits with a clear error on a build that lacks it. The
+before/after table will be added once the flag and the avatar fix are both in.
+The pointer is the real one, so the machine must be left alone while it runs.

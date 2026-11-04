@@ -23,7 +23,7 @@ export component Splash inherits Rectangle {
         opacity: root.progress;
         // Full-window veil: frosts everything behind the card (one blur).
         background: Theme.glass ? Theme.glass-fill : Theme.bg;
-        backdrop-blur: Theme.glass ? 40px : 0px;
+        backdrop-blur: 0px;
         if Theme.glass: Rectangle {
             background: Theme.glass-sheen;
         }

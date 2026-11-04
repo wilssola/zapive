@@ -7,7 +7,7 @@ export component DropOverlay inherits Rectangle {
     opacity: root.active ? 1.0 : 0.0;
     animate opacity { duration: Theme.motion-normal; easing: ease-out; }
     background: Theme.glass ? Theme.glass-fill-strong : Theme.panel.with-alpha(0.94);
-    backdrop-blur: Theme.glass ? 32px : 0px;
+    backdrop-blur: 0px;
     // Swallow pointer input so nothing underneath reacts while dragging.
     TouchArea { enabled: root.active; }
     Rectangle {

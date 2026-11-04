@@ -32,7 +32,7 @@ export component DetailsLayer inherits ModalLayer {
             x: parent.width - self.width + (1 - root.progress) * self.width;
             opacity: root.progress;
             background: Theme.panel;
-            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+            backdrop-blur: 0px;
             border-width: 1px;
             border-color: Theme.border;
             TouchArea { }
@@ -147,7 +147,7 @@ export component MessageDialogLayer inherits ModalLayer {
             opacity: root.progress;
             transform-scale: 0.96 + 0.04 * root.progress;
             background: Theme.panel;
-            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+            backdrop-blur: 0px;
             border-width: Theme.glass ? 1px : 0px;
             border-color: Theme.glass-rim;
             if Theme.glass: Rectangle {
@@ -207,7 +207,7 @@ export component ConfirmLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        backdrop-blur: 0px;
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {
@@ -276,7 +276,7 @@ export component ReactionsLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        backdrop-blur: 0px;
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {

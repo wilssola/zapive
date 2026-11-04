@@ -368,6 +368,10 @@ impl Bridge {
             eprintln!("[call] cannot show the call window: {e}");
             return;
         }
+        // The startup stamp ran before this window existed, so its title
+        // bar showed the default icon.
+        #[cfg(windows)]
+        crate::stamp_window_icons();
         crate::platform::focus_call_window();
     }
 

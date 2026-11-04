@@ -33,7 +33,7 @@ export component PickerLayer inherits ModalLayer {
         height: 320px;
         opacity: root.progress;
         background: Theme.panel;
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        backdrop-blur: 0px;
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {
@@ -272,7 +272,7 @@ export component ChatMenuLayer inherits ModalLayer {
         width: 260px;
         height: chat-menu-col.preferred-height + 12px;
         background: Theme.panel;
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        backdrop-blur: 0px;
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {
@@ -456,7 +456,7 @@ export component AttachLayer inherits ModalLayer {
         height: menu-col.preferred-height + 16px;
         opacity: root.progress;
         background: Theme.panel;
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        backdrop-blur: 0px;
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {
@@ -514,7 +514,7 @@ export component ChatSearchLayer inherits ModalLayer {
         x: parent.width - self.width + (1 - root.progress) * self.width;
         opacity: root.progress;
         background: Theme.panel;
-        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        backdrop-blur: 0px;
         border-width: Theme.glass ? 1px : 0px;
         border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {
