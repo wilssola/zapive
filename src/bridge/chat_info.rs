@@ -559,7 +559,7 @@ impl Bridge {
         let ts = if ts > 0 { ts } else { now_secs() };
         let stored = crate::wa_map::system_message(jid, id, ts, body);
         if self.store.add_message(stored) && Some(jid) == self.current_jid.as_deref() {
-            self.push_message_row(jid);
+            self.push_message_row(jid, id);
         }
     }
 

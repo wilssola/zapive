@@ -366,8 +366,9 @@ impl Bridge {
             return;
         };
         let jid = stored.jid.clone();
+        let stored_id = stored.id.clone();
         if self.store.add_message(stored) && Some(&jid) == self.current_jid.as_ref() {
-            self.push_message_row(&jid);
+            self.push_message_row(&jid, &stored_id);
         }
         self.schedule_refresh_chats();
     }
