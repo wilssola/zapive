@@ -6,7 +6,9 @@ pub fn focus_window() {
         "tell application \"System Events\" to set frontmost of (first process whose unix id is {}) to true",
         std::process::id()
     );
-    let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+    let _ = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .spawn();
 }
 
 // Same handling as the main window: the process comes forward and the
@@ -38,14 +40,20 @@ pub fn autostart_set(on: bool) -> Result<(), String> {
     let file = autostart_file();
     let path = file.to_string_lossy().to_string();
     if !on {
-        let _ = std::process::Command::new("launchctl").args(["unload", &path]).status();
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", &path])
+            .status();
         return match std::fs::remove_file(&file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
         };
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe = exe.display().to_string().replace('&', "&amp;").replace('<', "&lt;");
+    let exe = exe
+        .display()
+        .to_string()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;");
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -65,7 +73,9 @@ pub fn autostart_set(on: bool) -> Result<(), String> {
     std::fs::write(&file, plist).map_err(|e| e.to_string())?;
     // Registers it for this session too, so the toggle does not need a
     // logout to take effect.
-    let _ = std::process::Command::new("launchctl").args(["load", &path]).status();
+    let _ = std::process::Command::new("launchctl")
+        .args(["load", &path])
+        .status();
     Ok(())
 }
 
@@ -83,7 +93,12 @@ pub fn toast(title: &str, body: &str, _payload: super::ToastPayload) {
     BUNDLE.call_once(|| {
         let _ = notify_rust::set_application("io.github.wilssola.Zapive");
     });
-    if notify_rust::Notification::new().summary(title).body(body).show().is_ok() {
+    if notify_rust::Notification::new()
+        .summary(title)
+        .body(body)
+        .show()
+        .is_ok()
+    {
         return;
     }
     let script = format!(
@@ -91,14 +106,20 @@ pub fn toast(title: &str, body: &str, _payload: super::ToastPayload) {
         body.replace('"', "'"),
         title.replace('"', "'")
     );
-    let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+    let _ = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .spawn();
 }
 
 pub fn system_dark() -> bool {
     std::process::Command::new("defaults")
         .args(["read", "-g", "AppleInterfaceStyle"])
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("dark"))
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .to_lowercase()
+                .contains("dark")
+        })
         .unwrap_or(false)
 }
 
@@ -111,7 +132,16 @@ pub fn wrap_secret(inner: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(inner.as_bytes());
     let ok = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-s", SERVICE, "-a", ACCOUNT, "-w", &b64])
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            SERVICE,
+            "-a",
+            ACCOUNT,
+            "-w",
+            &b64,
+        ])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);

@@ -11,7 +11,11 @@ pub struct Canvas {
 
 impl Canvas {
     fn new(w: u32, h: u32) -> Self {
-        Canvas { w, h, px: vec![0; (w * h * 4) as usize] }
+        Canvas {
+            w,
+            h,
+            px: vec![0; (w * h * 4) as usize],
+        }
     }
 
     fn put(&mut self, x: u32, y: u32, rgb: [f32; 3], alpha: f32) {
@@ -66,7 +70,11 @@ fn hsv(h: f32, s: f32, v: f32) -> [f32; 3] {
 }
 
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 fn smooth(edge: f32, x: f32) -> f32 {
@@ -87,7 +95,9 @@ pub fn avatar(seed: u32) -> Image {
             let (fx, fy) = (x as f32 / s, y as f32 / s);
             let mut rgb = mix(a, b, (fx * 0.4 + fy * 0.6).clamp(0.0, 1.0));
             let head = (((fx - 0.5).powi(2) + (fy - 0.37).powi(2)).sqrt() - 0.17) * s;
-            let body = ((((fx - 0.5) / 0.36).powi(2) + ((fy - 1.02) / 0.38).powi(2)).sqrt() - 1.0) * 0.36 * s;
+            let body = ((((fx - 0.5) / 0.36).powi(2) + ((fy - 1.02) / 0.38).powi(2)).sqrt() - 1.0)
+                * 0.36
+                * s;
             let cover = smooth(1.5, head).max(smooth(1.5, body));
             rgb = mix(rgb, [1.0, 1.0, 1.0], cover * 0.88);
             c.put(x, y, rgb, 1.0);
@@ -102,9 +112,15 @@ pub fn photo(seed: u32, w: u32, h: u32) -> Image {
     let mut c = Canvas::new(w, h);
     let warm = seed.is_multiple_of(2);
     let (top, bottom) = if warm {
-        (hsv(0.72 + unit(seed) * 0.05, 0.55, 0.45), hsv(0.05 + unit(seed + 1) * 0.04, 0.6, 1.0))
+        (
+            hsv(0.72 + unit(seed) * 0.05, 0.55, 0.45),
+            hsv(0.05 + unit(seed + 1) * 0.04, 0.6, 1.0),
+        )
     } else {
-        (hsv(0.58, 0.6, 0.6), hsv(0.52 + unit(seed + 1) * 0.05, 0.35, 0.98))
+        (
+            hsv(0.58, 0.6, 0.6),
+            hsv(0.52 + unit(seed + 1) * 0.05, 0.35, 0.98),
+        )
     };
     let (sw, sh) = (w as f32, h as f32);
     let sun = (sw * (0.25 + unit(seed + 3) * 0.5), sh * 0.42);
@@ -112,8 +128,17 @@ pub fn photo(seed: u32, w: u32, h: u32) -> Image {
         .map(|i| {
             let depth = i as f32 / 3.0;
             let base = sh * (0.50 + depth * 0.14);
-            let tone = mix(hsv(0.62, 0.35, 0.55), hsv(0.40 + unit(seed + 9) * 0.1, 0.55, 0.22), depth);
-            (base, tone, 0.012 + unit(seed + i * 11) * 0.01, unit(seed + 20 + i) * 6.0)
+            let tone = mix(
+                hsv(0.62, 0.35, 0.55),
+                hsv(0.40 + unit(seed + 9) * 0.1, 0.55, 0.22),
+                depth,
+            );
+            (
+                base,
+                tone,
+                0.012 + unit(seed + i * 11) * 0.01,
+                unit(seed + 20 + i) * 6.0,
+            )
         })
         .collect();
     for y in 0..h {
@@ -121,7 +146,11 @@ pub fn photo(seed: u32, w: u32, h: u32) -> Image {
             let (fx, fy) = (x as f32, y as f32);
             let mut rgb = mix(top, bottom, (fy / (sh * 0.75)).clamp(0.0, 1.0));
             let d = ((fx - sun.0).powi(2) + (fy - sun.1).powi(2)).sqrt();
-            rgb = mix(rgb, [1.0, 0.95, 0.8], (1.0 - d / (sh * 0.16)).clamp(0.0, 1.0).powi(2));
+            rgb = mix(
+                rgb,
+                [1.0, 0.95, 0.8],
+                (1.0 - d / (sh * 0.16)).clamp(0.0, 1.0).powi(2),
+            );
             for (i, (base, tone, freq, phase)) in ridges.iter().enumerate() {
                 let ridge = base
                     + (fx * freq + phase).sin() * sh * 0.07
@@ -148,7 +177,9 @@ pub fn waveform(seed: u32) -> Image {
     let width = BARS * (BAR_W + GAP);
     let mut c = Canvas::new(width, H);
     for i in 0..BARS {
-        let envelope = ((i as f32 / BARS as f32) * std::f32::consts::PI).sin().max(0.25);
+        let envelope = ((i as f32 / BARS as f32) * std::f32::consts::PI)
+            .sin()
+            .max(0.25);
         let level = (0.25 + unit(seed + i * 5) * 0.75) * envelope;
         let bar = ((level * H as f32).round() as u32).clamp(2, H);
         let top = (H - bar) / 2;

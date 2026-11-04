@@ -67,7 +67,11 @@ pub fn wa_session_path(account: &str) -> PathBuf {
 }
 
 fn per_account(stem: &str, account: &str) -> String {
-    if account.is_empty() { format!("{stem}.db") } else { format!("{stem}-{account}.db") }
+    if account.is_empty() {
+        format!("{stem}.db")
+    } else {
+        format!("{stem}-{account}.db")
+    }
 }
 
 // Session and index files of accounts that are no longer registered. A
@@ -75,13 +79,20 @@ fn per_account(stem: &str, account: &str) -> String {
 // the session database of an account that was just switched away from
 // is often still open for a moment; this catches it at the next launch.
 pub fn sweep_accounts(known: &[String]) {
-    let Ok(entries) = std::fs::read_dir(data_dir()) else { return };
+    let Ok(entries) = std::fs::read_dir(data_dir()) else {
+        return;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(rest) = name.strip_prefix("wa-").or_else(|| name.strip_prefix("search-")) else {
+        let Some(rest) = name
+            .strip_prefix("wa-")
+            .or_else(|| name.strip_prefix("search-"))
+        else {
             continue;
         };
-        let Some((id, _)) = rest.split_once(".db") else { continue };
+        let Some((id, _)) = rest.split_once(".db") else {
+            continue;
+        };
         if !known.iter().any(|k| k == id) {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -156,7 +167,9 @@ fn media_is_node_era(dir: &std::path::Path) -> bool {
         }
         None
     }
-    let Some(sample) = first_file(dir, 2) else { return false };
+    let Some(sample) = first_file(dir, 2) else {
+        return false;
+    };
     let mut magic = [0u8; 5];
     use std::io::Read;
     match std::fs::File::open(sample).and_then(|mut f| f.read_exact(&mut magic).map(|_| ())) {

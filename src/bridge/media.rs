@@ -28,7 +28,11 @@ pub(super) const AVATAR_CACHE_MAX: usize = 300;
 
 // Records `key` as the newest entry of an LRU order and returns the keys
 // that no longer fit within `max`.
-pub(super) fn touch_lru(order: &mut std::collections::VecDeque<String>, key: &str, max: usize) -> Vec<String> {
+pub(super) fn touch_lru(
+    order: &mut std::collections::VecDeque<String>,
+    key: &str,
+    max: usize,
+) -> Vec<String> {
     order.retain(|known| known != key);
     order.push_back(key.to_string());
     let mut evicted = Vec::new();
@@ -322,16 +326,29 @@ impl Bridge {
 
     pub(super) fn request_automatic_media(&mut self, m: &StoredMessage) {
         use whatsapp_rust::proto_helpers::MessageExt as _;
-        if !m.deleted && matches!(m.kind, MessageKind::Image | MessageKind::Video)
-            && !self.decoded.contains_key(&m.id) && self.preview_requested.insert(m.id.clone())
+        if !m.deleted
+            && matches!(m.kind, MessageKind::Image | MessageKind::Video)
+            && !self.decoded.contains_key(&m.id)
+            && self.preview_requested.insert(m.id.clone())
         {
             let bytes = m.raw.as_ref().and_then(|raw| {
                 let inner = raw.get_base_message();
-                inner.image_message.as_option().and_then(|v| v.jpeg_thumbnail.clone())
-                    .or_else(|| inner.video_message.as_option().and_then(|v| v.jpeg_thumbnail.clone()))
+                inner
+                    .image_message
+                    .as_option()
+                    .and_then(|v| v.jpeg_thumbnail.clone())
+                    .or_else(|| {
+                        inner
+                            .video_message
+                            .as_option()
+                            .and_then(|v| v.jpeg_thumbnail.clone())
+                    })
             });
             if let Some(bytes) = bytes.filter(|bytes| !bytes.is_empty()) {
-                self.wa.send(Cmd::DecodePreview { id: m.id.clone(), bytes });
+                self.wa.send(Cmd::DecodePreview {
+                    id: m.id.clone(),
+                    bytes,
+                });
             }
         }
         let voice = m.raw.as_ref().is_some_and(|raw| {
@@ -390,7 +407,11 @@ impl Bridge {
         match m.kind {
             MessageKind::System => {}
             MessageKind::Text => {
-                let ext = inner.extended_text_message.as_option().cloned().unwrap_or_default();
+                let ext = inner
+                    .extended_text_message
+                    .as_option()
+                    .cloned()
+                    .unwrap_or_default();
                 let inline = ext
                     .jpeg_thumbnail
                     .clone()
@@ -431,7 +452,12 @@ impl Bridge {
                     let url = message_link(m);
                     if !url.is_empty() {
                         self.media_inflight.insert(m.id.clone());
-                        self.wa.send(Cmd::LinkPreview { jid: m.jid.clone(), id: m.id.clone(), text: m.text.clone(), url });
+                        self.wa.send(Cmd::LinkPreview {
+                            jid: m.jid.clone(),
+                            id: m.id.clone(),
+                            text: m.text.clone(),
+                            url,
+                        });
                     }
                 }
                 return;
@@ -548,7 +574,9 @@ impl Bridge {
 
     pub fn on_media_preview(&mut self, id: &str, img: Option<crate::media::Decoded>) {
         let Some(img) = img else { return };
-        if self.decoded.contains_key(id) { return; }
+        if self.decoded.contains_key(id) {
+            return;
+        }
         let image = image_of(&img);
         self.media_previews.insert(id.to_string(), image.clone());
         self.patch_row(id, |row| row.picture = image.clone());
@@ -768,26 +796,51 @@ impl Bridge {
         self.restick();
     }
 
-    pub fn on_link_preview(&mut self, jid: &str, id: &str, text: &str, preview: Option<crate::link_preview::Preview>) {
+    pub fn on_link_preview(
+        &mut self,
+        jid: &str,
+        id: &str,
+        text: &str,
+        preview: Option<crate::link_preview::Preview>,
+    ) {
         let jid = self.store.canon_owned(jid);
-        let Some(m) = self.store.messages.get_mut(&jid).and_then(|messages| messages.iter_mut().find(|m| m.id == id)) else {
+        let Some(m) = self
+            .store
+            .messages
+            .get_mut(&jid)
+            .and_then(|messages| messages.iter_mut().find(|m| m.id == id))
+        else {
             self.media_inflight.remove(id);
             return;
         };
-        if m.deleted || m.kind != MessageKind::Text || m.text != text { return; }
+        if m.deleted || m.kind != MessageKind::Text || m.text != text {
+            return;
+        }
         self.media_inflight.remove(id);
         let Some(preview) = preview else {
             self.on_media_missing(id);
             return;
         };
-        if m.link_title.is_empty() { m.link_title = preview.title; }
-        if m.link_desc.is_empty() { m.link_desc = preview.description; }
-        if m.link_url.is_empty() { m.link_url = crate::link_preview::first_url(text); }
-        let (title, desc, url) = (m.link_title.clone(), m.link_desc.clone(), m.link_url.clone());
+        if m.link_title.is_empty() {
+            m.link_title = preview.title;
+        }
+        if m.link_desc.is_empty() {
+            m.link_desc = preview.description;
+        }
+        if m.link_url.is_empty() {
+            m.link_url = crate::link_preview::first_url(text);
+        }
+        let (title, desc, url) = (
+            m.link_title.clone(),
+            m.link_desc.clone(),
+            m.link_url.clone(),
+        );
         self.store.dirty_jids.insert(jid);
         self.schedule_save();
         let image = preview.image.as_ref().map(image_of);
-        if image.is_none() { self.media_failed.insert(id.to_owned()); }
+        if image.is_none() {
+            self.media_failed.insert(id.to_owned());
+        }
         self.patch_row(id, |row| {
             row.linkTitle = title.into();
             row.linkDesc = desc.into();
@@ -810,13 +863,27 @@ impl Bridge {
         let image = image_of(&img);
         let (w, h) = (img.w as i32, img.h as i32);
         if link {
-            let valid = self.find_message(id).is_some_and(|m| !m.deleted && m.kind == MessageKind::Text && m.raw.as_ref().is_some_and(|raw| {
-                raw.get_base_message().extended_text_message.as_option().is_some_and(|ext| {
-                    ext.jpeg_thumbnail.as_ref().is_some_and(|bytes| !bytes.is_empty())
-                        || ext.thumbnail_direct_path.as_ref().is_some_and(|path| !path.is_empty())
-                })
-            }));
-            if !valid { return; }
+            let valid = self.find_message(id).is_some_and(|m| {
+                !m.deleted
+                    && m.kind == MessageKind::Text
+                    && m.raw.as_ref().is_some_and(|raw| {
+                        raw.get_base_message()
+                            .extended_text_message
+                            .as_option()
+                            .is_some_and(|ext| {
+                                ext.jpeg_thumbnail
+                                    .as_ref()
+                                    .is_some_and(|bytes| !bytes.is_empty())
+                                    || ext
+                                        .thumbnail_direct_path
+                                        .as_ref()
+                                        .is_some_and(|path| !path.is_empty())
+                            })
+                    })
+            });
+            if !valid {
+                return;
+            }
             self.media_inflight.remove(id);
             self.patch_row(id, |row| row.mediaLoading = false);
             self.patch_row(id, |row| {
@@ -970,7 +1037,10 @@ mod lru_tests {
         assert!(touch_lru(&mut order, "c", 3).is_empty());
         assert!(touch_lru(&mut order, "a", 3).is_empty());
         assert_eq!(touch_lru(&mut order, "d", 3), vec!["b".to_string()]);
-        assert_eq!(order.iter().cloned().collect::<Vec<_>>(), vec!["c", "a", "d"]);
+        assert_eq!(
+            order.iter().cloned().collect::<Vec<_>>(),
+            vec!["c", "a", "d"]
+        );
     }
 
     #[test]

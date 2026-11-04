@@ -13,16 +13,17 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
-    MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell,
+    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, DetailRow, LabelItem, LinkSpan,
+    MemberItem, MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem,
+    SearchHit, StarredItem, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
-use whatsapp_rust::types::events::MessageBatch;
 use whatsapp_rust::proto_helpers::MessageExt as _;
+use whatsapp_rust::types::events::MessageBatch;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 mod accounts;
@@ -56,6 +57,7 @@ mod wiring;
 
 use self::audio::*;
 use self::calls::*;
+pub use self::dropped::handle_file_drop_event;
 use self::helpers::*;
 use self::history::*;
 use self::media::*;
@@ -63,7 +65,6 @@ use self::notifications::*;
 use self::selection::*;
 use self::stickers::*;
 use self::translation::*;
-pub use self::dropped::handle_file_drop_event;
 pub use self::wiring::{install, replay_link_press};
 
 pub struct Bridge {

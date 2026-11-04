@@ -292,8 +292,12 @@ pub fn install(ui: &AppWindow, wa: WaService) {
 pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_translation_action(|action| defer(move |b| b.translation_action(&action)));
     ui.on_translation_install(|source| defer(move |b| b.install_translation_model(&source)));
-    ui.on_translation_remove(|source, target| defer(move |b| b.remove_translation_model(&source, &target)));
-    ui.on_translation_model_selected(|source| defer(move |b| b.translation_model_selected(&source)));
+    ui.on_translation_remove(|source, target| {
+        defer(move |b| b.remove_translation_model(&source, &target))
+    });
+    ui.on_translation_model_selected(|source| {
+        defer(move |b| b.translation_model_selected(&source))
+    });
     ui.on_translation_language(|kind, value| defer(move |b| b.translation_language(&kind, &value)));
     ui.set_status_text(t("status.connecting").into());
 
@@ -353,8 +357,12 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.handle_style(&style));
     });
     ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
-    ui.on_call_silence_repeat_changed(|enabled| defer(move |b| b.handle_call_silence_repeat(enabled)));
-    ui.on_call_silence_minutes_changed(|minutes| defer(move |b| b.handle_call_silence_minutes(minutes)));
+    ui.on_call_silence_repeat_changed(|enabled| {
+        defer(move |b| b.handle_call_silence_repeat(enabled))
+    });
+    ui.on_call_silence_minutes_changed(|minutes| {
+        defer(move |b| b.handle_call_silence_minutes(minutes))
+    });
     ui.on_answer_silenced_call(|id| {
         let id = id.to_string();
         defer(move |b| b.answer_silenced_call(&id));
@@ -516,11 +524,27 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_send_message(|text| {
         let text = text.to_string();
-        let context = BRIDGE.with(|cell| cell.borrow().as_ref().map(|b| (b.account.clone(), b.current_jid.clone(), b.reply_to.clone(), b.mentions.clone())));
+        let context = BRIDGE.with(|cell| {
+            cell.borrow().as_ref().map(|b| {
+                (
+                    b.account.clone(),
+                    b.current_jid.clone(),
+                    b.reply_to.clone(),
+                    b.mentions.clone(),
+                )
+            })
+        });
         defer(move |b| {
             if let Some((account, jid, reply, mentions)) = context {
-                if b.account != account || b.current_jid != jid { return; }
-                if b.reply_to != reply || b.mentions != mentions || b.ui.get_composer_text().as_str() != text { return; }
+                if b.account != account || b.current_jid != jid {
+                    return;
+                }
+                if b.reply_to != reply
+                    || b.mentions != mentions
+                    || b.ui.get_composer_text().as_str() != text
+                {
+                    return;
+                }
                 b.handle_send_text(&text);
             }
         });
@@ -564,7 +588,11 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| {
             if b.find_message(&id).is_some_and(message_editable) && !text.trim().is_empty() {
                 if let Some(jid) = b.current_jid.clone() {
-                    b.wa.send(Cmd::Edit { jid, id, text: text.trim().to_string() });
+                    b.wa.send(Cmd::Edit {
+                        jid,
+                        id,
+                        text: text.trim().to_string(),
+                    });
                     b.ui.set_message_dialog_open(false);
                 }
             }
@@ -593,9 +621,13 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let id = id.to_string();
         defer(move |b| b.remove_own_reaction(&id));
     });
-    ui.on_open_poll_composer(|| defer(|b| {
-        if b.current_jid.is_some() { b.ui.set_poll_composer_open(true); }
-    }));
+    ui.on_open_poll_composer(|| {
+        defer(|b| {
+            if b.current_jid.is_some() {
+                b.ui.set_poll_composer_open(true);
+            }
+        })
+    });
     ui.on_create_poll(|question, options, multi| {
         let question = question.to_string();
         let options: Vec<String> = options.iter().map(|option| option.to_string()).collect();
@@ -671,7 +703,12 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let caption = caption.to_string();
         defer(move |b| b.confirm_send_image(&caption));
     });
-    ui.on_cancel_send_image(|| defer(|b| { b.clear_staged(); b.cancel_preview(); }));
+    ui.on_cancel_send_image(|| {
+        defer(|b| {
+            b.clear_staged();
+            b.cancel_preview();
+        })
+    });
     ui.on_staged_select(|_| defer(|b| b.skip_staged()));
     ui.on_crop_preview(|x, y, w, h| {
         defer(move |b| b.edit_preview(crate::media::PreviewEdit::Crop(x, y, w, h)));
@@ -769,9 +806,7 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     // Enumerating devices touches the audio and camera stacks, so it waits
     // until the user actually opens Settings.
     ui.on_settings_opened(|| defer(|b| b.refresh_devices()));
-    ui.on_settings_search(|text, query| {
-        text.to_lowercase().contains(&query.to_lowercase())
-    });
+    ui.on_settings_search(|text, query| text.to_lowercase().contains(&query.to_lowercase()));
     ui.on_start_video_call(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.start_video_call(&jid));
@@ -930,8 +965,14 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_copy_image(|id| {
         let id = id.to_string();
         defer(move |b| {
-            let Some(cached) = b.media_path.get(&id) else { return };
-            let Some(path) = crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached)) else { return };
+            let Some(cached) = b.media_path.get(&id) else {
+                return;
+            };
+            let Some(path) =
+                crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached))
+            else {
+                return;
+            };
             std::thread::spawn(move || {
                 let Ok(image) = image::open(path) else { return };
                 let image = image.to_rgba8();

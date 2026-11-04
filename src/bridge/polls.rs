@@ -14,7 +14,12 @@ const MAX_OPTIONS: usize = 12;
 // poll would not be valid (empty question, fewer than two options).
 pub(super) fn sanitize_poll(question: &str, options: &[String]) -> Option<(String, Vec<String>)> {
     let clean = |text: &str, limit: usize| -> String {
-        text.chars().filter(|c| !c.is_control() || *c == ' ').take(limit).collect::<String>().trim().to_string()
+        text.chars()
+            .filter(|c| !c.is_control() || *c == ' ')
+            .take(limit)
+            .collect::<String>()
+            .trim()
+            .to_string()
     };
     let question = clean(question, MAX_QUESTION_CHARS);
     let mut seen = HashSet::new();
@@ -36,7 +41,11 @@ pub(super) struct PollView {
     pub can_vote: bool,
 }
 
-pub(super) fn poll_view(m: &StoredMessage, me: &str, name_of: impl Fn(&str) -> String) -> Option<PollView> {
+pub(super) fn poll_view(
+    m: &StoredMessage,
+    me: &str,
+    name_of: impl Fn(&str) -> String,
+) -> Option<PollView> {
     let raw = m.raw.as_ref()?;
     let (_, options, selectable) = crate::wa_map::poll_definition(raw)?;
     if options.is_empty() {
@@ -51,7 +60,9 @@ pub(super) fn poll_view(m: &StoredMessage, me: &str, name_of: impl Fn(&str) -> S
 }
 
 fn secret_of(m: &StoredMessage) -> Option<Vec<u8>> {
-    let bytes = base64::engine::general_purpose::STANDARD.decode(&m.poll_secret).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&m.poll_secret)
+        .ok()?;
     (bytes.len() == 32).then_some(bytes)
 }
 
@@ -63,7 +74,11 @@ impl Bridge {
             }
             let canon = self.store.canon_owned(&normalize_jid(jid));
             let name = self.store.chat_name(&canon);
-            if name.is_empty() { display_id(&canon) } else { name }
+            if name.is_empty() {
+                display_id(&canon)
+            } else {
+                name
+            }
         };
         let Some(view) = poll_view(m, "me", name_of) else {
             return (Vec::new(), false, 0, false);
@@ -78,20 +93,40 @@ impl Bridge {
                 voters: tally.voters.join("\n").into(),
             })
             .collect();
-        (rows, view.multi, view.total.min(i32::MAX as usize) as i32, view.can_vote)
+        (
+            rows,
+            view.multi,
+            view.total.min(i32::MAX as usize) as i32,
+            view.can_vote,
+        )
     }
 
     // The poll dialog's "create". Nothing is sent when the chat is closed,
     // the chat cannot be written to, or the poll is not valid.
     pub(super) fn create_poll(&mut self, question: &str, options: &[String], multi: bool) {
-        let Some(jid) = self.current_jid.clone() else { return };
-        if !self.store.chats.get(&jid).is_some_and(|chat| chat.can_send()) || is_channel(&jid) {
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
+        if !self
+            .store
+            .chats
+            .get(&jid)
+            .is_some_and(|chat| chat.can_send())
+            || is_channel(&jid)
+        {
             return;
         }
-        let Some((question, options)) = sanitize_poll(question, options) else { return };
+        let Some((question, options)) = sanitize_poll(question, options) else {
+            return;
+        };
         let selectable = if multi { 0 } else { 1 };
         self.ui.set_poll_composer_open(false);
-        self.wa.send(Cmd::CreatePoll { jid, question, options, selectable });
+        self.wa.send(Cmd::CreatePoll {
+            jid,
+            question,
+            options,
+            selectable,
+        });
     }
 
     // Confirmation from the network: the poll is now a message of ours.
@@ -109,7 +144,11 @@ impl Bridge {
             push_name: "",
             timestamp: now,
         };
-        let Some(mut stored) = crate::wa_map::normalize(&mut self.store, &meta, &message, &HashMap::new(), 0) else { return };
+        let Some(mut stored) =
+            crate::wa_map::normalize(&mut self.store, &meta, &message, &HashMap::new(), 0)
+        else {
+            return;
+        };
         stored.poll_secret = base64::engine::general_purpose::STANDARD.encode(secret);
         let target = stored.jid.clone();
         if self.store.add_message(stored) && Some(&target) == self.current_jid.as_ref() {
@@ -121,26 +160,55 @@ impl Bridge {
 
     // The user clicked option `index` of poll `id`.
     pub(super) fn poll_vote(&mut self, id: &str, index: i32) {
-        let Some(m) = self.find_message(id).cloned() else { return };
-        let (Some(raw), Some(secret)) = (m.raw.as_ref(), secret_of(&m)) else { return };
-        let Some((_, options, selectable)) = crate::wa_map::poll_definition(raw) else { return };
-        let Ok(index) = usize::try_from(index) else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
+        let (Some(raw), Some(secret)) = (m.raw.as_ref(), secret_of(&m)) else {
+            return;
+        };
+        let Some((_, options, selectable)) = crate::wa_map::poll_definition(raw) else {
+            return;
+        };
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
         let current: Vec<String> = m
             .poll_votes
             .get("me")
             .map(|vote| {
-                options.iter().filter(|name| vote.options.contains(&crate::store::poll_option_hash(name))).cloned().collect()
+                options
+                    .iter()
+                    .filter(|name| vote.options.contains(&crate::store::poll_option_hash(name)))
+                    .cloned()
+                    .collect()
             })
             .unwrap_or_default();
-        let Some(next) = next_poll_selection(&options, &current, index, selectable != 1) else { return };
-        let creator = if m.from_me { self.self_jid.clone() } else if m.sender_jid.is_empty() { m.jid.clone() } else { m.sender_jid.clone() };
-        self.wa.send(Cmd::PollVote { jid: m.jid.clone(), id: m.id.clone(), creator, secret, options: next });
+        let Some(next) = next_poll_selection(&options, &current, index, selectable != 1) else {
+            return;
+        };
+        let creator = if m.from_me {
+            self.self_jid.clone()
+        } else if m.sender_jid.is_empty() {
+            m.jid.clone()
+        } else {
+            m.sender_jid.clone()
+        };
+        self.wa.send(Cmd::PollVote {
+            jid: m.jid.clone(),
+            id: m.id.clone(),
+            creator,
+            secret,
+            options: next,
+        });
     }
 
     // My own vote went out: show it at once instead of waiting for the echo.
     pub fn on_poll_vote_sent(&mut self, jid: &str, id: &str, picked: &[String]) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        let hashes = picked.iter().map(|name| crate::store::poll_option_hash(name)).collect();
+        let hashes = picked
+            .iter()
+            .map(|name| crate::store::poll_option_hash(name))
+            .collect();
         let stamp = now_secs() * 1000;
         if self.store.apply_poll_vote(&jid, id, "me", hashes, stamp) {
             self.refresh_poll_row(&jid, id);
@@ -149,11 +217,25 @@ impl Bridge {
     }
 
     // Another person's (or another device's) vote, decrypted.
-    pub fn on_poll_vote(&mut self, jid: &str, id: &str, voter: &str, hashes: Vec<String>, timestamp_ms: i64) {
+    pub fn on_poll_vote(
+        &mut self,
+        jid: &str,
+        id: &str,
+        voter: &str,
+        hashes: Vec<String>,
+        timestamp_ms: i64,
+    ) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
         let voter_canon = self.store.canon_owned(&normalize_jid(voter));
-        let key = if self.store.self_jids.contains(&voter_canon) { "me".to_string() } else { voter_canon };
-        if self.store.apply_poll_vote(&jid, id, &key, hashes, timestamp_ms) {
+        let key = if self.store.self_jids.contains(&voter_canon) {
+            "me".to_string()
+        } else {
+            voter_canon
+        };
+        if self
+            .store
+            .apply_poll_vote(&jid, id, &key, hashes, timestamp_ms)
+        {
             self.refresh_poll_row(&jid, id);
             self.schedule_save();
         }
@@ -163,7 +245,15 @@ impl Bridge {
         if Some(jid) != self.current_jid.as_deref() {
             return;
         }
-        let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id).cloned() else { return };
+        let Some(m) = self
+            .store
+            .messages_for(jid)
+            .iter()
+            .find(|m| m.id == id)
+            .cloned()
+        else {
+            return;
+        };
         let (options, multi, total, can_vote) = self.poll_rows(&m);
         self.patch_row(id, |row| {
             row.poll_options = slint::ModelRc::new(VecModel::from(options));
@@ -175,18 +265,48 @@ impl Bridge {
 
     // A vote arrived inside a message batch. Find its poll (hydrating the
     // chat), and hand the ciphertext to the client to open.
-    pub(super) fn receive_poll_vote(&mut self, chat: &str, voter: &str, vote_message: &wa::message::PollUpdateMessage, timestamp_ms: i64) {
-        let Some(key) = vote_message.poll_creation_message_key.as_option() else { return };
-        let Some(poll_id) = key.id.as_deref() else { return };
-        let Some(enc) = vote_message.vote.as_option() else { return };
-        let (Some(payload), Some(iv)) = (enc.enc_payload.clone(), enc.enc_iv.clone()) else { return };
+    pub(super) fn receive_poll_vote(
+        &mut self,
+        chat: &str,
+        voter: &str,
+        vote_message: &wa::message::PollUpdateMessage,
+        timestamp_ms: i64,
+    ) {
+        let Some(key) = vote_message.poll_creation_message_key.as_option() else {
+            return;
+        };
+        let Some(poll_id) = key.id.as_deref() else {
+            return;
+        };
+        let Some(enc) = vote_message.vote.as_option() else {
+            return;
+        };
+        let (Some(payload), Some(iv)) = (enc.enc_payload.clone(), enc.enc_iv.clone()) else {
+            return;
+        };
         let jid = self.store.canon_owned(&normalize_jid(chat));
         if let Some(vault) = &self.vault {
             self.store.hydrate_id(vault, &jid, poll_id);
         }
-        let Some(poll) = self.store.messages_for(&jid).iter().find(|m| m.id == poll_id).cloned() else { return };
-        let Some(secret) = secret_of(&poll) else { return };
-        let creator = if poll.from_me { self.self_jid.clone() } else if poll.sender_jid.is_empty() { poll.jid.clone() } else { poll.sender_jid.clone() };
+        let Some(poll) = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .find(|m| m.id == poll_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(secret) = secret_of(&poll) else {
+            return;
+        };
+        let creator = if poll.from_me {
+            self.self_jid.clone()
+        } else if poll.sender_jid.is_empty() {
+            poll.jid.clone()
+        } else {
+            poll.sender_jid.clone()
+        };
         self.wa.send(Cmd::DecryptVote {
             jid,
             poll_id: poll_id.to_string(),
@@ -210,7 +330,11 @@ mod tests {
 
     #[test]
     fn sanitize_trims_dedupes_and_limits() {
-        let (question, opts) = sanitize_poll("  Lunch? ", &options(&[" Pizza ", "Pizza", "", "Sushi", "\u{7}Tacos"])).unwrap();
+        let (question, opts) = sanitize_poll(
+            "  Lunch? ",
+            &options(&[" Pizza ", "Pizza", "", "Sushi", "\u{7}Tacos"]),
+        )
+        .unwrap();
         assert_eq!(question, "Lunch?");
         assert_eq!(opts, options(&["Pizza", "Sushi", "Tacos"]));
     }

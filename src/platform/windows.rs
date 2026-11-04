@@ -1,6 +1,8 @@
 use std::os::windows::process::CommandExt as _;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
-use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentProcessId, GetCurrentThreadId};
+use windows::Win32::System::Threading::{
+    AttachThreadInput, GetCurrentProcessId, GetCurrentThreadId,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GetForegroundWindow, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
@@ -55,14 +57,22 @@ fn quiet(program: &str) -> std::process::Command {
 pub fn set_title_bar_theme(dark: bool, glass: bool) {
     use windows::Win32::Foundation::COLORREF;
     use windows::Win32::Graphics::Dwm::{
-        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
-        DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_COLOR_DEFAULT, DwmSetWindowAttribute,
+        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_COLOR_DEFAULT, DWMWA_TEXT_COLOR,
+        DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
     };
 
     unsafe {
-        let Some(hwnd) = find_own_window("Zapive") else { return };
+        let Some(hwnd) = find_own_window("Zapive") else {
+            return;
+        };
         let dark_mode = BOOL::from(dark);
-        let caption = COLORREF(if glass { DWMWA_COLOR_DEFAULT } else if dark { 0x00211b11 } else { 0x00f5f2f0 });
+        let caption = COLORREF(if glass {
+            DWMWA_COLOR_DEFAULT
+        } else if dark {
+            0x00211b11
+        } else {
+            0x00f5f2f0
+        });
         let text = COLORREF(if dark { 0x00efede9 } else { 0x00211b11 });
         let border = COLORREF(if dark { 0x003e3424 } else { 0x00e7e4e0 });
         let _ = DwmSetWindowAttribute(
@@ -150,42 +160,64 @@ pub fn allow_foreground(pid: u32) {
 }
 // Opens a file or URL with whatever the system associates with it.
 pub fn open_path(target: &str) {
-    let _ = quiet("cmd").args(["/c", "start", "", &target.replace('&', "^&")]).spawn();
+    let _ = quiet("cmd")
+        .args(["/c", "start", "", &target.replace('&', "^&")])
+        .spawn();
 }
 
 // ---- start with Windows: a per-user Run entry, no elevation needed ----
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
 pub fn autostart_enabled() -> bool {
-    quiet("reg").args(["query", RUN_KEY, "/v", "Zapive"]).output().is_ok_and(|out| out.status.success())
+    quiet("reg")
+        .args(["query", RUN_KEY, "/v", "Zapive"])
+        .output()
+        .is_ok_and(|out| out.status.success())
 }
 
 pub fn autostart_set(on: bool) -> Result<(), String> {
-    if !on && !autostart_enabled() { return Ok(()); }
+    if !on && !autostart_enabled() {
+        return Ok(());
+    }
     let out = if on {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let command = format!("\"{}\" --autostart", exe.display());
-        quiet("reg").args(["add", RUN_KEY, "/v", "Zapive", "/t", "REG_SZ", "/d", &command, "/f"]).output()
+        quiet("reg")
+            .args([
+                "add", RUN_KEY, "/v", "Zapive", "/t", "REG_SZ", "/d", &command, "/f",
+            ])
+            .output()
     } else {
-        quiet("reg").args(["delete", RUN_KEY, "/v", "Zapive", "/f"]).output()
-    }.map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
-}
-
-pub fn register_app_id(icon_path: &str) {
-    unsafe { let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("Zapive")); }
-    let key = r"HKCU\Software\Classes\AppUserModelId\Zapive";
-    for (name, value) in [("DisplayName", "Zapive"), ("IconUri", icon_path)] {
-        let _ = quiet("reg").args(["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"]).output();
+        quiet("reg")
+            .args(["delete", RUN_KEY, "/v", "Zapive", "/f"])
+            .output()
+    }
+    .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
 
+pub fn register_app_id(icon_path: &str) {
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("Zapive"));
+    }
+    let key = r"HKCU\Software\Classes\AppUserModelId\Zapive";
+    for (name, value) in [("DisplayName", "Zapive"), ("IconUri", icon_path)] {
+        let _ = quiet("reg")
+            .args(["add", key, "/v", name, "/t", "REG_SZ", "/d", value, "/f"])
+            .output();
+    }
+}
 
 pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
-    use windows::UI::Notifications::{
-        ToastNotification, ToastNotificationManager,
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    use windows::{
+        Data::Xml::Dom::XmlDocument,
+        core::{HSTRING, Interface as _},
     };
-    use windows::{Data::Xml::Dom::XmlDocument, core::{HSTRING, Interface as _}};
 
     let title = xml_escape(title);
     let body = xml_escape(body);
@@ -208,7 +240,10 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
     }
     if let Some(path) = payload.thumbnail.as_deref() {
         if let Ok(uri) = url::Url::from_file_path(path) {
-            image = format!("<image placement=\"appLogoOverride\" src=\"{}\"/>", xml_escape(uri.as_str()));
+            image = format!(
+                "<image placement=\"appLogoOverride\" src=\"{}\"/>",
+                xml_escape(uri.as_str())
+            );
         }
     }
     // Clicking the toast body reports the `launch` string. Without it the
@@ -224,39 +259,51 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
         let document = XmlDocument::new()?;
         document.LoadXml(&HSTRING::from(xml))?;
         let notification = ToastNotification::CreateToastNotification(&document)?;
-        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from("Zapive"))?;
+        let notifier =
+            ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from("Zapive"))?;
         let activation_token = payload.token.clone();
         let _registration = notification.Activated(&windows::Foundation::TypedEventHandler::<
             ToastNotification,
             windows::core::IInspectable,
         >::new(move |_, args| {
-                let Some(args) = args else { return Ok(()) };
-                let Ok(args) = args.cast::<windows::UI::Notifications::ToastActivatedEventArgs>() else { return Ok(()) };
-                let arguments = args.Arguments().map(|value| value.to_string()).unwrap_or_default();
-                use super::ToastAction;
-                // A token must be the one this very toast was built with.
-                let ours = |token: &str| activation_token.as_deref() == Some(token);
-                match super::parse_toast_args(&arguments) {
-                    ToastAction::Open(None) => {
-                        crate::bridge::ui_apply(|bridge| bridge.on_notification_open_app());
-                    }
-                    ToastAction::Open(Some(token)) if ours(&token) => {
-                        crate::bridge::ui_apply(move |bridge| bridge.on_notification_activated(&token));
-                    }
-                    ToastAction::Play(token) if ours(&token) => {
-                        crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
-                    }
-                    ToastAction::Reply(token) if ours(&token) => {
-                        let input = args.UserInput().ok()
-                            .and_then(|values| values.Lookup(&HSTRING::from("reply-input")).ok())
-                            .and_then(|value| value.cast::<windows::Foundation::IPropertyValue>().ok())
-                            .and_then(|value| value.GetString().ok())
-                            .map(|value| value.to_string()).unwrap_or_default();
-                        crate::bridge::ui_apply(move |bridge| bridge.on_notification_reply(&token, &input));
-                    }
-                    _ => {}
+            let Some(args) = args else { return Ok(()) };
+            let Ok(args) = args.cast::<windows::UI::Notifications::ToastActivatedEventArgs>()
+            else {
+                return Ok(());
+            };
+            let arguments = args
+                .Arguments()
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            use super::ToastAction;
+            // A token must be the one this very toast was built with.
+            let ours = |token: &str| activation_token.as_deref() == Some(token);
+            match super::parse_toast_args(&arguments) {
+                ToastAction::Open(None) => {
+                    crate::bridge::ui_apply(|bridge| bridge.on_notification_open_app());
                 }
-                Ok(())
+                ToastAction::Open(Some(token)) if ours(&token) => {
+                    crate::bridge::ui_apply(move |bridge| bridge.on_notification_activated(&token));
+                }
+                ToastAction::Play(token) if ours(&token) => {
+                    crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+                }
+                ToastAction::Reply(token) if ours(&token) => {
+                    let input = args
+                        .UserInput()
+                        .ok()
+                        .and_then(|values| values.Lookup(&HSTRING::from("reply-input")).ok())
+                        .and_then(|value| value.cast::<windows::Foundation::IPropertyValue>().ok())
+                        .and_then(|value| value.GetString().ok())
+                        .map(|value| value.to_string())
+                        .unwrap_or_default();
+                    crate::bridge::ui_apply(move |bridge| {
+                        bridge.on_notification_reply(&token, &input)
+                    });
+                }
+                _ => {}
+            }
+            Ok(())
         }))?;
         notifier.Show(&notification)?;
         // The Activated handler lives on this object: releasing it before the
@@ -283,8 +330,12 @@ fn keep_alive(notification: windows::UI::Notifications::ToastNotification) {
 }
 
 fn xml_escape(value: &str) -> String {
-    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-        .replace('\"', "&quot;").replace('\'', "&apos;")
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 // Whether Windows apps are set to dark mode (defaults dark on error).
@@ -311,8 +362,10 @@ use windows::Win32::Security::Cryptography::{
 };
 
 fn dpapi(input: &[u8], protect: bool) -> Result<Vec<u8>, String> {
-    let blob_in =
-        CRYPT_INTEGER_BLOB { cbData: input.len() as u32, pbData: input.as_ptr() as *mut u8 };
+    let blob_in = CRYPT_INTEGER_BLOB {
+        cbData: input.len() as u32,
+        pbData: input.as_ptr() as *mut u8,
+    };
     let mut blob_out = CRYPT_INTEGER_BLOB::default();
     unsafe {
         let result = if protect {
@@ -330,10 +383,16 @@ fn dpapi(input: &[u8], protect: bool) -> Result<Vec<u8>, String> {
 pub fn wrap_secret(inner: &str) -> String {
     use base64::Engine as _;
     match dpapi(inner.as_bytes(), true) {
-        Ok(wrapped) => format!("dpapi:{}", base64::engine::general_purpose::STANDARD.encode(wrapped)),
+        Ok(wrapped) => format!(
+            "dpapi:{}",
+            base64::engine::general_purpose::STANDARD.encode(wrapped)
+        ),
         Err(e) => {
             eprintln!("[vault] DPAPI protect failed ({e}); storing with weak protection");
-            format!("raw:{}", base64::engine::general_purpose::STANDARD.encode(inner.as_bytes()))
+            format!(
+                "raw:{}",
+                base64::engine::general_purpose::STANDARD.encode(inner.as_bytes())
+            )
         }
     }
 }
@@ -357,20 +416,24 @@ pub fn unwrap_secret(stored: &str) -> Result<String, String> {
     Err("unknown key wrapping format".into())
 }
 
-
 #[cfg(test)]
 mod notification_tests {
     use super::xml_escape;
 
     #[test]
     fn escapes_all_xml_metacharacters_in_action_arguments() {
-        assert_eq!(xml_escape("reply:a&b<c>d\"e'f"), "reply:a&amp;b&lt;c&gt;d&quot;e&apos;f");
+        assert_eq!(
+            xml_escape("reply:a&b<c>d\"e'f"),
+            "reply:a&amp;b&lt;c&gt;d&quot;e&apos;f"
+        );
     }
 
     #[test]
     fn escapes_attribute_delimiters_in_image_paths() {
-        assert_eq!(xml_escape(r#"file:///C:/A&B/<photo>"' image.jpg"#),
-            "file:///C:/A&amp;B/&lt;photo&gt;&quot;&apos; image.jpg");
+        assert_eq!(
+            xml_escape(r#"file:///C:/A&B/<photo>"' image.jpg"#),
+            "file:///C:/A&amp;B/&lt;photo&gt;&quot;&apos; image.jpg"
+        );
     }
 
     #[test]

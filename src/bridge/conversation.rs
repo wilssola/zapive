@@ -151,9 +151,16 @@ impl Bridge {
         self.refresh_labels();
         self.ensure_group_meta(jid);
         let jump_loaded = jump_to.map(|target| {
-            self.vault.as_ref().is_some_and(|vault| self.store.load_around(vault, jid, target))
+            self.vault
+                .as_ref()
+                .is_some_and(|vault| self.store.load_around(vault, jid, target))
         });
-        let at = jump_to.and_then(|target| self.store.messages_for(jid).iter().position(|m| m.id == target));
+        let at = jump_to.and_then(|target| {
+            self.store
+                .messages_for(jid)
+                .iter()
+                .position(|m| m.id == target)
+        });
         if jump_to.is_some() && (jump_loaded == Some(false) || at.is_none()) {
             self.message_action_failed(&t("history.unavailable"));
         }
@@ -306,7 +313,10 @@ impl Bridge {
     // ones keep the selectable input.
     // The styled rendering, whether there is one, the same words as plain
     // text for the selectable overlay, and where the links are in those.
-    pub(super) fn styled_for(&self, m: &StoredMessage) -> (slint::StyledText, bool, String, Vec<LinkSpan>) {
+    pub(super) fn styled_for(
+        &self,
+        m: &StoredMessage,
+    ) -> (slint::StyledText, bool, String, Vec<LinkSpan>) {
         let body = if m.deleted { "" } else { m.text.as_str() };
         let none = || {
             (
@@ -349,7 +359,10 @@ impl Bridge {
     }
 
     // Names and chats for the "@number" tokens of one message.
-    pub(super) fn mention_resolver<'a>(&'a self, m: &'a StoredMessage) -> impl Fn(&str) -> MentionTarget + 'a {
+    pub(super) fn mention_resolver<'a>(
+        &'a self,
+        m: &'a StoredMessage,
+    ) -> impl Fn(&str) -> MentionTarget + 'a {
         let store = &self.store;
         move |num: &str| -> MentionTarget {
             // Tagging the whole group carries the group's own id.
@@ -456,27 +469,80 @@ impl Bridge {
         let tr = self.translation_entry(m);
         let source = tr.map(|e| e.source.as_str()).unwrap_or("");
         MessageItem {
-            poll_options: slint::ModelRc::new(VecModel::from(poll_options)), poll_multi, poll_total, poll_can_vote,
-            translationText: tr.filter(|e| !e.hidden).map(|e| e.text.as_str()).unwrap_or("").into(),
-            translationLabel: tr.filter(|e| !e.text.is_empty()).map(|e| format!("{} → {}", translation_language_name(&e.source), translation_language_name(&self.translation_settings.target))).unwrap_or_default().into(),
+            poll_options: slint::ModelRc::new(VecModel::from(poll_options)),
+            poll_multi,
+            poll_total,
+            poll_can_vote,
+            translationText: tr
+                .filter(|e| !e.hidden)
+                .map(|e| e.text.as_str())
+                .unwrap_or("")
+                .into(),
+            translationLabel: tr
+                .filter(|e| !e.text.is_empty())
+                .map(|e| {
+                    format!(
+                        "{} → {}",
+                        translation_language_name(&e.source),
+                        translation_language_name(&self.translation_settings.target)
+                    )
+                })
+                .unwrap_or_default()
+                .into(),
             translationBusy: tr.is_some_and(|e| e.busy),
-            translationError: tr.filter(|e| !e.hidden).map(|e| e.error.as_str()).unwrap_or("").into(),
+            translationError: tr
+                .filter(|e| !e.hidden)
+                .map(|e| e.error.as_str())
+                .unwrap_or("")
+                .into(),
             translationSource: source.into(),
-            translationPolicy: self.translation_settings.policies.get(source).map(String::as_str).unwrap_or("").into(),
+            translationPolicy: self
+                .translation_settings
+                .policies
+                .get(source)
+                .map(String::as_str)
+                .unwrap_or("")
+                .into(),
             sendPending: outgoing.is_some() || preparing.is_some(),
-            sendRetry: preparing == Some(true) || outgoing.is_some_and(|entry| matches!(entry.state, crate::outbox::State::Failed | crate::outbox::State::Uncertain)),
-            sendState: outgoing.map(|entry| t(match entry.state {
-                crate::outbox::State::Queued => "outbox.queued",
-                crate::outbox::State::Sending => "outbox.sending",
-                crate::outbox::State::Uncertain => "outbox.uncertain",
-                crate::outbox::State::Failed => "outbox.failed",
-            })).unwrap_or_else(|| preparing.map(|failed| t(if failed { "outbox.failed" } else { "outbox.preparing" })).unwrap_or_default()).into(),
+            sendRetry: preparing == Some(true)
+                || outgoing.is_some_and(|entry| {
+                    matches!(
+                        entry.state,
+                        crate::outbox::State::Failed | crate::outbox::State::Uncertain
+                    )
+                }),
+            sendState: outgoing
+                .map(|entry| {
+                    t(match entry.state {
+                        crate::outbox::State::Queued => "outbox.queued",
+                        crate::outbox::State::Sending => "outbox.sending",
+                        crate::outbox::State::Uncertain => "outbox.uncertain",
+                        crate::outbox::State::Failed => "outbox.failed",
+                    })
+                })
+                .unwrap_or_else(|| {
+                    preparing
+                        .map(|failed| {
+                            t(if failed {
+                                "outbox.failed"
+                            } else {
+                                "outbox.preparing"
+                            })
+                        })
+                        .unwrap_or_default()
+                })
+                .into(),
             cardKind: card.kind.into(),
             cardInitial: initial_of(&card.title).into(),
             cardTitle: card.title.into(),
             cardBody: card.body.into(),
             cardDetail: card.detail.into(),
-            cardOptions: ModelRc::new(VecModel::from(card.options.into_iter().map(SharedString::from).collect::<Vec<_>>())),
+            cardOptions: ModelRc::new(VecModel::from(
+                card.options
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            )),
             cardHasPicture: card_picture.is_some(),
             cardPicture: card_picture.unwrap_or_else(empty_image),
             id: m.id.clone().into(),
@@ -520,7 +586,17 @@ impl Bridge {
                     .into()
             },
             firstOfRun: first_of_run,
-            time: format!("{}{}{}", if m.pinned_until > now_secs() { "⌖ " } else { "" }, format_clock(m.timestamp), if m.edited { " · edited" } else { "" }).into(),
+            time: format!(
+                "{}{}{}",
+                if m.pinned_until > now_secs() {
+                    "⌖ "
+                } else {
+                    ""
+                },
+                format_clock(m.timestamp),
+                if m.edited { " · edited" } else { "" }
+            )
+            .into(),
             // Rebuilt rows keep already-decoded media so scrollback and
             // re-opens draw instantly.
             picture: self
@@ -541,7 +617,9 @@ impl Bridge {
             mediaKind: "".into(),
             mediaOffer: false,
             mediaProgress: -1.0,
-            mediaSize: m.raw.as_ref()
+            mediaSize: m
+                .raw
+                .as_ref()
                 .and_then(|raw| crate::media::expected_bytes(raw))
                 .filter(|&bytes| bytes > 0)
                 .map(crate::media::format_size)
@@ -553,7 +631,12 @@ impl Bridge {
             reactionCount: reaction_count.into(),
             dayLabel: day_label.into(),
             unread_boundary: self.unread_boundary.as_deref() == Some(m.id.as_str()),
-            ticks: if outgoing.is_some() || preparing.is_some() { "pending" } else { ticks }.into(),
+            ticks: if outgoing.is_some() || preparing.is_some() {
+                "pending"
+            } else {
+                ticks
+            }
+            .into(),
             ticksBlue: ticks_blue,
             senderHasAvatar: self.avatar_for(&sender_jid).is_some(),
             senderAvatar: self.avatar_for(&sender_jid).unwrap_or_else(empty_image),
@@ -567,7 +650,9 @@ impl Bridge {
             audioFilename: if m.kind == MessageKind::Audio
                 || (m.kind == MessageKind::Doc && m.mimetype.starts_with("audio/"))
             {
-                let source = self.vault.as_ref()
+                let source = self
+                    .vault
+                    .as_ref()
                     .and_then(|vault| vault.setting_get(&format!("media-source:{}", m.id)));
                 m.audio_filename(source.as_deref()).into()
             } else {

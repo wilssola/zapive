@@ -50,7 +50,10 @@ pub fn cameras() -> Vec<CameraOption> {
     match nokhwa::query(nokhwa::utils::ApiBackend::Auto) {
         Ok(found) => found
             .into_iter()
-            .map(|info| CameraOption { name: info.human_name(), index: info.index().clone() })
+            .map(|info| CameraOption {
+                name: info.human_name(),
+                index: info.index().clone(),
+            })
             .collect(),
         Err(e) => {
             log::warn!("[camera] cannot list devices: {e}");
@@ -171,7 +174,11 @@ impl CameraFeed {
             stop.store(true, Ordering::SeqCst);
             return None;
         }
-        Some(CameraFeed { frames: rx, stop, force_key })
+        Some(CameraFeed {
+            frames: rx,
+            stop,
+            force_key,
+        })
     }
 
     pub fn source(&self) -> CameraSource {
@@ -214,11 +221,12 @@ fn capture(
     preview: impl Fn(Decoded),
     ready: std::sync::mpsc::Sender<bool>,
 ) {
-    let wanted = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
-        Resolution::new(CAPTURE_W, CAPTURE_H),
-        FrameFormat::NV12,
-        FPS,
-    )));
+    let wanted =
+        RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
+            Resolution::new(CAPTURE_W, CAPTURE_H),
+            FrameFormat::NV12,
+            FPS,
+        )));
     let mut camera = match nokhwa::Camera::new(index, wanted) {
         Ok(camera) => camera,
         Err(e) => {
@@ -277,7 +285,14 @@ fn capture(
         let Ok(buffer) = camera.frame() else { continue };
         let captured = ticks_90khz(origin.elapsed());
         let source = buffer.resolution();
-        if !to_rgb(buffer.buffer(), buffer.source_frame_format(), source, w, h, &mut rgb) {
+        if !to_rgb(
+            buffer.buffer(),
+            buffer.source_frame_format(),
+            source,
+            w,
+            h,
+            &mut rgb,
+        ) {
             continue;
         }
         if since_keyframe >= KEYFRAME_EVERY || force_key.swap(false, Ordering::Relaxed) {
@@ -292,7 +307,10 @@ fn capture(
                 produced += 1;
                 // A full channel means the relay is behind; dropping the
                 // frame is what video is supposed to do.
-                let frame = TimedVideoFrame { data: au, timestamp: captured };
+                let frame = TimedVideoFrame {
+                    data: au,
+                    timestamp: captured,
+                };
                 if tx.try_send(frame).is_err() {
                     refused += 1;
                 }
@@ -387,7 +405,13 @@ fn to_rgb(
                 for x in 0..w {
                     let luma = data[(y * sw + x) as usize];
                     let chroma = plane + ((y / 2) * sw + (x & !1)) as usize;
-                    write_yuv(out, (y * w + x) as usize, luma, data[chroma], data[chroma + 1]);
+                    write_yuv(
+                        out,
+                        (y * w + x) as usize,
+                        luma,
+                        data[chroma],
+                        data[chroma + 1],
+                    );
                 }
             }
             true
@@ -424,7 +448,10 @@ fn write_yuv(out: &mut [u8], pixel: usize, y: u8, u: u8, v: u8) {
 // so filtering would cost more than it shows.
 fn shrink(rgb: &[u8], w: u32, h: u32) -> Decoded {
     let scale = (PREVIEW_W as f32 / w as f32).min(1.0);
-    let (tw, th) = (((w as f32 * scale) as u32).max(1), ((h as f32 * scale) as u32).max(1));
+    let (tw, th) = (
+        ((w as f32 * scale) as u32).max(1),
+        ((h as f32 * scale) as u32).max(1),
+    );
     let mut rgba = vec![0u8; (tw * th * 4) as usize];
     for y in 0..th {
         let sy = y * h / th;
@@ -462,7 +489,13 @@ pub struct RemoteVideo {
 impl RemoteVideo {
     pub fn new() -> Option<RemoteVideo> {
         let decoder = openh264::decoder::Decoder::new().ok()?;
-        Some(RemoteVideo { decoder, started: false, turned: 0, lost: true, rgba: Vec::new() })
+        Some(RemoteVideo {
+            decoder,
+            started: false,
+            turned: 0,
+            lost: true,
+            rgba: Vec::new(),
+        })
     }
 
     // True once for each time the decoder was left without a reference
@@ -492,13 +525,20 @@ impl RemoteVideo {
         };
         if frame.orientation % 4 != self.turned {
             self.turned = frame.orientation % 4;
-            log::info!("[call] the peer's camera is at {}deg", self.turned as u32 * 90);
+            log::info!(
+                "[call] the peer's camera is at {}deg",
+                self.turned as u32 * 90
+            );
         }
         let (w, h) = yuv.dimensions();
         if frame.orientation % 4 == 0 {
             let mut rgba = vec![0u8; w * h * 4];
             yuv.write_rgba8(&mut rgba);
-            return Some(Decoded { w: w as u32, h: h as u32, rgba });
+            return Some(Decoded {
+                w: w as u32,
+                h: h as u32,
+                rgba,
+            });
         }
         self.rgba.resize(w * h * 4, 0);
         yuv.write_rgba8(&mut self.rgba);
@@ -529,6 +569,9 @@ fn upright(rgba: &[u8], w: usize, h: usize, quarters: u8) -> Decoded {
             out[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
         }
     }
-    Decoded { w: dw as u32, h: dh as u32, rgba: out }
+    Decoded {
+        w: dw as u32,
+        h: dh as u32,
+        rgba: out,
+    }
 }
-

@@ -61,7 +61,9 @@ fn decode_opus_ogg(path: &Path) -> Option<(Vec<f32>, u32)> {
             seen_tags = true; // OpusTags
             continue;
         }
-        let Ok(n) = dec.decode(&packet.data, 5760, &mut scratch) else { continue };
+        let Ok(n) = dec.decode(&packet.data, 5760, &mut scratch) else {
+            continue;
+        };
         // The decoder can ring slightly past full scale; keep the player
         // fed with clamped samples.
         for frame in scratch[..n * channels].chunks(channels) {
@@ -72,7 +74,11 @@ fn decode_opus_ogg(path: &Path) -> Option<(Vec<f32>, u32)> {
     if pre_skip < pcm.len() {
         pcm.drain(..pre_skip);
     }
-    if pcm.is_empty() { None } else { Some((pcm, OUT_RATE)) }
+    if pcm.is_empty() {
+        None
+    } else {
+        Some((pcm, OUT_RATE))
+    }
 }
 
 pub fn probe_duration(path: &Path) -> Option<u32> {
@@ -84,18 +90,24 @@ pub fn probe_duration(path: &Path) -> Option<u32> {
         hint.with_extension(ext);
     }
     let probed = symphonia::default::get_probe()
-        .format(&hint, stream, &Default::default(), &Default::default()).ok()?;
+        .format(&hint, stream, &Default::default(), &Default::default())
+        .ok()?;
     let params = &probed.format.default_track()?.codec_params;
     let frames = params.n_frames?;
     let time = params.time_base?.calc_time(frames);
-    Some((time.seconds as f64 + time.frac).round().clamp(0.0, u32::MAX as f64) as u32)
+    Some(
+        (time.seconds as f64 + time.frac)
+            .round()
+            .clamp(0.0, u32::MAX as f64) as u32,
+    )
 }
 
 #[cfg(test)]
 mod duration_tests {
     #[test]
     fn audio_duration_probe_reads_wav_metadata() {
-        let path = std::env::temp_dir().join(format!("zapive-audio-duration-{}.wav", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("zapive-audio-duration-{}.wav", std::process::id()));
         let data_size = 16_000u32;
         let mut wav = Vec::new();
         wav.extend_from_slice(b"RIFF");
@@ -139,8 +151,9 @@ fn decode_symphonia(path: &Path) -> Option<(Vec<f32>, u32)> {
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL && t.codec_params.sample_rate.is_some())?
         .clone();
-    let mut decoder =
-        symphonia::default::get_codecs().make(&track.codec_params, &Default::default()).ok()?;
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &Default::default())
+        .ok()?;
     let rate = track.codec_params.sample_rate?;
     let mut mono = Vec::new();
     let mut sbuf: Option<SampleBuffer<f32>> = None;
@@ -148,7 +161,9 @@ fn decode_symphonia(path: &Path) -> Option<(Vec<f32>, u32)> {
         if packet.track_id() != track.id {
             continue;
         }
-        let Ok(decoded) = decoder.decode(&packet) else { continue };
+        let Ok(decoded) = decoder.decode(&packet) else {
+            continue;
+        };
         let spec = *decoded.spec();
         let buf = sbuf.get_or_insert_with(|| SampleBuffer::new(decoded.capacity() as u64, spec));
         buf.copy_interleaved_ref(decoded);
@@ -157,7 +172,11 @@ fn decode_symphonia(path: &Path) -> Option<(Vec<f32>, u32)> {
             mono.push(frame.iter().sum::<f32>() / ch as f32);
         }
     }
-    if mono.is_empty() { None } else { Some((mono, rate)) }
+    if mono.is_empty() {
+        None
+    } else {
+        Some((mono, rate))
+    }
 }
 
 // Plain linear resample; opus itself sets the quality floor at these rates.
@@ -253,7 +272,9 @@ pub fn decode_with_tempo(path: &Path, rate: f64) -> Option<AudioBuffer> {
     if samples.is_empty() {
         return None;
     }
-    Some(AudioBuffer { samples: Arc::new(samples) })
+    Some(AudioBuffer {
+        samples: Arc::new(samples),
+    })
 }
 
 // ---- waveform (the 44-bar bitmap under the play button) ----
@@ -273,7 +294,10 @@ pub fn waveform(path: &Path) -> Option<Decoded> {
     for (i, peak) in peaks.iter_mut().enumerate() {
         let start = i * bucket;
         let end = ((i + 1) * bucket).min(samples.len());
-        *peak = samples[start..end].iter().map(|s| s.abs()).fold(0.0, f32::max);
+        *peak = samples[start..end]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0, f32::max);
     }
     let max = peaks.iter().fold(0.0f32, |a, &b| a.max(b)).max(1e-6);
     // White opaque bars on transparency; the .slint side colorizes them.
@@ -289,7 +313,11 @@ pub fn waveform(path: &Path) -> Option<Decoded> {
             }
         }
     }
-    Some(Decoded { w: width as u32, h: WAVE_H as u32, rgba })
+    Some(Decoded {
+        w: width as u32,
+        h: WAVE_H as u32,
+        rgba,
+    })
 }
 
 // The 64-value amplitude strip WhatsApp embeds in voice notes.
@@ -303,7 +331,10 @@ pub fn message_waveform(samples: &[f32]) -> Vec<u8> {
     for i in 0..POINTS {
         let start = (i * bucket).min(samples.len() - 1);
         let end = ((i + 1) * bucket).min(samples.len());
-        let peak = samples[start..end].iter().map(|s| s.abs()).fold(0.0, f32::max);
+        let peak = samples[start..end]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0, f32::max);
         out.push((peak * 100.0).min(100.0) as u8);
     }
     out
@@ -374,7 +405,10 @@ impl Player {
             )
             .ok()?;
         stream.play().ok()?;
-        Some(Player { _stream: stream, shared })
+        Some(Player {
+            _stream: stream,
+            shared,
+        })
     }
 
     pub fn pause(&self) {
@@ -396,7 +430,9 @@ impl Player {
     }
 
     pub fn set_gain(&self, gain: f32) {
-        self.shared.gain.store(gain.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.shared
+            .gain
+            .store(gain.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     // Position in OUTPUT seconds (multiply by the rate for source time).
@@ -440,7 +476,12 @@ impl Recorder {
             )
             .ok()?;
         stream.play().ok()?;
-        Some(Recorder { _stream: stream, samples, rate, channels })
+        Some(Recorder {
+            _stream: stream,
+            samples,
+            rate,
+            channels,
+        })
     }
 
     // Mono samples at the device rate.
@@ -484,13 +525,17 @@ pub fn encode_voice_ogg(samples: &[f32], in_rate: u32, out_path: &Path) -> Optio
     head.extend_from_slice(&OUT_RATE.to_le_bytes());
     head.extend_from_slice(&0u16.to_le_bytes()); // output gain
     head.push(0); // channel mapping family
-    writer.write_packet(head, serial, PacketWriteEndInfo::EndPage, 0).ok()?;
+    writer
+        .write_packet(head, serial, PacketWriteEndInfo::EndPage, 0)
+        .ok()?;
     let mut tags = Vec::new();
     tags.extend_from_slice(b"OpusTags");
     tags.extend_from_slice(&(6u32).to_le_bytes());
     tags.extend_from_slice(b"zapive");
     tags.extend_from_slice(&0u32.to_le_bytes());
-    writer.write_packet(tags, serial, PacketWriteEndInfo::EndPage, 0).ok()?;
+    writer
+        .write_packet(tags, serial, PacketWriteEndInfo::EndPage, 0)
+        .ok()?;
 
     const FRAME: usize = 960; // 20ms at 48k
     let mut granule = pre_skip;
@@ -505,7 +550,9 @@ pub fn encode_voice_ogg(samples: &[f32], in_rate: u32, out_path: &Path) -> Optio
             &padded
         };
         let mut packet = vec![0u8; 4000];
-        let Ok(n) = encoder.encode(frame, FRAME, &mut packet) else { continue };
+        let Ok(n) = encoder.encode(frame, FRAME, &mut packet) else {
+            continue;
+        };
         packet.truncate(n);
         let bytes = packet;
         granule += FRAME as u64;

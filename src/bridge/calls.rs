@@ -25,23 +25,36 @@ pub(super) struct SilenceSetting {
 
 impl Default for SilenceSetting {
     fn default() -> Self {
-        Self { enabled: true, minutes: SILENCE_DEFAULT_MINUTES }
+        Self {
+            enabled: true,
+            minutes: SILENCE_DEFAULT_MINUTES,
+        }
     }
 }
 
 // Only the offered choices are valid; anything else falls back to 10.
 pub(super) fn clamp_silence_minutes(minutes: u32) -> u32 {
-    if SILENCE_CHOICES.contains(&minutes) { minutes } else { SILENCE_DEFAULT_MINUTES }
+    if SILENCE_CHOICES.contains(&minutes) {
+        minutes
+    } else {
+        SILENCE_DEFAULT_MINUTES
+    }
 }
 
 // Whether a new offer must stay quiet: the same caller's last dismissed
 // call (unix seconds) is within the configured window. A dismissal in the
 // future (clock moved back) never silences.
-pub(super) fn should_silence_call(now: i64, last_dismissed: Option<i64>, setting: SilenceSetting) -> bool {
+pub(super) fn should_silence_call(
+    now: i64,
+    last_dismissed: Option<i64>,
+    setting: SilenceSetting,
+) -> bool {
     if !setting.enabled {
         return false;
     }
-    let Some(at) = last_dismissed else { return false };
+    let Some(at) = last_dismissed else {
+        return false;
+    };
     let age = now - at;
     (0..i64::from(clamp_silence_minutes(setting.minutes)) * 60).contains(&age)
 }
@@ -674,7 +687,11 @@ impl Bridge {
             return;
         }
         let jid = self.store.canon_owned(&normalize_jid(from));
-        if should_silence_call(now_secs(), self.call_dismissed.get(&jid).copied(), self.silence_setting()) {
+        if should_silence_call(
+            now_secs(),
+            self.call_dismissed.get(&jid).copied(),
+            self.silence_setting(),
+        ) {
             self.silence_incoming(id, from, video, group);
             let id = id.to_string();
             self.once(RING_TIMEOUT_MS, move |b| b.silenced_expired(&id));
@@ -719,7 +736,10 @@ impl Bridge {
     // ---- call anti-spam ----
 
     pub(super) fn silence_setting(&self) -> SilenceSetting {
-        SilenceSetting { enabled: self.call_silence_repeat, minutes: self.call_silence_minutes }
+        SilenceSetting {
+            enabled: self.call_silence_repeat,
+            minutes: self.call_silence_minutes,
+        }
     }
 
     // RAM only, per account: switching accounts clears it.
@@ -747,7 +767,9 @@ impl Bridge {
     }
 
     pub(super) fn silenced_for(&self, jid: &str) -> bool {
-        self.silenced_calls.iter().any(|call| self.caller_of(call) == jid)
+        self.silenced_calls
+            .iter()
+            .any(|call| self.caller_of(call) == jid)
     }
 
     // The banner rows for the open chat.
@@ -763,14 +785,20 @@ impl Bridge {
             .map(|call| crate::SilencedCall {
                 id: call.id.clone().into(),
                 name: t("call.silenced.title").into(),
-                kind: t(if call.video { "call.silenced.video" } else { "call.silenced.voice" }).into(),
+                kind: t(if call.video {
+                    "call.silenced.video"
+                } else {
+                    "call.silenced.voice"
+                })
+                .into(),
                 caller: self.store.chat_name(&self.caller_of(call)).into(),
                 video: call.video,
                 group: call.group,
                 time: format_clock(call.at).into(),
             })
             .collect();
-        self.ui.set_silenced_calls(ModelRc::new(VecModel::from(rows)));
+        self.ui
+            .set_silenced_calls(ModelRc::new(VecModel::from(rows)));
     }
 
     // A silenced offer nobody answered becomes a plain missed call.
@@ -786,10 +814,16 @@ impl Bridge {
 
     // Answer from the banner: it becomes an ordinary incoming call.
     pub(super) fn answer_silenced_call(&mut self, id: &str) {
-        let Some(index) = self.silenced_calls.iter().position(|call| call.id == id) else { return };
+        let Some(index) = self.silenced_calls.iter().position(|call| call.id == id) else {
+            return;
+        };
         let call = self.silenced_calls.remove(index);
         self.refresh_silenced_calls();
-        if self.call.as_ref().is_some_and(|active| active.state != "ended") {
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|active| active.state != "ended")
+        {
             return;
         }
         let jid = self.caller_of(&call);
@@ -799,11 +833,16 @@ impl Bridge {
     }
 
     pub(super) fn decline_silenced_call(&mut self, id: &str) {
-        let Some(index) = self.silenced_calls.iter().position(|call| call.id == id) else { return };
+        let Some(index) = self.silenced_calls.iter().position(|call| call.id == id) else {
+            return;
+        };
         let call = self.silenced_calls.remove(index);
         let jid = self.caller_of(&call);
         self.remember_dismissed(&jid);
-        self.wa.send(Cmd::RejectCall { id: call.id.clone(), from: call.from.clone() });
+        self.wa.send(Cmd::RejectCall {
+            id: call.id.clone(),
+            from: call.from.clone(),
+        });
         self.record_call(&call.id, &call.from, "reject", false);
         self.refresh_silenced_calls();
         self.schedule_refresh_chats();
@@ -829,10 +868,14 @@ impl Bridge {
     pub(super) fn load_call_silence(&mut self, vault: &Vault) {
         self.call_silence_repeat = vault.setting_get("call_silence_repeat").as_deref() != Some("0");
         self.call_silence_minutes = clamp_silence_minutes(
-            vault.setting_get("call_silence_minutes").and_then(|v| v.parse().ok()).unwrap_or(0),
+            vault
+                .setting_get("call_silence_minutes")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
         );
         self.ui.set_call_silence_repeat(self.call_silence_repeat);
-        self.ui.set_call_silence_minutes(self.call_silence_minutes as i32);
+        self.ui
+            .set_call_silence_minutes(self.call_silence_minutes as i32);
     }
 
     pub(super) fn ring_timeout(&mut self, id: &str) {
@@ -949,7 +992,10 @@ impl Bridge {
 mod silence_tests {
     use super::*;
 
-    const ON: SilenceSetting = SilenceSetting { enabled: true, minutes: 10 };
+    const ON: SilenceSetting = SilenceSetting {
+        enabled: true,
+        minutes: 10,
+    };
 
     #[test]
     fn a_first_call_from_a_caller_always_rings() {
@@ -972,7 +1018,10 @@ mod silence_tests {
 
     #[test]
     fn the_setting_off_never_silences() {
-        let off = SilenceSetting { enabled: false, minutes: 10 };
+        let off = SilenceSetting {
+            enabled: false,
+            minutes: 10,
+        };
         assert!(!should_silence_call(1_000_000, Some(1_000_000), off));
     }
 
@@ -980,17 +1029,29 @@ mod silence_tests {
     fn each_offered_window_is_honoured() {
         let now = 1_000_000;
         for minutes in SILENCE_CHOICES {
-            let setting = SilenceSetting { enabled: true, minutes };
+            let setting = SilenceSetting {
+                enabled: true,
+                minutes,
+            };
             let edge = i64::from(minutes) * 60;
-            assert!(should_silence_call(now, Some(now - edge + 1), setting), "{minutes}");
-            assert!(!should_silence_call(now, Some(now - edge), setting), "{minutes}");
+            assert!(
+                should_silence_call(now, Some(now - edge + 1), setting),
+                "{minutes}"
+            );
+            assert!(
+                !should_silence_call(now, Some(now - edge), setting),
+                "{minutes}"
+            );
         }
     }
 
     #[test]
     fn an_unknown_window_falls_back_to_ten_minutes() {
         let now = 1_000_000;
-        let odd = SilenceSetting { enabled: true, minutes: 7 };
+        let odd = SilenceSetting {
+            enabled: true,
+            minutes: 7,
+        };
         assert!(should_silence_call(now, Some(now - 599), odd));
         assert!(!should_silence_call(now, Some(now - 600), odd));
         assert_eq!(clamp_silence_minutes(0), 10);

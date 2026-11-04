@@ -6,19 +6,38 @@ impl Bridge {
     // echo from the server is deduplicated by id in the store.
     pub fn stage_attachment(&mut self, preparation: crate::outbox::Preparation) -> bool {
         let key = format!("store:preparation:{}", preparation.id);
-        let result = serde_json::to_string(&preparation).map_err(|e| e.to_string()).and_then(|json| {
-            self.vault.as_ref().ok_or("vault unavailable".to_string())?.set_checked(&key, &json)
-        });
-        if result.is_err() { self.message_action_failed(&t("outbox.storage_failed")); return false; }
+        let result = serde_json::to_string(&preparation)
+            .map_err(|e| e.to_string())
+            .and_then(|json| {
+                self.vault
+                    .as_ref()
+                    .ok_or("vault unavailable".to_string())?
+                    .set_checked(&key, &json)
+            });
+        if result.is_err() {
+            self.message_action_failed(&t("outbox.storage_failed"));
+            return false;
+        }
         self.show_preparation(&preparation, "outbox.preparing");
-        if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+        if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) {
+            self.wa.send(Cmd::PrepareAttachment(preparation));
+        }
         true
     }
 
-    pub(super) fn show_preparation(&mut self, preparation: &crate::outbox::Preparation, state: &str) {
+    pub(super) fn show_preparation(
+        &mut self,
+        preparation: &crate::outbox::Preparation,
+        state: &str,
+    ) {
         use whatsapp_rust::proto_helpers::MessageBuilderExt as _;
-        self.preparation_states.insert(preparation.id.clone(), state == "outbox.failed");
-        self.echo_sent(&preparation.jid, &preparation.id, wa::Message::text(format!("{}: {}", t(state), preparation.filename)));
+        self.preparation_states
+            .insert(preparation.id.clone(), state == "outbox.failed");
+        self.echo_sent(
+            &preparation.jid,
+            &preparation.id,
+            wa::Message::text(format!("{}: {}", t(state), preparation.filename)),
+        );
         self.patch_row(&preparation.id, |row| {
             row.sendPending = true;
             row.sendRetry = state == "outbox.failed";
@@ -28,34 +47,75 @@ impl Bridge {
     }
 
     pub(super) fn resume_preparations(&mut self) {
-        let preparations: Vec<_> = self.vault.as_ref().map(|vault| vault.keys("store:preparation:").into_iter()
-            .filter_map(|key| vault.get(&key)).filter_map(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok()).collect()).unwrap_or_default();
+        let preparations: Vec<_> = self
+            .vault
+            .as_ref()
+            .map(|vault| {
+                vault
+                    .keys("store:preparation:")
+                    .into_iter()
+                    .filter_map(|key| vault.get(&key))
+                    .filter_map(|json| {
+                        serde_json::from_str::<crate::outbox::Preparation>(&json).ok()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         for preparation in preparations {
             self.show_preparation(&preparation, "outbox.preparing");
-            if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+            if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) {
+                self.wa.send(Cmd::PrepareAttachment(preparation));
+            }
         }
     }
 
     pub fn on_attachment_prepared(&mut self, id: &str, result: Result<wa::Message, String>) {
         self.preparations_active.remove(id);
         let key = format!("store:preparation:{id}");
-        let preparation = self.vault.as_ref().and_then(|vault| vault.get(&key))
+        let preparation = self
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.get(&key))
             .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
-        let Some(preparation) = preparation else { return; };
+        let Some(preparation) = preparation else {
+            return;
+        };
         let message = match result {
             Ok(message) => message,
-            Err(_) => { self.show_preparation(&preparation, "outbox.failed"); return; }
+            Err(_) => {
+                self.show_preparation(&preparation, "outbox.failed");
+                return;
+            }
         };
         let mut entries = self.outbox.clone();
-        entries.push(crate::outbox::Entry::new(id.to_string(), preparation.jid.clone(), std::sync::Arc::new(message.clone()), now_secs()));
-        let json = match serde_json::to_string(&entries) { Ok(json) => json, Err(_) => return };
-        let saved = self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[("store:outbox", &json)], &[&key]).is_ok());
-        if !saved { self.message_action_failed(&t("outbox.storage_failed")); return; }
+        entries.push(crate::outbox::Entry::new(
+            id.to_string(),
+            preparation.jid.clone(),
+            std::sync::Arc::new(message.clone()),
+            now_secs(),
+        ));
+        let json = match serde_json::to_string(&entries) {
+            Ok(json) => json,
+            Err(_) => return,
+        };
+        let saved = self.vault.as_ref().is_some_and(|vault| {
+            vault
+                .batch_checked(&[("store:outbox", &json)], &[&key])
+                .is_ok()
+        });
+        if !saved {
+            self.message_action_failed(&t("outbox.storage_failed"));
+            return;
+        }
         self.outbox = entries;
         self.preparation_states.remove(id);
-        if let Some(messages) = self.store.messages.get_mut(&preparation.jid) { messages.retain(|message| message.id != id); }
+        if let Some(messages) = self.store.messages.get_mut(&preparation.jid) {
+            messages.retain(|message| message.id != id);
+        }
         self.echo_sent_from(&preparation.jid, id, message, preparation.origin);
-        if self.current_jid.as_deref() == Some(&preparation.jid) { self.rebuild_conversation(&preparation.jid); }
+        if self.current_jid.as_deref() == Some(&preparation.jid) {
+            self.rebuild_conversation(&preparation.jid);
+        }
         self.dispatch_outbox();
     }
 
@@ -69,31 +129,62 @@ impl Bridge {
         self.outbox_connected = false;
         self.resume_preparations();
         let cached = self.vault.as_ref().and_then(|v| v.get("store:outbox"));
-        self.outbox = cached.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
-        for entry in &mut self.outbox { entry.recover_interrupted(); }
+        self.outbox = cached
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        for entry in &mut self.outbox {
+            entry.recover_interrupted();
+        }
         let _ = self.persist_outbox(&self.outbox);
         for entry in self.outbox.clone() {
-            let found = self.vault.as_ref().is_some_and(|v| self.store.hydrate_id(v, &entry.jid, &entry.id));
-            if found && self.store.messages_for(&entry.jid).iter().any(|message| message.id == entry.id && message.status >= 1) {
+            let found = self
+                .vault
+                .as_ref()
+                .is_some_and(|v| self.store.hydrate_id(v, &entry.jid, &entry.id));
+            if found
+                && self
+                    .store
+                    .messages_for(&entry.jid)
+                    .iter()
+                    .any(|message| message.id == entry.id && message.status >= 1)
+            {
                 self.on_outbox_ack(&entry.id, None);
                 continue;
             }
             if !found {
                 self.echo_sent(&entry.jid, &entry.id, (*entry.message).clone());
-                if let Some(message) = self.store.messages.get_mut(&entry.jid).and_then(|messages| messages.iter_mut().find(|m| m.id == entry.id)) {
+                if let Some(message) = self
+                    .store
+                    .messages
+                    .get_mut(&entry.jid)
+                    .and_then(|messages| messages.iter_mut().find(|m| m.id == entry.id))
+                {
                     message.timestamp = entry.created;
                 }
             }
         }
     }
 
-    pub fn enqueue_prepared(&mut self, jid: &str, message: wa::Message, origin: Option<String>) -> bool {
+    pub fn enqueue_prepared(
+        &mut self,
+        jid: &str,
+        message: wa::Message,
+        origin: Option<String>,
+    ) -> bool {
         use rand::RngCore as _;
         let mut bytes = [0u8; 16];
         rand::rng().fill_bytes(&mut bytes);
-        let id = format!("3EB0{}", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>());
+        let id = format!(
+            "3EB0{}",
+            bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()
+        );
         let jid = self.store.canon_owned(jid);
-        let entry = crate::outbox::Entry::new(id.clone(), jid.clone(), std::sync::Arc::new(message.clone()), now_secs());
+        let entry = crate::outbox::Entry::new(
+            id.clone(),
+            jid.clone(),
+            std::sync::Arc::new(message.clone()),
+            now_secs(),
+        );
         let mut entries = self.outbox.clone();
         entries.push(entry);
         if self.persist_outbox(&entries).is_err() {
@@ -108,9 +199,23 @@ impl Bridge {
 
     pub(super) fn dispatch_outbox(&mut self) {
         use crate::outbox::State;
-        if !self.outbox_connected || self.switching { return; }
-        if self.outbox.iter().any(|entry| entry.state == State::Sending) { return; }
-        let Some(index) = self.outbox.iter().position(|entry| entry.state == State::Queued) else { return };
+        if !self.outbox_connected || self.switching {
+            return;
+        }
+        if self
+            .outbox
+            .iter()
+            .any(|entry| entry.state == State::Sending)
+        {
+            return;
+        }
+        let Some(index) = self
+            .outbox
+            .iter()
+            .position(|entry| entry.state == State::Queued)
+        else {
+            return;
+        };
         let mut entries = self.outbox.clone();
         entries[index].state = State::Sending;
         if self.persist_outbox(&entries).is_err() {
@@ -120,11 +225,21 @@ impl Bridge {
         self.outbox = entries;
         let entry = self.outbox[index].clone();
         self.refresh_outbox_row(&entry.id);
-        self.wa.send(Cmd::SendQueued { id: entry.id.clone(), jid: entry.jid, message: entry.message });
+        self.wa.send(Cmd::SendQueued {
+            id: entry.id.clone(),
+            jid: entry.jid,
+            message: entry.message,
+        });
         let epoch = self.epoch;
         self.once(45_000, move |b| {
-            if b.epoch != epoch { return; }
-            if let Some(pending) = b.outbox.iter_mut().find(|e| e.id == entry.id && e.state == State::Sending) {
+            if b.epoch != epoch {
+                return;
+            }
+            if let Some(pending) = b
+                .outbox
+                .iter_mut()
+                .find(|e| e.id == entry.id && e.state == State::Sending)
+            {
                 pending.state = State::Uncertain;
                 let _ = b.persist_outbox(&b.outbox);
                 b.refresh_outbox_row(&entry.id);
@@ -134,7 +249,11 @@ impl Bridge {
     }
 
     pub(super) fn refresh_outbox_row(&self, id: &str) {
-        let state = self.outbox.iter().find(|entry| entry.id == id).map(|entry| entry.state);
+        let state = self
+            .outbox
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.state);
         let label = match state {
             Some(crate::outbox::State::Queued) => t("outbox.queued"),
             Some(crate::outbox::State::Sending) => t("outbox.sending"),
@@ -144,9 +263,14 @@ impl Bridge {
         };
         self.patch_row(id, |row| {
             row.sendState = label.into();
-            row.sendRetry = matches!(state, Some(crate::outbox::State::Failed | crate::outbox::State::Uncertain));
+            row.sendRetry = matches!(
+                state,
+                Some(crate::outbox::State::Failed | crate::outbox::State::Uncertain)
+            );
             row.sendPending = state.is_some();
-            if state.is_some() { row.ticks = "pending".into(); }
+            if state.is_some() {
+                row.ticks = "pending".into();
+            }
         });
     }
 
@@ -163,21 +287,39 @@ impl Bridge {
     }
 
     pub fn on_outbox_ack(&mut self, id: &str, error: Option<String>) {
-        if !self.outbox.iter().any(|entry| entry.id == id) { return; }
+        if !self.outbox.iter().any(|entry| entry.id == id) {
+            return;
+        }
         if let Some(error) = error {
             if let Some(entry) = self.outbox.iter_mut().find(|entry| entry.id == id) {
                 entry.state = crate::outbox::State::Failed;
                 entry.error = error;
             }
         } else {
-            let entry = self.outbox.iter().find(|entry| entry.id == id).cloned().unwrap();
-            if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &entry.jid, id); }
+            let entry = self
+                .outbox
+                .iter()
+                .find(|entry| entry.id == id)
+                .cloned()
+                .unwrap();
+            if let Some(vault) = &self.vault {
+                self.store.hydrate_id(vault, &entry.jid, id);
+            }
             self.store.set_status(&entry.jid, id, 1);
             if let Some(vault) = &self.vault {
-                if self.store.save_checked(vault).is_err() { return; }
+                if self.store.save_checked(vault).is_err() {
+                    return;
+                }
             }
-            let remaining: Vec<_> = self.outbox.iter().filter(|entry| entry.id != id).cloned().collect();
-            if self.persist_outbox(&remaining).is_err() { return; }
+            let remaining: Vec<_> = self
+                .outbox
+                .iter()
+                .filter(|entry| entry.id != id)
+                .cloned()
+                .collect();
+            if self.persist_outbox(&remaining).is_err() {
+                return;
+            }
             self.outbox = remaining;
         }
         let _ = self.persist_outbox(&self.outbox);
@@ -188,7 +330,13 @@ impl Bridge {
         self.dispatch_outbox();
     }
 
-    pub fn echo_sent_from(&mut self, jid: &str, id: &str, message: wa::Message, origin: Option<String>) {
+    pub fn echo_sent_from(
+        &mut self,
+        jid: &str,
+        id: &str,
+        message: wa::Message,
+        origin: Option<String>,
+    ) {
         if let Some(origin) = origin {
             if let Some(vault) = &self.vault {
                 vault.setting_set(&format!("media-source:{id}"), &origin);
@@ -248,7 +396,10 @@ impl Bridge {
             };
             if let Some(path) = dialog.pick_file() {
                 ui_apply(move |b| {
-                    if b.current_jid == jid && b.epoch == epoch && b.preview_generation == generation {
+                    if b.current_jid == jid
+                        && b.epoch == epoch
+                        && b.preview_generation == generation
+                    {
                         b.on_picked(kind, path);
                     }
                 });
@@ -263,8 +414,16 @@ impl Bridge {
         match kind {
             // WhatsApp-style confirmation: caption field before sending.
             "image" => self.start_preview(path),
-            "audio" => self.wa.send(Cmd::SendAudioFile { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
-            _ => self.wa.send(Cmd::SendDocument { jid, origin: Some(path.to_string_lossy().into_owned()), path }),
+            "audio" => self.wa.send(Cmd::SendAudioFile {
+                jid,
+                origin: Some(path.to_string_lossy().into_owned()),
+                path,
+            }),
+            _ => self.wa.send(Cmd::SendDocument {
+                jid,
+                origin: Some(path.to_string_lossy().into_owned()),
+                path,
+            }),
         }
     }
 
@@ -297,9 +456,14 @@ impl Bridge {
         self.preview_busy = true;
         self.ui.set_preview_busy(true);
         std::thread::spawn(move || {
-            let image = std::fs::read(&path).ok().and_then(|bytes| crate::media::decode_bytes(&bytes, 1280));
+            let image = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| crate::media::decode_bytes(&bytes, 1280));
             ui_apply(move |b| {
-                if b.preview_generation != generation || b.epoch != epoch || b.current_jid != b.preview_jid {
+                if b.preview_generation != generation
+                    || b.epoch != epoch
+                    || b.current_jid != b.preview_jid
+                {
                     return;
                 }
                 b.preview_busy = false;
@@ -312,7 +476,10 @@ impl Bridge {
     }
 
     pub fn on_preview_ready(&mut self, path: &std::path::Path, img: crate::media::Decoded) {
-        if self.current_jid.is_none() || self.current_jid != self.preview_jid || self.original_image.as_deref() != Some(path) {
+        if self.current_jid.is_none()
+            || self.current_jid != self.preview_jid
+            || self.original_image.as_deref() != Some(path)
+        {
             return;
         }
         self.pending_image = Some(path.to_path_buf());
@@ -322,7 +489,9 @@ impl Bridge {
     }
 
     pub(super) fn reset_preview(&mut self) {
-        let Some(path) = self.original_image.clone() else { return; };
+        let Some(path) = self.original_image.clone() else {
+            return;
+        };
         if let Some(edited) = self.pending_image.take() {
             if edited != path {
                 let _ = std::fs::remove_file(edited);
@@ -332,10 +501,13 @@ impl Bridge {
     }
 
     pub(super) fn edit_preview(&mut self, edit: crate::media::PreviewEdit) {
-        if self.preview_busy || !self.ui.get_preview_open() || self.current_jid != self.preview_jid {
+        if self.preview_busy || !self.ui.get_preview_open() || self.current_jid != self.preview_jid
+        {
             return;
         }
-        let Some(path) = self.pending_image.clone() else { return; };
+        let Some(path) = self.pending_image.clone() else {
+            return;
+        };
         self.preview_generation = self.preview_generation.wrapping_add(1);
         let generation = self.preview_generation;
         let epoch = self.epoch;
@@ -344,8 +516,13 @@ impl Bridge {
         std::thread::spawn(move || {
             let result = crate::media::edit_preview(&path, edit);
             ui_apply(move |b| {
-                if b.preview_generation != generation || b.epoch != epoch || b.current_jid != b.preview_jid {
-                    if let Some((path, _)) = result { let _ = std::fs::remove_file(path); }
+                if b.preview_generation != generation
+                    || b.epoch != epoch
+                    || b.current_jid != b.preview_jid
+                {
+                    if let Some((path, _)) = result {
+                        let _ = std::fs::remove_file(path);
+                    }
                     return;
                 }
                 b.preview_busy = false;
@@ -370,7 +547,10 @@ impl Bridge {
             return;
         }
         let path = self.pending_image.take();
-        let origin = self.original_image.as_ref().map(|path| path.to_string_lossy().into_owned());
+        let origin = self
+            .original_image
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
         self.cancel_preview();
         let (Some(jid), Some(path)) = (self.current_jid.clone(), path) else {
             return;

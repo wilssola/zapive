@@ -36,7 +36,11 @@ impl Bridge {
     }
 
     pub(super) fn open_starred(&mut self, current_only: bool) {
-        let only = if current_only { self.current_jid.clone() } else { None };
+        let only = if current_only {
+            self.current_jid.clone()
+        } else {
+            None
+        };
         if current_only && only.is_none() {
             return;
         }
@@ -60,14 +64,21 @@ impl Bridge {
                     self.store.canon_owned(&m.sender_jid)
                 };
                 faces.push(face.clone());
-                let sender = if m.from_me { t("reactions.you") } else { m.sender.clone() };
+                let sender = if m.from_me {
+                    t("reactions.you")
+                } else {
+                    m.sender.clone()
+                };
                 let avatar = self.avatar_for(&face);
                 StarredItem {
                     jid: m.jid.clone().into(),
                     msg_id: m.id.clone().into(),
                     chat_name: self.store.chat_name(&m.jid).into(),
                     sender: sender.into(),
-                    text: self.store.named_mentions(&snippet(&crate::store::preview_body(m))).into(),
+                    text: self
+                        .store
+                        .named_mentions(&snippet(&crate::store::preview_body(m)))
+                        .into(),
                     time: format_time(m.timestamp).into(),
                     avatar: avatar.unwrap_or_else(empty_image),
                 }
@@ -76,7 +87,8 @@ impl Bridge {
         for face in faces {
             self.queue_avatar(&face);
         }
-        self.ui.set_starred_items(ModelRc::new(VecModel::from(rows)));
+        self.ui
+            .set_starred_items(ModelRc::new(VecModel::from(rows)));
     }
 
     pub(super) fn open_starred_item(&mut self, jid: &str, id: &str) {
@@ -93,26 +105,38 @@ impl Bridge {
     // opens or a pin changes.
     pub(super) fn refresh_pinned(&mut self) {
         let Some(jid) = self.current_jid.clone() else {
-            self.ui.set_pinned_items(ModelRc::new(VecModel::from(Vec::<PinnedItem>::new())));
+            self.ui
+                .set_pinned_items(ModelRc::new(VecModel::from(Vec::<PinnedItem>::new())));
             return;
         };
         let items: Vec<PinnedItem> = active_pins(self.store.messages_for(&jid), now_secs())
             .into_iter()
             .map(|m| PinnedItem {
                 msg_id: m.id.clone().into(),
-                sender: if m.from_me { t("reactions.you") } else { m.sender.clone() }.into(),
-                text: self.store.named_mentions(&snippet(&crate::store::preview_body(m))).into(),
+                sender: if m.from_me {
+                    t("reactions.you")
+                } else {
+                    m.sender.clone()
+                }
+                .into(),
+                text: self
+                    .store
+                    .named_mentions(&snippet(&crate::store::preview_body(m)))
+                    .into(),
             })
             .collect();
         let count = items.len() as i32;
-        self.ui.set_pinned_items(ModelRc::new(VecModel::from(items)));
+        self.ui
+            .set_pinned_items(ModelRc::new(VecModel::from(items)));
         if self.ui.get_pinned_index() >= count {
             self.ui.set_pinned_index(0);
         }
     }
 
     pub(super) fn open_pinned(&mut self, id: &str) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if id.is_empty() {
             return;
         }
@@ -120,18 +144,29 @@ impl Bridge {
     }
 
     pub(super) fn unpin_message(&mut self, id: &str) {
-        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
         if m.pinned_until <= now_secs() {
             return;
         }
         let participant = self.key_participant(&m);
-        self.wa.send(Cmd::PinMessage { jid: m.jid, id: m.id, from_me: m.from_me, participant, pin: false });
+        self.wa.send(Cmd::PinMessage {
+            jid: m.jid,
+            id: m.id,
+            from_me: m.from_me,
+            participant,
+            pin: false,
+        });
     }
 
     // ---- F4: keyboard shortcuts ----
 
     fn visible_jids(&self) -> Vec<String> {
-        self.visible_chats().into_iter().map(|(jid, ..)| jid).collect()
+        self.visible_chats()
+            .into_iter()
+            .map(|(jid, ..)| jid)
+            .collect()
     }
 
     pub(super) fn open_chat_at(&mut self, position: i32) {
@@ -143,7 +178,10 @@ impl Bridge {
 
     pub(super) fn select_adjacent_chat(&mut self, delta: i32) {
         let list = self.visible_jids();
-        let current = self.current_jid.as_ref().and_then(|jid| list.iter().position(|candidate| candidate == jid));
+        let current = self
+            .current_jid
+            .as_ref()
+            .and_then(|jid| list.iter().position(|candidate| candidate == jid));
         if let Some(index) = adjacent_index(current, list.len(), delta) {
             self.open_dm(&list[index], None);
         }
@@ -156,14 +194,22 @@ impl Bridge {
     }
 
     pub(super) fn toggle_mute_current(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
-        let muted = self.store.chats.get(&jid).is_some_and(|chat| chat.is_muted());
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
+        let muted = self
+            .store
+            .chats
+            .get(&jid)
+            .is_some_and(|chat| chat.is_muted());
         self.mute_current(if muted { 0 } else { -1 });
     }
 
     // The newest message of mine that can still be edited.
     pub(super) fn edit_last_message(&mut self) {
-        let Some(jid) = self.current_jid.clone() else { return };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         let id = self
             .store
             .messages_for(&jid)
@@ -184,24 +230,34 @@ impl Bridge {
             .map(|m| {
                 reaction_groups(&m.reactions)
                     .into_iter()
-                    .map(|(emoji, who)| ReactionTab { emoji: emoji.into(), count: who.len().min(i32::MAX as usize) as i32 })
+                    .map(|(emoji, who)| ReactionTab {
+                        emoji: emoji.into(),
+                        count: who.len().min(i32::MAX as usize) as i32,
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        self.ui.set_reaction_tabs(ModelRc::new(VecModel::from(tabs)));
+        self.ui
+            .set_reaction_tabs(ModelRc::new(VecModel::from(tabs)));
     }
 
     // Removing my reaction is sending an empty one, exactly like tapping
     // the same emoji again.
     pub(super) fn remove_own_reaction(&mut self, id: &str) {
-        let Some(m) = self.find_message(id).cloned() else { return };
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
         let mine = m.reactions.get("me").cloned().unwrap_or_default();
         if clean_text(&mine).is_empty() {
             return;
         }
         self.send_reaction(id, &mine);
         self.show_reactions(id);
-        if self.find_message(id).is_none_or(|m| m.reactions.values().all(|emoji| clean_text(emoji).is_empty())) {
+        if self.find_message(id).is_none_or(|m| {
+            m.reactions
+                .values()
+                .all(|emoji| clean_text(emoji).is_empty())
+        }) {
             self.ui.set_reactions_open(false);
         }
     }

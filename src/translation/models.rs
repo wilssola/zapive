@@ -77,7 +77,12 @@ pub(super) fn read_meta(dir: &Path) -> Result<Meta, String> {
 
 fn parse_meta(bytes: &[u8]) -> Result<Meta, String> {
     let value: Value = serde_json::from_slice(bytes).map_err(|_| "invalid_model_archive")?;
-    if value.get("type").and_then(Value::as_str).unwrap_or("translate") != "translate" {
+    if value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("translate")
+        != "translate"
+    {
         return Err("invalid_model_archive".into());
     }
     let from = value["from_code"].as_str().filter(|s| code(s));
@@ -223,10 +228,7 @@ fn install_error<E>(_: E) -> String {
 /// Normalised relative path components of a zip entry name, or an error when
 /// the name could escape the staging directory.
 pub(super) fn safe_parts(name: &str) -> Result<Vec<String>, String> {
-    if name.is_empty()
-        || name.contains(['\0', '\\', ':'])
-        || name.starts_with('/')
-    {
+    if name.is_empty() || name.contains(['\0', '\\', ':']) || name.starts_with('/') {
         return Err("invalid_model_archive".into());
     }
     let mut parts = Vec::new();
@@ -264,7 +266,10 @@ fn extract(archive: &Path, staging: &Path, check: Check<'_>) -> Result<PathBuf, 
         let entry = zip.by_index_raw(index).map_err(archive_error)?;
         let name = entry.name().map_err(archive_error)?.into_owned();
         let parts = safe_parts(&name)?;
-        if entry.unix_mode().is_some_and(|mode| mode & 0o170000 == 0o120000) {
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
             return Err("invalid_model_archive".into());
         }
         declared = declared.saturating_add(entry.size());
@@ -399,14 +404,19 @@ mod tests {
             vec![("pt".into(), "fr".into())]
         );
         catalog.remove(&("pt".into(), "fr".into()));
-        assert_eq!(plan_route("pt", "fr", &catalog, &installed).unwrap()[0].1, "es");
+        assert_eq!(
+            plan_route("pt", "fr", &catalog, &installed).unwrap()[0].1,
+            "es"
+        );
         assert_eq!(
             plan_route("pt", "fr", &catalog, &BTreeSet::new()).unwrap()[0].1,
             "en"
         );
         assert!(plan_route("zz", "fr", &catalog, &installed).is_none());
         assert_eq!(
-            plan_route("pt", "fr", &Catalog::new(), &installed).unwrap().len(),
+            plan_route("pt", "fr", &Catalog::new(), &installed)
+                .unwrap()
+                .len(),
             2
         );
         assert!(plan_route("pt", "fr", &Catalog::new(), &have(&[("pt", "en")])).is_none());
@@ -417,7 +427,9 @@ mod tests {
         for ok in ["en", "pt", "zh", "fil", "zh-hans", "pt-brazil"] {
             assert!(code(ok), "{ok}");
         }
-        for bad in ["", "e", "EN", "en_US", "en-", "a1", "en-x", "abcd", "en-us-x", "../x"] {
+        for bad in [
+            "", "e", "EN", "en_US", "en-", "a1", "en-x", "abcd", "en-us-x", "../x",
+        ] {
             assert!(!code(bad), "{bad}");
         }
     }
@@ -500,7 +512,11 @@ mod tests {
                 .starts_with("en_pt_")
         );
         assert_eq!(status(&models, &Catalog::new())["models"], "en:pt");
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 2, "staging left behind");
+        assert_eq!(
+            fs::read_dir(&root).unwrap().count(),
+            2,
+            "staging left behind"
+        );
         install_archive(&models, &file, "en", "pt", &|| Ok(())).unwrap();
         assert_eq!(fs::read_dir(&models).unwrap().count(), 1, "old copy kept");
         let _ = fs::remove_dir_all(root);
@@ -559,7 +575,12 @@ mod tests {
         assert_eq!(
             fs::read_dir(&root)
                 .unwrap()
-                .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with('.'))
+                .filter(|e| e
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with('.'))
                 .count(),
             0,
             "staging left behind"
@@ -588,8 +609,10 @@ mod tests {
         let file = root.join("a.argosmodel");
         archive(&file, &good(), None);
         assert_eq!(
-            install_archive(&models, &file, "en", "pt", &|| Err("request_cancelled".into()))
-                .unwrap_err(),
+            install_archive(&models, &file, "en", "pt", &|| Err(
+                "request_cancelled".into()
+            ))
+            .unwrap_err(),
             "request_cancelled"
         );
         assert!(installed(&models).is_empty());
@@ -612,8 +635,8 @@ mod tests {
 
     #[test]
     fn metadata_is_validated() {
-        let meta = parse_meta(br#"{"from_code":"en","to_code":"pt","target_prefix":"__pt__"}"#)
-            .unwrap();
+        let meta =
+            parse_meta(br#"{"from_code":"en","to_code":"pt","target_prefix":"__pt__"}"#).unwrap();
         assert_eq!((meta.from.as_str(), meta.to.as_str()), ("en", "pt"));
         assert_eq!(meta.target_prefix, "__pt__");
         assert_eq!(parse_meta(META).unwrap().target_prefix, "");
@@ -640,13 +663,25 @@ mod tests {
         fs::write(outside.join("metadata.json"), META).unwrap();
         let dir = installed(&models)[&("en".to_string(), "pt".to_string())].clone();
         assert!(disk_size(&dir) >= 9);
-        assert_eq!(status(&models, &Catalog::new())["installed"][0]["source"], "en");
-        assert_eq!(remove(&models, "../x", "pt").unwrap_err(), "invalid_language");
-        assert_eq!(remove(&models, "pt", "en").unwrap_err(), "model_not_installed");
+        assert_eq!(
+            status(&models, &Catalog::new())["installed"][0]["source"],
+            "en"
+        );
+        assert_eq!(
+            remove(&models, "../x", "pt").unwrap_err(),
+            "invalid_language"
+        );
+        assert_eq!(
+            remove(&models, "pt", "en").unwrap_err(),
+            "model_not_installed"
+        );
         remove(&models, "en", "pt").unwrap();
         assert!(installed(&models).is_empty());
         assert!(models.is_dir() && outside.join("metadata.json").is_file());
-        assert_eq!(remove(&models, "en", "pt").unwrap_err(), "model_not_installed");
+        assert_eq!(
+            remove(&models, "en", "pt").unwrap_err(),
+            "model_not_installed"
+        );
         assert_eq!(
             remove(&root.join("missing"), "en", "pt").unwrap_err(),
             "model_not_installed"

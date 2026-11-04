@@ -23,7 +23,9 @@ impl Bridge {
             self.request_manual_media(id);
             return;
         }
-        let Some((m, path)) = self.plain_document(id) else { return };
+        let Some((m, path)) = self.plain_document(id) else {
+            return;
+        };
         if crate::pdf::is_pdf(&m.mimetype, &m.text) {
             self.open_pdf(id, &m.text, path);
         } else {

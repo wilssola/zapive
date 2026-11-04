@@ -36,7 +36,12 @@ impl Bridge {
     pub(super) fn handle_wallpaper_colors(&mut self, bg: slint::Color, fg: slint::Color) {
         let (bg_hex, fg_hex) = (color_hex(bg), color_hex(fg));
         self.ui.set_wallpaper_bg(bg);
-        self.ui.set_wallpaper_fg(slint::Color::from_argb_u8(DOODLE_ALPHA, fg.red(), fg.green(), fg.blue()));
+        self.ui.set_wallpaper_fg(slint::Color::from_argb_u8(
+            DOODLE_ALPHA,
+            fg.red(),
+            fg.green(),
+            fg.blue(),
+        ));
         self.ui.set_wallpaper_custom(true);
         if let Some(vault) = &self.vault {
             vault.setting_set("chat_wallpaper_bg", &bg_hex);
@@ -46,7 +51,9 @@ impl Bridge {
 
     // A hex typed in settings: only a valid #RRGGBB changes anything.
     pub(super) fn wallpaper_hex_entered(&mut self, fg: bool, hex: &str) {
-        let Some((r, g, b)) = parse_hex_color(hex) else { return };
+        let Some((r, g, b)) = parse_hex_color(hex) else {
+            return;
+        };
         let typed = slint::Color::from_rgb_u8(r, g, b);
         let (bg, doodle) = (self.ui.get_wallpaper_bg(), self.ui.get_wallpaper_fg());
         if fg {
@@ -65,12 +72,24 @@ impl Bridge {
     }
 
     pub(super) fn load_wallpaper(&mut self, vault: &Vault) {
-        let bg = vault.setting_get("chat_wallpaper_bg").as_deref().and_then(parse_hex_color);
-        let fg = vault.setting_get("chat_wallpaper_fg").as_deref().and_then(parse_hex_color);
+        let bg = vault
+            .setting_get("chat_wallpaper_bg")
+            .as_deref()
+            .and_then(parse_hex_color);
+        let fg = vault
+            .setting_get("chat_wallpaper_fg")
+            .as_deref()
+            .and_then(parse_hex_color);
         match (bg, fg) {
             (Some(bg), Some(fg)) => {
-                self.ui.set_wallpaper_bg(slint::Color::from_rgb_u8(bg.0, bg.1, bg.2));
-                self.ui.set_wallpaper_fg(slint::Color::from_argb_u8(DOODLE_ALPHA, fg.0, fg.1, fg.2));
+                self.ui
+                    .set_wallpaper_bg(slint::Color::from_rgb_u8(bg.0, bg.1, bg.2));
+                self.ui.set_wallpaper_fg(slint::Color::from_argb_u8(
+                    DOODLE_ALPHA,
+                    fg.0,
+                    fg.1,
+                    fg.2,
+                ));
                 self.ui.set_wallpaper_custom(true);
             }
             _ => self.ui.set_wallpaper_custom(false),
@@ -181,7 +200,12 @@ pub(super) fn parse_hex_color(text: &str) -> Option<(u8, u8, u8)> {
 }
 
 pub(super) fn color_hex(color: slint::Color) -> String {
-    format!("#{:02X}{:02X}{:02X}", color.red(), color.green(), color.blue())
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        color.red(),
+        color.green(),
+        color.blue()
+    )
 }
 
 #[cfg(test)]
@@ -192,7 +216,17 @@ mod wallpaper_tests {
     fn parses_only_rrggbb() {
         assert_eq!(parse_hex_color("#0b141a"), Some((0x0b, 0x14, 0x1a)));
         assert_eq!(parse_hex_color(" #FFAA00 "), Some((255, 170, 0)));
-        for bad in ["", "#", "0b141a", "#fff", "#12345", "#1234567", "#gggggg", "#12 456", "rgb(1,2,3)"] {
+        for bad in [
+            "",
+            "#",
+            "0b141a",
+            "#fff",
+            "#12345",
+            "#1234567",
+            "#gggggg",
+            "#12 456",
+            "rgb(1,2,3)",
+        ] {
             assert_eq!(parse_hex_color(bad), None, "{bad}");
         }
     }

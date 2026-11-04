@@ -33,7 +33,9 @@ const CT2_RUNTIME: &[&str] = &["ctranslate2.dll", "libiomp5md.dll"];
 fn stage_ctranslate2() {
     use std::path::PathBuf;
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    let vendor = manifest.join("vendor").join(format!("ctranslate2-{CT2_VERSION}"));
+    let vendor = manifest
+        .join("vendor")
+        .join(format!("ctranslate2-{CT2_VERSION}"));
     println!("cargo:rerun-if-changed={}", vendor.display());
     println!("cargo:rerun-if-changed=build.rs");
     if !vendor.join("ctranslate2.lib").is_file() {
@@ -44,10 +46,13 @@ fn stage_ctranslate2() {
     }
     // OUT_DIR = target/<profile>/build/<pkg>-<hash>/out, the exe lands in target/<profile>/.
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("out dir"));
-    let Some(profile) = out.ancestors().nth(3) else { return };
+    let Some(profile) = out.ancestors().nth(3) else {
+        return;
+    };
     for dll in CT2_RUNTIME {
         let (from, to) = (vendor.join(dll), profile.join(dll));
-        let stale = std::fs::metadata(&to).map(|m| m.len()).ok() != std::fs::metadata(&from).map(|m| m.len()).ok();
+        let stale = std::fs::metadata(&to).map(|m| m.len()).ok()
+            != std::fs::metadata(&from).map(|m| m.len()).ok();
         if stale {
             std::fs::copy(&from, &to)
                 .unwrap_or_else(|e| panic!("copy {} -> {}: {e}", from.display(), to.display()));

@@ -11,12 +11,22 @@ pub fn qr_image(text: &str) -> slint::Image {
             let dim = size + margin * 2;
             let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(dim as u32, dim as u32);
             let pixels = buf.make_mut_slice();
-            pixels.fill(Rgba8Pixel { r: 255, g: 255, b: 255, a: 255 });
+            pixels.fill(Rgba8Pixel {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            });
             for y in 0..size {
                 for x in 0..size {
                     if code[(x, y)] == qrcode::Color::Dark {
                         let i = (y + margin) * dim + (x + margin);
-                        pixels[i] = Rgba8Pixel { r: 0, g: 0, b: 0, a: 255 };
+                        pixels[i] = Rgba8Pixel {
+                            r: 0,
+                            g: 0,
+                            b: 0,
+                            a: 255,
+                        };
                     }
                 }
             }

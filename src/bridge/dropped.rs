@@ -14,7 +14,11 @@ pub(super) enum DroppedKind {
 }
 
 pub(super) fn dropped_kind(path: &Path) -> DroppedKind {
-    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match ext.as_str() {
         "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif" => DroppedKind::Image,
         _ => DroppedKind::Document,
@@ -24,7 +28,10 @@ pub(super) fn dropped_kind(path: &Path) -> DroppedKind {
 // What may join the queue: regular files of a sane size, at most
 // MAX_DROPPED, no duplicates. Directories, links to nowhere and empty or
 // huge files are skipped silently.
-pub(super) fn accept_dropped(paths: &[PathBuf], metadata: impl Fn(&Path) -> Option<u64>) -> Vec<PathBuf> {
+pub(super) fn accept_dropped(
+    paths: &[PathBuf],
+    metadata: impl Fn(&Path) -> Option<u64>,
+) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     paths
         .iter()
@@ -39,7 +46,11 @@ pub(super) fn accept_dropped(paths: &[PathBuf], metadata: impl Fn(&Path) -> Opti
 fn document_card(label: &str) -> crate::media::Decoded {
     let mut card = image::RgbaImage::from_pixel(480, 320, image::Rgba([42, 57, 66, 255]));
     let _ = crate::media::burn_preview_text(&mut card, label, 0.4, 0.45);
-    crate::media::Decoded { w: 480, h: 320, rgba: card.into_raw() }
+    crate::media::Decoded {
+        w: 480,
+        h: 320,
+        rgba: card.into_raw(),
+    }
 }
 
 fn file_size(path: &Path) -> Option<u64> {
@@ -64,10 +75,14 @@ pub fn handle_file_drop_event(event: &slint::winit_030::winit::event::WindowEven
         WindowEvent::DroppedFile(path) => {
             COLLECTED.with(|list| list.borrow_mut().push(path.clone()));
             BATCH_TIMER.with(|timer| {
-                timer.start(slint::TimerMode::SingleShot, Duration::from_millis(80), || {
-                    let paths = COLLECTED.with(|list| std::mem::take(&mut *list.borrow_mut()));
-                    apply_now(|b| b.on_files_dropped(paths));
-                });
+                timer.start(
+                    slint::TimerMode::SingleShot,
+                    Duration::from_millis(80),
+                    || {
+                        let paths = COLLECTED.with(|list| std::mem::take(&mut *list.borrow_mut()));
+                        apply_now(|b| b.on_files_dropped(paths));
+                    },
+                );
             });
         }
         _ => {}
@@ -76,7 +91,8 @@ pub fn handle_file_drop_event(event: &slint::winit_030::winit::event::WindowEven
 
 impl Bridge {
     pub fn on_file_hover(&mut self, hovering: bool) {
-        let ready = self.current_jid.is_some() && self.vault.as_ref().is_some_and(|vault| !vault.locked());
+        let ready =
+            self.current_jid.is_some() && self.vault.as_ref().is_some_and(|vault| !vault.locked());
         self.ui.set_file_drag_hover(hovering && ready);
     }
 
@@ -120,7 +136,11 @@ impl Bridge {
         self.cancel_preview();
         self.preview_jid = self.current_jid.clone();
         self.staged_document = Some(path.clone());
-        let label = path.extension().and_then(|ext| ext.to_str()).unwrap_or("FILE").to_ascii_uppercase();
+        let label = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("FILE")
+            .to_ascii_uppercase();
         self.ui.set_preview_image(image_of(&document_card(&label)));
         self.ui.set_preview_open(true);
         self.ui.invoke_focus_preview_caption();
@@ -129,8 +149,13 @@ impl Bridge {
     // Confirm on a document card: this is the only place a dropped
     // document is sent.
     pub(super) fn confirm_staged_document(&mut self) -> bool {
-        let Some(path) = self.staged_document.take() else { return false };
-        let jid = self.current_jid.clone().filter(|jid| Some(jid) == self.preview_jid.as_ref());
+        let Some(path) = self.staged_document.take() else {
+            return false;
+        };
+        let jid = self
+            .current_jid
+            .clone()
+            .filter(|jid| Some(jid) == self.preview_jid.as_ref());
         self.cancel_preview();
         if let Some(jid) = jid {
             let origin = Some(path.to_string_lossy().into_owned());
@@ -141,9 +166,15 @@ impl Bridge {
     }
 
     pub(super) fn sync_staged_ui(&mut self) {
-        let count = if self.staged_total > 1 { self.staged_total } else { 0 };
-        self.ui.set_staged_count(count.min(i32::MAX as usize) as i32);
-        self.ui.set_staged_index(self.staged_position.min(i32::MAX as usize) as i32);
+        let count = if self.staged_total > 1 {
+            self.staged_total
+        } else {
+            0
+        };
+        self.ui
+            .set_staged_count(count.min(i32::MAX as usize) as i32);
+        self.ui
+            .set_staged_index(self.staged_position.min(i32::MAX as usize) as i32);
     }
 
     // The next queued image after one was sent or discarded.
@@ -206,7 +237,18 @@ mod tests {
 
     #[test]
     fn accept_skips_empty_huge_missing_and_duplicates() {
-        let got = accept_dropped(&paths(&["a.png", "empty.png", "huge.png", "dir", "missing.png", "a.png", "b.pdf"]), size_of);
+        let got = accept_dropped(
+            &paths(&[
+                "a.png",
+                "empty.png",
+                "huge.png",
+                "dir",
+                "missing.png",
+                "a.png",
+                "b.pdf",
+            ]),
+            size_of,
+        );
         assert_eq!(got, paths(&["a.png", "b.pdf"]));
     }
 
@@ -215,12 +257,21 @@ mod tests {
         let got = accept_dropped(&paths(&["z.pdf", "a.png", "m.txt"]), size_of);
         assert_eq!(got, paths(&["z.pdf", "a.png", "m.txt"]));
         let kinds: Vec<DroppedKind> = got.iter().map(|path| dropped_kind(path)).collect();
-        assert_eq!(kinds, vec![DroppedKind::Document, DroppedKind::Image, DroppedKind::Document]);
+        assert_eq!(
+            kinds,
+            vec![
+                DroppedKind::Document,
+                DroppedKind::Image,
+                DroppedKind::Document
+            ]
+        );
     }
 
     #[test]
     fn accept_caps_the_queue() {
-        let many: Vec<PathBuf> = (0..30).map(|i| PathBuf::from(format!("f{i}.png"))).collect();
+        let many: Vec<PathBuf> = (0..30)
+            .map(|i| PathBuf::from(format!("f{i}.png")))
+            .collect();
         assert_eq!(accept_dropped(&many, size_of).len(), MAX_DROPPED);
         assert!(accept_dropped(&[], size_of).is_empty());
     }

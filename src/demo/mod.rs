@@ -93,7 +93,11 @@ fn parse() -> Result<Options, String> {
         Some("reactions") => Page::Reactions,
         Some("drop") => Page::Drop,
         Some("poll-composer") => Page::PollComposer,
-        Some(other) => return Err(format!("unknown --demo-page `{other}` (chat|settings|info|login|splash|poll|starred|shortcuts|reactions|drop|poll-composer)")),
+        Some(other) => {
+            return Err(format!(
+                "unknown --demo-page `{other}` (chat|settings|info|login|splash|poll|starred|shortcuts|reactions|drop|poll-composer)"
+            ));
+        }
     };
     let dark = match value_of("--demo-theme").as_deref() {
         None | Some("dark") => true,
@@ -126,7 +130,8 @@ fn parse() -> Result<Options, String> {
         shot: value_of("--demo-shot").map(PathBuf::from),
         size,
         shots_all: value_of("--demo-shots-all").map(PathBuf::from),
-        group: matches!(page, Page::Info | Page::Poll | Page::Reactions) || std::env::args().any(|a| a == "--demo-group"),
+        group: matches!(page, Page::Info | Page::Poll | Page::Reactions)
+            || std::env::args().any(|a| a == "--demo-group"),
     })
 }
 
@@ -156,7 +161,10 @@ fn isolate() -> PathBuf {
     }
     for dir in [crate::paths::data_dir(), crate::paths::cache_dir()] {
         if !dir.starts_with(&root) {
-            eprintln!("[demo] refusing to run: {} is outside the scratch directory", dir.display());
+            eprintln!(
+                "[demo] refusing to run: {} is outside the scratch directory",
+                dir.display()
+            );
             std::process::exit(2);
         }
     }
@@ -199,8 +207,18 @@ fn shots_all(options: &Options, dir: &Path) -> i32 {
         let status = std::process::Command::new(&exe)
             .arg("--demo-shot")
             .arg(&target)
-            .args(["--demo-page", page, "--demo-theme", theme, "--demo-style", style])
-            .args(["--demo-size", &format!("{}x{}", options.size.0, options.size.1)])
+            .args([
+                "--demo-page",
+                page,
+                "--demo-theme",
+                theme,
+                "--demo-style",
+                style,
+            ])
+            .args([
+                "--demo-size",
+                &format!("{}x{}", options.size.0, options.size.1),
+            ])
             .args(["--demo-lang", if options.english { "en" } else { "pt" }])
             .status();
         match status {
@@ -221,7 +239,11 @@ fn show(options: &Options) -> i32 {
         .select()
         .expect("failed to select the Skia backend");
     crate::fonts::install_emoji();
-    i18n::set_locale(if options.english { i18n::Locale::En } else { i18n::Locale::Pt });
+    i18n::set_locale(if options.english {
+        i18n::Locale::En
+    } else {
+        i18n::Locale::Pt
+    });
     let ui = AppWindow::new().expect("failed to create the main window");
     slint::select_bundled_translation(if options.english { "en_US" } else { "pt" })
         .expect("selected bundled locale must exist");
@@ -229,8 +251,10 @@ fn show(options: &Options) -> i32 {
     configure(&ui, options);
 
     ui.show().expect("failed to show the main window");
-    ui.window()
-        .set_size(slint::LogicalSize::new(options.size.0 as f32, options.size.1 as f32));
+    ui.window().set_size(slint::LogicalSize::new(
+        options.size.0 as f32,
+        options.size.1 as f32,
+    ));
     #[cfg(windows)]
     crate::platform::set_title_bar_theme(options.dark, options.glass);
 
@@ -240,13 +264,17 @@ fn show(options: &Options) -> i32 {
         .map(|delay| {
             let timer = slint::Timer::default();
             let weak = ui.as_weak();
-            timer.start(slint::TimerMode::SingleShot, Duration::from_millis(delay), move || {
-                if let Some(ui) = weak.upgrade()
-                    && ui.get_chat_open()
-                {
-                    ui.invoke_scroll_conversation_end();
-                }
-            });
+            timer.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_millis(delay),
+                move || {
+                    if let Some(ui) = weak.upgrade()
+                        && ui.get_chat_open()
+                    {
+                        ui.invoke_scroll_conversation_end();
+                    }
+                },
+            );
             timer
         })
         .collect();
@@ -257,12 +285,16 @@ fn show(options: &Options) -> i32 {
         let weak = ui.as_weak();
         let outcome = outcome.clone();
         // Long enough for the splash fade and the last layout pass.
-        snapshot.start(slint::TimerMode::SingleShot, Duration::from_millis(2200), move || {
-            if let Some(ui) = weak.upgrade() {
-                outcome.set(save_snapshot(&ui, &path));
-            }
-            let _ = slint::quit_event_loop();
-        });
+        snapshot.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(2200),
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    outcome.set(save_snapshot(&ui, &path));
+                }
+                let _ = slint::quit_event_loop();
+            },
+        );
     }
     slint::run_event_loop().expect("event loop failed");
     drop(anchor);
@@ -304,7 +336,9 @@ fn configure(ui: &AppWindow, options: &Options) {
         Page::Login => {
             ui.set_screen("login".into());
             ui.set_status_text(i18n::t("status.scan_qr").into());
-            ui.set_qr_image(crate::qr::qr_image("zapive-demo-placeholder-not-a-real-pairing-code"));
+            ui.set_qr_image(crate::qr::qr_image(
+                "zapive-demo-placeholder-not-a-real-pairing-code",
+            ));
         }
     }
     ui.set_app_loading(options.page == Page::Splash);

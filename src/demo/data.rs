@@ -6,8 +6,8 @@ use slint::{ModelRc, SharedString, VecModel};
 use super::art;
 use crate::i18n::{t, ta};
 use crate::{
-    AccountItem, AppWindow, CallItem, ChatItem, MemberItem, MessageItem, PinnedItem, PollOption, SilencedCall,
-    ReactionItem, ReactionTab, StarredItem, StickerCell,
+    AccountItem, AppWindow, CallItem, ChatItem, MemberItem, MessageItem, PinnedItem, PollOption,
+    ReactionItem, ReactionTab, SilencedCall, StarredItem, StickerCell,
 };
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
@@ -15,17 +15,28 @@ fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
 }
 
 fn strings(items: &[String]) -> ModelRc<SharedString> {
-    model(items.iter().map(|s| SharedString::from(s.as_str())).collect())
+    model(
+        items
+            .iter()
+            .map(|s| SharedString::from(s.as_str()))
+            .collect(),
+    )
 }
 
 // Same spreading as the app's own avatar colours, over a fake id.
 fn color_idx(id: &str) -> i32 {
-    let sum = id.encode_utf16().fold(0i32, |h, u| h.wrapping_add(u as i32));
+    let sum = id
+        .encode_utf16()
+        .fold(0i32, |h, u| h.wrapping_add(u as i32));
     sum.abs() % 8
 }
 
 fn initial(name: &str) -> SharedString {
-    name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into()
+    name.chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_default()
+        .into()
 }
 
 struct Person {
@@ -35,13 +46,48 @@ struct Person {
     photo: bool,
 }
 
-const HELENA: Person = Person { id: "demo-helena", name: "Helena Park", seed: 11, photo: true };
-const THEO: Person = Person { id: "demo-theo", name: "Theo Marques", seed: 23, photo: true };
-const NINA: Person = Person { id: "demo-nina", name: "Nina Okafor", seed: 37, photo: true };
-const OMAR: Person = Person { id: "demo-omar", name: "Omar Haddad", seed: 41, photo: false };
-const IVY: Person = Person { id: "demo-ivy", name: "Ivy Lindqvist", seed: 53, photo: true };
-const RAUL: Person = Person { id: "demo-raul", name: "Raul Tanaka", seed: 67, photo: false };
-const SOFIA: Person = Person { id: "demo-sofia", name: "Sofia Bellini", seed: 71, photo: true };
+const HELENA: Person = Person {
+    id: "demo-helena",
+    name: "Helena Park",
+    seed: 11,
+    photo: true,
+};
+const THEO: Person = Person {
+    id: "demo-theo",
+    name: "Theo Marques",
+    seed: 23,
+    photo: true,
+};
+const NINA: Person = Person {
+    id: "demo-nina",
+    name: "Nina Okafor",
+    seed: 37,
+    photo: true,
+};
+const OMAR: Person = Person {
+    id: "demo-omar",
+    name: "Omar Haddad",
+    seed: 41,
+    photo: false,
+};
+const IVY: Person = Person {
+    id: "demo-ivy",
+    name: "Ivy Lindqvist",
+    seed: 53,
+    photo: true,
+};
+const RAUL: Person = Person {
+    id: "demo-raul",
+    name: "Raul Tanaka",
+    seed: 67,
+    photo: false,
+};
+const SOFIA: Person = Person {
+    id: "demo-sofia",
+    name: "Sofia Bellini",
+    seed: 71,
+    photo: true,
+};
 
 fn face(person: &Person) -> (slint::Image, bool) {
     if person.photo {
@@ -79,7 +125,11 @@ impl Row<'_> {
             ticks: self.ticks.into(),
             ticksBlue: self.blue,
             time: self.time.into(),
-            avatar: if self.photo { art::avatar(self.seed) } else { slint::Image::default() },
+            avatar: if self.photo {
+                art::avatar(self.seed)
+            } else {
+                slint::Image::default()
+            },
             hasAvatar: self.photo,
             initial: initial(&self.name),
             colorIdx: color_idx(self.id),
@@ -87,12 +137,20 @@ impl Row<'_> {
             mentioned: self.mentioned,
             pinned: self.pinned,
             muted: self.muted,
-            silenced_call: self.id == "demo-group-hikers" && std::env::args().any(|a| a == "--demo-silenced"),
+            silenced_call: self.id == "demo-group-hikers"
+                && std::env::args().any(|a| a == "--demo-silenced"),
         }
     }
 }
 
-fn row<'a>(id: &'a str, name: &str, seed: u32, photo: bool, preview: &str, time: &'a str) -> Row<'a> {
+fn row<'a>(
+    id: &'a str,
+    name: &str,
+    seed: u32,
+    photo: bool,
+    preview: &str,
+    time: &'a str,
+) -> Row<'a> {
     Row {
         id,
         name: name.to_string(),
@@ -114,26 +172,165 @@ fn row<'a>(id: &'a str, name: &str, seed: u32, photo: bool, preview: &str, time:
 fn chat_list(en: bool, open_jid: &str) -> Vec<ChatItem> {
     let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
     let mut rows = vec![
-        Row { pinned: true, ticks: "✓✓", blue: true, ..row(HELENA.id, HELENA.name, HELENA.seed, true, &l("Sounds perfect, see you there!", "Combinado, te vejo lá!"), "09:41") },
-        Row { pinned: true, unread: 3, ..row("demo-group-hikers", "Sunday Hikers", 101, true, &l("Nina: Who is bringing the thermos?", "Nina: Quem leva a garrafa térmica?"), "09:12") },
-        Row { pinned: true, muted: true, ..row("demo-group-family", &l("Family 🏡", "Família 🏡"), 103, true, &l("Mom: Dinner is at 8", "Mãe: O jantar é às 20h"), "08:30") },
-        Row { unread: 2, mentioned: true, ..row("demo-group-design", "Design Crit", 107, true, &l("Theo: @you can you review the mocks?", "Theo: @você pode revisar os layouts?"), "Yesterday") },
-        Row { typing: true, ..row(THEO.id, THEO.name, THEO.seed, true, &t("presence.typing"), "09:38") },
-        Row { ticks: "✓✓", ..row(NINA.id, NINA.name, NINA.seed, true, &l("🎙 Voice message (0:23)", "🎙 Mensagem de voz (0:23)"), "Yesterday") },
-        Row { unread: 1, ..row(OMAR.id, OMAR.name, OMAR.seed, false, &l("📷 Photo", "📷 Foto"), "Yesterday") },
-        Row { draft: true, ..row(IVY.id, IVY.name, IVY.seed, true, &format!("{} {}", t("preview.draft"), l("Let me check and get back", "Vou ver e te respondo")), "Mon") },
-        Row { ticks: "✓", ..row(RAUL.id, RAUL.name, RAUL.seed, false, &l("The invoice is attached 📄", "Segue a fatura em anexo 📄"), "Mon") },
-        Row { muted: true, ..row("demo-group-book", "Book Club 📚", 109, true, &l("Sofia: Chapter 7 was wild", "Sofia: O capítulo 7 foi demais"), "Sun") },
-        row(SOFIA.id, SOFIA.name, SOFIA.seed, true, &l("Thanks again for the recipe!", "Obrigada de novo pela receita!"), "Sat"),
-        row("demo-group-trip", "Lisbon Trip ✈️", 113, true, &l("Ivy: Booked the apartment", "Ivy: Reservei o apartamento"), "Fri"),
+        Row {
+            pinned: true,
+            ticks: "✓✓",
+            blue: true,
+            ..row(
+                HELENA.id,
+                HELENA.name,
+                HELENA.seed,
+                true,
+                &l("Sounds perfect, see you there!", "Combinado, te vejo lá!"),
+                "09:41",
+            )
+        },
+        Row {
+            pinned: true,
+            unread: 3,
+            ..row(
+                "demo-group-hikers",
+                "Sunday Hikers",
+                101,
+                true,
+                &l(
+                    "Nina: Who is bringing the thermos?",
+                    "Nina: Quem leva a garrafa térmica?",
+                ),
+                "09:12",
+            )
+        },
+        Row {
+            pinned: true,
+            muted: true,
+            ..row(
+                "demo-group-family",
+                &l("Family 🏡", "Família 🏡"),
+                103,
+                true,
+                &l("Mom: Dinner is at 8", "Mãe: O jantar é às 20h"),
+                "08:30",
+            )
+        },
+        Row {
+            unread: 2,
+            mentioned: true,
+            ..row(
+                "demo-group-design",
+                "Design Crit",
+                107,
+                true,
+                &l(
+                    "Theo: @you can you review the mocks?",
+                    "Theo: @você pode revisar os layouts?",
+                ),
+                "Yesterday",
+            )
+        },
+        Row {
+            typing: true,
+            ..row(
+                THEO.id,
+                THEO.name,
+                THEO.seed,
+                true,
+                &t("presence.typing"),
+                "09:38",
+            )
+        },
+        Row {
+            ticks: "✓✓",
+            ..row(
+                NINA.id,
+                NINA.name,
+                NINA.seed,
+                true,
+                &l("🎙 Voice message (0:23)", "🎙 Mensagem de voz (0:23)"),
+                "Yesterday",
+            )
+        },
+        Row {
+            unread: 1,
+            ..row(
+                OMAR.id,
+                OMAR.name,
+                OMAR.seed,
+                false,
+                &l("📷 Photo", "📷 Foto"),
+                "Yesterday",
+            )
+        },
+        Row {
+            draft: true,
+            ..row(
+                IVY.id,
+                IVY.name,
+                IVY.seed,
+                true,
+                &format!(
+                    "{} {}",
+                    t("preview.draft"),
+                    l("Let me check and get back", "Vou ver e te respondo")
+                ),
+                "Mon",
+            )
+        },
+        Row {
+            ticks: "✓",
+            ..row(
+                RAUL.id,
+                RAUL.name,
+                RAUL.seed,
+                false,
+                &l("The invoice is attached 📄", "Segue a fatura em anexo 📄"),
+                "Mon",
+            )
+        },
+        Row {
+            muted: true,
+            ..row(
+                "demo-group-book",
+                "Book Club 📚",
+                109,
+                true,
+                &l(
+                    "Sofia: Chapter 7 was wild",
+                    "Sofia: O capítulo 7 foi demais",
+                ),
+                "Sun",
+            )
+        },
+        row(
+            SOFIA.id,
+            SOFIA.name,
+            SOFIA.seed,
+            true,
+            &l(
+                "Thanks again for the recipe!",
+                "Obrigada de novo pela receita!",
+            ),
+            "Sat",
+        ),
+        row(
+            "demo-group-trip",
+            "Lisbon Trip ✈️",
+            113,
+            true,
+            &l("Ivy: Booked the apartment", "Ivy: Reservei o apartamento"),
+            "Fri",
+        ),
     ];
     let _ = open_jid;
-    rows.iter_mut().for_each(|r| r.preview = r.preview.replace('\n', " "));
+    rows.iter_mut()
+        .for_each(|r| r.preview = r.preview.replace('\n', " "));
     rows.into_iter().map(Row::item).collect()
 }
 
 fn base_message() -> MessageItem {
-    MessageItem { mediaProgress: -1.0, ..Default::default() }
+    MessageItem {
+        mediaProgress: -1.0,
+        ..Default::default()
+    }
 }
 
 struct Msg {
@@ -233,7 +430,13 @@ impl Msg {
         self
     }
 
-    fn poll(mut self, question: &str, options: &[(&str, i32, bool, &str)], multi: bool, total: i32) -> Msg {
+    fn poll(
+        mut self,
+        question: &str,
+        options: &[(&str, i32, bool, &str)],
+        multi: bool,
+        total: i32,
+    ) -> Msg {
         self.inner.cardKind = "poll".into();
         self.inner.cardTitle = question.into();
         self.inner.poll_options = model(
@@ -273,15 +476,108 @@ fn dm_messages(en: bool) -> Vec<MessageItem> {
     let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
     let today = t("day.today");
     let mut v = vec![
-        Msg::text("m1", &l("Morning! Are we still on for the trail this weekend?", "Bom dia! Ainda vamos na trilha neste fim de semana?"), "09:02", false).first().day(&today),
-        Msg::text("m2", &l("Yes! The forecast looks great ☀️", "Vamos! A previsão está ótima ☀️"), "09:04", true).first().ticks("✓✓", true).react("👍", "").pinned(),
-        Msg::text("m4", &l("Sunrise from the ridge. Worth the 5 am alarm.", "Nascer do sol na crista. Valeu acordar às 5h."), "09:06", true).image(4, 330, 190).ticks("✓✓", true).react("❤️🔥", "2"),
-        Msg::text("m5", &l("Wow, that is unreal 😍", "Uau, isso é surreal 😍"), "09:08", false).first().react("😮", ""),
+        Msg::text(
+            "m1",
+            &l(
+                "Morning! Are we still on for the trail this weekend?",
+                "Bom dia! Ainda vamos na trilha neste fim de semana?",
+            ),
+            "09:02",
+            false,
+        )
+        .first()
+        .day(&today),
+        Msg::text(
+            "m2",
+            &l(
+                "Yes! The forecast looks great ☀️",
+                "Vamos! A previsão está ótima ☀️",
+            ),
+            "09:04",
+            true,
+        )
+        .first()
+        .ticks("✓✓", true)
+        .react("👍", "")
+        .pinned(),
+        Msg::text(
+            "m4",
+            &l(
+                "Sunrise from the ridge. Worth the 5 am alarm.",
+                "Nascer do sol na crista. Valeu acordar às 5h.",
+            ),
+            "09:06",
+            true,
+        )
+        .image(4, 330, 190)
+        .ticks("✓✓", true)
+        .react("❤️🔥", "2"),
+        Msg::text(
+            "m5",
+            &l("Wow, that is unreal 😍", "Uau, isso é surreal 😍"),
+            "09:08",
+            false,
+        )
+        .first()
+        .react("😮", ""),
         Msg::text("m6", "", "09:10", false).voice(&HELENA, "0:23", 8, 0.42),
-        Msg::text("m7", &l("Here is the route and the packing list", "Segue o roteiro e a lista de itens"), "09:14", true).first().document(&l("trail-route-and-packing.pdf", "roteiro-e-itens-da-trilha.pdf"), "PDF", "1.2 MB").ticks("✓✓", false).pinned().starred(),
-        Msg::text("m8", &l("Perfect. Should I bring the tent too?", "Perfeito. Levo a barraca também?"), "09:30", false).first().reply(&t("reactions.you"), &l("Here is the route and the packing list", "Segue o roteiro e a lista de itens")),
-        Msg::text("m9", &l("Just the small one. We will camp near the lake.", "Só a pequena. Vamos acampar perto do lago."), "09:39", true).first().ticks("✓✓", true),
-        Msg::text("m10", &l("Sounds perfect, see you there!", "Combinado, te vejo lá!"), "09:41", false).first().starred(),
+        Msg::text(
+            "m7",
+            &l(
+                "Here is the route and the packing list",
+                "Segue o roteiro e a lista de itens",
+            ),
+            "09:14",
+            true,
+        )
+        .first()
+        .document(
+            &l(
+                "trail-route-and-packing.pdf",
+                "roteiro-e-itens-da-trilha.pdf",
+            ),
+            "PDF",
+            "1.2 MB",
+        )
+        .ticks("✓✓", false)
+        .pinned()
+        .starred(),
+        Msg::text(
+            "m8",
+            &l(
+                "Perfect. Should I bring the tent too?",
+                "Perfeito. Levo a barraca também?",
+            ),
+            "09:30",
+            false,
+        )
+        .first()
+        .reply(
+            &t("reactions.you"),
+            &l(
+                "Here is the route and the packing list",
+                "Segue o roteiro e a lista de itens",
+            ),
+        ),
+        Msg::text(
+            "m9",
+            &l(
+                "Just the small one. We will camp near the lake.",
+                "Só a pequena. Vamos acampar perto do lago.",
+            ),
+            "09:39",
+            true,
+        )
+        .first()
+        .ticks("✓✓", true),
+        Msg::text(
+            "m10",
+            &l("Sounds perfect, see you there!", "Combinado, te vejo lá!"),
+            "09:41",
+            false,
+        )
+        .first()
+        .starred(),
     ];
     for m in &mut v {
         if m.inner.fromMe && m.inner.firstOfRun {
@@ -295,20 +591,91 @@ fn group_messages(en: bool) -> Vec<MessageItem> {
     let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
     let today = t("day.today");
     let v = vec![
-        Msg::text("g1", &l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto."), "08:50", false).from(&NINA, true).first().day(&today).pinned().starred(),
-        Msg::text("g2", &l("I will bring maps and snacks 🥜", "Levo mapas e lanches 🥜"), "08:52", false).from(&THEO, true).first(),
-        Msg::text("g3", &l("Count me in!", "Podem contar comigo!"), "08:55", false).from(&HELENA, true).first().react("🙌", ""),
-        Msg::text("g4", "", "09:01", false).voice(&NINA, "0:23", 21, 0.0).from(&NINA, true).first(),
-        Msg::text("g5", &l("Last month's summit view, for motivation", "A vista do cume do mês passado, pra motivar"), "09:05", false).from(&IVY, true).first().image(6, 330, 190).react("😍🔥👏", "5").starred(),
-        Msg::text("g6", &l("Who is bringing the thermos?", "Quem leva a garrafa térmica?"), "09:12", false).from(&NINA, true).first().reply(&l("Theo Marques", "Theo Marques"), &l("I will bring maps and snacks 🥜", "Levo mapas e lanches 🥜")),
+        Msg::text(
+            "g1",
+            &l(
+                "Meeting point is the old bridge, 7:30 sharp.",
+                "Ponto de encontro na ponte velha, 7h30 em ponto.",
+            ),
+            "08:50",
+            false,
+        )
+        .from(&NINA, true)
+        .first()
+        .day(&today)
+        .pinned()
+        .starred(),
+        Msg::text(
+            "g2",
+            &l("I will bring maps and snacks 🥜", "Levo mapas e lanches 🥜"),
+            "08:52",
+            false,
+        )
+        .from(&THEO, true)
+        .first(),
+        Msg::text(
+            "g3",
+            &l("Count me in!", "Podem contar comigo!"),
+            "08:55",
+            false,
+        )
+        .from(&HELENA, true)
+        .first()
+        .react("🙌", ""),
+        Msg::text("g4", "", "09:01", false)
+            .voice(&NINA, "0:23", 21, 0.0)
+            .from(&NINA, true)
+            .first(),
+        Msg::text(
+            "g5",
+            &l(
+                "Last month's summit view, for motivation",
+                "A vista do cume do mês passado, pra motivar",
+            ),
+            "09:05",
+            false,
+        )
+        .from(&IVY, true)
+        .first()
+        .image(6, 330, 190)
+        .react("😍🔥👏", "5")
+        .starred(),
+        Msg::text(
+            "g6",
+            &l(
+                "Who is bringing the thermos?",
+                "Quem leva a garrafa térmica?",
+            ),
+            "09:12",
+            false,
+        )
+        .from(&NINA, true)
+        .first()
+        .reply(
+            &l("Theo Marques", "Theo Marques"),
+            &l("I will bring maps and snacks 🥜", "Levo mapas e lanches 🥜"),
+        ),
         Msg::text("g7", "", "09:20", false)
             .poll(
-                &l("Which trail next Sunday?", "Qual trilha no próximo domingo?"),
+                &l(
+                    "Which trail next Sunday?",
+                    "Qual trilha no próximo domingo?",
+                ),
                 &[
                     ("Eagle Ridge", 6, true, "Nina, Theo, Ivy, Helena, Omar, You"),
-                    (&l("Cedar Falls", "Cachoeira do Cedro"), 4, true, "Nina, Ivy, Raul, You"),
+                    (
+                        &l("Cedar Falls", "Cachoeira do Cedro"),
+                        4,
+                        true,
+                        "Nina, Ivy, Raul, You",
+                    ),
                     (&l("Lake Loop", "Volta do Lago"), 2, false, "Theo, Sofia"),
-                    (&l("Skip it, brunch instead", "Pular e fazer um brunch"), 1, false, "Omar"),
+                    (
+                        &l("Skip it, brunch instead", "Pular e fazer um brunch"),
+                        1,
+                        false,
+                        "Omar",
+                    ),
                 ],
                 true,
                 8,
@@ -359,35 +726,121 @@ fn pinned_items(en: bool, group: bool) -> Vec<PinnedItem> {
     };
     if group {
         vec![
-            item("g1", NINA.name, l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto.")),
-            item("g7", THEO.name, l("📊 Which trail next Sunday?", "📊 Qual trilha no próximo domingo?")),
+            item(
+                "g1",
+                NINA.name,
+                l(
+                    "Meeting point is the old bridge, 7:30 sharp.",
+                    "Ponto de encontro na ponte velha, 7h30 em ponto.",
+                ),
+            ),
+            item(
+                "g7",
+                THEO.name,
+                l(
+                    "📊 Which trail next Sunday?",
+                    "📊 Qual trilha no próximo domingo?",
+                ),
+            ),
         ]
     } else {
         vec![
-            item("m2", &t("reactions.you"), l("Yes! The forecast looks great ☀️", "Vamos! A previsão está ótima ☀️")),
-            item("m7", &t("reactions.you"), l("📄 trail-route-and-packing.pdf", "📄 roteiro-e-itens-da-trilha.pdf")),
+            item(
+                "m2",
+                &t("reactions.you"),
+                l(
+                    "Yes! The forecast looks great ☀️",
+                    "Vamos! A previsão está ótima ☀️",
+                ),
+            ),
+            item(
+                "m7",
+                &t("reactions.you"),
+                l(
+                    "📄 trail-route-and-packing.pdf",
+                    "📄 roteiro-e-itens-da-trilha.pdf",
+                ),
+            ),
         ]
     }
 }
 
 fn starred_items(en: bool) -> Vec<StarredItem> {
     let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
-    let item = |jid: &str, id: &str, chat: &str, who: &Person, text: String, time: &str| StarredItem {
-        jid: jid.into(),
-        msg_id: id.into(),
-        chat_name: chat.into(),
-        sender: who.name.into(),
-        text: text.into(),
-        time: time.into(),
-        avatar: art::avatar(who.seed),
-    };
+    let item =
+        |jid: &str, id: &str, chat: &str, who: &Person, text: String, time: &str| StarredItem {
+            jid: jid.into(),
+            msg_id: id.into(),
+            chat_name: chat.into(),
+            sender: who.name.into(),
+            text: text.into(),
+            time: time.into(),
+            avatar: art::avatar(who.seed),
+        };
     vec![
-        item(HELENA.id, "m10", HELENA.name, &HELENA, l("Sounds perfect, see you there!", "Combinado, te vejo lá!"), "09:41"),
-        item("demo-group-hikers", "g1", "Sunday Hikers", &NINA, l("Meeting point is the old bridge, 7:30 sharp.", "Ponto de encontro na ponte velha, 7h30 em ponto."), "08:50"),
-        item("demo-group-hikers", "g5", "Sunday Hikers", &IVY, l("Last month's summit view, for motivation", "A vista do cume do mês passado, pra motivar"), "09:05"),
-        item("demo-group-design", "d1", "Design Crit", &THEO, l("Final palette: teal 600, slate 900, warm sand.", "Paleta final: verde-azulado 600, ardósia 900, areia quente."), "Yesterday"),
-        item(RAUL.id, "r1", RAUL.name, &RAUL, l("Invoice #2043 is attached, due on the 15th.", "Fatura nº 2043 em anexo, vence no dia 15."), "Mon"),
-        item("demo-group-trip", "t1", "Lisbon Trip ✈️", &SOFIA, l("Apartment address: Rua das Flores 12, 3rd floor.", "Endereço do apartamento: Rua das Flores 12, 3º andar."), "Fri"),
+        item(
+            HELENA.id,
+            "m10",
+            HELENA.name,
+            &HELENA,
+            l("Sounds perfect, see you there!", "Combinado, te vejo lá!"),
+            "09:41",
+        ),
+        item(
+            "demo-group-hikers",
+            "g1",
+            "Sunday Hikers",
+            &NINA,
+            l(
+                "Meeting point is the old bridge, 7:30 sharp.",
+                "Ponto de encontro na ponte velha, 7h30 em ponto.",
+            ),
+            "08:50",
+        ),
+        item(
+            "demo-group-hikers",
+            "g5",
+            "Sunday Hikers",
+            &IVY,
+            l(
+                "Last month's summit view, for motivation",
+                "A vista do cume do mês passado, pra motivar",
+            ),
+            "09:05",
+        ),
+        item(
+            "demo-group-design",
+            "d1",
+            "Design Crit",
+            &THEO,
+            l(
+                "Final palette: teal 600, slate 900, warm sand.",
+                "Paleta final: verde-azulado 600, ardósia 900, areia quente.",
+            ),
+            "Yesterday",
+        ),
+        item(
+            RAUL.id,
+            "r1",
+            RAUL.name,
+            &RAUL,
+            l(
+                "Invoice #2043 is attached, due on the 15th.",
+                "Fatura nº 2043 em anexo, vence no dia 15.",
+            ),
+            "Mon",
+        ),
+        item(
+            "demo-group-trip",
+            "t1",
+            "Lisbon Trip ✈️",
+            &SOFIA,
+            l(
+                "Apartment address: Rua das Flores 12, 3rd floor.",
+                "Endereço do apartamento: Rua das Flores 12, 3º andar.",
+            ),
+            "Fri",
+        ),
     ]
 }
 
@@ -400,7 +853,14 @@ fn reaction_rows(en: bool) -> Vec<ReactionItem> {
         (NINA.id, NINA.name.to_string(), "🔥", NINA.seed, true, false),
         ("demo", me, "😍", 5, true, true),
         (THEO.id, THEO.name.to_string(), "👏", THEO.seed, true, false),
-        (OMAR.id, OMAR.name.to_string(), "🔥", OMAR.seed, false, false),
+        (
+            OMAR.id,
+            OMAR.name.to_string(),
+            "🔥",
+            OMAR.seed,
+            false,
+            false,
+        ),
     ]
     .into_iter()
     .map(|(id, name, emoji, seed, photo, own)| ReactionItem {
@@ -408,7 +868,11 @@ fn reaction_rows(en: bool) -> Vec<ReactionItem> {
         initial: initial(&name),
         name: name.into(),
         emoji: emoji.into(),
-        avatar: if photo { art::avatar(seed) } else { slint::Image::default() },
+        avatar: if photo {
+            art::avatar(seed)
+        } else {
+            slint::Image::default()
+        },
         hasAvatar: photo,
         colorIdx: color_idx(id),
         own,
@@ -418,34 +882,59 @@ fn reaction_rows(en: bool) -> Vec<ReactionItem> {
 
 fn reaction_tabs() -> Vec<ReactionTab> {
     vec![
-        ReactionTab { emoji: "😍".into(), count: 2 },
-        ReactionTab { emoji: "🔥".into(), count: 2 },
-        ReactionTab { emoji: "👏".into(), count: 1 },
+        ReactionTab {
+            emoji: "😍".into(),
+            count: 2,
+        },
+        ReactionTab {
+            emoji: "🔥".into(),
+            count: 2,
+        },
+        ReactionTab {
+            emoji: "👏".into(),
+            count: 1,
+        },
     ]
 }
 
 fn calls(en: bool) -> Vec<CallItem> {
     let l = |a: &str, b: &str| if en { a.to_string() } else { b.to_string() };
-    [(&HELENA, false, "12:04"), (&THEO, true, "Yesterday"), (&NINA, false, "Mon")]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (who, video, time))| {
-            let (avatar, has) = face(who);
-            CallItem {
-                id: format!("demo-call-{i}").into(),
-                from: who.id.into(),
-                name: who.name.into(),
-                detail: l(if video { "Video call · 14 min" } else { "Voice call · 3 min" }, if video { "Chamada de vídeo · 14 min" } else { "Chamada de voz · 3 min" }).into(),
-                time: time.into(),
-                avatar,
-                hasAvatar: has,
-                initial: initial(who.name),
-                colorIdx: color_idx(who.id),
-                video,
-                group: false,
-            }
-        })
-        .collect()
+    [
+        (&HELENA, false, "12:04"),
+        (&THEO, true, "Yesterday"),
+        (&NINA, false, "Mon"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (who, video, time))| {
+        let (avatar, has) = face(who);
+        CallItem {
+            id: format!("demo-call-{i}").into(),
+            from: who.id.into(),
+            name: who.name.into(),
+            detail: l(
+                if video {
+                    "Video call · 14 min"
+                } else {
+                    "Voice call · 3 min"
+                },
+                if video {
+                    "Chamada de vídeo · 14 min"
+                } else {
+                    "Chamada de voz · 3 min"
+                },
+            )
+            .into(),
+            time: time.into(),
+            avatar,
+            hasAvatar: has,
+            initial: initial(who.name),
+            colorIdx: color_idx(who.id),
+            video,
+            group: false,
+        }
+    })
+    .collect()
 }
 
 pub fn populate(ui: &AppWindow, en: bool, group: bool) {
@@ -458,7 +947,11 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
     ui.set_notify_previews(true);
     ui.set_message_sound(true);
 
-    let open_jid = if group { "demo-group-hikers" } else { HELENA.id };
+    let open_jid = if group {
+        "demo-group-hikers"
+    } else {
+        HELENA.id
+    };
     ui.set_chats(model(chat_list(en, open_jid)));
     ui.set_calls(model(calls(en)));
     ui.set_chats_unread_count(4);
@@ -500,7 +993,13 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
         ui.set_current_avatar_has(true);
         ui.set_current_initial("S".into());
         ui.set_current_color_idx(color_idx(open_jid));
-        ui.set_current_status(l("Helena, Theo, Nina, Ivy, You", "Helena, Theo, Nina, Ivy, Você").into());
+        ui.set_current_status(
+            l(
+                "Helena, Theo, Nina, Ivy, You",
+                "Helena, Theo, Nina, Ivy, Você",
+            )
+            .into(),
+        );
         ui.set_current_is_group(true);
         ui.set_current_callable(false);
         ui.set_messages(model(group_messages(en)));
@@ -508,7 +1007,13 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
 
         ui.set_info_name("Sunday Hikers".into());
         ui.set_info_id("".into());
-        ui.set_info_desc(l("Every Sunday, rain or shine. Bring water, good boots and a story to tell.", "Todo domingo, faça chuva ou sol. Leve água, bota boa e uma história pra contar.").into());
+        ui.set_info_desc(
+            l(
+                "Every Sunday, rain or shine. Bring water, good boots and a story to tell.",
+                "Todo domingo, faça chuva ou sol. Leve água, bota boa e uma história pra contar.",
+            )
+            .into(),
+        );
         ui.set_info_is_group(true);
         ui.set_info_members(ta("info.members", &["5"]).into());
         ui.set_info_avatar(avatar);
@@ -554,7 +1059,11 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
             id: "demo-call".into(),
             name: t("call.silenced.title").into(),
             kind: t("call.silenced.voice").into(),
-            caller: if group { NINA.name.into() } else { slint::SharedString::default() },
+            caller: if group {
+                NINA.name.into()
+            } else {
+                slint::SharedString::default()
+            },
             video: false,
             group,
             time: "09:47".into(),

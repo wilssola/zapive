@@ -27,7 +27,9 @@ pub fn chime_samples(rate: u32) -> Vec<f32> {
         let first = (start * rate as f32) as usize;
         let count = (length * rate as f32) as usize;
         for i in 0..count {
-            let Some(slot) = out.get_mut(first + i) else { break };
+            let Some(slot) = out.get_mut(first + i) else {
+                break;
+            };
             let t = i as f32 / rate as f32;
             let attack = (t / 0.006).min(1.0);
             let release = ((length - t) / 0.03).clamp(0.0, 1.0);
@@ -82,7 +84,9 @@ pub fn should_chime(ctx: &ChimeContext) -> bool {
 
 // Checks the burst gap and, when clear, arms it for the next call.
 fn throttled() -> bool {
-    let Ok(mut last) = LAST_PLAYED.lock() else { return true };
+    let Ok(mut last) = LAST_PLAYED.lock() else {
+        return true;
+    };
     let now = Instant::now();
     if last.is_some_and(|at| now.duration_since(at) < MIN_GAP) {
         return true;
@@ -92,7 +96,10 @@ fn throttled() -> bool {
 }
 
 pub fn since_last_chime() -> Option<Duration> {
-    LAST_PLAYED.lock().ok().and_then(|last| last.map(|at| at.elapsed()))
+    LAST_PLAYED
+        .lock()
+        .ok()
+        .and_then(|last| last.map(|at| at.elapsed()))
 }
 
 // Fire and forget: a failure (no output device, busy device) is silent.
@@ -101,34 +108,42 @@ pub fn play_message() {
     if throttled() {
         return;
     }
-    let _ = std::thread::Builder::new().name("message-sound".into()).spawn(|| {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-        let Some(device) = cpal::default_host().default_output_device() else { return };
-        let Ok(config) = device.default_output_config() else { return };
-        let rate = config.sample_rate().0;
-        let channels = config.channels() as usize;
-        let samples = chime_samples(rate.max(8_000));
-        let length = samples.len();
-        let mut cursor = 0usize;
-        let Ok(stream) = device.build_output_stream(
-            &config.config(),
-            move |out: &mut [f32], _| {
-                for frame in out.chunks_mut(channels) {
-                    let value = samples.get(cursor).copied().unwrap_or(0.0);
-                    cursor += 1;
-                    frame.fill(value);
-                }
-            },
-            |error| eprintln!("[sound] output stream error: {error}"),
-            None,
-        ) else {
-            return;
-        };
-        if stream.play().is_err() {
-            return;
-        }
-        std::thread::sleep(Duration::from_secs_f32(length as f32 / rate.max(8_000) as f32 + 0.25));
-    });
+    let _ = std::thread::Builder::new()
+        .name("message-sound".into())
+        .spawn(|| {
+            use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+            let Some(device) = cpal::default_host().default_output_device() else {
+                return;
+            };
+            let Ok(config) = device.default_output_config() else {
+                return;
+            };
+            let rate = config.sample_rate().0;
+            let channels = config.channels() as usize;
+            let samples = chime_samples(rate.max(8_000));
+            let length = samples.len();
+            let mut cursor = 0usize;
+            let Ok(stream) = device.build_output_stream(
+                &config.config(),
+                move |out: &mut [f32], _| {
+                    for frame in out.chunks_mut(channels) {
+                        let value = samples.get(cursor).copied().unwrap_or(0.0);
+                        cursor += 1;
+                        frame.fill(value);
+                    }
+                },
+                |error| eprintln!("[sound] output stream error: {error}"),
+                None,
+            ) else {
+                return;
+            };
+            if stream.play().is_err() {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs_f32(
+                length as f32 / rate.max(8_000) as f32 + 0.25,
+            ));
+        });
 }
 
 #[cfg(test)]
@@ -157,44 +172,99 @@ mod tests {
 
     #[test]
     fn respects_the_setting() {
-        assert!(!should_chime(&ChimeContext { setting_on: false, ..live() }));
+        assert!(!should_chime(&ChimeContext {
+            setting_on: false,
+            ..live()
+        }));
     }
 
     #[test]
     fn never_chimes_for_own_system_or_locked() {
-        assert!(!should_chime(&ChimeContext { from_me: true, ..live() }));
-        assert!(!should_chime(&ChimeContext { system_message: true, ..live() }));
-        assert!(!should_chime(&ChimeContext { vault_locked: true, ..live() }));
+        assert!(!should_chime(&ChimeContext {
+            from_me: true,
+            ..live()
+        }));
+        assert!(!should_chime(&ChimeContext {
+            system_message: true,
+            ..live()
+        }));
+        assert!(!should_chime(&ChimeContext {
+            vault_locked: true,
+            ..live()
+        }));
     }
 
     #[test]
     fn muted_chats_are_quiet_unless_mentioned() {
-        assert!(!should_chime(&ChimeContext { chat_muted: true, ..live() }));
-        assert!(should_chime(&ChimeContext { chat_muted: true, mentions_me: true, ..live() }));
+        assert!(!should_chime(&ChimeContext {
+            chat_muted: true,
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            chat_muted: true,
+            mentions_me: true,
+            ..live()
+        }));
     }
 
     #[test]
     fn backlog_and_history_are_quiet() {
-        assert!(should_chime(&ChimeContext { age_secs: Some(MAX_LIVE_AGE_SECS), ..live() }));
-        assert!(!should_chime(&ChimeContext { age_secs: Some(MAX_LIVE_AGE_SECS + 1), ..live() }));
-        assert!(!should_chime(&ChimeContext { age_secs: Some(86_400), ..live() }));
-        assert!(should_chime(&ChimeContext { age_secs: None, ..live() }));
-        assert!(should_chime(&ChimeContext { age_secs: Some(-5), ..live() }));
+        assert!(should_chime(&ChimeContext {
+            age_secs: Some(MAX_LIVE_AGE_SECS),
+            ..live()
+        }));
+        assert!(!should_chime(&ChimeContext {
+            age_secs: Some(MAX_LIVE_AGE_SECS + 1),
+            ..live()
+        }));
+        assert!(!should_chime(&ChimeContext {
+            age_secs: Some(86_400),
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            age_secs: None,
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            age_secs: Some(-5),
+            ..live()
+        }));
     }
 
     #[test]
     fn open_chat_is_quiet_only_while_the_window_is_focused() {
-        assert!(!should_chime(&ChimeContext { chat_open: true, window_focused: true, ..live() }));
-        assert!(should_chime(&ChimeContext { chat_open: true, window_focused: false, ..live() }));
-        assert!(should_chime(&ChimeContext { chat_open: false, window_focused: true, ..live() }));
+        assert!(!should_chime(&ChimeContext {
+            chat_open: true,
+            window_focused: true,
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            chat_open: true,
+            window_focused: false,
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            chat_open: false,
+            window_focused: true,
+            ..live()
+        }));
     }
 
     #[test]
     fn bursts_are_throttled() {
         let just_played = Some(MIN_GAP - Duration::from_millis(1));
-        assert!(!should_chime(&ChimeContext { since_last: just_played, ..live() }));
-        assert!(should_chime(&ChimeContext { since_last: Some(MIN_GAP), ..live() }));
-        assert!(should_chime(&ChimeContext { since_last: Some(Duration::from_secs(60)), ..live() }));
+        assert!(!should_chime(&ChimeContext {
+            since_last: just_played,
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            since_last: Some(MIN_GAP),
+            ..live()
+        }));
+        assert!(should_chime(&ChimeContext {
+            since_last: Some(Duration::from_secs(60)),
+            ..live()
+        }));
     }
     const SYNTH_RATE: u32 = 48_000;
 

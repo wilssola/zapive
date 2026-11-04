@@ -10,7 +10,10 @@ impl Bridge {
     // encrypted) vault, the on/off switch and port in plain settings.
     pub(super) fn load_mcp(&mut self) {
         self.mcp = None;
-        let enabled = self.vault.as_ref().is_some_and(|v| v.setting_get("mcp_enabled").as_deref() == Some("1"));
+        let enabled = self
+            .vault
+            .as_ref()
+            .is_some_and(|v| v.setting_get("mcp_enabled").as_deref() == Some("1"));
         self.ui.set_mcp_enabled(enabled);
         if enabled {
             self.start_mcp();
@@ -60,18 +63,23 @@ impl Bridge {
     }
 
     fn store_mcp_token(&mut self, token: &str) -> bool {
-        let Some(vault) = &self.vault else { return false };
+        let Some(vault) = &self.vault else {
+            return false;
+        };
         match vault.set_checked(TOKEN_KEY, token) {
             Ok(()) => true,
             Err(e) => {
-                self.ui.set_mcp_status(ta("settings.mcp.status_error", &[&e]).into());
+                self.ui
+                    .set_mcp_status(ta("settings.mcp.status_error", &[&e]).into());
                 false
             }
         }
     }
 
     fn start_mcp(&mut self) {
-        let Some(token) = self.mcp_token() else { return };
+        let Some(token) = self.mcp_token() else {
+            return;
+        };
         let Some(rt) = crate::RT.get() else { return };
         let port = self
             .vault
@@ -90,19 +98,22 @@ impl Bridge {
                     vault.setting_set("mcp_port", bound.trim_end_matches("/mcp"));
                 }
                 self.ui.set_mcp_url(url.as_str().into());
-                self.ui.set_mcp_status(ta("settings.mcp.status_running", &[&url]).into());
+                self.ui
+                    .set_mcp_status(ta("settings.mcp.status_running", &[&url]).into());
                 self.mcp = Some(server);
             }
             Err(e) => {
                 self.ui.set_mcp_url("".into());
-                self.ui.set_mcp_status(ta("settings.mcp.status_error", &[&e]).into());
+                self.ui
+                    .set_mcp_status(ta("settings.mcp.status_error", &[&e]).into());
             }
         }
     }
 
     fn show_mcp_stopped(&mut self) {
         self.ui.set_mcp_url("".into());
-        self.ui.set_mcp_status(t("settings.mcp.status_stopped").into());
+        self.ui
+            .set_mcp_status(t("settings.mcp.status_stopped").into());
     }
 
     // ---- tool calls (from crate::mcp, through ui_apply) ----
@@ -119,12 +130,28 @@ impl Bridge {
         }
         match call {
             Call::ListChats { query, limit } => Ok(self.mcp_list_chats(query.as_deref(), limit)),
-            Call::ReadMessages { chat_id, limit, before } => self.mcp_read(&chat_id, limit, before.as_deref()),
-            Call::SearchMessages { query, chat_id, limit } => self.mcp_search(&query, chat_id.as_deref(), limit),
+            Call::ReadMessages {
+                chat_id,
+                limit,
+                before,
+            } => self.mcp_read(&chat_id, limit, before.as_deref()),
+            Call::SearchMessages {
+                query,
+                chat_id,
+                limit,
+            } => self.mcp_search(&query, chat_id.as_deref(), limit),
             Call::GetChatInfo { chat_id } => self.mcp_chat_info(&chat_id),
-            Call::SendMessage { chat_id, text, reply_to } => self.mcp_send(&chat_id, text, reply_to.as_deref()),
+            Call::SendMessage {
+                chat_id,
+                text,
+                reply_to,
+            } => self.mcp_send(&chat_id, text, reply_to.as_deref()),
             Call::MarkAsRead { chat_id } => self.mcp_mark_read(&chat_id),
-            Call::React { chat_id, message_id, emoji } => self.mcp_react(&chat_id, &message_id, &emoji),
+            Call::React {
+                chat_id,
+                message_id,
+                emoji,
+            } => self.mcp_react(&chat_id, &message_id, &emoji),
         }
     }
 
@@ -133,7 +160,9 @@ impl Bridge {
         if self.store.chats.contains_key(&jid) {
             Ok(jid)
         } else {
-            Err(format!("Unknown chat_id '{chat_id}'. Use list_chats to find one."))
+            Err(format!(
+                "Unknown chat_id '{chat_id}'. Use list_chats to find one."
+            ))
         }
     }
 
@@ -203,7 +232,11 @@ impl Bridge {
         let text = if m.deleted || m.revoked {
             String::new()
         } else if m.text.is_empty() || m.kind != MessageKind::Text {
-            if m.text.is_empty() { preview_body(m) } else { format!("[{}] {}", preview_body(m), m.text) }
+            if m.text.is_empty() {
+                preview_body(m)
+            } else {
+                format!("[{}] {}", preview_body(m), m.text)
+            }
         } else {
             m.text.clone()
         };
@@ -228,15 +261,25 @@ impl Bridge {
         value
     }
 
-    fn mcp_read(&mut self, chat_id: &str, limit: usize, before: Option<&str>) -> Result<Value, String> {
+    fn mcp_read(
+        &mut self,
+        chat_id: &str,
+        limit: usize,
+        before: Option<&str>,
+    ) -> Result<Value, String> {
         let jid = self.mcp_chat(chat_id)?;
         let cursor = match before {
             Some(id) => Some((self.mcp_message(&jid, id)?.timestamp, id.to_string())),
             None => None,
         };
         let vault = self.vault.as_ref().ok_or("Zapive is locked.")?;
-        let disk = vault.history_page(&jid, cursor.as_ref().map(|(ts, id)| (*ts, id.as_str())), limit)?;
-        let mut by_id: HashMap<String, StoredMessage> = disk.into_iter().map(|m| (m.id.clone(), m)).collect();
+        let disk = vault.history_page(
+            &jid,
+            cursor.as_ref().map(|(ts, id)| (*ts, id.as_str())),
+            limit,
+        )?;
+        let mut by_id: HashMap<String, StoredMessage> =
+            disk.into_iter().map(|m| (m.id.clone(), m)).collect();
         // Live rows not flushed to the vault yet win over their stored copy.
         for m in self.store.messages_for(&jid) {
             by_id.insert(m.id.clone(), m.clone());
@@ -244,11 +287,18 @@ impl Bridge {
         let mut list: Vec<StoredMessage> = by_id
             .into_values()
             .filter(|m| m.kind != MessageKind::System || !m.text.is_empty())
-            .filter(|m| cursor.as_ref().is_none_or(|(ts, id)| (m.timestamp, m.id.as_str()) < (*ts, id.as_str())))
+            .filter(|m| {
+                cursor
+                    .as_ref()
+                    .is_none_or(|(ts, id)| (m.timestamp, m.id.as_str()) < (*ts, id.as_str()))
+            })
             .collect();
         list.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
         let skip = list.len().saturating_sub(limit);
-        let messages: Vec<Value> = list[skip..].iter().map(|m| self.mcp_message_json(m)).collect();
+        let messages: Vec<Value> = list[skip..]
+            .iter()
+            .map(|m| self.mcp_message_json(m))
+            .collect();
         Ok(json!({
             "chat_id": jid,
             "name": self.store.chat_name(&jid),
@@ -257,7 +307,12 @@ impl Bridge {
         }))
     }
 
-    fn mcp_search(&mut self, query: &str, chat_id: Option<&str>, limit: usize) -> Result<Value, String> {
+    fn mcp_search(
+        &mut self,
+        query: &str,
+        chat_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Value, String> {
         let jid = chat_id.map(|id| self.mcp_chat(id)).transpose()?;
         let hits: Vec<Value> = self
             .store
@@ -298,7 +353,8 @@ impl Bridge {
             "disappearing_seconds": meta.ephemeral,
         });
         if !meta.community.is_empty() {
-            value["community"] = json!({ "chat_id": meta.community, "name": self.store.chat_name(&meta.community) });
+            value["community"] =
+                json!({ "chat_id": meta.community, "name": self.store.chat_name(&meta.community) });
         }
         if is_group(&jid) {
             let members: Vec<Value> = self
@@ -307,7 +363,11 @@ impl Bridge {
                 .iter()
                 .take(1024)
                 .map(|m| {
-                    let name = if m.name.is_empty() { self.store.chat_name(&self.store.canon_owned(&m.jid)) } else { m.name.clone() };
+                    let name = if m.name.is_empty() {
+                        self.store.chat_name(&self.store.canon_owned(&m.jid))
+                    } else {
+                        m.name.clone()
+                    };
                     json!({ "id": m.jid, "name": name, "admin": m.admin })
                 })
                 .collect();
@@ -318,10 +378,18 @@ impl Bridge {
         Ok(value)
     }
 
-    fn mcp_send(&mut self, chat_id: &str, text: String, reply_to: Option<&str>) -> Result<Value, String> {
+    fn mcp_send(
+        &mut self,
+        chat_id: &str,
+        text: String,
+        reply_to: Option<&str>,
+    ) -> Result<Value, String> {
         let jid = self.mcp_chat(chat_id)?;
         if !self.store.chats[&jid].can_send() {
-            return Err("Messages cannot be sent to this chat (left the group, or only admins can send).".into());
+            return Err(
+                "Messages cannot be sent to this chat (left the group, or only admins can send)."
+                    .into(),
+            );
         }
         let quote = match reply_to {
             Some(id) => {
@@ -330,13 +398,22 @@ impl Bridge {
                 Some(QuoteRef {
                     id: m.id.clone(),
                     chat_jid: m.jid.clone(),
-                    sender_jid: if m.from_me { self.self_jid.clone() } else { m.sender_jid.clone() },
+                    sender_jid: if m.from_me {
+                        self.self_jid.clone()
+                    } else {
+                        m.sender_jid.clone()
+                    },
                     message: raw,
                 })
             }
             None => None,
         };
-        let known: HashSet<String> = self.store.messages_for(&jid).iter().map(|m| m.id.clone()).collect();
+        let known: HashSet<String> = self
+            .store
+            .messages_for(&jid)
+            .iter()
+            .map(|m| m.id.clone())
+            .collect();
         let message = crate::wa::build_text(&jid, text, &quote, Vec::new(), None);
         if !self.enqueue_prepared(&jid, message, None) {
             return Err("The message could not be queued (storage failed).".into());

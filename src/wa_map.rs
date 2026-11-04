@@ -1,11 +1,11 @@
 // wa::Message -> StoredMessage normalization: the getContentType half of
 // store.ts normalize() on master, shared by the live path (InboundMessage)
 // and the history-sync path (WebMessageInfo).
-use crate::store::{
-    MessageKind, Store, StoredMessage, clean_text, display_id, format_duration,
-    is_displayable_jid, normalize_jid, quoted_summary,
-};
 use crate::i18n::{t, ta, tp};
+use crate::store::{
+    MessageKind, Store, StoredMessage, clean_text, display_id, format_duration, is_displayable_jid,
+    normalize_jid, quoted_summary,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use whatsapp_rust::types::events::InboundMessage;
@@ -43,10 +43,22 @@ fn context_of(content: &wa::Message) -> Option<&wa::ContextInfo> {
                 && let Some(ci) = inner.context_info.as_option() { return Some(ci); })*
         };
     }
-    ctx!(image_message, video_message, audio_message, document_message, sticker_message,
-        contact_message, contacts_array_message, location_message, live_location_message,
-        poll_creation_message, poll_creation_message_v2, poll_creation_message_v3,
-        poll_creation_message_v5, poll_creation_message_v6);
+    ctx!(
+        image_message,
+        video_message,
+        audio_message,
+        document_message,
+        sticker_message,
+        contact_message,
+        contacts_array_message,
+        location_message,
+        live_location_message,
+        poll_creation_message,
+        poll_creation_message_v2,
+        poll_creation_message_v3,
+        poll_creation_message_v5,
+        poll_creation_message_v6
+    );
     None
 }
 
@@ -60,15 +72,42 @@ fn display_content(message: &wa::Message) -> Option<&wa::Message> {
             || current.video_message.as_option().and_then(|m| m.view_once) == Some(true)
             || current.ptv_message.as_option().and_then(|m| m.view_once) == Some(true)
             || current.audio_message.as_option().and_then(|m| m.view_once) == Some(true)
-            || current.extended_text_message.as_option().and_then(|m| m.view_once) == Some(true)
+            || current
+                .extended_text_message
+                .as_option()
+                .and_then(|m| m.view_once)
+                == Some(true)
         {
             return None;
         }
-        let next = current.device_sent_message.as_option().and_then(|m| m.message.as_option())
-            .or_else(|| current.ephemeral_message.as_option().and_then(|m| m.message.as_option()))
-            .or_else(|| current.document_with_caption_message.as_option().and_then(|m| m.message.as_option()))
-            .or_else(|| current.edited_message.as_option().and_then(|m| m.message.as_option()))
-            .or_else(|| current.poll_creation_message_v4.as_option().and_then(|m| m.message.as_option()));
+        let next = current
+            .device_sent_message
+            .as_option()
+            .and_then(|m| m.message.as_option())
+            .or_else(|| {
+                current
+                    .ephemeral_message
+                    .as_option()
+                    .and_then(|m| m.message.as_option())
+            })
+            .or_else(|| {
+                current
+                    .document_with_caption_message
+                    .as_option()
+                    .and_then(|m| m.message.as_option())
+            })
+            .or_else(|| {
+                current
+                    .edited_message
+                    .as_option()
+                    .and_then(|m| m.message.as_option())
+            })
+            .or_else(|| {
+                current
+                    .poll_creation_message_v4
+                    .as_option()
+                    .and_then(|m| m.message.as_option())
+            });
         match next {
             Some(inner) => current = inner,
             None => return Some(current),
@@ -78,15 +117,29 @@ fn display_content(message: &wa::Message) -> Option<&wa::Message> {
 }
 
 fn card_text(value: &str) -> String {
-    clean_text(value).chars().filter(|c| !c.is_control()).take(2048).collect::<String>().trim().to_string()
+    clean_text(value)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(2048)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn contact_parts(contact: &wa::message::ContactMessage) -> (String, Vec<String>) {
     let mut name = card_text(contact.display_name.as_deref().unwrap_or(""));
     let mut phones = Vec::new();
     for line in contact.vcard.as_deref().unwrap_or("").lines().take(512) {
-        let Some((key, value)) = line.split_once(':') else { continue };
-        let property = key.split(';').next().unwrap_or("").rsplit('.').next().unwrap_or("");
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let property = key
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .rsplit('.')
+            .next()
+            .unwrap_or("");
         if property.eq_ignore_ascii_case("FN") && name.is_empty() {
             name = card_text(value);
         }
@@ -95,7 +148,9 @@ fn contact_parts(contact: &wa::message::ContactMessage) -> (String, Vec<String>)
             let value = value.strip_prefix("tel:").unwrap_or(value);
             if value.len() <= 64
                 && value.chars().any(|c| c.is_ascii_digit())
-                && value.chars().all(|c| c.is_ascii_digit() || matches!(c, '+' | ' ' | '-' | '(' | ')' | '.'))
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '+' | ' ' | '-' | '(' | ')' | '.'))
                 && !phones.iter().any(|p| p == value)
             {
                 phones.push(value.to_string());
@@ -108,19 +163,34 @@ fn contact_parts(contact: &wa::message::ContactMessage) -> (String, Vec<String>)
 fn contact_card(contact: &wa::message::ContactMessage) -> String {
     let (name, phones) = contact_parts(contact);
     let mut lines = vec![t("compat.contact")];
-    if !name.is_empty() { lines.push(name); }
+    if !name.is_empty() {
+        lines.push(name);
+    }
     lines.extend(phones);
     lines.join("\n")
 }
 
 fn location_card(lat: Option<f64>, lon: Option<f64>, live: bool, details: &[&str]) -> String {
-    let mut lines = vec![t(if live { "compat.live_location" } else { "compat.location" })];
-    lines.extend(details.iter().map(|s| card_text(s)).filter(|s| !s.is_empty()));
+    let mut lines = vec![t(if live {
+        "compat.live_location"
+    } else {
+        "compat.location"
+    })];
+    lines.extend(
+        details
+            .iter()
+            .map(|s| card_text(s))
+            .filter(|s| !s.is_empty()),
+    );
     match (lat, lon) {
-        (Some(lat), Some(lon)) if lat.is_finite() && lon.is_finite()
-            && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) => {
-                lines.push(format!("{lat:.6}, {lon:.6}"));
-            }
+        (Some(lat), Some(lon))
+            if lat.is_finite()
+                && lon.is_finite()
+                && (-90.0..=90.0).contains(&lat)
+                && (-180.0..=180.0).contains(&lon) =>
+        {
+            lines.push(format!("{lat:.6}, {lon:.6}"));
+        }
         _ => lines.push(t("compat.invalid_location")),
     }
     lines.join("\n")
@@ -137,7 +207,12 @@ pub struct SpecialCard<'a> {
 }
 
 fn titled_card(kind: &'static str, title: &str, body: &str) -> SpecialCard<'static> {
-    SpecialCard { kind, title: t(title), body: t(body), ..Default::default() }
+    SpecialCard {
+        kind,
+        title: t(title),
+        body: t(body),
+        ..Default::default()
+    }
 }
 
 pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
@@ -160,28 +235,62 @@ pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
         let (name, phones) = contact_parts(contact);
         return SpecialCard {
             kind: "contact",
-            title: if name.is_empty() { t("compat.contact") } else { name },
+            title: if name.is_empty() {
+                t("compat.contact")
+            } else {
+                name
+            },
             body: phones.join("\n"),
             ..Default::default()
         };
     }
     if let Some(contacts) = content.contacts_array_message.as_option() {
-        let body = contacts.contacts.iter().take(256).map(|contact| {
-            let (name, phones) = contact_parts(contact);
-            let mut lines = vec![if name.is_empty() { t("compat.contact") } else { name }];
-            lines.extend(phones);
-            lines.join("\n")
-        }).collect::<Vec<_>>().join("\n\n");
-        return SpecialCard { kind: "contact", title: t("card.contacts"), body, ..Default::default() };
+        let body = contacts
+            .contacts
+            .iter()
+            .take(256)
+            .map(|contact| {
+                let (name, phones) = contact_parts(contact);
+                let mut lines = vec![if name.is_empty() {
+                    t("compat.contact")
+                } else {
+                    name
+                }];
+                lines.extend(phones);
+                lines.join("\n")
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        return SpecialCard {
+            kind: "contact",
+            title: t("card.contacts"),
+            body,
+            ..Default::default()
+        };
     }
     if let Some(loc) = content.location_message.as_option() {
         let live = loc.is_live.unwrap_or(false);
         let name = card_text(loc.name.as_deref().unwrap_or(""));
-        let body = [loc.address.as_deref().unwrap_or(""), loc.comment.as_deref().unwrap_or("")]
-            .into_iter().map(card_text).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+        let body = [
+            loc.address.as_deref().unwrap_or(""),
+            loc.comment.as_deref().unwrap_or(""),
+        ]
+        .into_iter()
+        .map(card_text)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
         return SpecialCard {
             kind: if live { "live-location" } else { "location" },
-            title: if name.is_empty() { t(if live { "card.live_location" } else { "compat.location" }) } else { name },
+            title: if name.is_empty() {
+                t(if live {
+                    "card.live_location"
+                } else {
+                    "compat.location"
+                })
+            } else {
+                name
+            },
             body,
             detail: coordinate_detail(loc.degrees_latitude, loc.degrees_longitude, live),
             thumbnail: loc.jpeg_thumbnail.as_deref(),
@@ -190,14 +299,17 @@ pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
     }
     if let Some(loc) = content.live_location_message.as_option() {
         return SpecialCard {
-            kind: "live-location", title: t("card.live_location"),
+            kind: "live-location",
+            title: t("card.live_location"),
             body: card_text(loc.caption.as_deref().unwrap_or("")),
             detail: coordinate_detail(loc.degrees_latitude, loc.degrees_longitude, true),
             thumbnail: loc.jpeg_thumbnail.as_deref(),
             ..Default::default()
         };
     }
-    let poll = content.poll_creation_message.as_option()
+    let poll = content
+        .poll_creation_message
+        .as_option()
         .or_else(|| content.poll_creation_message_v2.as_option())
         .or_else(|| content.poll_creation_message_v3.as_option())
         .or_else(|| content.poll_creation_message_v5.as_option())
@@ -205,10 +317,20 @@ pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
     if let Some(poll) = poll {
         let question = card_text(poll.name.as_deref().unwrap_or(""));
         return SpecialCard {
-            kind: "poll", title: if question.is_empty() { t("compat.poll") } else { question },
+            kind: "poll",
+            title: if question.is_empty() {
+                t("compat.poll")
+            } else {
+                question
+            },
             detail: t("compat.poll_phone"),
-            options: poll.options.iter().take(256).map(|option| card_text(option.option_name.as_deref().unwrap_or("")))
-                .filter(|name| !name.is_empty()).collect(),
+            options: poll
+                .options
+                .iter()
+                .take(256)
+                .map(|option| card_text(option.option_name.as_deref().unwrap_or("")))
+                .filter(|name| !name.is_empty())
+                .collect(),
             ..Default::default()
         };
     }
@@ -228,11 +350,21 @@ pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
 
 fn coordinate_detail(lat: Option<f64>, lon: Option<f64>, live: bool) -> String {
     let coordinates = match (lat, lon) {
-        (Some(lat), Some(lon)) if lat.is_finite() && lon.is_finite()
-            && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) => format!("{lat:.6}, {lon:.6}"),
+        (Some(lat), Some(lon))
+            if lat.is_finite()
+                && lon.is_finite()
+                && (-90.0..=90.0).contains(&lat)
+                && (-180.0..=180.0).contains(&lon) =>
+        {
+            format!("{lat:.6}, {lon:.6}")
+        }
         _ => t("compat.invalid_location"),
     };
-    if live { format!("{coordinates}\n{}", t("card.live_location_detail")) } else { coordinates }
+    if live {
+        format!("{coordinates}\n{}", t("card.live_location_detail"))
+    } else {
+        coordinates
+    }
 }
 
 pub fn compatibility_card(content: &wa::Message) -> Option<String> {
@@ -240,17 +372,41 @@ pub fn compatibility_card(content: &wa::Message) -> Option<String> {
         return Some(contact_card(contact));
     }
     if let Some(contacts) = content.contacts_array_message.as_option() {
-        let cards: Vec<_> = contacts.contacts.iter().take(256).map(contact_card).collect();
-        return Some(if cards.is_empty() { t("compat.contact") } else { cards.join("\n\n") });
+        let cards: Vec<_> = contacts
+            .contacts
+            .iter()
+            .take(256)
+            .map(contact_card)
+            .collect();
+        return Some(if cards.is_empty() {
+            t("compat.contact")
+        } else {
+            cards.join("\n\n")
+        });
     }
     if let Some(loc) = content.location_message.as_option() {
-        return Some(location_card(loc.degrees_latitude, loc.degrees_longitude, loc.is_live.unwrap_or(false),
-            &[loc.name.as_deref().unwrap_or(""), loc.address.as_deref().unwrap_or(""), loc.comment.as_deref().unwrap_or("")]));
+        return Some(location_card(
+            loc.degrees_latitude,
+            loc.degrees_longitude,
+            loc.is_live.unwrap_or(false),
+            &[
+                loc.name.as_deref().unwrap_or(""),
+                loc.address.as_deref().unwrap_or(""),
+                loc.comment.as_deref().unwrap_or(""),
+            ],
+        ));
     }
     if let Some(loc) = content.live_location_message.as_option() {
-        return Some(location_card(loc.degrees_latitude, loc.degrees_longitude, true, &[loc.caption.as_deref().unwrap_or("")]));
+        return Some(location_card(
+            loc.degrees_latitude,
+            loc.degrees_longitude,
+            true,
+            &[loc.caption.as_deref().unwrap_or("")],
+        ));
     }
-    let poll = content.poll_creation_message.as_option()
+    let poll = content
+        .poll_creation_message
+        .as_option()
         .or_else(|| content.poll_creation_message_v2.as_option())
         .or_else(|| content.poll_creation_message_v3.as_option())
         .or_else(|| content.poll_creation_message_v5.as_option())
@@ -258,10 +414,14 @@ pub fn compatibility_card(content: &wa::Message) -> Option<String> {
     if let Some(poll) = poll {
         let mut lines = vec![t("compat.poll")];
         let question = card_text(poll.name.as_deref().unwrap_or(""));
-        if !question.is_empty() { lines.push(question); }
+        if !question.is_empty() {
+            lines.push(question);
+        }
         for (i, option) in poll.options.iter().take(256).enumerate() {
             let name = card_text(option.option_name.as_deref().unwrap_or(""));
-            if !name.is_empty() { lines.push(format!("{}. {name}", i + 1)); }
+            if !name.is_empty() {
+                lines.push(format!("{}. {name}", i + 1));
+            }
         }
         lines.push(t("compat.poll_phone"));
         return Some(lines.join("\n"));
@@ -277,8 +437,16 @@ pub fn poll_secret_of(message: &wa::Message) -> String {
     if poll_of(content).is_none() {
         return String::new();
     }
-    let secret = message.message_context_info.as_option().and_then(|info| info.message_secret.as_deref())
-        .or_else(|| content.message_context_info.as_option().and_then(|info| info.message_secret.as_deref()));
+    let secret = message
+        .message_context_info
+        .as_option()
+        .and_then(|info| info.message_secret.as_deref())
+        .or_else(|| {
+            content
+                .message_context_info
+                .as_option()
+                .and_then(|info| info.message_secret.as_deref())
+        });
     match secret {
         Some(bytes) if bytes.len() == 32 => base64::engine::general_purpose::STANDARD.encode(bytes),
         _ => String::new(),
@@ -286,7 +454,9 @@ pub fn poll_secret_of(message: &wa::Message) -> String {
 }
 
 fn poll_of(content: &wa::Message) -> Option<&wa::message::PollCreationMessage> {
-    content.poll_creation_message.as_option()
+    content
+        .poll_creation_message
+        .as_option()
         .or_else(|| content.poll_creation_message_v2.as_option())
         .or_else(|| content.poll_creation_message_v3.as_option())
         .or_else(|| content.poll_creation_message_v5.as_option())
@@ -297,10 +467,18 @@ fn poll_of(content: &wa::Message) -> Option<&wa::message::PollCreationMessage> {
 pub fn poll_definition(message: &wa::Message) -> Option<(String, Vec<String>, u32)> {
     let content = display_content(message).unwrap_or(message);
     let poll = poll_of(content)?;
-    let options: Vec<String> = poll.options.iter().take(12)
+    let options: Vec<String> = poll
+        .options
+        .iter()
+        .take(12)
         .map(|option| card_text(option.option_name.as_deref().unwrap_or("")))
-        .filter(|name| !name.is_empty()).collect();
-    Some((card_text(poll.name.as_deref().unwrap_or("")), options, poll.selectable_options_count.unwrap_or(0)))
+        .filter(|name| !name.is_empty())
+        .collect();
+    Some((
+        card_text(poll.name.as_deref().unwrap_or("")),
+        options,
+        poll.selectable_options_count.unwrap_or(0),
+    ))
 }
 
 fn has_unsupported_content(content: &wa::Message) -> bool {
@@ -309,19 +487,42 @@ fn has_unsupported_content(content: &wa::Message) -> bool {
     macro_rules! clear {
         ($($field:ident),* $(,)?) => { $(remaining.$field = Default::default();)* };
     }
-    clear!(sender_key_distribution_message, fast_ratchet_key_sender_key_distribution_message,
-        protocol_message, reaction_message, enc_reaction_message, poll_update_message,
-        message_context_info, keep_in_chat_message, pin_in_chat_message, sticker_sync_rmr_message,
-        call, chat, message_history_bundle, message_history_notice, status_notification_message,
-        enc_event_response_message, enc_comment_message, poll_result_snapshot_message,
-        poll_result_snapshot_message_v3, poll_add_option_message, group_root_key_share,
-        root_secret_distribute_message, status_link_preview_metadata,
-        ephemeral_message, device_sent_message, document_with_caption_message, edited_message);
+    clear!(
+        sender_key_distribution_message,
+        fast_ratchet_key_sender_key_distribution_message,
+        protocol_message,
+        reaction_message,
+        enc_reaction_message,
+        poll_update_message,
+        message_context_info,
+        keep_in_chat_message,
+        pin_in_chat_message,
+        sticker_sync_rmr_message,
+        call,
+        chat,
+        message_history_bundle,
+        message_history_notice,
+        status_notification_message,
+        enc_event_response_message,
+        enc_comment_message,
+        poll_result_snapshot_message,
+        poll_result_snapshot_message_v3,
+        poll_add_option_message,
+        group_root_key_share,
+        root_secret_distribute_message,
+        status_link_preview_metadata,
+        ephemeral_message,
+        device_sent_message,
+        document_with_caption_message,
+        edited_message
+    );
     remaining.encoded_len() != 0
 }
 
 pub fn display_content_summary(message: &wa::Message) -> String {
-    let Some(content) = display_content(message) else { return t("compat.view_once") };
+    let Some(content) = display_content(message) else {
+        return t("compat.view_once");
+    };
     if let Some(card) = compatibility_card(content) {
         return card.chars().take(240).collect();
     }
@@ -376,14 +577,23 @@ pub fn notice_name(store: &Store, jid: &str) -> String {
         return t("reactions.you");
     }
     let name = store.chat_name(&canon);
-    if name.is_empty() { display_id(&canon) } else { name }
+    if name.is_empty() {
+        display_id(&canon)
+    } else {
+        name
+    }
 }
 
 fn join_names(names: &[String]) -> String {
     match names.len() {
         0 => String::new(),
         1 => names[0].clone(),
-        n => format!("{} {} {}", names[..n - 1].join(", "), t("notice.and"), names[n - 1]),
+        n => format!(
+            "{} {} {}",
+            names[..n - 1].join(", "),
+            t("notice.and"),
+            names[n - 1]
+        ),
     }
 }
 
@@ -415,7 +625,11 @@ pub fn group_notice(
     let names: Vec<String> = who.iter().map(|w| notice_name(store, w)).collect();
     let names_me = names.len() == 1 && names[0] == me;
     let people = join_names(&names);
-    let actor_or_someone = if actor_name.is_empty() { t("notice.someone") } else { actor_name.clone() };
+    let actor_or_someone = if actor_name.is_empty() {
+        t("notice.someone")
+    } else {
+        actor_name.clone()
+    };
     // Roster churn that does not involve us collapses into one line that
     // opens the group info, the way WhatsApp keeps busy groups readable.
     let self_leave = kind == "leave"
@@ -447,7 +661,11 @@ pub fn group_notice(
         "invite" => ta("notice.joined_link", &[&people]),
         "remove" | "leave" => {
             if actor.is_some() && who.len() == 1 && actor_name == names[0] {
-                if names_me { t("notice.you_left") } else { ta("notice.left", &[&people]) }
+                if names_me {
+                    t("notice.you_left")
+                } else {
+                    ta("notice.left", &[&people])
+                }
             } else if names_me {
                 ta("notice.removed_you", &[&actor_or_someone])
             } else if actor_is_me {
@@ -457,10 +675,18 @@ pub fn group_notice(
             }
         }
         "promote" => {
-            if names_me { t("notice.you_admin") } else { ta("notice.promoted", &[&people]) }
+            if names_me {
+                t("notice.you_admin")
+            } else {
+                ta("notice.promoted", &[&people])
+            }
         }
         "demote" => {
-            if names_me { t("notice.you_not_admin") } else { ta("notice.demoted", &[&people]) }
+            if names_me {
+                t("notice.you_not_admin")
+            } else {
+                ta("notice.demoted", &[&people])
+            }
         }
         "subject" => ta("notice.subject", &[&actor_or_someone, text]),
         "description" => ta("notice.description", &[&actor_or_someone]),
@@ -474,7 +700,10 @@ pub fn group_notice(
             if number == 0 {
                 ta("notice.ephemeral_off", &[&actor_or_someone])
             } else {
-                ta("notice.ephemeral_on", &[&actor_or_someone, &ephemeral_label(number)])
+                ta(
+                    "notice.ephemeral_on",
+                    &[&actor_or_someone, &ephemeral_label(number)],
+                )
             }
         }
         "delete" => t("notice.deleted"),
@@ -497,7 +726,10 @@ fn stub_system(store: &mut Store, web: &wa::WebMessageInfo) -> Option<StoredMess
     let actor: Option<String> = if key.from_me.unwrap_or(false) {
         store.self_jids.iter().next().cloned()
     } else {
-        key.participant.as_deref().map(normalize_jid).or_else(|| Some(chat.clone()))
+        key.participant
+            .as_deref()
+            .map(normalize_jid)
+            .or_else(|| Some(chat.clone()))
     };
     let params = &web.message_stub_parameters;
     let jids: Vec<String> = params
@@ -518,10 +750,18 @@ fn stub_system(store: &mut Store, web: &wa::WebMessageInfo) -> Option<StoredMess
         S::GROUP_CHANGE_ICON => ("icon", "", 0),
         S::GROUP_CREATE => ("create", first, 0),
         S::GROUP_CHANGE_ANNOUNCE => {
-            if first == "on" { ("announce", "", 0) } else { ("not_announce", "", 0) }
+            if first == "on" {
+                ("announce", "", 0)
+            } else {
+                ("not_announce", "", 0)
+            }
         }
         S::GROUP_CHANGE_RESTRICT => {
-            if first == "on" { ("locked", "", 0) } else { ("unlocked", "", 0) }
+            if first == "on" {
+                ("locked", "", 0)
+            } else {
+                ("unlocked", "", 0)
+            }
         }
         S::CHANGE_EPHEMERAL_SETTING => ("ephemeral", "", first.parse::<u32>().unwrap_or(0)),
         S::GROUP_DELETE => ("delete", "", 0),
@@ -539,7 +779,12 @@ fn stub_system(store: &mut Store, web: &wa::WebMessageInfo) -> Option<StoredMess
     if body.is_empty() {
         return None;
     }
-    Some(system_message(&chat, key.id.as_deref()?, web.message_timestamp.unwrap_or(0) as i64, body))
+    Some(system_message(
+        &chat,
+        key.id.as_deref()?,
+        web.message_timestamp.unwrap_or(0) as i64,
+        body,
+    ))
 }
 
 pub fn system_message(chat: &str, id: &str, timestamp: i64, text: String) -> StoredMessage {
@@ -585,7 +830,9 @@ pub fn system_message(chat: &str, id: &str, timestamp: i64, text: String) -> Sto
 }
 
 pub fn from_history(store: &mut Store, web: &wa::WebMessageInfo) -> Option<StoredMessage> {
-    if web.message_stub_type.is_some_and(|s| s != wa::web_message_info::StubType::UNKNOWN)
+    if web
+        .message_stub_type
+        .is_some_and(|s| s != wa::web_message_info::StubType::UNKNOWN)
         && web.message.as_option().is_none()
     {
         return stub_system(store, web);
@@ -598,7 +845,9 @@ pub fn from_history(store: &mut Store, web: &wa::WebMessageInfo) -> Option<Store
     // History-synced messages carry their accumulated reactions inline.
     let mut reactions: HashMap<String, String> = HashMap::new();
     for r in &web.reactions {
-        let Some(text) = r.text.as_deref().filter(|t| !t.is_empty()) else { continue };
+        let Some(text) = r.text.as_deref().filter(|t| !t.is_empty()) else {
+            continue;
+        };
         let reactor = r
             .key
             .as_option()
@@ -648,7 +897,9 @@ pub fn normalize(
 
     let sender_jid = store.canon_owned(&meta.sender);
     if !meta.from_me && !meta.push_name.is_empty() {
-        store.push_names.insert(sender_jid.clone(), meta.push_name.to_string());
+        store
+            .push_names
+            .insert(sender_jid.clone(), meta.push_name.to_string());
     }
     let sender = if meta.from_me {
         String::new()
@@ -657,7 +908,13 @@ pub fn normalize(
             store
                 .contacts
                 .get(&sender_jid)
-                .or_else(|| store.chats.get(&sender_jid).filter(|c| !c.name.is_empty()).map(|c| &c.name))
+                .or_else(|| {
+                    store
+                        .chats
+                        .get(&sender_jid)
+                        .filter(|c| !c.name.is_empty())
+                        .map(|c| &c.name)
+                })
                 .or_else(|| store.push_names.get(&sender_jid))
                 .cloned()
                 .unwrap_or_else(|| display_id(&sender_jid))
@@ -683,7 +940,8 @@ pub fn normalize(
 
     // A reply carries a copy of what it answers; enough of it to draw the
     // quoted strip without looking the original up.
-    let (quote_id, quote_author, quote_text) = match ctx.and_then(|c| c.quoted_message.as_option()) {
+    let (quote_id, quote_author, quote_text) = match ctx.and_then(|c| c.quoted_message.as_option())
+    {
         Some(quoted) => (
             ctx.and_then(|c| c.stanza_id.clone()).unwrap_or_default(),
             ctx.and_then(|c| c.participant.as_deref())
@@ -716,7 +974,8 @@ pub fn normalize(
         mentions: Vec::new(),
         mentions_me,
         quote_id,
-        quote_jid: ctx.and_then(|c| c.remote_jid.as_deref())
+        quote_jid: ctx
+            .and_then(|c| c.remote_jid.as_deref())
             .map(normalize_jid)
             .filter(|remote| is_displayable_jid(remote))
             .map(|remote| store.canon_owned(&remote))
@@ -756,11 +1015,18 @@ pub fn normalize(
             .map(|c| c.mentioned_jid.iter().map(|j| j.to_string()).collect())
             .unwrap_or_default();
         let detected_url = crate::link_preview::first_url(&stored.text);
-        let url = ext.matched_text.as_deref().filter(|url| !url.is_empty()).unwrap_or(&detected_url);
+        let url = ext
+            .matched_text
+            .as_deref()
+            .filter(|url| !url.is_empty())
+            .unwrap_or(&detected_url);
         let link_title = clean_text(ext.title.as_deref().unwrap_or(""));
         let link_desc = clean_text(ext.description.as_deref().unwrap_or(""));
         let has_thumb = ext.jpeg_thumbnail.as_ref().is_some_and(|t| !t.is_empty())
-            || ext.thumbnail_direct_path.as_ref().is_some_and(|path| !path.is_empty());
+            || ext
+                .thumbnail_direct_path
+                .as_ref()
+                .is_some_and(|path| !path.is_empty());
         let host = url
             .trim_start_matches("https://")
             .trim_start_matches("http://")
@@ -782,7 +1048,10 @@ pub fn normalize(
         stored.sticker = true;
         stored.media_w = sticker.width.unwrap_or(180);
         stored.media_h = sticker.height.unwrap_or(180);
-        stored.mimetype = sticker.mimetype.clone().unwrap_or_else(|| "image/webp".into());
+        stored.mimetype = sticker
+            .mimetype
+            .clone()
+            .unwrap_or_else(|| "image/webp".into());
         return Some(stored);
     }
     if let Some(v) = content.video_message.as_option() {
@@ -806,8 +1075,10 @@ pub fn normalize(
     if let Some(doc) = content.document_message.as_option() {
         stored.kind = MessageKind::Doc;
         stored.text = clean_text(doc.file_name.as_deref().unwrap_or(&t("doc.fallback_name")));
-        stored.mimetype =
-            doc.mimetype.clone().unwrap_or_else(|| "application/octet-stream".into());
+        stored.mimetype = doc
+            .mimetype
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".into());
         return Some(stored);
     }
     if let Some(audio) = content.audio_message.as_option() {
@@ -834,7 +1105,9 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         return None;
     }
     if !info.push_name.is_empty() {
-        store.contacts.insert(author.clone(), info.push_name.to_string());
+        store
+            .contacts
+            .insert(author.clone(), info.push_name.to_string());
     }
     let displayable = display_content(&inbound.message);
     let content = displayable.unwrap_or(&inbound.message);
@@ -843,12 +1116,21 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
     } else if let Some(text) = &content.conversation {
         (MessageKind::Text, clean_text(text))
     } else if let Some(ext) = content.extended_text_message.as_option() {
-        (MessageKind::Text, clean_text(ext.text.as_deref().unwrap_or("")))
+        (
+            MessageKind::Text,
+            clean_text(ext.text.as_deref().unwrap_or("")),
+        )
     } else if let Some(img) = content.image_message.as_option() {
-        (MessageKind::Image, clean_text(img.caption.as_deref().unwrap_or("")))
+        (
+            MessageKind::Image,
+            clean_text(img.caption.as_deref().unwrap_or("")),
+        )
     } else if let Some(v) = content.video_message.as_option() {
         // Rendered from the embedded jpeg thumbnail.
-        (MessageKind::Image, clean_text(v.caption.as_deref().unwrap_or("")))
+        (
+            MessageKind::Image,
+            clean_text(v.caption.as_deref().unwrap_or("")),
+        )
     } else {
         return None;
     };
@@ -858,7 +1140,11 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         kind,
         text,
         from_me: info.source.is_from_me,
-        sender: store.contacts.get(&author).cloned().unwrap_or_else(|| display_id(&author)),
+        sender: store
+            .contacts
+            .get(&author)
+            .cloned()
+            .unwrap_or_else(|| display_id(&author)),
         sender_jid: author,
         forwarded: false,
         deleted: false,
@@ -899,17 +1185,33 @@ mod tests {
     use crate::i18n::{LOCALE_TEST_LOCK, Locale, set_locale};
 
     fn map(message: wa::Message) -> Option<StoredMessage> {
-        normalize(&mut Store::default(), &LiveMeta {
-            chat: "123@s.whatsapp.net".into(), sender: "123@s.whatsapp.net".into(),
-            sender_alt: None, recipient_alt: None, id: "m1", from_me: false,
-            is_group: false, push_name: "Alice", timestamp: 1234,
-        }, &message, &HashMap::new(), 5)
+        normalize(
+            &mut Store::default(),
+            &LiveMeta {
+                chat: "123@s.whatsapp.net".into(),
+                sender: "123@s.whatsapp.net".into(),
+                sender_alt: None,
+                recipient_alt: None,
+                id: "m1",
+                from_me: false,
+                is_group: false,
+                push_name: "Alice",
+                timestamp: 1234,
+            },
+            &message,
+            &HashMap::new(),
+            5,
+        )
     }
 
     #[test]
     fn text_metadata_and_empty_messages() {
         assert!(map(wa::Message::default()).is_none());
-        let m = map(wa::Message { conversation: Some("hello".into()), ..Default::default() }).unwrap();
+        let m = map(wa::Message {
+            conversation: Some("hello".into()),
+            ..Default::default()
+        })
+        .unwrap();
         assert_eq!(m.text, "hello");
         assert_eq!(m.jid, "123@s.whatsapp.net");
         assert_eq!(m.id, "m1");
@@ -921,46 +1223,88 @@ mod tests {
 
     #[test]
     fn media_fields_and_defaults() {
-        let image = map(wa::Message { image_message: Some(wa::message::ImageMessage {
-            caption: Some("caption".into()), width: Some(640), height: Some(480),
-            mimetype: Some("image/png".into()), ..Default::default()
-        }).into(), ..Default::default() }).unwrap();
+        let image = map(wa::Message {
+            image_message: Some(wa::message::ImageMessage {
+                caption: Some("caption".into()),
+                width: Some(640),
+                height: Some(480),
+                mimetype: Some("image/png".into()),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert!(matches!(image.kind, MessageKind::Image));
         assert_eq!((image.media_w, image.media_h), (640, 480));
         assert_eq!(image.text, "caption");
         assert_eq!(image.mimetype, "image/png");
-        let audio = map(wa::Message { audio_message: Some(wa::message::AudioMessage {
-            seconds: Some(65), ..Default::default()
-        }).into(), ..Default::default() }).unwrap();
+        let audio = map(wa::Message {
+            audio_message: Some(wa::message::AudioMessage {
+                seconds: Some(65),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert!(matches!(audio.kind, MessageKind::Audio));
         assert_eq!(audio.duration_sec, 65);
-        let video = map(wa::Message { video_message: Some(wa::message::VideoMessage {
-            gif_playback: Some(true), seconds: Some(9), ..Default::default()
-        }).into(), ..Default::default() }).unwrap();
+        let video = map(wa::Message {
+            video_message: Some(wa::message::VideoMessage {
+                gif_playback: Some(true),
+                seconds: Some(9),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert!(matches!(video.kind, MessageKind::Video));
         assert!(video.gif);
         assert_eq!(video.duration_sec, 9);
-        let sticker = map(wa::Message { sticker_message: Some(wa::message::StickerMessage::default()).into(), ..Default::default() }).unwrap();
+        let sticker = map(wa::Message {
+            sticker_message: Some(wa::message::StickerMessage::default()).into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert!(sticker.sticker);
         assert!(matches!(sticker.kind, MessageKind::Image));
-        let doc = map(wa::Message { document_message: Some(wa::message::DocumentMessage {
-            file_name: Some("report.pdf".into()), title: Some("ignored".into()), ..Default::default()
-        }).into(), ..Default::default() }).unwrap();
+        let doc = map(wa::Message {
+            document_message: Some(wa::message::DocumentMessage {
+                file_name: Some("report.pdf".into()),
+                title: Some("ignored".into()),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert!(matches!(doc.kind, MessageKind::Doc));
         assert_eq!(doc.text, "report.pdf");
     }
 
     #[test]
     fn extended_text_context_and_link_preview() {
-        let m = map(wa::Message { extended_text_message: Some(wa::message::ExtendedTextMessage {
-            text: Some("link".into()), title: Some("title".into()),
-            description: Some("description".into()), matched_text: Some("https://example.com".into()),
-            context_info: Some(wa::ContextInfo {
-                is_forwarded: Some(true), stanza_id: Some("quoted".into()),
-                mentioned_jid: vec!["456@s.whatsapp.net".into()],
+        let m = map(wa::Message {
+            extended_text_message: Some(wa::message::ExtendedTextMessage {
+                text: Some("link".into()),
+                title: Some("title".into()),
+                description: Some("description".into()),
+                matched_text: Some("https://example.com".into()),
+                context_info: Some(wa::ContextInfo {
+                    is_forwarded: Some(true),
+                    stanza_id: Some("quoted".into()),
+                    mentioned_jid: vec!["456@s.whatsapp.net".into()],
+                    ..Default::default()
+                })
+                .into(),
                 ..Default::default()
-            }).into(), ..Default::default()
-        }).into(), ..Default::default() }).unwrap();
+            })
+            .into(),
+            ..Default::default()
+        })
+        .unwrap();
         assert!(m.forwarded);
         assert_eq!(m.quote_id, "");
         assert_eq!(m.mentions, vec!["456@s.whatsapp.net"]);
@@ -971,8 +1315,20 @@ mod tests {
 
     #[test]
     fn protocol_reaction_and_unknown_payloads_are_not_bubbles() {
-        assert!(map(wa::Message { reaction_message: Some(wa::message::ReactionMessage::default()).into(), ..Default::default() }).is_none());
-        assert!(map(wa::Message { protocol_message: Some(wa::message::ProtocolMessage::default()).into(), ..Default::default() }).is_none());
+        assert!(
+            map(wa::Message {
+                reaction_message: Some(wa::message::ReactionMessage::default()).into(),
+                ..Default::default()
+            })
+            .is_none()
+        );
+        assert!(
+            map(wa::Message {
+                protocol_message: Some(wa::message::ProtocolMessage::default()).into(),
+                ..Default::default()
+            })
+            .is_none()
+        );
     }
 
     #[test]
@@ -980,9 +1336,21 @@ mod tests {
         let mut store = Store::default();
         assert!(from_history(&mut store, &wa::WebMessageInfo::default()).is_none());
         let mut web = wa::WebMessageInfo {
-            key: Some(wa::MessageKey { id: Some("history".into()), remote_jid: Some("123@s.whatsapp.net".into()), from_me: Some(true), ..Default::default() }).into(),
-            message: Some(wa::Message { conversation: Some("old".into()), ..Default::default() }).into(),
-            message_timestamp: Some(99), starred: Some(true), ..Default::default()
+            key: Some(wa::MessageKey {
+                id: Some("history".into()),
+                remote_jid: Some("123@s.whatsapp.net".into()),
+                from_me: Some(true),
+                ..Default::default()
+            })
+            .into(),
+            message: Some(wa::Message {
+                conversation: Some("old".into()),
+                ..Default::default()
+            })
+            .into(),
+            message_timestamp: Some(99),
+            starred: Some(true),
+            ..Default::default()
         };
         let m = from_history(&mut store, &web).unwrap();
         assert_eq!(m.timestamp, 99);
@@ -998,9 +1366,15 @@ mod tests {
         let web = wa::WebMessageInfo {
             key: Some(wa::MessageKey {
                 remote_jid: Some("123:7@s.whatsapp.net".into()),
-                id: Some("device".into()), ..Default::default()
-            }).into(),
-            message: Some(wa::Message { conversation: Some("body".into()), ..Default::default() }).into(),
+                id: Some("device".into()),
+                ..Default::default()
+            })
+            .into(),
+            message: Some(wa::Message {
+                conversation: Some("body".into()),
+                ..Default::default()
+            })
+            .into(),
             ..Default::default()
         };
         let m = from_history(&mut Store::default(), &web).unwrap();
@@ -1008,16 +1382,27 @@ mod tests {
         assert_eq!(m.timestamp, 0);
         assert_eq!(m.status, 0);
         let mut invalid = web.clone();
-        invalid.key = Some(wa::MessageKey { remote_jid: Some("123@s.whatsapp.net".into()), id: Some(String::new()), ..Default::default() }).into();
+        invalid.key = Some(wa::MessageKey {
+            remote_jid: Some("123@s.whatsapp.net".into()),
+            id: Some(String::new()),
+            ..Default::default()
+        })
+        .into();
         assert!(from_history(&mut Store::default(), &invalid).is_none());
     }
 
     #[test]
     fn system_defaults_and_duration_units() {
-        let _lock = LOCALE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = LOCALE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous = crate::i18n::current_locale();
         struct Restore(Locale);
-        impl Drop for Restore { fn drop(&mut self) { set_locale(self.0); } }
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                set_locale(self.0);
+            }
+        }
         let _restore = Restore(previous);
         set_locale(Locale::En);
         let m = system_message("chat", "notice", -1, "notice text".into());

@@ -26,13 +26,22 @@ impl Bridge {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
         let meta = self.store.chats.get(jid);
-        let activity = self.chat_typing.get(jid).and_then(|members| members.values().max_by_key(|(token, _)| token)).map(|(_, text)| text.as_str());
-        let draft = self.store.drafts.get(jid)
-            .filter(|draft| self.current_jid.as_deref() != Some(jid) && !draft.text.trim().is_empty());
-        let draft_preview = draft.map(|draft| format!("{} {}", t("preview.draft"), clean_text(&draft.text)));
+        let activity = self
+            .chat_typing
+            .get(jid)
+            .and_then(|members| members.values().max_by_key(|(token, _)| token))
+            .map(|(_, text)| text.as_str());
+        let draft = self.store.drafts.get(jid).filter(|draft| {
+            self.current_jid.as_deref() != Some(jid) && !draft.text.trim().is_empty()
+        });
+        let draft_preview =
+            draft.map(|draft| format!("{} {}", t("preview.draft"), clean_text(&draft.text)));
         let preview = draft_preview.as_deref().or(activity).unwrap_or(preview);
         let (preview, ticks, ticks_blue) = if let Some(body) = preview.strip_prefix("✓ ") {
-            let (ticks, blue) = self.store.messages.get(jid)
+            let (ticks, blue) = self
+                .store
+                .messages
+                .get(jid)
                 .and_then(|messages| messages.iter().max_by_key(|m| m.timestamp))
                 .filter(|m| m.from_me && m.timestamp == timestamp)
                 .map(ticks_for)
@@ -163,7 +172,10 @@ impl Bridge {
             .collect();
         for row in &rows {
             let jid = row.jid.as_str();
-            if !is_group(jid) && !is_channel(jid) && self.presence_subscribed.insert(jid.to_string()) {
+            if !is_group(jid)
+                && !is_channel(jid)
+                && self.presence_subscribed.insert(jid.to_string())
+            {
                 self.wa.send(Cmd::SubscribePresence(jid.to_string()));
             }
         }
@@ -289,9 +301,17 @@ impl Bridge {
                     .unwrap_or(false),
             })
             .collect();
-        self.label_chip_model.set_vec(rows.iter().filter(|row| {
-            self.store.labels.get(row.id.as_str()).is_some_and(|label| !label.is_builtin_filter())
-        }).cloned().collect::<Vec<_>>());
+        self.label_chip_model.set_vec(
+            rows.iter()
+                .filter(|row| {
+                    self.store
+                        .labels
+                        .get(row.id.as_str())
+                        .is_some_and(|label| !label.is_builtin_filter())
+                })
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         self.label_model.set_vec(rows);
     }
 

@@ -167,7 +167,12 @@ impl CallAudio {
             stop.store(true, Ordering::SeqCst);
             return None;
         }
-        Some(CallAudio { mic: mic_rx, speaker: spk_tx, muted, stop })
+        Some(CallAudio {
+            mic: mic_rx,
+            speaker: spk_tx,
+            muted,
+            stop,
+        })
     }
 
     pub fn mic(&self) -> async_channel::Receiver<Vec<i16>> {
@@ -242,7 +247,11 @@ fn build_input(
                 resampler.drop_backlog(MAX_PLAYOUT);
                 let silent = muted.load(Ordering::Relaxed);
                 while let Some(sample) = resampler.pull() {
-                    let value = if silent { 0 } else { (sample.clamp(-1.0, 1.0) * 32767.0) as i16 };
+                    let value = if silent {
+                        0
+                    } else {
+                        (sample.clamp(-1.0, 1.0) * 32767.0) as i16
+                    };
                     frame.push(value);
                     if frame.len() == FRAME {
                         // Voice is loss tolerant: a full channel means the
@@ -263,10 +272,7 @@ fn build_input(
 
 // Playout: pull decoded 16 kHz frames off the channel and stretch them
 // to whatever rate the output device runs at.
-fn build_output(
-    spk_rx: async_channel::Receiver<Vec<i16>>,
-    name: &str,
-) -> Option<cpal::Stream> {
+fn build_output(spk_rx: async_channel::Receiver<Vec<i16>>, name: &str) -> Option<cpal::Stream> {
     use cpal::traits::{DeviceTrait, StreamTrait};
     let device = output_device(name)?;
     let config = device.default_output_config().ok()?;
@@ -321,8 +327,12 @@ impl Ring {
 
     // The ringtone: a four-note arpeggio, each note plucked and left to
     // decay, then silence for the rest of the turn.
-    const NOTES: [(f32, f32); 4] =
-        [(0.0, 659.26), (0.18, 830.61), (0.36, 987.77), (0.54, 1318.51)];
+    const NOTES: [(f32, f32); 4] = [
+        (0.0, 659.26),
+        (0.18, 830.61),
+        (0.36, 987.77),
+        (0.54, 1318.51),
+    ];
 
     // One sample of the pattern at `t` seconds into it.
     fn sample(self, t: f32) -> f32 {

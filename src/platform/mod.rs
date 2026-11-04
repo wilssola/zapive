@@ -39,7 +39,10 @@ pub enum ToastAction {
 const TOKEN_LEN: usize = 32;
 
 fn valid_token(token: &str) -> bool {
-    token.len() == TOKEN_LEN && token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    token.len() == TOKEN_LEN
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -48,7 +51,9 @@ pub fn parse_toast_args(arguments: &str) -> ToastAction {
         "" | "open" | "default" => return ToastAction::Open(None),
         _ => {}
     }
-    let Some((kind, token)) = arguments.split_once(':') else { return ToastAction::Invalid };
+    let Some((kind, token)) = arguments.split_once(':') else {
+        return ToastAction::Invalid;
+    };
     if !valid_token(token) {
         return ToastAction::Invalid;
     }
@@ -76,9 +81,18 @@ mod toast_args_tests {
 
     #[test]
     fn parses_open_reply_and_play_with_a_token() {
-        assert_eq!(parse_toast_args(&format!("open:{TOKEN}")), ToastAction::Open(Some(TOKEN.into())));
-        assert_eq!(parse_toast_args(&format!("reply:{TOKEN}")), ToastAction::Reply(TOKEN.into()));
-        assert_eq!(parse_toast_args(&format!("play:{TOKEN}")), ToastAction::Play(TOKEN.into()));
+        assert_eq!(
+            parse_toast_args(&format!("open:{TOKEN}")),
+            ToastAction::Open(Some(TOKEN.into()))
+        );
+        assert_eq!(
+            parse_toast_args(&format!("reply:{TOKEN}")),
+            ToastAction::Reply(TOKEN.into())
+        );
+        assert_eq!(
+            parse_toast_args(&format!("play:{TOKEN}")),
+            ToastAction::Play(TOKEN.into())
+        );
     }
 
     #[test]
@@ -87,7 +101,10 @@ mod toast_args_tests {
             if kind.is_empty() {
                 assert_eq!(parse_toast_args(&format!(":{TOKEN}")), ToastAction::Invalid);
             } else {
-                assert_eq!(parse_toast_args(&format!("{kind}:{TOKEN}")), ToastAction::Invalid);
+                assert_eq!(
+                    parse_toast_args(&format!("{kind}:{TOKEN}")),
+                    ToastAction::Invalid
+                );
             }
         }
     }
@@ -95,16 +112,34 @@ mod toast_args_tests {
     #[test]
     fn rejects_malformed_tokens() {
         let long = format!("{TOKEN}0");
-        for token in ["", "abc", "ZZZZ456789abcdef0123456789abcdef", "0123456789ABCDEF0123456789ABCDEF", long.as_str(), "0123456789abcdef0123456789abcde:"] {
+        for token in [
+            "",
+            "abc",
+            "ZZZZ456789abcdef0123456789abcdef",
+            "0123456789ABCDEF0123456789ABCDEF",
+            long.as_str(),
+            "0123456789abcdef0123456789abcde:",
+        ] {
             for kind in ["open", "reply", "play"] {
-                assert_eq!(parse_toast_args(&format!("{kind}:{token}")), ToastAction::Invalid, "{kind}:{token}");
+                assert_eq!(
+                    parse_toast_args(&format!("{kind}:{token}")),
+                    ToastAction::Invalid,
+                    "{kind}:{token}"
+                );
             }
         }
     }
 
     #[test]
     fn rejects_input_without_a_separator_or_with_extra_parts() {
-        for args in ["reply", "play", "garbage", "open:open", &format!("play:{TOKEN}:x"), &format!(" open:{TOKEN}")] {
+        for args in [
+            "reply",
+            "play",
+            "garbage",
+            "open:open",
+            &format!("play:{TOKEN}:x"),
+            &format!(" open:{TOKEN}"),
+        ] {
             assert_eq!(parse_toast_args(args), ToastAction::Invalid, "{args}");
         }
     }

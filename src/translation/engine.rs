@@ -44,9 +44,9 @@ fn runtime_ready() -> Result<(), String> {
                 }
                 let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
                 let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
-                if let Err(error) = unsafe {
-                    LoadLibraryExW(windows::core::PCWSTR(wide.as_ptr()), None, flags)
-                } {
+                if let Err(error) =
+                    unsafe { LoadLibraryExW(windows::core::PCWSTR(wide.as_ptr()), None, flags) }
+                {
                     log::warn!("[translation] {name} could not be loaded: {error}");
                     return Err("runtime_missing".into());
                 }
@@ -157,7 +157,9 @@ impl Engine {
             .map(|result| {
                 let tokens = result.hypotheses.into_iter().next().unwrap_or_default();
                 let decoded = detokenize(&tokens);
-                Ok(strip_prefix(&decoded, &self.target_prefix).trim().to_string())
+                Ok(strip_prefix(&decoded, &self.target_prefix)
+                    .trim()
+                    .to_string())
             })
             .collect()
     }
@@ -245,10 +247,18 @@ mod tests {
 
     #[test]
     fn detokenize_turns_sentencepiece_markers_into_spaces() {
-        let pieces: Vec<String> = ["\u{2581}É", "\u{2581}difícil", "\u{2581}para", "\u{2581}nós", ",", "\u{2581}IP", "."]
-            .iter()
-            .map(|p| p.to_string())
-            .collect();
+        let pieces: Vec<String> = [
+            "\u{2581}É",
+            "\u{2581}difícil",
+            "\u{2581}para",
+            "\u{2581}nós",
+            ",",
+            "\u{2581}IP",
+            ".",
+        ]
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
         assert_eq!(detokenize(&pieces), "É difícil para nós, IP.");
         let glued: Vec<String> = vec!["\u{2581}você\u{2581}\u{2581}deve".into(), "</s>".into()];
         assert_eq!(detokenize(&glued), "você deve");
@@ -260,7 +270,10 @@ mod tests {
             split_sentences("Hello world. How are you?  Fine! Ok"),
             ["Hello world.", "How are you?", "Fine!", "Ok"]
         );
-        assert_eq!(split_sentences("no punctuation here"), ["no punctuation here"]);
+        assert_eq!(
+            split_sentences("no punctuation here"),
+            ["no punctuation here"]
+        );
         assert_eq!(split_sentences("3.14 is pi"), ["3.14 is pi"]);
         assert_eq!(split_sentences("a.b c"), ["a.b c"]);
         assert_eq!(split_sentences("Wait... what?"), ["Wait...", "what?"]);
@@ -268,7 +281,10 @@ mod tests {
             split_sentences("こんにちは。 元気ですか？ はい"),
             ["こんにちは。", "元気ですか？", "はい"]
         );
-        assert_eq!(split_sentences("Mr. Smith\tleft.\u{a0}Bye"), ["Mr.", "Smith\tleft.", "Bye"]);
+        assert_eq!(
+            split_sentences("Mr. Smith\tleft.\u{a0}Bye"),
+            ["Mr.", "Smith\tleft.", "Bye"]
+        );
     }
 
     #[test]

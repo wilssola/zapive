@@ -5,7 +5,6 @@ pub(super) const NOTIFICATION_TOKEN_TTL: Duration = Duration::from_secs(60);
 
 pub(super) const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
 
-
 #[derive(Clone)]
 pub(super) struct NotificationToken {
     pub(super) jid: String,
@@ -15,7 +14,12 @@ pub(super) struct NotificationToken {
 
 // A token only opens something while it is fresh and still points at a
 // chat and a message this session knows about.
-pub(super) fn token_usable(expires: SystemTime, now: SystemTime, chat_known: bool, message_known: bool) -> bool {
+pub(super) fn token_usable(
+    expires: SystemTime,
+    now: SystemTime,
+    chat_known: bool,
+    message_known: bool,
+) -> bool {
     expires > now && chat_known && message_known
 }
 
@@ -42,7 +46,13 @@ pub(super) fn notification_body(m: &StoredMessage) -> String {
 impl Bridge {
     // ---- notifications ----
 
-    pub(super) fn push_notification(&mut self, title: String, text: String, jid: String, msg_id: String) {
+    pub(super) fn push_notification(
+        &mut self,
+        title: String,
+        text: String,
+        jid: String,
+        msg_id: String,
+    ) {
         if !self.notifications {
             return;
         }
@@ -56,7 +66,13 @@ impl Bridge {
     // Chime for a live incoming message, like WhatsApp Web: independent of
     // the desktop-notification switch, quiet for muted chats, offline
     // backlog and the conversation being read right now.
-    pub(super) fn play_message_sound(&self, jid: &str, mentions_me: bool, timestamp: i64, system_message: bool) {
+    pub(super) fn play_message_sound(
+        &self,
+        jid: &str,
+        mentions_me: bool,
+        timestamp: i64,
+        system_message: bool,
+    ) {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
@@ -65,7 +81,11 @@ impl Bridge {
             from_me: false,
             system_message,
             vault_locked: self.vault.as_ref().is_none_or(|vault| vault.locked()),
-            chat_muted: self.store.chats.get(jid).is_some_and(|chat| chat.is_muted()),
+            chat_muted: self
+                .store
+                .chats
+                .get(jid)
+                .is_some_and(|chat| chat.is_muted()),
             mentions_me,
             age_secs: (timestamp > 0).then_some(now - timestamp),
             chat_open: self.current_jid.as_deref() == Some(jid),
@@ -88,17 +108,34 @@ impl Bridge {
                     self.clear_notification_sensitive_state();
                     return;
                 }
-                if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
-                let Some(chat) = self.store.chats.get(&jid) else { return };
-                if chat.is_muted() { return; }
-                let message = self.store.messages_for(&jid).iter().find(|message| message.id == msg_id).cloned();
+                if let Some(vault) = &self.vault {
+                    self.store.hydrate(vault, &jid);
+                }
+                let Some(chat) = self.store.chats.get(&jid) else {
+                    return;
+                };
+                if chat.is_muted() {
+                    return;
+                }
+                let message = self
+                    .store
+                    .messages_for(&jid)
+                    .iter()
+                    .find(|message| message.id == msg_id)
+                    .cloned();
                 let Some(message) = message else { return };
                 if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
                     self.clear_notification_sensitive_state();
                     return;
                 }
-                let Some(token) = self.register_notification_token(&jid, &message.id) else { return };
-                let toast_title = if self.notify_previews { title.clone() } else { t("notify.app_name") };
+                let Some(token) = self.register_notification_token(&jid, &message.id) else {
+                    return;
+                };
+                let toast_title = if self.notify_previews {
+                    title.clone()
+                } else {
+                    t("notify.app_name")
+                };
                 let mut payload = crate::platform::ToastPayload {
                     token: Some(token.clone()),
                     reply: true,
@@ -111,11 +148,28 @@ impl Bridge {
                         let thumbnail = if view_once {
                             None
                         } else {
-                            inner.image_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref())
-                                .or_else(|| inner.video_message.as_option().and_then(|v| v.jpeg_thumbnail.as_deref()))
-                                .or_else(|| inner.sticker_message.as_option().and_then(|v| v.context_info.quoted_message.image_message.as_option().and_then(|image| image.jpeg_thumbnail.as_deref())))
+                            inner
+                                .image_message
+                                .as_option()
+                                .and_then(|v| v.jpeg_thumbnail.as_deref())
+                                .or_else(|| {
+                                    inner
+                                        .video_message
+                                        .as_option()
+                                        .and_then(|v| v.jpeg_thumbnail.as_deref())
+                                })
+                                .or_else(|| {
+                                    inner.sticker_message.as_option().and_then(|v| {
+                                        v.context_info
+                                            .quoted_message
+                                            .image_message
+                                            .as_option()
+                                            .and_then(|image| image.jpeg_thumbnail.as_deref())
+                                    })
+                                })
                         };
-                        payload.thumbnail = thumbnail.and_then(crate::media::notification_thumbnail);
+                        payload.thumbnail =
+                            thumbnail.and_then(crate::media::notification_thumbnail);
                         payload.play = !view_once
                             && inner.audio_message.as_option().is_some()
                             && self.media_path.contains_key(&message.id);
@@ -125,7 +179,8 @@ impl Bridge {
                     t("notify.new_message")
                 };
                 if let Some(path) = &payload.thumbnail {
-                    self.notification_thumbnails.insert(token.clone(), path.clone());
+                    self.notification_thumbnails
+                        .insert(token.clone(), path.clone());
                 }
                 crate::platform::toast(&toast_title, &toast_body, payload);
                 let expired_token = token.clone();
@@ -137,37 +192,70 @@ impl Bridge {
                 });
             }
             _ => {
-                if self.vault.as_ref().is_none_or(|vault| vault.locked()) { return; }
+                if self.vault.as_ref().is_none_or(|vault| vault.locked()) {
+                    return;
+                }
                 let mut names: Vec<&str> = Vec::new();
                 if self.notify_previews {
                     for (title, _, jid, _) in &queue {
-                        if self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted()) && !names.contains(&title.as_str()) {
+                        if self
+                            .store
+                            .chats
+                            .get(jid)
+                            .is_some_and(|chat| !chat.is_muted())
+                            && !names.contains(&title.as_str())
+                        {
                             names.push(title);
-                            if names.len() == 3 { break; }
+                            if names.len() == 3 {
+                                break;
+                            }
                         }
                     }
                 }
-                let count = queue.iter().filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted())).count();
-                if count == 0 || (self.notify_previews && names.is_empty()) { return; }
+                let count = queue
+                    .iter()
+                    .filter(|(_, _, jid, _)| {
+                        self.store
+                            .chats
+                            .get(jid)
+                            .is_some_and(|chat| !chat.is_muted())
+                    })
+                    .count();
+                if count == 0 || (self.notify_previews && names.is_empty()) {
+                    return;
+                }
                 let text = if !self.notify_previews {
                     ta("notify.new_messages", &[&count.to_string(), ""])
                 } else if names.len() == 1 {
                     ta("notify.from_one", &[&count.to_string(), names[0]])
                 } else {
-                    ta("notify.new_messages", &[&count.to_string(), &names.join(", ")])
+                    ta(
+                        "notify.new_messages",
+                        &[&count.to_string(), &names.join(", ")],
+                    )
                 };
                 // When every banner in the group belongs to one chat, a
                 // click opens that chat; otherwise it only raises the app.
-                let live: Vec<&(String, String, String, String)> = queue.iter()
-                    .filter(|(_, _, jid, _)| self.store.chats.get(jid).is_some_and(|chat| !chat.is_muted()))
+                let live: Vec<&(String, String, String, String)> = queue
+                    .iter()
+                    .filter(|(_, _, jid, _)| {
+                        self.store
+                            .chats
+                            .get(jid)
+                            .is_some_and(|chat| !chat.is_muted())
+                    })
                     .collect();
-                let single_chat = live.first().map(|entry| entry.2.clone())
+                let single_chat = live
+                    .first()
+                    .map(|entry| entry.2.clone())
                     .filter(|jid| live.iter().all(|entry| &entry.2 == jid));
                 let mut payload = crate::platform::ToastPayload::default();
                 if let Some(jid) = single_chat
                     && let Some(last) = live.last().map(|entry| entry.3.clone())
                 {
-                    if let Some(vault) = &self.vault { self.store.hydrate(vault, &jid); }
+                    if let Some(vault) = &self.vault {
+                        self.store.hydrate(vault, &jid);
+                    }
                     payload.token = self.register_notification_token(&jid, &last);
                 }
                 crate::platform::toast(&t("notify.app_name"), &text, payload);
@@ -185,26 +273,39 @@ impl Bridge {
         crate::media::clean_notification_thumbnails();
     }
 
-    pub(super) fn register_notification_token(&mut self, jid: &str, msg_id: &str) -> Option<String> {
+    pub(super) fn register_notification_token(
+        &mut self,
+        jid: &str,
+        msg_id: &str,
+    ) -> Option<String> {
         use rand::TryRngCore as _;
         let mut bytes = [0u8; 16];
         rand::rngs::OsRng.try_fill_bytes(&mut bytes).ok()?;
-        let token = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let token = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         self.expire_notification_tokens();
-        self.notify_tokens.insert(token.clone(), NotificationToken {
-            jid: jid.to_string(),
-            msg_id: msg_id.to_string(),
-            expires: SystemTime::now() + NOTIFICATION_TOKEN_TTL,
-        });
+        self.notify_tokens.insert(
+            token.clone(),
+            NotificationToken {
+                jid: jid.to_string(),
+                msg_id: msg_id.to_string(),
+                expires: SystemTime::now() + NOTIFICATION_TOKEN_TTL,
+            },
+        );
         Some(token)
     }
 
     pub(super) fn expire_notification_tokens(&mut self) {
         let now = SystemTime::now();
         self.notify_tokens.retain(|_, token| token.expires > now);
-        let expired: Vec<String> = self.notification_thumbnails.keys()
+        let expired: Vec<String> = self
+            .notification_thumbnails
+            .keys()
             .filter(|token| !self.notify_tokens.contains_key(*token))
-            .cloned().collect();
+            .cloned()
+            .collect();
         for token in expired {
             if let Some(path) = self.notification_thumbnails.remove(&token) {
                 let _ = std::fs::remove_file(path);
@@ -223,7 +324,11 @@ impl Bridge {
             let _ = std::fs::remove_file(path);
         }
         let chat_known = self.store.chats.contains_key(&item.jid);
-        let message_known = self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id);
+        let message_known = self
+            .store
+            .messages_for(&item.jid)
+            .iter()
+            .any(|message| message.id == item.msg_id);
         if !token_usable(item.expires, SystemTime::now(), chat_known, message_known) {
             return None;
         }
@@ -248,46 +353,83 @@ impl Bridge {
 
     pub fn on_notification_activated(&mut self, token: &str) {
         self.raise_main_window();
-        let Some(item) = self.take_notification_token(token) else { return };
+        let Some(item) = self.take_notification_token(token) else {
+            return;
+        };
         self.open_dm(&item.jid, None);
         self.raise_main_window();
     }
 
     pub fn on_notification_play(&mut self, token: &str) {
-        let Some(item) = self.take_notification_token(token) else { return };
-        let valid_audio = self.store.messages_for(&item.jid).iter()
+        let Some(item) = self.take_notification_token(token) else {
+            return;
+        };
+        let valid_audio = self
+            .store
+            .messages_for(&item.jid)
+            .iter()
             .find(|message| message.id == item.msg_id)
             .and_then(|message| message.raw.as_ref())
-            .is_some_and(|raw| !raw.is_view_once() && raw.get_base_message().audio_message.as_option().is_some());
+            .is_some_and(|raw| {
+                !raw.is_view_once() && raw.get_base_message().audio_message.as_option().is_some()
+            });
         if valid_audio && self.media_path.contains_key(&item.msg_id) {
             self.toggle_audio_background(&item.jid, &item.msg_id);
         }
     }
 
     pub fn on_notification_reply(&mut self, token: &str, text: &str) {
-        let Some(item) = self.take_notification_token(token) else { return };
-        let mut body: String = text.chars().filter(|ch| !ch.is_control() || *ch == '\n').collect();
-        body = body.trim_matches(|ch: char| ch != '\n' && ch.is_whitespace()).to_string();
-        if body.is_empty() { return; }
+        let Some(item) = self.take_notification_token(token) else {
+            return;
+        };
+        let mut body: String = text
+            .chars()
+            .filter(|ch| !ch.is_control() || *ch == '\n')
+            .collect();
+        body = body
+            .trim_matches(|ch: char| ch != '\n' && ch.is_whitespace())
+            .to_string();
+        if body.is_empty() {
+            return;
+        }
         if body.len() > NOTIFICATION_REPLY_MAX_BYTES {
             let mut end = NOTIFICATION_REPLY_MAX_BYTES;
-            while !body.is_char_boundary(end) { end -= 1; }
+            while !body.is_char_boundary(end) {
+                end -= 1;
+            }
             body.truncate(end);
         }
         if body.is_empty()
             || !self.store.chats.contains_key(&item.jid)
-            || !self.store.chats.get(&item.jid).is_some_and(|chat| chat.can_send())
-            || !self.store.messages_for(&item.jid).iter().any(|message| message.id == item.msg_id)
+            || !self
+                .store
+                .chats
+                .get(&item.jid)
+                .is_some_and(|chat| chat.can_send())
+            || !self
+                .store
+                .messages_for(&item.jid)
+                .iter()
+                .any(|message| message.id == item.msg_id)
         {
             return;
         }
         let message = crate::wa::build_text(&item.jid, body, &None, Vec::new(), None);
-        if !self.enqueue_prepared(&item.jid, message, None) { return; }
+        if !self.enqueue_prepared(&item.jid, message, None) {
+            return;
+        }
         if self.ui.get_send_receipts() {
-            let message = self.store.messages_for(&item.jid).iter().find(|m| m.id == item.msg_id).cloned();
+            let message = self
+                .store
+                .messages_for(&item.jid)
+                .iter()
+                .find(|m| m.id == item.msg_id)
+                .cloned();
             if let Some(message) = message {
                 self.wa.send(Cmd::MarkRead {
-                    jid: item.jid.clone(), sender: self.key_participant(&message), ids: vec![item.msg_id.clone()],
+                    jid: item.jid.clone(),
+                    sender: self.key_participant(&message),
+                    ids: vec![item.msg_id.clone()],
                 });
                 self.store.mark_read_sent(&item.jid, &[item.msg_id.clone()]);
             }
@@ -298,7 +440,11 @@ impl Bridge {
     pub(super) fn toggle_audio_background(&mut self, jid: &str, id: &str) {
         if self.vault.as_ref().is_none_or(|vault| vault.locked())
             || !self.media_path.contains_key(id)
-            || !self.store.messages_for(jid).iter().any(|message| message.id == id)
+            || !self
+                .store
+                .messages_for(jid)
+                .iter()
+                .any(|message| message.id == id)
         {
             return;
         }
@@ -310,12 +456,23 @@ impl Bridge {
     }
 
     pub(super) fn start_audio_for_notification(&mut self, jid: &str, id: &str) {
-        let Some(message) = self.store.messages_for(jid).iter().find(|message| message.id == id) else { return };
+        let Some(message) = self
+            .store
+            .messages_for(jid)
+            .iter()
+            .find(|message| message.id == id)
+        else {
+            return;
+        };
         let duration = message.duration_sec.max(1) as f64;
         self.stop_audio();
         self.audio = Some(AudioState {
-            id: id.to_string(), jid: jid.to_string(), duration,
-            paused: false, pending_offset: Some(0.0), player: None,
+            id: id.to_string(),
+            jid: jid.to_string(),
+            duration,
+            paused: false,
+            pending_offset: Some(0.0),
+            player: None,
         });
         self.spin_audio_at(0.0);
         self.sync_mini_player();
@@ -342,7 +499,17 @@ mod tests {
     #[test]
     fn default_ttl_leaves_the_toast_clickable_for_a_minute() {
         let now = SystemTime::now();
-        assert!(token_usable(now + NOTIFICATION_TOKEN_TTL, now + Duration::from_secs(59), true, true));
-        assert!(!token_usable(now + NOTIFICATION_TOKEN_TTL, now + Duration::from_secs(61), true, true));
+        assert!(token_usable(
+            now + NOTIFICATION_TOKEN_TTL,
+            now + Duration::from_secs(59),
+            true,
+            true
+        ));
+        assert!(!token_usable(
+            now + NOTIFICATION_TOKEN_TTL,
+            now + Duration::from_secs(61),
+            true,
+            true
+        ));
     }
 }

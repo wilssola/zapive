@@ -39,16 +39,21 @@ impl Bridge {
         self.ui.set_notifications(self.notifications);
         self.notify_previews = vault.setting_get("notify_previews").as_deref() == Some("1");
         self.ui.set_notify_previews(self.notify_previews);
-        self.ui.set_message_sound(vault.setting_get("message_sound").as_deref() != Some("0"));
+        self.ui
+            .set_message_sound(vault.setting_get("message_sound").as_deref() != Some("0"));
         self.load_wallpaper(&vault);
         self.load_call_silence(&vault);
         // Silence memory is per account and never outlives it.
         self.call_dismissed.clear();
         self.silenced_calls.clear();
-        self.ui.set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
-        self.ui.set_blur_photos(vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
-        self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
-        self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
+        self.ui
+            .set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
+        self.ui
+            .set_blur_photos(vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
+        self.ui
+            .set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
+        self.ui
+            .set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
         self.load_translation_settings();
         self.load_mcp();
