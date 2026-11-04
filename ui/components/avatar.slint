@@ -1,3 +1,5 @@
+import { PrivacyVeil } from "privacy-veil.slint";
+import { Theme } from "theme.slint";
 export component Avatar inherits Rectangle {
     in property <image> src;
     in property <bool> has-image;
@@ -5,6 +7,7 @@ export component Avatar inherits Rectangle {
     in property <int> color-idx;
     in property <bool> privacy-blurred: false;
     in property <bool> privacy-reveal: false;
+    in property <bool> demo-reveal: false;
     property <[color]> avatar-colors: [#6bcbef, #e17ab0, #91ab01, #f05d4d, #ffbc38, #8b7add, #02a698, #ee6e51];
 
     border-radius: self.width / 2;
@@ -16,8 +19,13 @@ export component Avatar inherits Rectangle {
         width: parent.width;
         height: parent.height;
         image-fit: cover;
-        opacity: root.privacy-blurred && !root.privacy-reveal ? 0.08 : 1;
-        animate opacity { duration: 120ms; easing: ease-out; }
+    }
+    if root.privacy-blurred && !root.privacy-reveal && !root.demo-reveal: PrivacyVeil {
+        width: parent.width;
+        height: parent.height;
+        radius: parent.border-radius;
+        blur: 20px;
+        tint: Theme.glass ? Theme.glass-fill-soft : Theme.panel;
     }
     if !self.has-image: Text {
         text: root.initial;
@@ -27,7 +35,11 @@ export component Avatar inherits Rectangle {
         height: parent.height;
         horizontal-alignment: center;
         vertical-alignment: center;
-        opacity: root.privacy-blurred && !root.privacy-reveal ? 0.08 : 1;
-        animate opacity { duration: 120ms; easing: ease-out; }
+    }
+    if !self.has-image && root.privacy-blurred && !root.privacy-reveal && !root.demo-reveal: PrivacyVeil {
+        width: parent.width;
+        height: parent.height;
+        radius: parent.border-radius;
+        tint: Theme.glass ? Theme.glass-fill-soft : Theme.panel;
     }
 }

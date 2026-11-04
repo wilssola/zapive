@@ -1,0 +1,16 @@
+import { Theme } from "theme.slint";
+
+// Conditional privacy mask. Only instantiate while private content is hidden;
+// placing it last in a parent makes it a passive visual overlay while earlier
+// child hit targets continue to receive input.
+export component PrivacyVeil inherits Rectangle {
+    in property <bool> active: true;
+    in property <color> tint: Theme.panel;
+    in property <length> radius: 0px;
+    in property <length> blur: 8px;
+    visible: root.active;
+    border-radius: root.radius;
+    clip: true;
+    background: root.tint.with-alpha(0.45);
+    backdrop-blur: root.active ? root.blur : 0px;
+}

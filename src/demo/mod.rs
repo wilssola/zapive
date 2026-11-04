@@ -61,6 +61,7 @@ struct Options {
     size: (u32, u32),
     shots_all: Option<PathBuf>,
     group: bool,
+    hover: Option<(i32, i32)>,
 }
 
 pub fn requested() -> bool {
@@ -132,6 +133,21 @@ fn parse() -> Result<Options, String> {
         shots_all: value_of("--demo-shots-all").map(PathBuf::from),
         group: matches!(page, Page::Info | Page::Poll | Page::Reactions)
             || std::env::args().any(|a| a == "--demo-group"),
+        hover: value_of("--demo-hover")
+            .map(|value| {
+                let (x, y) = value
+                    .split_once(',')
+                    .ok_or_else(|| format!("invalid --demo-hover `{value}` (expected x,y)"))?;
+                Ok::<_, String>((
+                    x.trim()
+                        .parse()
+                        .map_err(|_| format!("invalid --demo-hover `{value}` (expected x,y)"))?,
+                    y.trim()
+                        .parse()
+                        .map_err(|_| format!("invalid --demo-hover `{value}` (expected x,y)"))?,
+                ))
+            })
+            .transpose()?,
     })
 }
 
@@ -255,11 +271,14 @@ fn show(options: &Options) -> i32 {
         options.size.0 as f32,
         options.size.1 as f32,
     ));
+    if options.hover.is_some() {
+        ui.set_demo_hover(true);
+    }
     #[cfg(windows)]
     crate::platform::set_title_bar_theme(options.dark, options.glass);
 
     // The list lays out lazily: anchor on the newest message once it has.
-    let anchor: Vec<slint::Timer> = [250u64, 700, 1200]
+    let mut anchor: Vec<slint::Timer> = [250u64, 700, 1200]
         .into_iter()
         .map(|delay| {
             let timer = slint::Timer::default();
@@ -279,12 +298,31 @@ fn show(options: &Options) -> i32 {
         })
         .collect();
 
+    if let Some(mode) = value_of("--demo-bench") {
+        anchor.push(start_bench(&ui, &mode));
+    }
+
     let outcome = Rc::new(Cell::new(0));
     let snapshot = slint::Timer::default();
     if let Some(path) = options.shot.clone() {
         let weak = ui.as_weak();
         let outcome = outcome.clone();
-        // Long enough for the splash fade and the last layout pass.
+        if let Some((x, y)) = options.hover {
+            let weak = ui.as_weak();
+            let hover = slint::Timer::default();
+            hover.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_millis(1600),
+                move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_demo_hover_x(x as f32);
+                        ui.set_demo_hover_y(y as f32);
+                    }
+                },
+            );
+            anchor.push(hover);
+        }
+
         snapshot.start(
             slint::TimerMode::SingleShot,
             Duration::from_millis(2200),
@@ -342,6 +380,12 @@ fn configure(ui: &AppWindow, options: &Options) {
         }
     }
     ui.set_app_loading(options.page == Page::Splash);
+    if std::env::args().any(|a| a == "--demo-privacy-blur") {
+        ui.set_blur_names(true);
+        ui.set_blur_messages(true);
+        ui.set_blur_photos(true);
+        ui.set_blur_media(true);
+    }
 }
 
 fn save_snapshot(ui: &AppWindow, path: &Path) -> i32 {
@@ -370,4 +414,38 @@ fn save_snapshot(ui: &AppWindow, path: &Path) -> i32 {
             1
         }
     }
+}
+
+// In-app load generator for CPU benchmarks: synthetic pointer moves and
+// viewport scrolling dispatched inside the window, never real input.
+fn start_bench(ui: &AppWindow, mode: &str) -> slint::Timer {
+    use slint::platform::WindowEvent;
+    let weak = ui.as_weak();
+    let mode = mode.to_string();
+    let started = std::time::Instant::now();
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(16),
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let t = started.elapsed().as_secs_f32();
+            if t < 3.0 {
+                return;
+            }
+            let phase = (t * 0.8).sin().abs();
+            match mode.as_str() {
+                "scroll" => ui.invoke_set_conversation_scroll(-phase * 700.0),
+                "hover-list" | "hover-chat" => {
+                    let x = if mode == "hover-list" { 200.0 } else { 900.0 };
+                    let y = 120.0 + phase * 640.0;
+                    ui.window().dispatch_event(WindowEvent::PointerMoved {
+                        position: slint::LogicalPosition::new(x, y),
+                    });
+                }
+                _ => {}
+            }
+        },
+    );
+    timer
 }
