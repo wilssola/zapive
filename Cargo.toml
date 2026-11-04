@@ -86,7 +86,7 @@ cpal = "0.16"
 # `decoding` is off on purpose -- it pulls mozjpeg (C); the `image` crate
 # already decodes MJPEG in pure Rust.
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
-rfd = "0.15"
+rfd = "0.17"
 webp = "0.3"
 ogg = "0.9.2"
 mp4 = "0.14.0"
