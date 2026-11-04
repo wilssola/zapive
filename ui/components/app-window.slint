@@ -3510,33 +3510,51 @@ export component AppWindow inherits Window {
                 // Read-only conversation: announcement groups and groups
                 // we are no longer in.
                 if !root.select-mode && !root.current-can-send: Rectangle {
-                    height: 62px;
-                    background: Theme.header;
-                    HorizontalLayout {
-                        alignment: center;
-                        if root.current-left: Text {
-                            text: @tr("chat.composer.not_member");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            vertical-alignment: center;
+                    height: 52px;
+                    // Floats like the composer pill: same margins, radius and glass.
+                    Rectangle {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        background: Theme.panel;
+                        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+                        border-width: 1px;
+                        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+                        border-radius: 18px;
+                        drop-shadow-blur: 10px;
+                        drop-shadow-color: Theme.glass-shadow;
+                        if Theme.glass: Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: parent.border-radius;
+                            background: Theme.glass-sheen;
                         }
-                        if !root.current-left: Text {
-                            text: @tr("chat.composer.admins_only_prefix");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-                        if !root.current-left: Text {
-                            text: @tr("chat.composer.admins_only_highlight");
-                            color: Theme.accent;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-                        if !root.current-left: Text {
-                            text: @tr("chat.composer.admins_only_suffix");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            alignment: center;
+                            if root.current-left: Text {
+                                text: @tr("chat.composer.not_member");
+                                color: Theme.text-dim;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if !root.current-left: Text {
+                                text: @tr("chat.composer.admins_only_prefix");
+                                color: Theme.text-dim;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if !root.current-left: Text {
+                                text: @tr("chat.composer.admins_only_highlight");
+                                color: Theme.accent-text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if !root.current-left: Text {
+                                text: @tr("chat.composer.admins_only_suffix");
+                                color: Theme.text-dim;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }
@@ -3558,6 +3576,12 @@ export component AppWindow inherits Window {
                         border-radius: 18px;
                         drop-shadow-blur: 10px;
                         drop-shadow-color: Theme.glass-shadow;
+                        if Theme.glass: Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: parent.border-radius;
+                            background: Theme.glass-sheen;
+                        }
 
                         // Recording bar (replaces the composer while capturing)
                         HorizontalBox {
