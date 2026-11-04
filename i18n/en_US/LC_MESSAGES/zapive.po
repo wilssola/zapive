@@ -1989,6 +1989,69 @@ msgstr "All {0}"
 msgid "reactions.click_to_remove"
 msgstr "Click to remove"
 
+msgid "settings.shortcuts.title"
+msgstr "Keyboard shortcuts"
+
+msgid "settings.shortcuts.description"
+msgstr "See every shortcut available in Zapive"
+
+msgid "shortcuts.title"
+msgstr "Keyboard shortcuts"
+
+msgid "shortcuts.section.chats"
+msgstr "Chats"
+
+msgid "shortcuts.section.search"
+msgstr "Search"
+
+msgid "shortcuts.section.messages"
+msgstr "Messages"
+
+msgid "shortcuts.section.general"
+msgstr "General"
+
+msgid "shortcuts.open_chat_n"
+msgstr "Open chat 1 to 9"
+
+msgid "shortcuts.next_chat"
+msgstr "Next chat"
+
+msgid "shortcuts.prev_chat"
+msgstr "Previous chat"
+
+msgid "shortcuts.next_chat_alt"
+msgstr "Next chat (alternative)"
+
+msgid "shortcuts.prev_chat_alt"
+msgstr "Previous chat (alternative)"
+
+msgid "shortcuts.archive"
+msgstr "Archive or unarchive chat"
+
+msgid "shortcuts.mute"
+msgstr "Mute or unmute chat"
+
+msgid "shortcuts.search_chats"
+msgstr "Search chats"
+
+msgid "shortcuts.search_in_chat"
+msgstr "Search in this chat"
+
+msgid "shortcuts.edit_last"
+msgstr "Edit your last message (empty composer)"
+
+msgid "shortcuts.paste_image"
+msgstr "Paste image from clipboard"
+
+msgid "shortcuts.copy_selection"
+msgstr "Copy selected messages"
+
+msgid "shortcuts.close_overlay"
+msgstr "Close the topmost panel"
+
+msgid "shortcuts.show_shortcuts"
+msgstr "Show or hide this list"
+
 msgid "starred.title"
 msgstr "Starred messages"
 

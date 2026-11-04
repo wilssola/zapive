@@ -1991,6 +1991,69 @@ msgstr "Todas {0}"
 msgid "reactions.click_to_remove"
 msgstr "Clique para remover"
 
+msgid "settings.shortcuts.title"
+msgstr "Atalhos de teclado"
+
+msgid "settings.shortcuts.description"
+msgstr "Veja todos os atalhos disponíveis no Zapive"
+
+msgid "shortcuts.title"
+msgstr "Atalhos de teclado"
+
+msgid "shortcuts.section.chats"
+msgstr "Conversas"
+
+msgid "shortcuts.section.search"
+msgstr "Busca"
+
+msgid "shortcuts.section.messages"
+msgstr "Mensagens"
+
+msgid "shortcuts.section.general"
+msgstr "Geral"
+
+msgid "shortcuts.open_chat_n"
+msgstr "Abrir conversa de 1 a 9"
+
+msgid "shortcuts.next_chat"
+msgstr "Próxima conversa"
+
+msgid "shortcuts.prev_chat"
+msgstr "Conversa anterior"
+
+msgid "shortcuts.next_chat_alt"
+msgstr "Próxima conversa (alternativo)"
+
+msgid "shortcuts.prev_chat_alt"
+msgstr "Conversa anterior (alternativo)"
+
+msgid "shortcuts.archive"
+msgstr "Arquivar ou desarquivar conversa"
+
+msgid "shortcuts.mute"
+msgstr "Silenciar ou reativar conversa"
+
+msgid "shortcuts.search_chats"
+msgstr "Buscar conversas"
+
+msgid "shortcuts.search_in_chat"
+msgstr "Buscar nesta conversa"
+
+msgid "shortcuts.edit_last"
+msgstr "Editar a última mensagem (campo vazio)"
+
+msgid "shortcuts.paste_image"
+msgstr "Colar imagem da área de transferência"
+
+msgid "shortcuts.copy_selection"
+msgstr "Copiar mensagens selecionadas"
+
+msgid "shortcuts.close_overlay"
+msgstr "Fechar o painel do topo"
+
+msgid "shortcuts.show_shortcuts"
+msgstr "Mostrar ou ocultar esta lista"
+
 msgid "starred.title"
 msgstr "Mensagens favoritas"
 

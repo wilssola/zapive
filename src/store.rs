@@ -1676,6 +1676,55 @@ impl Store {
     }
 }
 
+// Messages that are pinned right now, newest pin first. `now` is a
+// parameter so expiry is testable.
+pub fn active_pins(list: &[StoredMessage], now: i64) -> Vec<&StoredMessage> {
+    let mut pins: Vec<&StoredMessage> = list
+        .iter()
+        .filter(|m| m.pinned_until > now && !m.deleted && m.kind != MessageKind::System)
+        .collect();
+    pins.sort_by(|a, b| b.pinned_until.cmp(&a.pinned_until).then_with(|| b.timestamp.cmp(&a.timestamp)));
+    pins
+}
+
+// Index of the next chat when moving `delta` steps through a list of
+// `len` rows, wrapping at both ends. With nothing selected, forward starts
+// at the first row and backward at the last.
+pub fn adjacent_index(current: Option<usize>, len: usize, delta: i32) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    match current {
+        Some(index) => Some((index as i64 + i64::from(delta)).rem_euclid(len as i64) as usize),
+        None => Some(if delta >= 0 { 0 } else { len - 1 }),
+    }
+}
+
+// The row a Ctrl+digit shortcut opens, or None past the end of the list.
+pub fn shortcut_index(position: i32, len: usize) -> Option<usize> {
+    usize::try_from(position).ok().filter(|index| *index < len)
+}
+
+// Reactor jid -> emoji, grouped by emoji for the reaction sheet: most
+// used first, ties keep the emoji order of the sorted reactor keys.
+pub fn reaction_groups(reactions: &HashMap<String, String>) -> Vec<(String, Vec<String>)> {
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    let mut keys: Vec<&String> = reactions.keys().collect();
+    keys.sort();
+    for reactor in keys {
+        let emoji = clean_text(&reactions[reactor]);
+        if emoji.is_empty() {
+            continue;
+        }
+        match groups.iter_mut().find(|(existing, _)| *existing == emoji) {
+            Some((_, who)) => who.push(reactor.clone()),
+            None => groups.push((emoji, vec![reactor.clone()])),
+        }
+    }
+    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    groups
+}
+
 fn to_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
 }

@@ -248,6 +248,25 @@ export component SettingsLayer inherits ModalLayer {
                                     clicked => { root.autostart-changed(!root.autostart); }
                                 }
                             }
+                            SettingsRow {
+                                label: @tr("settings.shortcuts.title");
+                                detail: @tr("settings.shortcuts.description");
+                                icon: @image-url("../icons/settings.svg");
+                                height: 54px;
+                                shortcuts-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.shortcuts.title");
+                                    clicked => { root.show-shortcuts(); }
+                                }
+                                Image {
+                                    source: @image-url("../icons/chevron-right.svg");
+                                    colorize: Theme.icon;
+                                    width: 16px;
+                                    height: 16px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
                         }
                         if ((root.settings-query == "" && (root.settings-section == "mcp")) || (root.settings-query != "" && root.settings-matches(@tr("settings.mcp.title") + " " + @tr("settings.mcp.enable") + " " + @tr("settings.mcp.description") + " MCP AI " + @tr("settings.mcp.url") + " " + @tr("settings.mcp.token") + " " + @tr("settings.mcp.copy_config") + " " + @tr("settings.mcp.regenerate_token")))): SettingsCard {
                             title: @tr("settings.mcp.title");

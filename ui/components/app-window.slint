@@ -1010,6 +1010,40 @@ export component AppWindow inherits Window {
     capture-scope := FocusScope {
         visible: root.screen == "main";
         capture-key-pressed(event) => {
+            if (event.text == "/" && event.modifiers.control) {
+                root.shortcuts-open = !root.shortcuts-open;
+                return accept;
+            }
+            if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                && event.text >= "1" && event.text <= "9" && root.screen == "main") {
+                if (event.text == "1") { root.open-chat-at(0); }
+                else if (event.text == "2") { root.open-chat-at(1); }
+                else if (event.text == "3") { root.open-chat-at(2); }
+                else if (event.text == "4") { root.open-chat-at(3); }
+                else if (event.text == "5") { root.open-chat-at(4); }
+                else if (event.text == "6") { root.open-chat-at(5); }
+                else if (event.text == "7") { root.open-chat-at(6); }
+                else if (event.text == "8") { root.open-chat-at(7); }
+                else { root.open-chat-at(8); }
+                return accept;
+            }
+            if (event.text == Key.Tab && event.modifiers.control) {
+                root.select-adjacent-chat(event.modifiers.shift ? -1 : 1);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.DownArrow) {
+                root.select-adjacent-chat(1);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.UpArrow) {
+                root.select-adjacent-chat(-1);
+                return accept;
+            }
+            if (event.text.to-lowercase() == "f" && event.modifiers.control && event.modifiers.shift
+                && root.chat-open) {
+                root.menu-search();
+                return accept;
+            }
             if (event.text == "f" && event.modifiers.control) {
                 search-box.focus();
                 return accept;
