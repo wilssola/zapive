@@ -2120,7 +2120,11 @@ export component AppWindow inherits Window {
                         // Pressing on the row's background and dragging
                         // sweeps whole messages into the selection, the way
                         // dragging over a page selects across bubbles.
-                        if msg.kind != "system": TouchArea {
+                        row-hover := TouchArea {
+                            // Hover probe for the action buttons and privacy
+                            // reveal, and the background for drag-select.
+                            // System rows keep it inert, as before.
+                            enabled: msg.kind != "system";
                             mouse-cursor: default;
                             pointer-event(e) => {
                                 if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
@@ -2153,22 +2157,6 @@ export component AppWindow inherits Window {
                             background: Theme.accent.with-alpha(self.lit ? 0.22 : 0.5);
                             animate background { duration: 700ms; easing: ease-out; }
                             border-radius: 10px;
-                        }
-                        row-hover := TouchArea {
-                            mouse-cursor: default;
-                            enabled: true;
-                            clicked => {
-                                if !root.select-mode && !msg.deleted {
-                                    root.request-reply(msg.id);
-                                    root.focus-composer();
-                                }
-                            }
-                            double-clicked => {
-                                if !root.select-mode && !msg.deleted {
-                                    root.request-reply(msg.id);
-                                    root.focus-composer();
-                                }
-                            }
                         }
                         // System notices: one centered pill, no bubble.
                         sys-pill := Rectangle {
@@ -3285,25 +3273,40 @@ export component AppWindow inherits Window {
                                 clicked => { root.message-action(msg.id, "translation-copy"); }
                             }
                         }
-                        // Hover actions, mirroring WhatsApp: react, forward
-                        // and the message menu.
-                        if (row-hover.has-hover || root.react-bar-id == msg.id)
-                            && !root.select-mode && msg.kind != "system": Rectangle {
-                            y: bubble.y + 4px;
-                            // Compact 28px buttons, as before the glass work;
-                            // width follows the buttons so nothing overlaps.
-                            width: actions-row.preferred-width;
+                        // Hover actions like WhatsApp Web: one small pill
+                        // beside the bubble (react, forward, translate, menu).
+                        // It sits inside msg-row and reports its own hover,
+                        // so reaching for it keeps it shown (no flicker).
+                        property <bool> show-actions: (row-hover.has-hover || root.react-bar-id == msg.id || msg-row.actions-hover)
+                            && !root.select-mode && msg.kind != "system" && !msg.deleted;
+                        property <bool> actions-hover: false;
+                        if msg-row.show-actions: Rectangle {
+                            width: actions-row.preferred-width + 8px;
+                            height: 32px;
+                            y: bubble.y + max(0px, (min(bubble.height, 80px) - self.height) / 2);
                             x: msg.fromMe
                                 ? max(0px, bubble.x - self.width - 6px)
                                 : bubble.x + bubble.width + 6px;
-                            height: 28px;
+                            border-radius: 16px;
+                            background: Theme.panel;
+                            border-width: Theme.glass ? 1px : 0px;
+                            border-color: Theme.glass-rim;
+                            pill-touch := TouchArea {
+                                changed has-hover => { msg-row.actions-hover = self.has-hover; }
+                            }
                             actions-row := HorizontalLayout {
-                                spacing: 4px;
+                                padding-left: 4px;
+                                padding-right: 4px;
+                                padding-top: 2px;
+                                padding-bottom: 2px;
+                                spacing: 2px;
                                 IconButton {
                                     icon: @image-url("../icons/mood-smile.svg");
                                     icon-size: 17px;
                                     width: 28px;
                                     height: 28px;
+                                    radius: 14px;
+                                    accessible-role: button;
                                     clicked => {
                                         root.react-bar-id =
                                             root.react-bar-id == msg.id ? "" : msg.id;
@@ -3314,6 +3317,8 @@ export component AppWindow inherits Window {
                                     icon-size: 17px;
                                     width: 28px;
                                     height: 28px;
+                                    radius: 14px;
+                                    accessible-role: button;
                                     clicked => { root.request-forward(msg.id); }
                                 }
                                 if root.can-translate(msg) && !msg-row.has-translation: IconButton {
@@ -3321,17 +3326,20 @@ export component AppWindow inherits Window {
                                     icon-size: 17px;
                                     width: 28px;
                                     height: 28px;
+                                    radius: 14px;
                                     accessible-role: button;
                                     accessible-label: @tr("chat.message.translate");
                                     enabled: !msg.translationBusy;
                                     active: msg.translationText != "";
                                     clicked => { root.message-action(msg.id, "translate"); }
                                 }
-                                IconButton {
+                                menu-button := IconButton {
                                     icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
                                     width: 28px;
                                     height: 28px;
+                                    radius: 14px;
+                                    accessible-role: button;
                                     clicked => {
                                         root.menu-message = msg;
                                         root.message-menu-x = self.absolute-position.x;

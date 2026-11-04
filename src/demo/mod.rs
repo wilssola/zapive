@@ -385,6 +385,20 @@ fn configure(ui: &AppWindow, options: &Options) {
         }
     }
     ui.set_app_loading(options.page == Page::Splash);
+    // Shows a message's hover actions, by message id ("last" = newest).
+    if let Some(id) = value_of("--demo-actions") {
+        use slint::Model;
+        let messages = ui.get_messages();
+        let id = if id == "last" {
+            messages
+                .row_data(messages.row_count().saturating_sub(1))
+                .map(|m| m.id.to_string())
+                .unwrap_or_default()
+        } else {
+            id
+        };
+        ui.set_react_bar_id(id.into());
+    }
     // Shows the chat-row drop target as if files were dragged over a row.
     if let Some(name) = value_of("--demo-drop-row") {
         let jid = demo_jid_of(ui, &name);
