@@ -17,6 +17,7 @@ mod logging;
 mod markup;
 mod mcp;
 mod media;
+mod mime;
 mod outbox;
 mod paths;
 mod pdf;

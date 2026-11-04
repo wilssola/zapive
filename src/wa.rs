@@ -1466,6 +1466,10 @@ async fn prepare_attachment(
     .map_err(|e| e.to_string())??;
     let (data, thumb, seconds, waveform) = converted;
     let len = data.len() as u64;
+    // Decided before the upload consumes the bytes: the name says what the
+    // file is, and the first bytes settle it when the name does not.
+    let document_fields = (preparation.kind == "document")
+        .then(|| crate::mime::document_fields(&preparation.filename, &data));
     let upload = client
         .upload(data, media_type, Default::default())
         .await
@@ -1479,13 +1483,19 @@ async fn prepare_attachment(
                 ..Default::default()
             },
         ),
-        "document" => whatsapp_rust::media::document_message(
-            upload,
-            whatsapp_rust::media::DocumentOptions {
-                file_name: Some(preparation.filename),
-                ..Default::default()
-            },
-        ),
+        "document" => {
+            let fields = document_fields
+                .unwrap_or_else(|| crate::mime::document_fields(&preparation.filename, &[]));
+            whatsapp_rust::media::document_message(
+                upload,
+                whatsapp_rust::media::DocumentOptions {
+                    mimetype: Some(fields.mimetype),
+                    file_name: Some(fields.file_name),
+                    title: Some(fields.title),
+                    ..Default::default()
+                },
+            )
+        }
         "audio" | "voice" => {
             let mimetype = match std::path::Path::new(&preparation.filename)
                 .extension()
