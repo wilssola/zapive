@@ -3264,19 +3264,20 @@ export component AppWindow inherits Window {
                         if (row-hover.has-hover || root.react-bar-id == msg.id)
                             && !root.select-mode && msg.kind != "system": Rectangle {
                             y: bubble.y + 4px;
-                            // Sized by its buttons, never a guessed width: a
-                            // fixed width let the last icon spill onto the
-                            // bubble of outgoing messages.
+                            // Compact 28px buttons, as before the glass work;
+                            // width follows the buttons so nothing overlaps.
                             width: actions-row.preferred-width;
                             x: msg.fromMe
-                                ? max(0px, bubble.x - self.width - 8px)
-                                : bubble.x + bubble.width + 8px;
+                                ? max(0px, bubble.x - self.width - 6px)
+                                : bubble.x + bubble.width + 6px;
                             height: 28px;
                             actions-row := HorizontalLayout {
                                 spacing: 4px;
                                 IconButton {
                                     icon: @image-url("../icons/mood-smile.svg");
                                     icon-size: 17px;
+                                    width: 28px;
+                                    height: 28px;
                                     clicked => {
                                         root.react-bar-id =
                                             root.react-bar-id == msg.id ? "" : msg.id;
@@ -3285,11 +3286,15 @@ export component AppWindow inherits Window {
                                 IconButton {
                                     icon: @image-url("../icons/corner-up-right.svg");
                                     icon-size: 17px;
+                                    width: 28px;
+                                    height: 28px;
                                     clicked => { root.request-forward(msg.id); }
                                 }
                                 if root.can-translate(msg) && !msg-row.has-translation: IconButton {
                                     icon: @image-url("../icons/translate.svg");
                                     icon-size: 17px;
+                                    width: 28px;
+                                    height: 28px;
                                     accessible-role: button;
                                     accessible-label: @tr("chat.message.translate");
                                     enabled: !msg.translationBusy;
@@ -3299,6 +3304,8 @@ export component AppWindow inherits Window {
                                 IconButton {
                                     icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
+                                    width: 28px;
+                                    height: 28px;
                                     clicked => {
                                         root.menu-message = msg;
                                         root.message-menu-x = self.absolute-position.x;
