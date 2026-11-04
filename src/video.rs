@@ -42,31 +42,12 @@ fn h264_track(reader: &mp4::Mp4Reader<BufReader<std::fs::File>>) -> Option<u32> 
         .map(|(id, _)| *id)
 }
 
-pub fn probe_size(path: &Path) -> (u32, u32) {
-    let fallback = (640, 360);
-    if is_gif(path) {
-        use image::ImageDecoder;
-        return std::fs::File::open(path)
-            .ok()
-            .and_then(|f| image::codecs::gif::GifDecoder::new(BufReader::new(f)).ok())
-            .map(|d| d.dimensions())
-            .filter(|&(w, h)| w > 0 && h > 0)
-            .unwrap_or(fallback);
-    }
-    let Some(reader) = open_mp4(path) else { return fallback };
-    h264_track(&reader)
-        .and_then(|id| reader.tracks().get(&id))
-        .map(|t| (t.width() as u32, t.height() as u32))
-        .filter(|&(w, h)| w > 0 && h > 0)
-        .unwrap_or(fallback)
-}
-
 // AVCC samples carry length-prefixed NALs; the decoder wants Annex-B.
 fn avcc_to_annexb(sample: &[u8], out: &mut Vec<u8>) {
     let mut i = 0usize;
     while i + 4 <= sample.len() {
-        let len = u32::from_be_bytes([sample[i], sample[i + 1], sample[i + 2], sample[i + 3]])
-            as usize;
+        let len =
+            u32::from_be_bytes([sample[i], sample[i + 1], sample[i + 2], sample[i + 3]]) as usize;
         i += 4;
         if len == 0 || i + len > sample.len() {
             break;
@@ -82,22 +63,31 @@ fn rgb_to_decoded(rgb: &[u8], w: u32, h: u32, target_w: u32) -> Decoded {
     for px in rgb.chunks(3) {
         rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
     }
-    let img = image::RgbaImage::from_raw(w, h, rgba)
-        .unwrap_or_else(|| image::RgbaImage::new(1, 1));
+    let img = image::RgbaImage::from_raw(w, h, rgba).unwrap_or_else(|| image::RgbaImage::new(1, 1));
     if target_w >= w {
-        return Decoded { w, h, rgba: img.into_raw() };
+        return Decoded {
+            w,
+            h,
+            rgba: img.into_raw(),
+        };
     }
     let tw = (target_w / 2) * 2;
     let th = (((h as u64 * tw as u64 / w as u64) as u32 / 2) * 2).max(2);
     let scaled =
         image::imageops::resize(&img, tw.max(2), th, image::imageops::FilterType::Triangle);
-    Decoded { w: scaled.width(), h: scaled.height(), rgba: scaled.into_raw() }
+    Decoded {
+        w: scaled.width(),
+        h: scaled.height(),
+        rgba: scaled.into_raw(),
+    }
 }
 
 fn gif_frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<Decoded> {
     use image::AnimationDecoder;
     let mut out = Vec::new();
-    let Ok(file) = std::fs::File::open(path) else { return out };
+    let Ok(file) = std::fs::File::open(path) else {
+        return out;
+    };
     let Ok(decoder) = image::codecs::gif::GifDecoder::new(BufReader::new(file)) else {
         return out;
     };
@@ -122,15 +112,19 @@ fn gif_frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
         if target_w < w {
             let tw = (target_w / 2) * 2;
             let th = (((h as u64 * tw as u64 / w as u64) as u32 / 2) * 2).max(2);
-            let scaled = image::imageops::resize(
-                &img,
-                tw.max(2),
-                th,
-                image::imageops::FilterType::Triangle,
-            );
-            out.push(Decoded { w: scaled.width(), h: scaled.height(), rgba: scaled.into_raw() });
+            let scaled =
+                image::imageops::resize(&img, tw.max(2), th, image::imageops::FilterType::Triangle);
+            out.push(Decoded {
+                w: scaled.width(),
+                h: scaled.height(),
+                rgba: scaled.into_raw(),
+            });
         } else {
-            out.push(Decoded { w, h, rgba: img.into_raw() });
+            out.push(Decoded {
+                w,
+                h,
+                rgba: img.into_raw(),
+            });
         }
     }
     out
@@ -140,7 +134,9 @@ fn gif_frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
 // backdrop while it loads.
 pub fn poster(path: &Path, target_w: u32) -> Option<Decoded> {
     let turns = open_mp4(path)
-        .and_then(|reader| h264_track(&reader).and_then(|id| reader.tracks().get(&id).map(quarter_turns)))
+        .and_then(|reader| {
+            h264_track(&reader).and_then(|id| reader.tracks().get(&id).map(quarter_turns))
+        })
         .unwrap_or(0);
     let first = frames(path, target_w, 0.0, 1).into_iter().next()?;
     if turns == 0 {
@@ -152,7 +148,11 @@ pub fn poster(path: &Path, target_w: u32) -> Option<Decoded> {
         2 => image::imageops::rotate180(&img),
         _ => image::imageops::rotate270(&img),
     };
-    Some(Decoded { w: img.width(), h: img.height(), rgba: img.into_raw() })
+    Some(Decoded {
+        w: img.width(),
+        h: img.height(),
+        rgba: img.into_raw(),
+    })
 }
 
 // Decodes up to `max_frames` frames at roughly `fps`, scaled so the width
@@ -162,17 +162,32 @@ pub fn frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
         return gif_frames(path, target_w, fps, max_frames);
     }
     let mut out = Vec::new();
-    let Some(mut reader) = open_mp4(path) else { return out };
-    let Some(track_id) = h264_track(&reader) else { return out };
+    let Some(mut reader) = open_mp4(path) else {
+        return out;
+    };
+    let Some(track_id) = h264_track(&reader) else {
+        return out;
+    };
     let (sample_count, timescale, sps, pps) = {
-        let Some(track) = reader.tracks().get(&track_id) else { return out };
-        let (Ok(sps), Ok(pps)) = (track.sequence_parameter_set(), track.picture_parameter_set())
-        else {
+        let Some(track) = reader.tracks().get(&track_id) else {
             return out;
         };
-        (track.sample_count(), track.timescale().max(1), sps.to_vec(), pps.to_vec())
+        let (Ok(sps), Ok(pps)) = (
+            track.sequence_parameter_set(),
+            track.picture_parameter_set(),
+        ) else {
+            return out;
+        };
+        (
+            track.sample_count(),
+            track.timescale().max(1),
+            sps.to_vec(),
+            pps.to_vec(),
+        )
     };
-    let Some(mut decoder) = new_decoder() else { return out };
+    let Some(mut decoder) = new_decoder() else {
+        return out;
+    };
     let min_gap = if fps > 0.0 { 1.0 / fps } else { 0.0 };
     let mut next_at = 0.0f64;
     let mut annexb = Vec::new();
@@ -180,7 +195,9 @@ pub fn frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
         if out.len() >= max_frames {
             break;
         }
-        let Ok(Some(sample)) = reader.read_sample(track_id, i) else { break };
+        let Ok(Some(sample)) = reader.read_sample(track_id, i) else {
+            break;
+        };
         annexb.clear();
         if i == 1 {
             annexb.extend_from_slice(&[0, 0, 0, 1]);
@@ -191,7 +208,9 @@ pub fn frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
         avcc_to_annexb(&sample.bytes, &mut annexb);
         // Every frame feeds the decoder (references), but only the gated
         // ones are converted and kept.
-        let Ok(Some(yuv)) = decoder.decode(&annexb) else { continue };
+        let Ok(Some(yuv)) = decoder.decode(&annexb) else {
+            continue;
+        };
         let ts = sample.start_time as f64 / timescale as f64;
         if ts + 1e-6 < next_at {
             continue;
@@ -220,8 +239,16 @@ pub fn frames(path: &Path, target_w: u32, fps: f64, max_frames: usize) -> Vec<De
 
 pub enum PlayerEvent {
     // The clip is open: picture size as displayed and length in seconds.
-    Ready { w: u32, h: u32, duration: f64 },
-    Frame { frame: Decoded, pos: f64, resync: bool },
+    Ready {
+        w: u32,
+        h: u32,
+        duration: f64,
+    },
+    Frame {
+        frame: Decoded,
+        pos: f64,
+        resync: bool,
+    },
     Audio(crate::audio::AudioBuffer),
     Ended,
     Failed,
@@ -251,25 +278,27 @@ impl Playback {
         let busy = Arc::new(AtomicBool::new(false));
         let shown = busy.clone();
         let emit = Arc::new(emit);
-        let _ = std::thread::Builder::new().name("zapive-video-player".into()).spawn(move || {
-            let Some(plain) = crate::media::temp_plain(&key, &sealed) else {
-                emit(PlayerEvent::Failed);
-                return;
-            };
-            {
-                let (plain, emit) = (plain.clone(), emit.clone());
-                let _ = std::thread::Builder::new().name("zapive-video-audio".into()).spawn(
-                    move || {
-                        if let Some(buffer) = crate::audio::decode_with_tempo(&plain, 1.0) {
-                            emit(PlayerEvent::Audio(buffer));
-                        }
-                    },
-                );
-            }
-            if play_loop(&plain, &rx, &shown, &*emit).is_none() {
-                emit(PlayerEvent::Failed);
-            }
-        });
+        let _ = std::thread::Builder::new()
+            .name("zapive-video-player".into())
+            .spawn(move || {
+                let Some(plain) = crate::media::temp_plain(&key, &sealed) else {
+                    emit(PlayerEvent::Failed);
+                    return;
+                };
+                {
+                    let (plain, emit) = (plain.clone(), emit.clone());
+                    let _ = std::thread::Builder::new()
+                        .name("zapive-video-audio".into())
+                        .spawn(move || {
+                            if let Some(buffer) = crate::audio::decode_with_tempo(&plain, 1.0) {
+                                emit(PlayerEvent::Audio(buffer));
+                            }
+                        });
+                }
+                if play_loop(&plain, &rx, &shown, &*emit).is_none() {
+                    emit(PlayerEvent::Failed);
+                }
+            });
         Playback { tx, busy }
     }
 
@@ -332,7 +361,11 @@ impl SampleTable {
             }
         }
         offsets.resize(count, 0);
-        let raw: Vec<i64> = dts.iter().zip(&offsets).map(|(d, o)| *d as i64 + o).collect();
+        let raw: Vec<i64> = dts
+            .iter()
+            .zip(&offsets)
+            .map(|(d, o)| *d as i64 + o)
+            .collect();
         // Encoders with B-frames shift everything by the reorder delay;
         // the first picture still belongs at zero.
         let first = raw.iter().copied().min().unwrap_or(0);
@@ -352,7 +385,12 @@ impl SampleTable {
         };
         let mut shown_at = pts.clone();
         shown_at.sort_by(|a, b| a.total_cmp(b));
-        Some(SampleTable { pts, sync, shown_at, duration: at as f64 / scale })
+        Some(SampleTable {
+            pts,
+            sync,
+            shown_at,
+            duration: at as f64 / scale,
+        })
     }
 
     // The last sync sample at or before `secs` (0-based).
@@ -397,7 +435,12 @@ fn to_picture(yuv: &openh264::decoder::DecodedYUV<'_>, turns: u8) -> Decoded {
         .unwrap_or_else(|| image::RgbaImage::new(1, 1));
     if img.width() > PLAYER_MAX_W {
         let th = (img.height() as u64 * PLAYER_MAX_W as u64 / img.width() as u64).max(1) as u32;
-        img = image::imageops::resize(&img, PLAYER_MAX_W, th, image::imageops::FilterType::Triangle);
+        img = image::imageops::resize(
+            &img,
+            PLAYER_MAX_W,
+            th,
+            image::imageops::FilterType::Triangle,
+        );
     }
     let img = match turns {
         1 => image::imageops::rotate90(&img),
@@ -405,7 +448,11 @@ fn to_picture(yuv: &openh264::decoder::DecodedYUV<'_>, turns: u8) -> Decoded {
         3 => image::imageops::rotate270(&img),
         _ => img,
     };
-    Decoded { w: img.width(), h: img.height(), rgba: img.into_raw() }
+    Decoded {
+        w: img.width(),
+        h: img.height(),
+        rgba: img.into_raw(),
+    }
 }
 
 // None when the clip cannot be played at all.
@@ -460,10 +507,24 @@ fn play_loop(
         let table = SampleTable::read(track)?;
         let sps = track.sequence_parameter_set().ok()?.to_vec();
         let pps = track.picture_parameter_set().ok()?.to_vec();
-        (table, sps, pps, quarter_turns(track), (track.width() as u32, track.height() as u32))
+        (
+            table,
+            sps,
+            pps,
+            quarter_turns(track),
+            (track.width() as u32, track.height() as u32),
+        )
     };
-    let (w, h) = if turns % 2 == 1 { (size.1, size.0) } else { size };
-    emit(PlayerEvent::Ready { w, h, duration: table.duration });
+    let (w, h) = if turns % 2 == 1 {
+        (size.1, size.0)
+    } else {
+        size
+    };
+    emit(PlayerEvent::Ready {
+        w,
+        h,
+        duration: table.duration,
+    });
 
     let count = table.pts.len();
     let mut decoder = new_decoder()?;
@@ -506,7 +567,9 @@ fn play_loop(
             // somewhere else in the clip.
             decoder = new_decoder()?;
             next = key;
-            slot = table.shown_at.partition_point(|&at| at + 1e-6 < table.pts[key]);
+            slot = table
+                .shown_at
+                .partition_point(|&at| at + 1e-6 < table.pts[key]);
             skip_until = to;
             t.position = to;
             t.origin = Instant::now() - Duration::from_secs_f64(to);
@@ -587,7 +650,11 @@ fn play_loop(
             t.position = at;
             t.resync = false;
             busy.store(true, Ordering::Release);
-            emit(PlayerEvent::Frame { frame: to_picture(&yuv, turns), pos: at, resync: true });
+            emit(PlayerEvent::Frame {
+                frame: to_picture(&yuv, turns),
+                pos: at,
+                resync: true,
+            });
             continue;
         }
         if t.resync {
@@ -635,7 +702,11 @@ fn play_loop(
         }
         dropped = 0;
         busy.store(true, Ordering::Release);
-        emit(PlayerEvent::Frame { frame: to_picture(&yuv, turns), pos: at, resync: t.resync });
+        emit(PlayerEvent::Frame {
+            frame: to_picture(&yuv, turns),
+            pos: at,
+            resync: t.resync,
+        });
         t.resync = false;
     }
 }
@@ -707,7 +778,9 @@ pub fn gif_to_mp4(src: &Path, dst: &Path) -> Option<()> {
         }
         let source = openh264::formats::RgbSliceU8::new(&rgb, (w as usize, h as usize));
         let yuv = openh264::formats::YUVBuffer::from_rgb_source(source);
-        let Ok(bitstream) = encoder.encode(&yuv) else { continue };
+        let Ok(bitstream) = encoder.encode(&yuv) else {
+            continue;
+        };
         let raw = bitstream.to_vec();
         let mut sps: Option<Vec<u8>> = None;
         let mut pps: Option<Vec<u8>> = None;
@@ -730,7 +803,9 @@ pub fn gif_to_mp4(src: &Path, dst: &Path) -> Option<()> {
             }
         }
         if !track_added {
-            let (Some(sps), Some(pps)) = (sps, pps) else { continue };
+            let (Some(sps), Some(pps)) = (sps, pps) else {
+                continue;
+            };
             writer
                 .add_track(&mp4::TrackConfig {
                     track_type: mp4::TrackType::Video,

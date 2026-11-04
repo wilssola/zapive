@@ -28,7 +28,10 @@ pub fn current_version() -> &'static str {
 }
 
 pub fn is_newer_release(tag: &str) -> bool {
-    release_update(current_version(), tag).ok().flatten().is_some()
+    release_update(current_version(), tag)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 fn release_update(current: &str, tag: &str) -> Result<Option<String>, String> {
@@ -37,13 +40,19 @@ fn release_update(current: &str, tag: &str) -> Result<Option<String>, String> {
     let version_order = version.split('+').next().unwrap_or(version);
     let newer = self_update::version::bump_is_greater(current_order, version_order)
         .map_err(|_| "invalid release version".to_string())?;
-    Ok(if newer { Some(version.to_string()) } else { None })
+    Ok(if newer {
+        Some(version.to_string())
+    } else {
+        None
+    })
 }
 
 // While the repository is private, the API needs a token; once public
 // this just works unauthenticated.
 fn token() -> Option<String> {
-    std::env::var("ZAPIVE_GH_TOKEN").ok().filter(|t| !t.is_empty())
+    std::env::var("ZAPIVE_GH_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
 }
 
 // Set by the Restart button; main() relaunches once the instance lock is
@@ -122,11 +131,16 @@ pub fn apply() -> Result<String, String> {
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe = exe.canonicalize().unwrap_or(exe);
-    let dir = exe.parent().ok_or("the executable has no directory")?.to_path_buf();
+    let dir = exe
+        .parent()
+        .ok_or("the executable has no directory")?
+        .to_path_buf();
 
     let release = latest_release()?;
     let zip_name = format!("zapive-{TARGET}.zip");
-    let zip_url = release.asset(&zip_name).ok_or(format!("no {zip_name} in release {}", release.version))?;
+    let zip_url = release
+        .asset(&zip_name)
+        .ok_or(format!("no {zip_name} in release {}", release.version))?;
 
     // Staged next to the executable: the same volume, so the renames
     // below cannot run out of space, and a directory that cannot be
@@ -158,7 +172,9 @@ fn old_path(exe: &std::path::Path) -> std::path::PathBuf {
 // What an update leaves behind: Windows cannot delete the executable of
 // a running process, so the previous binary waits for the next launch.
 pub fn sweep() {
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
     let exe = exe.canonicalize().unwrap_or(exe);
     let _ = std::fs::remove_file(old_path(&exe));
     if let Some(dir) = exe.parent() {
@@ -200,25 +216,45 @@ fn parse_release_notes(text: &str) -> Result<ReleasePage, String> {
     let json: serde_json::Value =
         serde_json::from_str(text).map_err(|_| "invalid release notes")?;
     let entries = json.as_array().ok_or("invalid release notes")?;
-    let releases = entries.iter().filter_map(|entry| {
-        if entry.get("draft").and_then(|v| v.as_bool()).unwrap_or(false)
-            || entry.get("prerelease").and_then(|v| v.as_bool()).unwrap_or(false)
-        {
-            return None;
-        }
-        let tag = entry.get("tag_name")?.as_str()?.trim();
-        if tag.is_empty() {
-            return None;
-        }
-        let date = entry.get("published_at")
-            .and_then(|v| v.as_str())
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|date| date.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
-        let body = entry.get("body").and_then(|v| v.as_str()).unwrap_or_default();
-        Some(ReleaseNote { tag: tag.to_string(), date, notes: plain_release_notes(body) })
-    }).collect();
-    Ok(ReleasePage { releases, has_more: entries.len() >= 20 })
+    let releases = entries
+        .iter()
+        .filter_map(|entry| {
+            if entry
+                .get("draft")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                || entry
+                    .get("prerelease")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            {
+                return None;
+            }
+            let tag = entry.get("tag_name")?.as_str()?.trim();
+            if tag.is_empty() {
+                return None;
+            }
+            let date = entry
+                .get("published_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|date| date.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            let body = entry
+                .get("body")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            Some(ReleaseNote {
+                tag: tag.to_string(),
+                date,
+                notes: plain_release_notes(body),
+            })
+        })
+        .collect();
+    Ok(ReleasePage {
+        releases,
+        has_more: entries.len() >= 20,
+    })
 }
 
 fn plain_release_notes(body: &str) -> String {
@@ -240,15 +276,18 @@ fn plain_release_notes(body: &str) -> String {
             continue;
         }
         let level = line.chars().take_while(|&c| c == '#').count();
-        let heading = (1..=6).contains(&level)
-            && line[level..].starts_with(char::is_whitespace);
+        let heading = (1..=6).contains(&level) && line[level..].starts_with(char::is_whitespace);
         if let Some(skipped_level) = checksum_level {
             if !heading || level > skipped_level {
                 continue;
             }
             checksum_level = None;
         }
-        let content = if heading { line[level..].trim().trim_end_matches('#').trim() } else { line };
+        let content = if heading {
+            line[level..].trim().trim_end_matches('#').trim()
+        } else {
+            line
+        };
         let title = content.trim_matches('*').trim().to_ascii_lowercase();
         if (heading || bulletless_checksum_title(&title))
             && (title.contains("sha-256") || title.contains("sha256") || title.contains("checksum"))
@@ -256,12 +295,18 @@ fn plain_release_notes(body: &str) -> String {
             checksum_level = Some(if heading { level } else { 6 });
             continue;
         }
-        let bullet = ["- ", "* ", "+ ", "• "].iter().find_map(|prefix| content.strip_prefix(prefix));
+        let bullet = ["- ", "* ", "+ ", "• "]
+            .iter()
+            .find_map(|prefix| content.strip_prefix(prefix));
         let content = bullet.unwrap_or(content);
         let text = plain_release_inline(content);
         let text = text.trim();
         if !text.is_empty() {
-            lines.push(if bullet.is_some() { format!("• {text}") } else { text.to_string() });
+            lines.push(if bullet.is_some() {
+                format!("• {text}")
+            } else {
+                text.to_string()
+            });
         } else if lines.last().is_some_and(|line| !line.is_empty()) {
             lines.push(String::new());
         }
@@ -270,19 +315,27 @@ fn plain_release_notes(body: &str) -> String {
 }
 
 fn bulletless_checksum_title(title: &str) -> bool {
-    ["sha-256", "sha256", "checksum"].iter().any(|prefix| title.starts_with(prefix))
+    ["sha-256", "sha256", "checksum"]
+        .iter()
+        .any(|prefix| title.starts_with(prefix))
 }
 
 fn plain_release_inline(text: &str) -> String {
-    static RULES: std::sync::OnceLock<Vec<(regex::Regex, &'static str)>> = std::sync::OnceLock::new();
-    let rules = RULES.get_or_init(|| [
-        (r"(?is)<script\b[^>]*>.*?</script\s*>", ""),
-        (r"(?is)<style\b[^>]*>.*?</style\s*>", ""),
-        (r"!?\[([^\]]*)\]\([^)]*\)", "$1"),
-        (r"!?\[([^\]]*)\]\[[^\]]*\]", "$1"),
-        (r"<[^>]*>", ""),
-        (r"\*\*|__|~~|`", ""),
-    ].into_iter().map(|(pattern, replacement)| (regex::Regex::new(pattern).unwrap(), replacement)).collect());
+    static RULES: std::sync::OnceLock<Vec<(regex::Regex, &'static str)>> =
+        std::sync::OnceLock::new();
+    let rules = RULES.get_or_init(|| {
+        [
+            (r"(?is)<script\b[^>]*>.*?</script\s*>", ""),
+            (r"(?is)<style\b[^>]*>.*?</style\s*>", ""),
+            (r"!?\[([^\]]*)\]\([^)]*\)", "$1"),
+            (r"!?\[([^\]]*)\]\[[^\]]*\]", "$1"),
+            (r"<[^>]*>", ""),
+            (r"\*\*|__|~~|`", ""),
+        ]
+        .into_iter()
+        .map(|(pattern, replacement)| (regex::Regex::new(pattern).unwrap(), replacement))
+        .collect()
+    });
     let mut text = text.to_string();
     for (pattern, replacement) in rules {
         text = pattern.replace_all(&text, *replacement).into_owned();
@@ -298,17 +351,24 @@ struct LatestRelease {
 
 impl LatestRelease {
     fn asset(&self, name: &str) -> Option<String> {
-        self.assets.iter().find(|(n, _)| n == name).map(|(_, url)| url.clone())
+        self.assets
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, url)| url.clone())
     }
 }
 
 fn get(url: &str, accept: &str) -> Result<ureq::http::Response<ureq::Body>, String> {
-    let mut req = ureq::get(url).header("User-Agent", "Zapive").header("Accept", accept);
+    let mut req = ureq::get(url)
+        .header("User-Agent", "Zapive")
+        .header("Accept", accept);
     if let Some(t) = token() {
         req = req.header("Authorization", &format!("Bearer {t}"));
     }
     req.config()
-        .timeout_global((accept == "application/vnd.github+json").then(|| std::time::Duration::from_secs(20)))
+        .timeout_global(
+            (accept == "application/vnd.github+json").then(|| std::time::Duration::from_secs(20)),
+        )
         .build()
         .call()
         .map_err(|e| e.to_string())
@@ -336,7 +396,10 @@ fn latest_release() -> Result<LatestRelease, String> {
             assets
                 .iter()
                 .filter_map(|a| {
-                    Some((a.get("name")?.as_str()?.to_string(), a.get("url")?.as_str()?.to_string()))
+                    Some((
+                        a.get("name")?.as_str()?.to_string(),
+                        a.get("url")?.as_str()?.to_string(),
+                    ))
                 })
                 .collect()
         })
@@ -375,8 +438,10 @@ fn stage_binary(
                 .find(|(_, name)| name.trim().trim_start_matches('*') == zip_name)
                 .map(|(sum, _)| sum.trim().to_ascii_lowercase())
                 .ok_or(format!("{zip_name} is not listed in SHA256SUMS.txt"))?;
-            let actual: String =
-                sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+            let actual: String = sha2::Sha256::digest(&bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             if actual != expected {
                 return Err("the download does not match its checksum".into());
             }
@@ -411,23 +476,29 @@ const RUNTIME_FILES: &[&str] = &["ctranslate2.dll", "libiomp5md.dll"];
 
 // Unpacks the named files that the zip holds into `stage`. A zip without
 // them (an old release) just yields fewer files; nothing here is fatal.
+#[cfg_attr(not(windows), allow(dead_code))] // runtime DLLs exist only on Windows; tests cover it everywhere
 fn extract_named(
     zip: &std::path::Path,
     names: &[&str],
     stage: &std::path::Path,
 ) -> Vec<std::path::PathBuf> {
-    let Ok(file) = std::fs::File::open(zip) else { return Vec::new() };
+    let Ok(file) = std::fs::File::open(zip) else {
+        return Vec::new();
+    };
     let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else {
         return Vec::new();
     };
     let mut found = Vec::new();
     for name in names {
-        let Ok(mut entry) = archive.by_name(name) else { continue };
+        let Ok(mut entry) = archive.by_name(name) else {
+            continue;
+        };
         if !entry.is_file() {
             continue;
         }
         let target = stage.join(name);
-        let written = std::fs::File::create(&target).and_then(|mut out| std::io::copy(&mut entry, &mut out));
+        let written =
+            std::fs::File::create(&target).and_then(|mut out| std::io::copy(&mut entry, &mut out));
         match written {
             Ok(_) => found.push(target),
             Err(e) => log::warn!("[update] cannot unpack {name}: {e}"),
@@ -436,9 +507,10 @@ fn extract_named(
     found
 }
 
+#[cfg_attr(not(windows), allow(dead_code))] // runtime DLLs exist only on Windows; tests cover it everywhere
 fn same_content(a: &std::path::Path, b: &std::path::Path) -> bool {
     use sha2::Digest as _;
-    let sum = |path: &std::path::Path| std::fs::read(path).map(|bytes| sha2::Sha256::digest(bytes));
+    let sum = |path: &std::path::Path| std::fs::read(path).map(sha2::Sha256::digest);
     match (sum(a), sum(b)) {
         (Ok(x), Ok(y)) => x == y,
         _ => false,
@@ -448,6 +520,7 @@ fn same_content(a: &std::path::Path, b: &std::path::Path) -> bool {
 // Puts `fresh` at `dest` unless `dest` already holds the same bytes. A
 // loaded DLL cannot be overwritten or deleted on Windows but can be renamed,
 // so the current file is moved aside (and swept at the next launch) first.
+#[cfg_attr(not(windows), allow(dead_code))] // runtime DLLs exist only on Windows; tests cover it everywhere
 fn place_file(dest: &std::path::Path, fresh: &std::path::Path) -> Result<bool, String> {
     if dest.is_file() && same_content(dest, fresh) {
         return Ok(false);
@@ -456,9 +529,11 @@ fn place_file(dest: &std::path::Path, fresh: &std::path::Path) -> Result<bool, S
     let _ = std::fs::remove_file(&old);
     let moved = dest.exists();
     if moved {
-        std::fs::rename(dest, &old).map_err(|e| format!("cannot move {} aside: {e}", dest.display()))?;
+        std::fs::rename(dest, &old)
+            .map_err(|e| format!("cannot move {} aside: {e}", dest.display()))?;
     }
-    if let Err(e) = std::fs::rename(fresh, dest).or_else(|_| std::fs::copy(fresh, dest).map(|_| ())) {
+    if let Err(e) = std::fs::rename(fresh, dest).or_else(|_| std::fs::copy(fresh, dest).map(|_| ()))
+    {
         if moved {
             let _ = std::fs::rename(&old, dest);
         }
@@ -471,7 +546,9 @@ fn place_file(dest: &std::path::Path, fresh: &std::path::Path) -> Result<bool, S
 #[cfg(windows)]
 fn install_runtime(zip: &std::path::Path, stage: &std::path::Path, dir: &std::path::Path) {
     for fresh in extract_named(zip, RUNTIME_FILES, stage) {
-        let Some(name) = fresh.file_name() else { continue };
+        let Some(name) = fresh.file_name() else {
+            continue;
+        };
         match place_file(&dir.join(name), &fresh) {
             Ok(true) => log::info!("[update] updated {}", name.to_string_lossy()),
             Ok(false) => {}
@@ -485,7 +562,8 @@ fn install_runtime(zip: &std::path::Path, stage: &std::path::Path, dir: &std::pa
 fn swap_in(exe: &std::path::Path, fresh: &std::path::Path) -> Result<(), String> {
     let old = old_path(exe);
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(exe, &old).map_err(|e| format!("cannot move the current version aside: {e}"))?;
+    std::fs::rename(exe, &old)
+        .map_err(|e| format!("cannot move the current version aside: {e}"))?;
     if let Err(e) = std::fs::rename(fresh, exe) {
         return match std::fs::rename(&old, exe) {
             Ok(()) => Err(format!("cannot put the new version in place: {e}")),
@@ -531,7 +609,9 @@ mod tests {
         use std::io::Write as _;
         let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
         for (name, data) in files {
-            writer.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
             writer.write_all(data).unwrap();
         }
         writer.finish().unwrap();
@@ -541,12 +621,22 @@ mod tests {
     fn runtime_libraries_are_extracted_when_the_zip_has_them() {
         let dir = scratch("extract");
         let zip = dir.join("u.zip");
-        zip_of(&zip, &[("zapive.exe", b"exe"), ("ctranslate2.dll", b"ct2"), ("libiomp5md.dll", b"omp")]);
+        zip_of(
+            &zip,
+            &[
+                ("zapive.exe", b"exe"),
+                ("ctranslate2.dll", b"ct2"),
+                ("libiomp5md.dll", b"omp"),
+            ],
+        );
         let stage = dir.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let found = extract_named(&zip, RUNTIME_FILES, &stage);
         assert_eq!(found.len(), 2);
-        assert_eq!(std::fs::read(stage.join("ctranslate2.dll")).unwrap(), b"ct2");
+        assert_eq!(
+            std::fs::read(stage.join("ctranslate2.dll")).unwrap(),
+            b"ct2"
+        );
         assert_eq!(std::fs::read(stage.join("libiomp5md.dll")).unwrap(), b"omp");
         assert!(!stage.join("zapive.exe").exists());
         let _ = std::fs::remove_dir_all(dir);
@@ -569,27 +659,45 @@ mod tests {
         let dir = scratch("place");
         let (dest, fresh) = (dir.join("ctranslate2.dll"), dir.join("fresh.dll"));
         std::fs::write(&fresh, b"new").unwrap();
-        assert!(place_file(&dest, &fresh).unwrap(), "missing file is installed");
+        assert!(
+            place_file(&dest, &fresh).unwrap(),
+            "missing file is installed"
+        );
         assert_eq!(std::fs::read(&dest).unwrap(), b"new");
         std::fs::write(&fresh, b"new").unwrap();
-        assert!(!place_file(&dest, &fresh).unwrap(), "identical file is left alone");
+        assert!(
+            !place_file(&dest, &fresh).unwrap(),
+            "identical file is left alone"
+        );
         assert!(fresh.exists());
         std::fs::write(&fresh, b"newer").unwrap();
-        assert!(place_file(&dest, &fresh).unwrap(), "different file is replaced");
+        assert!(
+            place_file(&dest, &fresh).unwrap(),
+            "different file is replaced"
+        );
         assert_eq!(std::fs::read(&dest).unwrap(), b"newer");
-        assert!(!old_path(&dest).exists(), "the previous copy is not left behind");
+        assert!(
+            !old_path(&dest).exists(),
+            "the previous copy is not left behind"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn release_versions_use_semver_ordering() {
         for tag in ["1.2.4", "v1.3.0", "v1.10.0", "2.0.0"] {
-            assert_eq!(release_update("1.2.3", tag).unwrap(), Some(tag.trim_start_matches('v').to_string()));
+            assert_eq!(
+                release_update("1.2.3", tag).unwrap(),
+                Some(tag.trim_start_matches('v').to_string())
+            );
         }
         for tag in ["1.2.3", "v1.2.3", "1.2.2", "v1.1.10", "1.2.3-beta.1"] {
             assert_eq!(release_update("1.2.3", tag).unwrap(), None);
         }
-        assert_eq!(release_update("1.2.3-beta.1", "v1.2.3").unwrap(), Some("1.2.3".into()));
+        assert_eq!(
+            release_update("1.2.3-beta.1", "v1.2.3").unwrap(),
+            Some("1.2.3".into())
+        );
         assert_eq!(release_update("1.2.3", "1.2.3+build.1").unwrap(), None);
     }
 
@@ -605,29 +713,54 @@ mod tests {
 
     #[test]
     fn release_categories_and_legacy_markdown_are_plain_text() {
-        let notes = plain_release_notes("## Features\n- **New** [settings](https://example.com)\n\n### Fixes\n* fix(ui): `Crash`\n+ Legacy item\n• Existing item\n<script>alert(1)</script><b>Text</b>");
-        assert_eq!(notes, "Features\n• New settings\n\nFixes\n• fix(ui): Crash\n• Legacy item\n• Existing item\nText");
-        assert_eq!(plain_release_notes("# Title #\n![image](javascript:evil)\n[x][ref]"), "Title\nimage\nx");
+        let notes = plain_release_notes(
+            "## Features\n- **New** [settings](https://example.com)\n\n### Fixes\n* fix(ui): `Crash`\n+ Legacy item\n• Existing item\n<script>alert(1)</script><b>Text</b>",
+        );
+        assert_eq!(
+            notes,
+            "Features\n• New settings\n\nFixes\n• fix(ui): Crash\n• Legacy item\n• Existing item\nText"
+        );
+        assert_eq!(
+            plain_release_notes("# Title #\n![image](javascript:evil)\n[x][ref]"),
+            "Title\nimage\nx"
+        );
     }
 
     #[test]
     fn checksum_and_fences_do_not_hide_later_sections() {
         let body = "## Changes\n- Keep\n```rust\n## Hidden\n```\n## SHA-256\nHashes\n### Assets\n~~~text\nabc file\n~~~\n## Fixes\n- Restored\n```\nignored\n```\n- Also kept";
-        assert_eq!(plain_release_notes(body), "Changes\n• Keep\nFixes\n• Restored\n• Also kept");
-        assert_eq!(plain_release_notes("Checksums\nabc\n# News\n- Visible"), "News\n• Visible");
-        assert_eq!(plain_release_notes("## Checksums\n### Nested\nhash\n# News\n~~~\nhidden\n~~~~\n- Visible"), "News\n• Visible");
-        assert_eq!(plain_release_notes("- Fix checksum verification"), "• Fix checksum verification");
+        assert_eq!(
+            plain_release_notes(body),
+            "Changes\n• Keep\nFixes\n• Restored\n• Also kept"
+        );
+        assert_eq!(
+            plain_release_notes("Checksums\nabc\n# News\n- Visible"),
+            "News\n• Visible"
+        );
+        assert_eq!(
+            plain_release_notes(
+                "## Checksums\n### Nested\nhash\n# News\n~~~\nhidden\n~~~~\n- Visible"
+            ),
+            "News\n• Visible"
+        );
+        assert_eq!(
+            plain_release_notes("- Fix checksum verification"),
+            "• Fix checksum verification"
+        );
     }
 
     #[test]
     fn releases_filter_drafts_prereleases_and_invalid_tags() {
-        let page = parse_release_notes(r###"[
+        let page = parse_release_notes(
+            r###"[
             {"tag_name":"v1", "published_at":"2026-10-30T12:34:56Z", "body":"## Fixes\n- Fixed"},
             {"tag_name":"draft", "draft":true},
             {"tag_name":"preview", "prerelease":true},
             {}, {"tag_name":" "}, {"tag_name":123},
             {"tag_name":"v0", "published_at":"invalid", "body":null}
-        ]"###).unwrap();
+        ]"###,
+        )
+        .unwrap();
         assert!(!page.has_more);
         assert_eq!(page.releases.len(), 2);
         assert_eq!(page.releases[0].tag, "v1");
@@ -651,7 +784,8 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("zapive_test_update_{}_{tag}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("zapive_test_update_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(STAGE_DIR)).expect("scratch dir");
         dir

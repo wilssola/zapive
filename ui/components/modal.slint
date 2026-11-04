@@ -1,8 +1,10 @@
+import { Theme } from "theme.slint";
+
 // Modal overlay: fade + scale animations on open/close, dismiss on outside click.
 export component ModalLayer inherits Rectangle {
     in property <bool> open;
     in property <bool> dismissible: true;
-    in property <brush> scrim: #00000088;
+    in property <brush> scrim: Theme.scrim;
     callback dismiss();
     out property <float> progress: root.open ? 1.0 : 0.0;
     animate progress {

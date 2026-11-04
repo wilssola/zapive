@@ -5,25 +5,46 @@ impl Bridge {
     // ---- composing ----
 
     pub(super) fn save_draft(&mut self, text: &str, promote: bool) {
-        let Some(jid) = self.current_jid.clone() else { return; };
+        let Some(jid) = self.current_jid.clone() else {
+            return;
+        };
         if text.is_empty() {
             if self.store.drafts.remove(&jid).is_some() {
                 self.schedule_refresh_chats();
             }
             return;
         }
-        if !self.store.chats.contains_key(&jid) { return; }
-        let previous = self.store.drafts.get(&jid).map_or(0, |draft| draft.promoted);
+        if !self.store.chats.contains_key(&jid) {
+            return;
+        }
+        let previous = self
+            .store
+            .drafts
+            .get(&jid)
+            .map_or(0, |draft| draft.promoted);
         let promoted = if promote && !text.trim().is_empty() {
-            self.draft_sequence = self.draft_sequence
-                .max(self.store.drafts.values().map(|draft| draft.promoted).max().unwrap_or(0)) + 1;
+            self.draft_sequence = self.draft_sequence.max(
+                self.store
+                    .drafts
+                    .values()
+                    .map(|draft| draft.promoted)
+                    .max()
+                    .unwrap_or(0),
+            ) + 1;
             self.draft_sequence
-        } else if text.trim().is_empty() { 0 } else { previous };
-        self.store.drafts.insert(jid, crate::store::Draft {
-            text: text.to_string(),
-            mentions: self.mentions.clone(),
-            promoted,
-        });
+        } else if text.trim().is_empty() {
+            0
+        } else {
+            previous
+        };
+        self.store.drafts.insert(
+            jid,
+            crate::store::Draft {
+                text: text.to_string(),
+                mentions: self.mentions.clone(),
+                promoted,
+            },
+        );
         self.schedule_refresh_chats();
     }
 

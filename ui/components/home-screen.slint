@@ -13,7 +13,7 @@ component HomeAction inherits TouchArea {
         border-radius: 14px;
         border-width: 1px;
         border-color: root.has-hover ? Theme.accent : Theme.border;
-        background: root.pressed ? Theme.selected : root.has-hover ? Theme.hover : Theme.dark ? #17292e : #ffffffb3;
+        background: root.pressed ? Theme.selected : root.has-hover ? Theme.hover : Theme.glass ? Theme.glass-fill-soft : Theme.dark ? #17292e : #ffffffb3;
 
         Image {
             source: root.icon;
@@ -48,7 +48,10 @@ export component HomeScreen inherits Rectangle {
     private property <length> section-gap: root.compact ? 14px : 26px;
     private property <length> brand-height: root.compact ? 46px : 60px;
     private property <length> tile-height: root.compact ? 88px : 104px;
-    background: Theme.dark
+    background: Theme.glass
+        ? (Theme.dark ? @linear-gradient(145deg, #1a3a4440 0%, #10202966 52%, #0b151b40 100%)
+            : @linear-gradient(145deg, #ffffff70 0%, #e7f4ee50 100%))
+        : Theme.dark
         ? @linear-gradient(145deg, #152c32 0%, #101f26 52%, #0d191f 100%)
         : @linear-gradient(145deg, #e7f4ee 0%, #f5f8f7 55%, #edf4f3 100%);
     clip: true;

@@ -1,0 +1,36 @@
+name: Suggest a feature
+description: An idea to improve Zapive.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: Describe the situation where you need it, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: How you imagine the solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Affected platforms
+      multiple: true
+      options: [Windows, Linux, macOS]
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched open and closed issues and found no similar request.
+          required: true
+        - label: I am not asking for messages, calls or statuses to be sent automatically on the user's behalf without an explicit action.
+          required: false

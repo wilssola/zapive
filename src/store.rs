@@ -97,6 +97,111 @@ pub struct StoredMessage {
     // as prost bytes in base64.
     #[serde(default, with = "raw_proto", skip_serializing_if = "Option::is_none")]
     pub raw: Option<Arc<wa::Message>>,
+    // Poll messages only. The secret derives every vote's key; it lives in
+    // the same encrypted history row as the message. Base64, 32 bytes.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub poll_secret: String,
+    // Poll messages only: voter jid -> the option hashes (hex) they picked.
+    // A newer vote replaces the older one, so only the latest is kept.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub poll_votes: HashMap<String, PollVote>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Debug)]
+pub struct PollVote {
+    pub options: Vec<String>,
+    pub timestamp_ms: i64,
+}
+
+// One poll option as the bubble shows it.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct PollTally {
+    pub name: String,
+    pub votes: usize,
+    pub voted: bool,
+    // Display names, in the order the votes came in.
+    pub voters: Vec<String>,
+}
+
+pub fn poll_option_hash(name: &str) -> String {
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(name.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+// Counts the stored votes per option. `me` is the key a vote of ours is
+// stored under; `name_of` turns a voter jid into what the sheet shows.
+pub fn tally_poll(
+    options: &[String],
+    votes: &HashMap<String, PollVote>,
+    me: &str,
+    name_of: impl Fn(&str) -> String,
+) -> Vec<PollTally> {
+    let mut ordered: Vec<(&String, &PollVote)> = votes.iter().collect();
+    ordered.sort_by(|a, b| {
+        a.1.timestamp_ms
+            .cmp(&b.1.timestamp_ms)
+            .then_with(|| a.0.cmp(b.0))
+    });
+    options
+        .iter()
+        .map(|name| {
+            let hash = poll_option_hash(name);
+            let mut tally = PollTally {
+                name: name.clone(),
+                ..Default::default()
+            };
+            for (voter, vote) in &ordered {
+                if vote.options.contains(&hash) {
+                    tally.votes += 1;
+                    if voter.as_str() == me {
+                        tally.voted = true;
+                        tally.voters.push(name_of("me"));
+                    } else {
+                        tally.voters.push(name_of(voter));
+                    }
+                }
+            }
+            tally
+        })
+        .collect()
+}
+
+// Distinct people who voted for at least one option.
+pub fn poll_voter_count(votes: &HashMap<String, PollVote>) -> usize {
+    votes
+        .values()
+        .filter(|vote| !vote.options.is_empty())
+        .count()
+}
+
+// The option names a vote should carry after `me` toggles `index`: single
+// choice replaces the pick (or clears it when it was the pick), multi
+// choice flips just that one. Out-of-range indexes change nothing.
+pub fn next_poll_selection(
+    options: &[String],
+    current: &[String],
+    index: usize,
+    multi: bool,
+) -> Option<Vec<String>> {
+    let name = options.get(index)?;
+    let picked = current.iter().any(|existing| existing == name);
+    let mut next: Vec<String> = if multi {
+        options
+            .iter()
+            .filter(|option| current.iter().any(|c| c == *option) && *option != name)
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if !picked {
+        next.push(name.clone());
+    }
+    if multi {
+        next.sort_by_key(|option| options.iter().position(|o| o == option));
+    }
+    Some(next)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -130,22 +235,41 @@ impl ParticipantReceipt {
     }
 
     pub fn status(&self) -> u32 {
-        self.level.max(if self.played.is_some() { 5 } else if self.read.is_some() { 4 }
-        else if self.delivered.is_some() { 3 } else { 0 })
+        self.level.max(if self.played.is_some() {
+            5
+        } else if self.read.is_some() {
+            4
+        } else if self.delivered.is_some() {
+            3
+        } else {
+            0
+        })
     }
 }
 
 impl StoredMessage {
     pub fn record_edit(&mut self, text: String, timestamp: i64) -> bool {
-        if self.deleted || self.text == text { return false; }
+        if self.deleted || self.text == text {
+            return false;
+        }
         let time = (timestamp > 0).then_some(timestamp);
-        if self.edit_versions.iter().any(|v| v.text == text && v.timestamp == time) { return false; }
+        if self
+            .edit_versions
+            .iter()
+            .any(|v| v.text == text && v.timestamp == time)
+        {
+            return false;
+        }
         if self.edit_versions.is_empty() {
             self.edit_versions.push(EditVersion {
-                text: self.text.clone(), timestamp: (!self.edited).then_some(self.timestamp),
+                text: self.text.clone(),
+                timestamp: (!self.edited).then_some(self.timestamp),
             });
         }
-        self.edit_versions.push(EditVersion { text, timestamp: time });
+        self.edit_versions.push(EditVersion {
+            text,
+            timestamp: time,
+        });
         self.edit_versions.sort_by_key(|v| v.timestamp.unwrap_or(0));
         self.text = self.edit_versions.last().unwrap().text.clone();
         self.edited = true;
@@ -154,22 +278,36 @@ impl StoredMessage {
 
     pub fn is_voice_message(&self) -> bool {
         use whatsapp_rust::proto_helpers::MessageExt as _;
-        self.kind == MessageKind::Audio && self.raw.as_ref()
-            .and_then(|raw| raw.get_base_message().audio_message.as_option())
-            .and_then(|audio| audio.ptt)
-            .unwrap_or(false)
+        self.kind == MessageKind::Audio
+            && self
+                .raw
+                .as_ref()
+                .and_then(|raw| raw.get_base_message().audio_message.as_option())
+                .and_then(|audio| audio.ptt)
+                .unwrap_or(false)
     }
 
     pub fn audio_filename(&self, source: Option<&str>) -> String {
         use whatsapp_rust::proto_helpers::MessageExt as _;
-        let original = source.and_then(|path| path.rsplit(['/', '\\']).next())
+        let original = source
+            .and_then(|path| path.rsplit(['/', '\\']).next())
             .filter(|name| !name.trim().is_empty());
-        let document = self.raw.as_ref()
+        let document = self
+            .raw
+            .as_ref()
             .and_then(|raw| raw.get_base_message().document_message.as_option())
-            .filter(|doc| doc.mimetype.as_deref().unwrap_or(&self.mimetype).starts_with("audio/"))
+            .filter(|doc| {
+                doc.mimetype
+                    .as_deref()
+                    .unwrap_or(&self.mimetype)
+                    .starts_with("audio/")
+            })
             .and_then(|doc| doc.file_name.as_deref())
             .filter(|name| !name.trim().is_empty());
-        original.or(document).map(clean_text).unwrap_or_else(|| t("audio.fallback_name"))
+        original
+            .or(document)
+            .map(clean_text)
+            .unwrap_or_else(|| t("audio.fallback_name"))
     }
 }
 
@@ -204,6 +342,34 @@ mod raw_proto {
     }
 }
 
+// The level of a one-to-one message is whatever the peer reached. In a
+// group the delivered/read ticks need EVERY other member: the value is the
+// lowest level across the roster, and an unknown roster never goes past
+// the server ack (2) so the bubble cannot turn blue early.
+pub fn aggregate_status(
+    group: bool,
+    current: u32,
+    incoming: u32,
+    receipts: &HashMap<String, ParticipantReceipt>,
+    others: &[String],
+) -> u32 {
+    if !group {
+        return current.max(incoming);
+    }
+    if others.is_empty() {
+        return current.max(incoming.min(2));
+    }
+    let lowest = others
+        .iter()
+        .map(|jid| receipts.get(jid).map_or(0, ParticipantReceipt::status))
+        .min()
+        .unwrap_or(0);
+    // played (5) counts as read for the blue ticks
+    current.max(lowest.min(5))
+}
+
+// ReceiptType-independent core of the mapping: what a receipt's kind means
+// for the ticks. `None` = not a delivery state (retry, errors, ...).
 pub fn ticks_for(m: &StoredMessage) -> (&'static str, bool) {
     if !m.from_me {
         return ("", false);
@@ -232,7 +398,11 @@ pub fn reaction_summary(m: &StoredMessage) -> (String, String) {
             }
         }
     }
-    let count = if values.len() > 1 { values.len().to_string() } else { String::new() };
+    let count = if values.len() > 1 {
+        values.len().to_string()
+    } else {
+        String::new()
+    };
     (unique.concat(), count)
 }
 
@@ -371,14 +541,20 @@ pub fn is_group(jid: &str) -> bool {
 
 fn local_date(timestamp: i64) -> chrono::DateTime<chrono::Local> {
     use chrono::TimeZone as _;
-    chrono::Local.timestamp_opt(timestamp, 0).single().unwrap_or_else(chrono::Local::now)
+    chrono::Local
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .unwrap_or_else(chrono::Local::now)
 }
 
 pub fn format_time(timestamp: i64) -> String {
     if timestamp == 0 {
         return String::new();
     }
-    format_time_at(local_date(timestamp).naive_local(), chrono::Local::now().date_naive())
+    format_time_at(
+        local_date(timestamp).naive_local(),
+        chrono::Local::now().date_naive(),
+    )
 }
 
 fn format_time_at(d: chrono::NaiveDateTime, today: chrono::NaiveDate) -> String {
@@ -435,7 +611,9 @@ pub fn format_day(timestamp: i64) -> String {
 // selector (e.g. "❤️" = U+2764 U+FE0F); stripping the selector keeps the
 // colored glyph.
 pub fn clean_text(s: &str) -> String {
-    s.chars().filter(|c| !('\u{FE00}'..='\u{FE0F}').contains(c)).collect()
+    s.chars()
+        .filter(|c| !('\u{FE00}'..='\u{FE0F}').contains(c))
+        .collect()
 }
 
 // A readable identity for a jid without a known name.
@@ -548,16 +726,20 @@ impl Store {
     }
 
     fn merge_jid(&mut self, from: &str, into: &str) {
-        if from == into { return; }
-        self.pending_merges.push((from.to_string(), into.to_string()));
+        if from == into {
+            return;
+        }
+        self.pending_merges
+            .push((from.to_string(), into.to_string()));
         self.older_cursors.remove(into);
         self.older_exhausted.remove(into);
-        if let Some(src) = self.drafts.remove(from) {
-            if self.drafts.get(into).is_none_or(|dst| {
-                (!src.text.trim().is_empty(), src.promoted) > (!dst.text.trim().is_empty(), dst.promoted)
-            }) {
-                self.drafts.insert(into.to_string(), src);
-            }
+        if let Some(src) = self.drafts.remove(from)
+            && self.drafts.get(into).is_none_or(|dst| {
+                (!src.text.trim().is_empty(), src.promoted)
+                    > (!dst.text.trim().is_empty(), dst.promoted)
+            })
+        {
+            self.drafts.insert(into.to_string(), src);
         }
         if let Some(src) = self.chats.remove(from) {
             let dst = self.chats.get(into);
@@ -568,7 +750,8 @@ impl Store {
                     .map(|d| d.name.clone())
                     .unwrap_or_else(|| src.name.clone()),
                 preview: if dst.map(|d| d.timestamp).unwrap_or(0) >= src.timestamp {
-                    dst.map(|d| d.preview.clone()).unwrap_or_else(|| src.preview.clone())
+                    dst.map(|d| d.preview.clone())
+                        .unwrap_or_else(|| src.preview.clone())
                 } else {
                     src.preview.clone()
                 },
@@ -577,11 +760,19 @@ impl Store {
                 mentioned: src.mentioned || dst.map(|d| d.mentioned).unwrap_or(false),
                 pinned: src.pinned.max(dst.map(|d| d.pinned).unwrap_or(0)),
                 archived: src.archived || dst.map(|d| d.archived).unwrap_or(false),
-                community: dst.map(|d| d.community.clone()).unwrap_or_else(|| src.community.clone()),
+                community: dst
+                    .map(|d| d.community.clone())
+                    .unwrap_or_else(|| src.community.clone()),
                 is_community: src.is_community || dst.map(|d| d.is_community).unwrap_or(false),
-                muted: dst.map(|d| d.muted).filter(|m| *m != 0).unwrap_or(src.muted),
+                muted: dst
+                    .map(|d| d.muted)
+                    .filter(|m| *m != 0)
+                    .unwrap_or(src.muted),
                 favorite: src.favorite || dst.map(|d| d.favorite).unwrap_or(false),
-                ephemeral: dst.map(|d| d.ephemeral).filter(|e| *e != 0).unwrap_or(src.ephemeral),
+                ephemeral: dst
+                    .map(|d| d.ephemeral)
+                    .filter(|e| *e != 0)
+                    .unwrap_or(src.ephemeral),
                 announce: src.announce || dst.map(|d| d.announce).unwrap_or(false),
                 admin: src.admin || dst.map(|d| d.admin).unwrap_or(false),
                 left: src.left && dst.map(|d| d.left).unwrap_or(true),
@@ -595,9 +786,11 @@ impl Store {
             }
         }
         self.search.remove_chat(from);
-        self.pending_removals = self.pending_removals.drain().map(|(jid, id)| {
-            (if jid == from { into.to_string() } else { jid }, id)
-        }).collect();
+        self.pending_removals = self
+            .pending_removals
+            .drain()
+            .map(|(jid, id)| (if jid == from { into.to_string() } else { jid }, id))
+            .collect();
         if let Some(mut src_msgs) = self.messages.remove(from) {
             for m in &mut src_msgs {
                 m.jid = into.to_string();
@@ -659,7 +852,12 @@ impl Store {
                         let name = self
                             .contacts
                             .get(jid)
-                            .or_else(|| self.chats.get(jid).filter(|c| !c.name.is_empty()).map(|c| &c.name))
+                            .or_else(|| {
+                                self.chats
+                                    .get(jid)
+                                    .filter(|c| !c.name.is_empty())
+                                    .map(|c| &c.name)
+                            })
                             .or_else(|| self.push_names.get(jid));
                         if let Some(name) = name {
                             out.push('@');
@@ -700,18 +898,24 @@ impl Store {
         list.sort_by(|a, b| {
             let (pa, pb) = (a.pinned, b.pinned);
             if (pa > 0) != (pb > 0) {
-                return if pa > 0 { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+                return if pa > 0 {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
             }
             if pa > 0 {
                 return pb.cmp(&pa);
             }
             let promotion = |chat: &ChatMeta| {
-                self.drafts.get(&chat.jid)
+                self.drafts
+                    .get(&chat.jid)
                     .filter(|draft| !draft.text.trim().is_empty())
                     .map(|draft| draft.promoted)
                     .unwrap_or(0)
             };
-            promotion(b).cmp(&promotion(a))
+            promotion(b)
+                .cmp(&promotion(a))
                 .then_with(|| b.timestamp.cmp(&a.timestamp))
         });
         list
@@ -786,7 +990,10 @@ impl Store {
 
     // Returns true if the message was newly added (false = duplicate).
     pub fn add_message(&mut self, mut stored: StoredMessage) -> bool {
-        if self.pending_removals.contains(&(self.canon_owned(&stored.jid), stored.id.clone())) {
+        if self
+            .pending_removals
+            .contains(&(self.canon_owned(&stored.jid), stored.id.clone()))
+        {
             return false;
         }
         let list = self.messages.entry(stored.jid.clone()).or_default();
@@ -837,7 +1044,9 @@ impl Store {
         self.dirty_jids.remove(jid);
         self.deleted_jids.insert(jid.to_string());
         for (from, into) in &self.pending_merges {
-            if into == jid { self.deleted_jids.insert(from.clone()); }
+            if into == jid {
+                self.deleted_jids.insert(from.clone());
+            }
         }
         self.search.remove_chat(jid);
         if let Some(meta) = self.chats.get_mut(jid) {
@@ -865,7 +1074,11 @@ impl Store {
 
     pub fn set_label_chat(&mut self, label_id: &str, jid: &str, on: bool) -> bool {
         let set = self.label_chats.entry(label_id.to_string()).or_default();
-        let changed = if on { set.insert(jid.to_string()) } else { set.remove(jid) };
+        let changed = if on {
+            set.insert(jid.to_string())
+        } else {
+            set.remove(jid)
+        };
         if changed {
             self.labels_dirty = true;
         }
@@ -886,7 +1099,12 @@ impl Store {
     // A fresh label id: WhatsApp numbers them, skipping the predefined
     // ones (below 5) it keeps for itself.
     pub fn next_label_id(&self) -> String {
-        let max = self.labels.keys().filter_map(|k| k.parse::<i64>().ok()).max().unwrap_or(4);
+        let max = self
+            .labels
+            .keys()
+            .filter_map(|k| k.parse::<i64>().ok())
+            .max()
+            .unwrap_or(4);
         (max.max(4) + 1).to_string()
     }
 
@@ -902,7 +1120,9 @@ impl Store {
     // Applies a roster change from a group notification. Returns whether
     // the roster is known at all (a fresh fetch fixes an unknown one).
     pub fn patch_members(&mut self, jid: &str, jids: &[String], action: &str) -> bool {
-        let Some(list) = self.members.get_mut(jid) else { return false };
+        let Some(list) = self.members.get_mut(jid) else {
+            return false;
+        };
         for who in jids {
             match action {
                 "add" => {
@@ -946,16 +1166,27 @@ impl Store {
     // arrived over the socket while the chat was cold.
     pub fn hydrate(&mut self, vault: &Vault, jid: &str) {
         let jid = self.canon_owned(jid);
-        if self.hydrated.contains(&jid) { return; }
-        if let Err(e) = self.flush_history(vault) { eprintln!("[store] hydrate {jid} failed: {e}"); return; }
+        if self.hydrated.contains(&jid) {
+            return;
+        }
+        if let Err(e) = self.flush_history(vault) {
+            eprintln!("[store] hydrate {jid} failed: {e}");
+            return;
+        }
         let disk = match vault.history_page(&jid, None, 100) {
             Ok(disk) => disk,
-            Err(e) => { eprintln!("[store] hydrate {jid} failed: {e}"); return; }
+            Err(e) => {
+                eprintln!("[store] hydrate {jid} failed: {e}");
+                return;
+            }
         };
         if let Some(first) = disk.first() {
-            self.older_cursors.insert(jid.clone(), (first.timestamp, first.id.clone()));
+            self.older_cursors
+                .insert(jid.clone(), (first.timestamp, first.id.clone()));
         }
-        if disk.len() < 100 { self.older_exhausted.insert(jid.clone()); }
+        if disk.len() < 100 {
+            self.older_exhausted.insert(jid.clone());
+        }
         self.messages.remove(&jid);
         self.merge_page(&jid, disk);
         self.hydrated.insert(jid.clone());
@@ -968,8 +1199,9 @@ impl Store {
         live.retain(|m| !removals.contains(&(jid.to_string(), m.id.clone())));
         let known: HashSet<String> = live.iter().map(|m| m.id.clone()).collect();
         let before = live.len();
-        live.extend(disk.into_iter().filter(|m| !known.contains(&m.id)
-            && !removals.contains(&(jid.to_string(), m.id.clone()))));
+        live.extend(disk.into_iter().filter(|m| {
+            !known.contains(&m.id) && !removals.contains(&(jid.to_string(), m.id.clone()))
+        }));
         live.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
         live.len() > before
     }
@@ -977,14 +1209,31 @@ impl Store {
     pub fn load_older(&mut self, vault: &Vault, jid: &str) -> bool {
         let jid = self.canon_owned(jid);
         self.hydrate(vault, &jid);
-        if !self.hydrated.contains(&jid) || self.older_exhausted.contains(&jid) { return false; }
-        if let Err(e) = self.flush_history(vault) { eprintln!("[store] load_older {jid} failed: {e}"); return false; }
-        let cursor = self.older_cursors.get(&jid).map(|(ts, id)| (*ts, id.as_str()));
-        let page = match vault.history_page(&jid, cursor, 100) { Ok(page) => page, Err(e) => { eprintln!("[store] load_older {jid} failed: {e}"); return false; } };
-        if let Some(first) = page.first() {
-            self.older_cursors.insert(jid.clone(), (first.timestamp, first.id.clone()));
+        if !self.hydrated.contains(&jid) || self.older_exhausted.contains(&jid) {
+            return false;
         }
-        if page.len() < 100 { self.older_exhausted.insert(jid.clone()); }
+        if let Err(e) = self.flush_history(vault) {
+            eprintln!("[store] load_older {jid} failed: {e}");
+            return false;
+        }
+        let cursor = self
+            .older_cursors
+            .get(&jid)
+            .map(|(ts, id)| (*ts, id.as_str()));
+        let page = match vault.history_page(&jid, cursor, 100) {
+            Ok(page) => page,
+            Err(e) => {
+                eprintln!("[store] load_older {jid} failed: {e}");
+                return false;
+            }
+        };
+        if let Some(first) = page.first() {
+            self.older_cursors
+                .insert(jid.clone(), (first.timestamp, first.id.clone()));
+        }
+        if page.len() < 100 {
+            self.older_exhausted.insert(jid.clone());
+        }
         let found = !page.is_empty();
         self.merge_page(&jid, page);
         found
@@ -992,22 +1241,52 @@ impl Store {
 
     pub fn hydrate_id(&mut self, vault: &Vault, jid: &str, id: &str) -> bool {
         let jid = self.canon_owned(jid);
-        if self.pending_removals.contains(&(jid.clone(), id.to_string())) { return false; }
-        if self.messages_for(&jid).iter().any(|m| m.id == id) { return true; }
-        if self.flush_history(vault).is_err() { return false; }
-        let Ok(Some(message)) = vault.history_id(&jid, id) else { return false };
+        if self
+            .pending_removals
+            .contains(&(jid.clone(), id.to_string()))
+        {
+            return false;
+        }
+        if self.messages_for(&jid).iter().any(|m| m.id == id) {
+            return true;
+        }
+        if self.flush_history(vault).is_err() {
+            return false;
+        }
+        let Ok(Some(message)) = vault.history_id(&jid, id) else {
+            return false;
+        };
         self.merge_page(&jid, vec![message]);
         true
     }
 
     pub fn load_around(&mut self, vault: &Vault, jid: &str, id: &str) -> bool {
         let jid = self.canon_owned(jid);
-        if let Err(e) = self.flush_history(vault) { eprintln!("[store] load_around {jid} failed: {e}"); return false; }
+        if let Err(e) = self.flush_history(vault) {
+            eprintln!("[store] load_around {jid} failed: {e}");
+            return false;
+        }
         self.hydrate(vault, &jid);
-        if !self.hydrate_id(vault, &jid, id) { return false; }
-        let Some(target) = self.messages_for(&jid).iter().find(|m| m.id == id) else { return false };
-        let mut page = match vault.history_page(&jid, Some((target.timestamp, &target.id)), 50) { Ok(page) => page, Err(e) => { eprintln!("[store] load_around {jid} failed: {e}"); return false; } };
-        let after = match vault.history_after(&jid, target.timestamp, &target.id, 50) { Ok(after) => after, Err(e) => { eprintln!("[store] load_around {jid} failed: {e}"); return false; } };
+        if !self.hydrate_id(vault, &jid, id) {
+            return false;
+        }
+        let Some(target) = self.messages_for(&jid).iter().find(|m| m.id == id) else {
+            return false;
+        };
+        let mut page = match vault.history_page(&jid, Some((target.timestamp, &target.id)), 50) {
+            Ok(page) => page,
+            Err(e) => {
+                eprintln!("[store] load_around {jid} failed: {e}");
+                return false;
+            }
+        };
+        let after = match vault.history_after(&jid, target.timestamp, &target.id, 50) {
+            Ok(after) => after,
+            Err(e) => {
+                eprintln!("[store] load_around {jid} failed: {e}");
+                return false;
+            }
+        };
         page.extend(after);
         self.merge_page(&jid, page);
         true
@@ -1027,6 +1306,7 @@ impl Store {
     }
 
     // Records a call event; returns true when it is new or changed.
+    #[allow(clippy::too_many_arguments)] // one call record, three call sites; a params struct adds noise
     pub fn upsert_call(
         &mut self,
         id: &str,
@@ -1104,8 +1384,11 @@ impl Store {
     }
 
     pub fn unseen_calls(&self) -> i32 {
-        self.calls.iter().filter(|call| !call.outgoing && !call.seen && call.status == "timeout")
-            .count().min(i32::MAX as usize) as i32
+        self.calls
+            .iter()
+            .filter(|call| !call.outgoing && !call.seen && call.status == "timeout")
+            .count()
+            .min(i32::MAX as usize) as i32
     }
 
     pub fn mark_calls_seen(&mut self) {
@@ -1123,10 +1406,11 @@ impl Store {
             .statuses
             .iter()
             .filter_map(|(jid, list)| {
-                list.last().map(|latest| (jid.clone(), latest.clone(), list.len()))
+                list.last()
+                    .map(|latest| (jid.clone(), latest.clone(), list.len()))
             })
             .collect();
-        out.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        out.sort_by_key(|entry| std::cmp::Reverse(entry.1.timestamp));
         out
     }
 
@@ -1138,23 +1422,6 @@ impl Store {
             .flatten()
             .filter(|m| m.timestamp > 0 && m.raw.is_some())
             .min_by_key(|m| m.timestamp)
-    }
-
-    // The oldest message of one chat (per-chat backfill anchor).
-    pub fn oldest_in_chat(&self, jid: &str) -> Option<&StoredMessage> {
-        self.messages
-            .get(jid)?
-            .iter()
-            .find(|m| m.timestamp > 0 && m.raw.is_some())
-    }
-
-    // Most recent received GIFs (gif-playback videos) for the picker.
-    pub fn recent_gifs(&self, limit: usize) -> Vec<&StoredMessage> {
-        let mut out: Vec<&StoredMessage> =
-            self.messages.values().flatten().filter(|m| m.gif).collect();
-        out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        out.truncate(limit);
-        out
     }
 
     // Stickers the user actually sent, newest first, deduped by content.
@@ -1178,7 +1445,7 @@ impl Store {
             .flatten()
             .filter(|m| m.sticker && keep(m))
             .collect();
-        items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        items.sort_by_key(|m| std::cmp::Reverse(m.timestamp));
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for m in items {
@@ -1202,6 +1469,54 @@ impl Store {
         out
     }
 
+    // Stores `voter`'s latest vote for a poll. Older votes (by sender
+    // timestamp) never overwrite newer ones, so a replayed or reordered
+    // stanza cannot resurrect a pick the voter already changed.
+    pub fn apply_poll_vote(
+        &mut self,
+        jid: &str,
+        poll_id: &str,
+        voter: &str,
+        options: Vec<String>,
+        timestamp_ms: i64,
+    ) -> bool {
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|l| l.iter_mut().find(|x| x.id == poll_id))
+        else {
+            return false;
+        };
+        if let Some(existing) = m.poll_votes.get(voter)
+            && existing.timestamp_ms >= timestamp_ms
+        {
+            return false;
+        }
+        m.poll_votes.insert(
+            voter.to_string(),
+            PollVote {
+                options,
+                timestamp_ms,
+            },
+        );
+        self.dirty_jids.insert(jid.to_string());
+        true
+    }
+
+    // Starred messages across the cached chats, newest first. Messages of
+    // cold chats are not loaded here; the caller hydrates them by id.
+    pub fn starred_messages(&self, only_chat: Option<&str>) -> Vec<&StoredMessage> {
+        let mut list: Vec<&StoredMessage> = self
+            .messages
+            .iter()
+            .filter(|(jid, _)| only_chat.is_none_or(|chat| chat == jid.as_str()))
+            .flat_map(|(_, list)| list.iter())
+            .filter(|m| m.starred && !m.deleted && m.kind != MessageKind::System)
+            .collect();
+        list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+        list
+    }
+
     pub fn set_starred(&mut self, jid: &str, id: &str, starred: bool) -> bool {
         if starred {
             self.starred_ids.insert(id.to_string());
@@ -1209,7 +1524,10 @@ impl Store {
             self.starred_ids.remove(id);
         }
         self.starred_dirty = true;
-        let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|l| l.iter_mut().find(|x| x.id == id))
         else {
             return false;
         };
@@ -1229,7 +1547,10 @@ impl Store {
     // its body: the destructive path, used when "apply deletions" is on,
     // and always for a revoke performed on this account's own devices.
     pub fn mark_deleted(&mut self, jid: &str, id: &str) -> bool {
-        let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|l| l.iter_mut().find(|x| x.id == id))
         else {
             return false;
         };
@@ -1253,7 +1574,10 @@ impl Store {
     // a "deleted by sender" indicator -- and it stays in the search
     // index, since its content is still there.
     pub fn mark_revoked(&mut self, jid: &str, id: &str) -> bool {
-        let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|l| l.iter_mut().find(|x| x.id == id))
         else {
             return false;
         };
@@ -1268,9 +1592,14 @@ impl Store {
     // Marks receipts as already sent for these messages, so "send
     // message viewed" (opt-in) doesn't ack them twice.
     pub fn mark_read_sent(&mut self, jid: &str, ids: &[String]) {
-        let Some(list) = self.messages.get_mut(jid) else { return };
+        let Some(list) = self.messages.get_mut(jid) else {
+            return;
+        };
         let mut changed = false;
-        for m in list.iter_mut().filter(|m| ids.contains(&m.id) && !m.read_sent) {
+        for m in list
+            .iter_mut()
+            .filter(|m| ids.contains(&m.id) && !m.read_sent)
+        {
             m.read_sent = true;
             changed = true;
         }
@@ -1282,7 +1611,9 @@ impl Store {
     // Removes messages locally only ("delete for me").
     pub fn remove_messages(&mut self, jid: &str, ids: &[String]) -> bool {
         let jid = self.canon_owned(jid);
-        if ids.is_empty() { return false; }
+        if ids.is_empty() {
+            return false;
+        }
         if let Some(list) = self.messages.get_mut(&jid) {
             list.retain(|m| !ids.contains(&m.id));
         }
@@ -1295,16 +1626,23 @@ impl Store {
     }
 
     // Updates the delivery status of an own message (monotonic).
-    pub fn receipt_participants(&self, m: &StoredMessage) -> (bool, Vec<(String, ParticipantReceipt)>) {
+    pub fn receipt_participants(
+        &self,
+        m: &StoredMessage,
+    ) -> (bool, Vec<(String, ParticipantReceipt)>) {
         let known = !is_group(&m.jid) || self.members.contains_key(&m.jid);
         let mut rows: HashMap<String, ParticipantReceipt> = HashMap::new();
-        let excluded = |jid: &str| self.self_jids.iter().any(|s| self.canon(s) == jid)
-            || (!m.sender_jid.is_empty() && self.canon(&m.sender_jid) == jid);
+        let excluded = |jid: &str| {
+            self.self_jids.iter().any(|s| self.canon(s) == jid)
+                || (!m.sender_jid.is_empty() && self.canon(&m.sender_jid) == jid)
+        };
         if m.from_me {
             if is_group(&m.jid) {
                 for member in self.members_of(&m.jid) {
                     let jid = self.canon_owned(&normalize_jid(&member.jid));
-                    if !excluded(&jid) { rows.entry(jid).or_default(); }
+                    if !excluded(&jid) {
+                        rows.entry(jid).or_default();
+                    }
                 }
             } else {
                 let jid = self.canon_owned(&m.jid);
@@ -1315,32 +1653,94 @@ impl Store {
             }
             for (jid, receipt) in &m.receipts {
                 let jid = self.canon_owned(&normalize_jid(jid));
-                if excluded(&jid) { continue; }
+                if excluded(&jid) {
+                    continue;
+                }
                 let row = rows.entry(jid).or_default();
                 row.level = row.level.max(receipt.status());
-                for (status, time) in [(3, receipt.delivered), (4, receipt.read), (5, receipt.played)] {
-                    if let Some(time) = time { row.promote(status, time); }
+                for (status, time) in [
+                    (3, receipt.delivered),
+                    (4, receipt.read),
+                    (5, receipt.played),
+                ] {
+                    if let Some(time) = time {
+                        row.promote(status, time);
+                    }
                 }
             }
         }
         let mut rows: Vec<_> = rows.into_iter().collect();
-        rows.sort_by(|a, b| self.chat_name(&a.0).cmp(&self.chat_name(&b.0)));
+        rows.sort_by_key(|a| self.chat_name(&a.0));
         (known, rows)
     }
 
-    pub fn apply_receipt(&mut self, jid: &str, id: &str, participant: &str, status: u32, timestamp: i64) -> bool {
+    pub fn apply_receipt(
+        &mut self,
+        jid: &str,
+        id: &str,
+        participant: &str,
+        status: u32,
+        timestamp: i64,
+    ) -> bool {
         let participant = self.canon_owned(&normalize_jid(participant));
-        if participant.is_empty() || self.self_jids.iter().any(|s| self.canon(s) == participant) { return false; }
-        let Some(m) = self.messages.get_mut(jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return false; };
-        if !m.from_me { return false; }
-        m.receipts.entry(participant).or_default().promote(status, timestamp);
-        m.status = m.status.max(status);
+        if participant.is_empty() || self.self_jids.iter().any(|s| self.canon(s) == participant) {
+            return false;
+        }
+        if !self
+            .messages
+            .get(jid)
+            .and_then(|v| v.iter().find(|m| m.id == id))
+            .is_some_and(|m| m.from_me)
+        {
+            return false;
+        }
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|v| v.iter_mut().find(|m| m.id == id))
+        else {
+            return false;
+        };
+        m.receipts
+            .entry(participant)
+            .or_default()
+            .promote(status, timestamp);
+        let group = is_group(jid);
+        let roster: Vec<String> = if group {
+            self.members
+                .get(jid)
+                .map(|list| {
+                    list.iter()
+                        .map(|member| self.canon_owned(&normalize_jid(&member.jid)))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let me = self.self_jids.clone();
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|v| v.iter_mut().find(|m| m.id == id))
+        else {
+            return false;
+        };
+        let others: Vec<String> = roster
+            .into_iter()
+            .filter(|j| !me.iter().any(|s| s == j))
+            .collect();
+        let next = aggregate_status(group, m.status, status, &m.receipts, &others);
+        m.status = m.status.max(next);
         self.dirty_jids.insert(jid.into());
         true
     }
 
     pub fn set_status(&mut self, jid: &str, id: &str, status: u32) -> bool {
-        let Some(m) = self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|x| x.id == id))
+        let Some(m) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|l| l.iter_mut().find(|x| x.id == id))
         else {
             return false;
         };
@@ -1353,16 +1753,26 @@ impl Store {
     }
 
     // Applies (or removes, when emoji is empty) a reaction to a message.
-    pub fn apply_reaction(&mut self, jid: &str, target_id: &str, reactor: &str, emoji: &str) -> bool {
-        let Some(target) =
-            self.messages.get_mut(jid).and_then(|l| l.iter_mut().find(|m| m.id == target_id))
+    pub fn apply_reaction(
+        &mut self,
+        jid: &str,
+        target_id: &str,
+        reactor: &str,
+        emoji: &str,
+    ) -> bool {
+        let Some(target) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|l| l.iter_mut().find(|m| m.id == target_id))
         else {
             return false;
         };
         if emoji.is_empty() {
             target.reactions.remove(reactor);
         } else {
-            target.reactions.insert(reactor.to_string(), clean_text(emoji));
+            target
+                .reactions
+                .insert(reactor.to_string(), clean_text(emoji));
         }
         self.dirty_jids.insert(jid.to_string());
         true
@@ -1378,14 +1788,22 @@ impl Store {
             }
             self.search.remove(jid, id);
         }
-        let messages: Vec<StoredMessage> = self.dirty_jids.iter()
-            .filter_map(|jid| self.messages.get(jid)).flatten().cloned().collect();
+        let messages: Vec<StoredMessage> = self
+            .dirty_jids
+            .iter()
+            .filter_map(|jid| self.messages.get(jid))
+            .flatten()
+            .cloned()
+            .collect();
         let clears: Vec<String> = self.deleted_jids.iter().cloned().collect();
         let removals: Vec<(String, String)> = self.pending_removals.iter().cloned().collect();
         vault.history_commit(&messages, &clears, &removals, &self.pending_merges)?;
         for message in &messages {
-            if message.deleted { self.search.remove(&message.jid, &message.id); }
-            else { self.search.add(&message.jid, message); }
+            if message.deleted {
+                self.search.remove(&message.jid, &message.id);
+            } else {
+                self.search.add(&message.jid, message);
+            }
         }
         for (from, into) in std::mem::take(&mut self.pending_merges) {
             self.search.remove_chat(&from);
@@ -1448,19 +1866,25 @@ impl Store {
         Ok(())
     }
 
-
     // Indexes one cold chat straight from the vault (first-run backfill
     // for chats stored before the search index existed).
     fn refresh_audio_preview(&mut self, jid: &str) {
-        let preview = self.messages.get(jid)
+        let preview = self
+            .messages
+            .get(jid)
             .and_then(|messages| messages.iter().max_by_key(|m| m.timestamp))
-            .filter(|m| m.kind == MessageKind::Audio
-                && self.chats.get(jid).is_some_and(|chat| chat.timestamp == m.timestamp))
+            .filter(|m| {
+                m.kind == MessageKind::Audio
+                    && self
+                        .chats
+                        .get(jid)
+                        .is_some_and(|chat| chat.timestamp == m.timestamp)
+            })
             .map(|m| compute_preview(m, self));
-        if let Some(preview) = preview {
-            if let Some(chat) = self.chats.get_mut(jid) {
-                chat.preview = preview;
-            }
+        if let Some(preview) = preview
+            && let Some(chat) = self.chats.get_mut(jid)
+        {
+            chat.preview = preview;
         }
     }
 
@@ -1468,18 +1892,28 @@ impl Store {
         let jid = self.canon_owned(jid);
         let mut cursor: Option<(i64, String)> = None;
         loop {
-            let Ok(page) = vault.history_page(&jid, cursor.as_ref().map(|(ts, id)| (*ts, id.as_str())), 100) else { return };
+            let Ok(page) = vault.history_page(
+                &jid,
+                cursor.as_ref().map(|(ts, id)| (*ts, id.as_str())),
+                100,
+            ) else {
+                return;
+            };
             for message in &page {
-                if !self.pending_removals.contains(&(jid.clone(), message.id.clone())) {
+                if !self
+                    .pending_removals
+                    .contains(&(jid.clone(), message.id.clone()))
+                {
                     self.search.add(&jid, message);
                 }
             }
-            if page.len() < 100 { break; }
+            if page.len() < 100 {
+                break;
+            }
             cursor = page.first().map(|m| (m.timestamp, m.id.clone()));
         }
         self.search.mark_complete(&jid);
     }
-
 
     pub fn load_from(&mut self, vault: &Vault) {
         fn read<T: serde::de::DeserializeOwned>(vault: &Vault, key: &str) -> Option<T> {
@@ -1502,8 +1936,12 @@ impl Store {
         }
         if let Some(v) = read(vault, "store:aliases") {
             self.aliases = v;
-            self.pending_merges.extend(self.aliases.iter().filter(|(from, into)| from != into)
-                .map(|(from, into)| (from.clone(), into.clone())));
+            self.pending_merges.extend(
+                self.aliases
+                    .iter()
+                    .filter(|(from, into)| from != into)
+                    .map(|(from, into)| (from.clone(), into.clone())),
+            );
         }
         // Message bodies stay on disk; chats hydrate on open/hover. The
         // list itself renders from ChatMeta.preview alone.
@@ -1530,6 +1968,59 @@ impl Store {
     }
 }
 
+// Messages that are pinned right now, newest pin first. `now` is a
+// parameter so expiry is testable.
+pub fn active_pins(list: &[StoredMessage], now: i64) -> Vec<&StoredMessage> {
+    let mut pins: Vec<&StoredMessage> = list
+        .iter()
+        .filter(|m| m.pinned_until > now && !m.deleted && m.kind != MessageKind::System)
+        .collect();
+    pins.sort_by(|a, b| {
+        b.pinned_until
+            .cmp(&a.pinned_until)
+            .then_with(|| b.timestamp.cmp(&a.timestamp))
+    });
+    pins
+}
+
+// Index of the next chat when moving `delta` steps through a list of
+// `len` rows, wrapping at both ends. With nothing selected, forward starts
+// at the first row and backward at the last.
+pub fn adjacent_index(current: Option<usize>, len: usize, delta: i32) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    match current {
+        Some(index) => Some((index as i64 + i64::from(delta)).rem_euclid(len as i64) as usize),
+        None => Some(if delta >= 0 { 0 } else { len - 1 }),
+    }
+}
+
+// The row a Ctrl+digit shortcut opens, or None past the end of the list.
+pub fn shortcut_index(position: i32, len: usize) -> Option<usize> {
+    usize::try_from(position).ok().filter(|index| *index < len)
+}
+
+// Reactor jid -> emoji, grouped by emoji for the reaction sheet: most
+// used first, ties keep the emoji order of the sorted reactor keys.
+pub fn reaction_groups(reactions: &HashMap<String, String>) -> Vec<(String, Vec<String>)> {
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    let mut keys: Vec<&String> = reactions.keys().collect();
+    keys.sort();
+    for reactor in keys {
+        let emoji = clean_text(&reactions[reactor]);
+        if emoji.is_empty() {
+            continue;
+        }
+        match groups.iter_mut().find(|(existing, _)| *existing == emoji) {
+            Some((_, who)) => who.push(reactor.clone()),
+            None => groups.push((emoji, vec![reactor.clone()])),
+        }
+    }
+    groups.sort_by_key(|group| std::cmp::Reverse(group.1.len()));
+    groups
+}
+
 fn to_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
 }
@@ -1546,7 +2037,9 @@ pub fn normalize_jid(jid: &str) -> String {
 // the reply.
 pub fn quoted_summary(quoted: &wa::Message) -> String {
     use whatsapp_rust::proto_helpers::MessageExt as _;
-    if quoted.is_view_once() { return t("compat.view_once"); }
+    if quoted.is_view_once() {
+        return t("compat.view_once");
+    }
     if let Some(card) = crate::wa_map::compatibility_card(quoted.get_base_message()) {
         return card.chars().take(120).collect();
     }
@@ -1554,13 +2047,19 @@ pub fn quoted_summary(quoted: &wa::Message) -> String {
         .ephemeral_message
         .as_option()
         .and_then(|e| e.message.as_option())
-        .or_else(|| quoted.view_once_message_v2.as_option().and_then(|v| v.message.as_option()))
+        .or_else(|| {
+            quoted
+                .view_once_message_v2
+                .as_option()
+                .and_then(|v| v.message.as_option())
+        })
         .unwrap_or(quoted);
-    if let Some(text) = inner
-        .conversation
-        .as_deref()
-        .or_else(|| inner.extended_text_message.as_option().and_then(|e| e.text.as_deref()))
-    {
+    if let Some(text) = inner.conversation.as_deref().or_else(|| {
+        inner
+            .extended_text_message
+            .as_option()
+            .and_then(|e| e.text.as_deref())
+    }) {
         return clean_text(text).chars().take(120).collect();
     }
     if let Some(img) = inner.image_message.as_option() {
@@ -1590,8 +2089,16 @@ pub fn quoted_summary(quoted: &wa::Message) -> String {
 
 // What a message looks like in the chat list, without the sender prefix.
 fn audio_preview(voice: bool, seconds: u32) -> String {
-    let label = t(if voice { "preview.voice" } else { "preview.audio" });
-    if seconds > 0 { format!("{label} ({})", format_duration(seconds)) } else { label }
+    let label = t(if voice {
+        "preview.voice"
+    } else {
+        "preview.audio"
+    });
+    if seconds > 0 {
+        format!("{label} ({})", format_duration(seconds))
+    } else {
+        label
+    }
 }
 
 pub fn preview_body(stored: &StoredMessage) -> String {
@@ -1599,7 +2106,11 @@ pub fn preview_body(stored: &StoredMessage) -> String {
         MessageKind::Image => t("preview.photo"),
         MessageKind::Audio => audio_preview(stored.is_voice_message(), stored.duration_sec),
         MessageKind::Video => {
-            if stored.gif { t("preview.gif") } else { t("preview.video") }
+            if stored.gif {
+                t("preview.gif")
+            } else {
+                t("preview.video")
+            }
         }
         MessageKind::Doc => ta("preview.document", &[&stored.text]),
         MessageKind::Text | MessageKind::System => {
@@ -1616,7 +2127,10 @@ pub fn compute_preview(stored: &StoredMessage, store: &Store) -> String {
     let prefix = if stored.from_me {
         "✓ ".to_string()
     } else if is_group(&stored.jid) && !stored.sender.is_empty() {
-        format!("{}: ", clean_text(&stored.sender).split(' ').next().unwrap_or(""))
+        format!(
+            "{}: ",
+            clean_text(&stored.sender).split(' ').next().unwrap_or("")
+        )
     } else {
         String::new()
     };
@@ -1628,20 +2142,28 @@ mod tests {
     use super::*;
 
     fn history_message(jid: &str, n: i64) -> StoredMessage {
-        let mut message = crate::wa_map::system_message(jid, &format!("{n:05}"), n / 3, format!("history body {n}"));
+        let mut message = crate::wa_map::system_message(
+            jid,
+            &format!("{n:05}"),
+            n / 3,
+            format!("history body {n}"),
+        );
         message.kind = MessageKind::Text;
         message
     }
 
     #[test]
     fn durable_history_restart_pages_and_off_window_mutations() {
-        let path = std::env::temp_dir().join(format!("zapive_history_restart_{}.db", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("zapive_history_restart_{}.db", std::process::id()));
         crate::paths::remove_db(&path);
         {
             let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
             vault.open().unwrap();
             let mut store = Store::default();
-            for n in 0..751 { store.add_message(history_message("chat", n)); }
+            for n in 0..751 {
+                store.add_message(history_message("chat", n));
+            }
             store.save_checked(&vault).unwrap();
             assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 751);
             assert!(store.messages_for("chat").is_empty());
@@ -1661,7 +2183,14 @@ mod tests {
             assert!(store.load_around(&vault, "chat", "00200"));
             while store.load_older(&vault, "chat") {}
             assert_eq!(store.messages_for("chat").len(), 750);
-            assert!(store.messages_for("chat").iter().find(|m| m.id == "00001").unwrap().deleted);
+            assert!(
+                store
+                    .messages_for("chat")
+                    .iter()
+                    .find(|m| m.id == "00001")
+                    .unwrap()
+                    .deleted
+            );
             assert!(vault.history_id("chat", "00002").unwrap().is_none());
             store.add_message(history_message("chat", 999));
             vault.lock();
@@ -1679,24 +2208,38 @@ mod tests {
     fn durable_history_removals_survive_loading_dirty_save_and_restart() {
         for around in [false, true] {
             let path = std::env::temp_dir().join(format!(
-                "zapive_history_removals_{}_{around}.db", std::process::id()
+                "zapive_history_removals_{}_{around}.db",
+                std::process::id()
             ));
             crate::paths::remove_db(&path);
             {
                 let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
                 vault.open().unwrap();
                 let mut store = Store::default();
-                for n in 0..300 { store.add_message(history_message("chat", n)); }
+                for n in 0..300 {
+                    store.add_message(history_message("chat", n));
+                }
                 store.save_checked(&vault).unwrap();
-                if around { store.hydrate(&vault, "chat"); }
-                let removed = if around { ["00249", "00251"] } else { ["00298", "00299"] };
+                if around {
+                    store.hydrate(&vault, "chat");
+                }
+                let removed = if around {
+                    ["00249", "00251"]
+                } else {
+                    ["00298", "00299"]
+                };
                 assert!(store.remove_messages("chat", &removed.map(String::from)));
                 if around {
                     assert!(store.load_around(&vault, "chat", "00250"));
                 } else {
                     store.hydrate(&vault, "chat");
                 }
-                assert!(store.messages_for("chat").iter().all(|m| !removed.contains(&m.id.as_str())));
+                assert!(
+                    store
+                        .messages_for("chat")
+                        .iter()
+                        .all(|m| !removed.contains(&m.id.as_str()))
+                );
                 assert!(!store.hydrate_id(&vault, "chat", removed[0]));
                 assert!(!store.load_around(&vault, "chat", removed[1]));
                 assert!(store.add_message(history_message("chat", 999)));
@@ -1709,7 +2252,11 @@ mod tests {
                 store.load_from(&vault);
                 store.hydrate(&vault, "chat");
                 while store.load_older(&vault, "chat") {}
-                let removed = if around { ["00249", "00251"] } else { ["00298", "00299"] };
+                let removed = if around {
+                    ["00249", "00251"]
+                } else {
+                    ["00298", "00299"]
+                };
                 assert_eq!(store.messages_for("chat").len(), 299);
                 for id in removed {
                     assert!(vault.history_id("chat", id).unwrap().is_none());
@@ -1736,7 +2283,11 @@ mod tests {
         store.add_message(history_message("old@lid", 1));
         store.learn_alias("old@lid", "chat");
         assert!(store.messages_for("chat").is_empty());
-        store.messages.get_mut("chat").unwrap().push(history_message("chat", 1));
+        store
+            .messages
+            .get_mut("chat")
+            .unwrap()
+            .push(history_message("chat", 1));
         store.save_checked(&vault).unwrap();
         assert!(store.messages_for("chat").is_empty());
         assert!(store.pending_removals.is_empty());
@@ -1754,9 +2305,20 @@ mod tests {
         let mut vault = Vault::open_at(":memory:").unwrap();
         vault.open().unwrap();
         let legacy: Vec<_> = (0..610).map(|n| history_message("chat", n)).collect();
-        vault.set_checked("store:msgs:chat", &to_json(&legacy)).unwrap();
-        vault.set_checked("store:msgs:broken", "invalid json").unwrap();
-        vault.history_commit(&[history_message("broken", 900)], &["broken".into()], &[], &[]).unwrap();
+        vault
+            .set_checked("store:msgs:chat", &to_json(&legacy))
+            .unwrap();
+        vault
+            .set_checked("store:msgs:broken", "invalid json")
+            .unwrap();
+        vault
+            .history_commit(
+                &[history_message("broken", 900)],
+                &["broken".into()],
+                &[],
+                &[],
+            )
+            .unwrap();
         assert_eq!(vault.history_page("broken", None, 1000).unwrap().len(), 1);
         assert!(vault.get("store:msgs:chat").is_some());
         assert!(vault.get("store:msgs:broken").is_some());
@@ -1765,11 +2327,15 @@ mod tests {
         assert_eq!(store.messages_for("chat").len(), 100);
         assert!(vault.get("store:msgs:chat").is_none());
         assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 610);
-        vault.set_checked("store:msgs:chat", &to_json(&legacy)).unwrap();
+        vault
+            .set_checked("store:msgs:chat", &to_json(&legacy))
+            .unwrap();
         assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 610);
         vault.set_account("other");
         assert!(vault.history_page("chat", None, 1000).unwrap().is_empty());
-        vault.history_commit(&[history_message("chat", 999)], &[], &[], &[]).unwrap();
+        vault
+            .history_commit(&[history_message("chat", 999)], &[], &[], &[])
+            .unwrap();
         vault.set_account("");
         store.remove_messages("chat", &["00000".into()]);
         store.save_checked(&vault).unwrap();
@@ -1779,7 +2345,10 @@ mod tests {
         store.save_checked(&vault).unwrap();
         assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 1);
         vault.set_account("other");
-        assert_eq!(vault.history_page("chat", None, 1000).unwrap()[0].id, "00999");
+        assert_eq!(
+            vault.history_page("chat", None, 1000).unwrap()[0].id,
+            "00999"
+        );
         vault.wipe_account("");
         assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 1);
         vault.wipe_account("other");
@@ -1791,12 +2360,21 @@ mod tests {
         let mut vault = Vault::open_at(":memory:").unwrap();
         vault.open().unwrap();
         let source: Vec<_> = (0..620).map(|n| history_message("old@lid", n)).collect();
-        vault.set_checked("store:msgs:old@lid", &to_json(&source)).unwrap();
-        vault.history_commit(&[history_message("new", 900)], &[], &[], &[]).unwrap();
+        vault
+            .set_checked("store:msgs:old@lid", &to_json(&source))
+            .unwrap();
+        vault
+            .history_commit(&[history_message("new", 900)], &[], &[], &[])
+            .unwrap();
         let mut store = Store::default();
         store.learn_alias("old@lid", "new");
         store.save_checked(&vault).unwrap();
-        assert!(vault.history_page("old@lid", None, 1000).unwrap().is_empty());
+        assert!(
+            vault
+                .history_page("old@lid", None, 1000)
+                .unwrap()
+                .is_empty()
+        );
         let merged = vault.history_page("new", None, 1000).unwrap();
         assert_eq!(merged.len(), 621);
         assert!(merged.iter().all(|m| m.jid == "new"));
@@ -1809,14 +2387,24 @@ mod tests {
     fn sidebar_time_uses_calendar_day_boundaries() {
         let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
         let at = |year, month, day, hour, minute| {
-            chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap()
-                .and_hms_opt(hour, minute, 0).unwrap()
+            chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(hour, minute, 0)
+                .unwrap()
         };
         assert_eq!(format_time(0), "");
         assert_eq!(format_time_at(at(2026, 1, 2, 9, 5), now), "09:05");
-        assert_eq!(format_time_at(at(2026, 1, 1, 23, 59), now), t("day.yesterday"));
-        for (day, key) in [(31, "day.wednesday"), (30, "day.tuesday"),
-            (29, "day.monday"), (28, "day.sunday"), (27, "day.saturday")] {
+        assert_eq!(
+            format_time_at(at(2026, 1, 1, 23, 59), now),
+            t("day.yesterday")
+        );
+        for (day, key) in [
+            (31, "day.wednesday"),
+            (30, "day.tuesday"),
+            (29, "day.monday"),
+            (28, "day.sunday"),
+            (27, "day.saturday"),
+        ] {
             assert_eq!(format_time_at(at(2025, 12, day, 23, 59), now), t(key));
         }
         assert_eq!(format_time_at(at(2025, 12, 26, 23, 59), now), "26/12");
@@ -1830,12 +2418,23 @@ mod tests {
     #[test]
     fn sidebar_time_uses_local_dates_across_offset_changes() {
         for (message, now, key) in [
-            ("2026-03-07T23:30:00-05:00", "2026-03-09T00:15:00-04:00", "day.saturday"),
-            ("2026-10-31T00:15:00-04:00", "2026-11-01T23:30:00-05:00", "day.yesterday"),
+            (
+                "2026-03-07T23:30:00-05:00",
+                "2026-03-09T00:15:00-04:00",
+                "day.saturday",
+            ),
+            (
+                "2026-10-31T00:15:00-04:00",
+                "2026-11-01T23:30:00-05:00",
+                "day.yesterday",
+            ),
         ] {
             let message = chrono::DateTime::parse_from_rfc3339(message).unwrap();
             let now = chrono::DateTime::parse_from_rfc3339(now).unwrap();
-            assert_eq!(format_time_at(message.naive_local(), now.date_naive()), t(key));
+            assert_eq!(
+                format_time_at(message.naive_local(), now.date_naive()),
+                t(key)
+            );
         }
     }
 
@@ -1851,15 +2450,40 @@ mod tests {
             ("blank", 40, 0, " \n\t", 999),
             ("unpromoted", 30, 0, "draft", 0),
         ] {
-            store.chats.insert(jid.into(), ChatMeta {
-                jid: jid.into(), timestamp, pinned, ..Default::default()
-            });
-            store.drafts.insert(jid.into(), Draft {
-                text: text.into(), promoted, ..Default::default()
-            });
+            store.chats.insert(
+                jid.into(),
+                ChatMeta {
+                    jid: jid.into(),
+                    timestamp,
+                    pinned,
+                    ..Default::default()
+                },
+            );
+            store.drafts.insert(
+                jid.into(),
+                Draft {
+                    text: text.into(),
+                    promoted,
+                    ..Default::default()
+                },
+            );
         }
-        assert_eq!(store.sorted_chats().iter().map(|chat| chat.jid.as_str()).collect::<Vec<_>>(),
-            ["pin-new", "pin-old", "draft-new", "draft-old", "normal", "blank", "unpromoted"]);
+        assert_eq!(
+            store
+                .sorted_chats()
+                .iter()
+                .map(|chat| chat.jid.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "pin-new",
+                "pin-old",
+                "draft-new",
+                "draft-old",
+                "normal",
+                "blank",
+                "unpromoted"
+            ]
+        );
         assert_eq!(store.chats["draft-new"].timestamp, 3);
         assert_eq!(store.chats["draft-old"].timestamp, 4);
     }
@@ -1868,16 +2492,33 @@ mod tests {
     fn draft_removal_restores_timestamp_order() {
         let mut store = Store::default();
         for (jid, timestamp) in [("older", 10), ("newer", 20)] {
-            store.chats.insert(jid.into(), ChatMeta {
-                jid: jid.into(), timestamp, ..Default::default()
-            });
+            store.chats.insert(
+                jid.into(),
+                ChatMeta {
+                    jid: jid.into(),
+                    timestamp,
+                    ..Default::default()
+                },
+            );
         }
-        store.drafts.insert("older".into(), Draft {
-            text: "draft".into(), promoted: 1, ..Default::default()
-        });
+        store.drafts.insert(
+            "older".into(),
+            Draft {
+                text: "draft".into(),
+                promoted: 1,
+                ..Default::default()
+            },
+        );
         assert_eq!(store.sorted_chats()[0].jid, "older");
         store.drafts.remove("older");
-        assert_eq!(store.sorted_chats().iter().map(|chat| chat.jid.as_str()).collect::<Vec<_>>(), ["newer", "older"]);
+        assert_eq!(
+            store
+                .sorted_chats()
+                .iter()
+                .map(|chat| chat.jid.as_str())
+                .collect::<Vec<_>>(),
+            ["newer", "older"]
+        );
         assert_eq!(store.chats["older"].timestamp, 10);
         assert_eq!(store.chats["newer"].timestamp, 20);
     }
@@ -1886,7 +2527,10 @@ mod tests {
     fn draft_serialization_preserves_mentions() {
         let draft = Draft {
             text: "Hello @Alice and @Bob 👋".into(),
-            mentions: vec![("Alice".into(), "1@s.whatsapp.net".into()), ("Bob".into(), "2@lid".into())],
+            mentions: vec![
+                ("Alice".into(), "1@s.whatsapp.net".into()),
+                ("Bob".into(), "2@lid".into()),
+            ],
             promoted: u64::MAX,
         };
         let drafts = HashMap::from([("group@g.us".to_string(), draft.clone())]);
@@ -1906,10 +2550,18 @@ mod tests {
             (" \t", 30, "target", 20, "target"),
             ("source", 0, "", 20, "source"),
         ] {
-            for (jid, text, promoted) in [("from", source_text, source_promoted), ("into", target_text, target_promoted)] {
-                store.drafts.insert(jid.into(), Draft {
-                    text: text.into(), mentions: vec![(text.into(), jid.into())], promoted,
-                });
+            for (jid, text, promoted) in [
+                ("from", source_text, source_promoted),
+                ("into", target_text, target_promoted),
+            ] {
+                store.drafts.insert(
+                    jid.into(),
+                    Draft {
+                        text: text.into(),
+                        mentions: vec![(text.into(), jid.into())],
+                        promoted,
+                    },
+                );
             }
             store.merge_jid("from", "into");
             assert!(!store.drafts.contains_key("from"));
@@ -1917,9 +2569,13 @@ mod tests {
             assert_eq!(store.drafts["into"].mentions[0].0, expected);
         }
         store.drafts.remove("into");
-        store.drafts.insert("from".into(), Draft {
-            text: "only source".into(), ..Default::default()
-        });
+        store.drafts.insert(
+            "from".into(),
+            Draft {
+                text: "only source".into(),
+                ..Default::default()
+            },
+        );
         store.merge_jid("from", "into");
         assert_eq!(store.drafts["into"].text, "only source");
     }
@@ -1927,8 +2583,20 @@ mod tests {
     #[test]
     fn delete_chat_removes_draft() {
         let mut store = Store::default();
-        store.chats.insert("chat".into(), ChatMeta { jid: "chat".into(), ..Default::default() });
-        store.drafts.insert("chat".into(), Draft { text: "draft".into(), ..Default::default() });
+        store.chats.insert(
+            "chat".into(),
+            ChatMeta {
+                jid: "chat".into(),
+                ..Default::default()
+            },
+        );
+        store.drafts.insert(
+            "chat".into(),
+            Draft {
+                text: "draft".into(),
+                ..Default::default()
+            },
+        );
         store.delete_chat("chat");
         assert!(!store.chats.contains_key("chat"));
         assert!(!store.drafts.contains_key("chat"));
@@ -1943,10 +2611,17 @@ mod tests {
             ("community@g.us", 2, "", true),
             ("c@newsletter", 7, "", false),
         ] {
-            store.chats.insert(jid.into(), ChatMeta {
-                jid: jid.into(), unread, community: community.into(), is_community: shell,
-                archived: true, ..Default::default()
-            });
+            store.chats.insert(
+                jid.into(),
+                ChatMeta {
+                    jid: jid.into(),
+                    unread,
+                    community: community.into(),
+                    is_community: shell,
+                    archived: true,
+                    ..Default::default()
+                },
+            );
         }
         assert_eq!(store.sidebar_unread_counts(), (2, 1, 2));
         store.chats.get_mut("a@s.whatsapp.net").unwrap().unread = u32::MAX;
@@ -1962,14 +2637,39 @@ mod tests {
     #[test]
     fn missed_call_badge_clears_and_persists_seen_state() {
         let mut store = Store::default();
-        store.upsert_call("incoming", "a@s.whatsapp.net", "offer", false, false, 1, false);
+        store.upsert_call(
+            "incoming",
+            "a@s.whatsapp.net",
+            "offer",
+            false,
+            false,
+            1,
+            false,
+        );
         assert_eq!(store.unseen_calls(), 0);
-        store.upsert_call("incoming", "a@s.whatsapp.net", "timeout", false, false, 1, false);
-        store.upsert_call("outgoing", "a@s.whatsapp.net", "timeout", false, false, 1, true);
+        store.upsert_call(
+            "incoming",
+            "a@s.whatsapp.net",
+            "timeout",
+            false,
+            false,
+            1,
+            false,
+        );
+        store.upsert_call(
+            "outgoing",
+            "a@s.whatsapp.net",
+            "timeout",
+            false,
+            false,
+            1,
+            true,
+        );
         assert_eq!(store.unseen_calls(), 1);
         store.mark_calls_seen();
         assert_eq!(store.unseen_calls(), 0);
-        let restored: Vec<CallEntry> = serde_json::from_str(&serde_json::to_string(&store.calls).unwrap()).unwrap();
+        let restored: Vec<CallEntry> =
+            serde_json::from_str(&serde_json::to_string(&store.calls).unwrap()).unwrap();
         assert!(restored.iter().all(|call| call.seen));
         let legacy: CallEntry = serde_json::from_str(r#"{"id":"old","jid":"a@s.whatsapp.net","video":false,"group":false,"status":"timeout","timestamp":1}"#).unwrap();
         assert!(!legacy.seen);
@@ -1984,8 +2684,16 @@ mod tests {
         assert!(m.record_edit("middle".into(), 300));
         assert_eq!(m.text, "current");
         assert!(!m.record_edit("second".into(), 200));
-        let restored: StoredMessage = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
-        assert_eq!(restored.edit_versions.iter().map(|v| v.text.as_str()).collect::<Vec<_>>(), ["original", "second", "middle", "current"]);
+        let restored: StoredMessage =
+            serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
+        assert_eq!(
+            restored
+                .edit_versions
+                .iter()
+                .map(|v| v.text.as_str())
+                .collect::<Vec<_>>(),
+            ["original", "second", "middle", "current"]
+        );
         assert_eq!(restored.edit_versions[0].timestamp, Some(100));
         let mut value = serde_json::to_value(&m).unwrap();
         value.as_object_mut().unwrap().remove("edit_versions");
@@ -2004,25 +2712,59 @@ mod tests {
         let mut m = crate::wa_map::system_message("g@g.us", "receipt", 100, "body".into());
         m.from_me = true;
         store.add_message(m);
-        assert!(!store.receipt_participants(&store.messages_for("g@g.us")[0]).0);
+        assert!(
+            !store
+                .receipt_participants(&store.messages_for("g@g.us")[0])
+                .0
+        );
         assert!(store.apply_receipt("g@g.us", "receipt", "person@lid", 4, 400));
         assert!(store.apply_receipt("g@g.us", "receipt", "person@s.whatsapp.net", 3, 300));
         assert!(store.apply_receipt("g@g.us", "receipt", "person@lid", 3, 350));
         assert!(!store.apply_receipt("g@g.us", "receipt", "self@s.whatsapp.net", 4, 200));
-        store.set_members("g@g.us", ["person@s.whatsapp.net", "person@lid", "self@s.whatsapp.net", "other@s.whatsapp.net"].iter().map(|jid| Member {
-            jid: (*jid).into(), phone: String::new(), name: String::new(), admin: false,
-        }).collect());
+        store.set_members(
+            "g@g.us",
+            [
+                "person@s.whatsapp.net",
+                "person@lid",
+                "self@s.whatsapp.net",
+                "other@s.whatsapp.net",
+            ]
+            .iter()
+            .map(|jid| Member {
+                jid: (*jid).into(),
+                phone: String::new(),
+                name: String::new(),
+                admin: false,
+            })
+            .collect(),
+        );
         let m = &store.messages_for("g@g.us")[0];
         let (known, rows) = store.receipt_participants(m);
         assert!(known);
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows.iter().find(|(jid, _)| jid == "person@s.whatsapp.net").unwrap().1.status(), 4);
-        assert_eq!(rows.iter().find(|(jid, _)| jid == "other@s.whatsapp.net").unwrap().1.status(), 0);
-        let restored: StoredMessage = serde_json::from_str(&serde_json::to_string(m).unwrap()).unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|(jid, _)| jid == "person@s.whatsapp.net")
+                .unwrap()
+                .1
+                .status(),
+            4
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|(jid, _)| jid == "other@s.whatsapp.net")
+                .unwrap()
+                .1
+                .status(),
+            0
+        );
+        let restored: StoredMessage =
+            serde_json::from_str(&serde_json::to_string(m).unwrap()).unwrap();
         let receipt = &restored.receipts["person@s.whatsapp.net"];
         assert_eq!(receipt.delivered, Some(300));
         assert_eq!(receipt.read, Some(400));
-        assert_eq!(restored.status, 4);
+        // `other` has not received it, so the group as a whole is not read.
+        assert!(restored.status < 3);
         let mut only_read = ParticipantReceipt::default();
         only_read.promote(4, 500);
         assert_eq!(only_read.status(), 4);
@@ -2036,7 +2778,8 @@ mod tests {
     #[test]
     fn private_legacy_receipts_keep_status_without_fabricated_time() {
         let store = Store::default();
-        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "private", 100, "body".into());
+        let mut m =
+            crate::wa_map::system_message("peer@s.whatsapp.net", "private", 100, "body".into());
         m.from_me = true;
         m.status = 4;
         let (known, rows) = store.receipt_participants(&m);
@@ -2052,7 +2795,8 @@ mod tests {
     #[test]
     fn deleting_message_discards_observed_edit_bodies() {
         let mut store = Store::default();
-        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "deleted", 100, "original".into());
+        let mut m =
+            crate::wa_map::system_message("peer@s.whatsapp.net", "deleted", 100, "original".into());
         m.record_edit("updated".into(), 200);
         store.add_message(m);
         assert!(store.mark_deleted("peer@s.whatsapp.net", "deleted"));
@@ -2063,10 +2807,16 @@ mod tests {
 
     fn audio_message(ptt: Option<bool>) -> StoredMessage {
         let raw = wa::Message {
-            audio_message: wa::message::AudioMessage { ptt, seconds: Some(65), ..Default::default() }.into(),
+            audio_message: wa::message::AudioMessage {
+                ptt,
+                seconds: Some(65),
+                ..Default::default()
+            }
+            .into(),
             ..Default::default()
         };
-        let mut stored = crate::wa_map::system_message("123@s.whatsapp.net", "audio", 100, String::new());
+        let mut stored =
+            crate::wa_map::system_message("123@s.whatsapp.net", "audio", 100, String::new());
         stored.kind = MessageKind::Audio;
         stored.duration_sec = 65;
         stored.raw = Some(Arc::new(raw));
@@ -2078,10 +2828,18 @@ mod tests {
         for ptt in [None, Some(false), Some(true)] {
             let stored = audio_message(ptt);
             assert_eq!(stored.is_voice_message(), ptt == Some(true));
-            let label = t(if ptt == Some(true) { "preview.voice" } else { "preview.audio" });
+            let label = t(if ptt == Some(true) {
+                "preview.voice"
+            } else {
+                "preview.audio"
+            });
             assert_eq!(preview_body(&stored), format!("{label} (1:05)"));
-            assert_eq!(quoted_summary(stored.raw.as_ref().unwrap()), preview_body(&stored));
-            let restored: StoredMessage = serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
+            assert_eq!(
+                quoted_summary(stored.raw.as_ref().unwrap()),
+                preview_body(&stored)
+            );
+            let restored: StoredMessage =
+                serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
             assert_eq!(restored.is_voice_message(), stored.is_voice_message());
         }
         let mut stored = audio_message(Some(true));
@@ -2094,14 +2852,23 @@ mod tests {
     #[test]
     fn audio_filename_uses_only_original_sources_or_document_names() {
         let mut stored = audio_message(Some(false));
-        assert_eq!(stored.audio_filename(Some(r"D:\Music\original song.mp3")), "original song.mp3");
-        assert_eq!(stored.audio_filename(Some("/music/original.flac")), "original.flac");
+        assert_eq!(
+            stored.audio_filename(Some(r"D:\Music\original song.mp3")),
+            "original song.mp3"
+        );
+        assert_eq!(
+            stored.audio_filename(Some("/music/original.flac")),
+            "original.flac"
+        );
         assert_eq!(stored.audio_filename(None), t("audio.fallback_name"));
         stored.kind = MessageKind::Doc;
         stored.raw = Some(Arc::new(wa::Message {
             document_message: wa::message::DocumentMessage {
-                mimetype: Some("audio/mpeg".into()), file_name: Some("received.mp3".into()), ..Default::default()
-            }.into(),
+                mimetype: Some("audio/mpeg".into()),
+                file_name: Some("received.mp3".into()),
+                ..Default::default()
+            }
+            .into(),
             ..Default::default()
         }));
         assert_eq!(stored.audio_filename(None), "received.mp3");
@@ -2117,7 +2884,10 @@ mod tests {
         store.add_message(stored.clone());
         store.chats.get_mut(&jid).unwrap().preview = "old preview".into();
         store.refresh_audio_preview(&jid);
-        assert_eq!(store.chats[&jid].preview, format!("✓ {}", preview_body(&stored)));
+        assert_eq!(
+            store.chats[&jid].preview,
+            format!("✓ {}", preview_body(&stored))
+        );
         store.chats.get_mut(&jid).unwrap().timestamp += 1;
         store.chats.get_mut(&jid).unwrap().preview = "newer preview".into();
         store.refresh_audio_preview(&jid);
@@ -2127,16 +2897,35 @@ mod tests {
     #[test]
     fn builtin_filters_use_protocol_type_not_names_or_label_ids() {
         for list_type in [1, 2, 3] {
-            for name in ["Unread", "Não lidas", "Groups", "Grupos", "Favorites", "Favoritos", "renamed"] {
-                let label = Label { id: "123".into(), name: name.into(), list_type: Some(list_type), ..Default::default() };
+            for name in [
+                "Unread",
+                "Não lidas",
+                "Groups",
+                "Grupos",
+                "Favorites",
+                "Favoritos",
+                "renamed",
+            ] {
+                let label = Label {
+                    id: "123".into(),
+                    name: name.into(),
+                    list_type: Some(list_type),
+                    ..Default::default()
+                };
                 assert!(label.is_builtin_filter());
-                let restored: Label = serde_json::from_str(&serde_json::to_string(&label).unwrap()).unwrap();
+                let restored: Label =
+                    serde_json::from_str(&serde_json::to_string(&label).unwrap()).unwrap();
                 assert!(restored.is_builtin_filter());
             }
         }
         for list_type in [None, Some(0), Some(4), Some(5), Some(6), Some(7), Some(12)] {
             for id in ["1", "2", "3", "unread", "groups", "favorites"] {
-                let label = Label { id: id.into(), name: "Unread".into(), list_type, ..Default::default() };
+                let label = Label {
+                    id: id.into(),
+                    name: "Unread".into(),
+                    list_type,
+                    ..Default::default()
+                };
                 assert!(!label.is_builtin_filter());
             }
         }
@@ -2158,7 +2947,11 @@ mod tests {
 
         // "Apply deletions" off: the message stays, only flagged.
         assert!(store.mark_revoked("a@g.us", "1"));
-        let kept = store.messages_for("a@g.us").iter().find(|m| m.id == "1").unwrap();
+        let kept = store
+            .messages_for("a@g.us")
+            .iter()
+            .find(|m| m.id == "1")
+            .unwrap();
         assert!(kept.revoked);
         assert!(!kept.deleted);
         assert_eq!(kept.text, "hello");
@@ -2166,7 +2959,11 @@ mod tests {
         // "Apply deletions" on (or a revoke from this account's own
         // devices): the destructive path wipes the body.
         assert!(store.mark_deleted("a@g.us", "2"));
-        let wiped = store.messages_for("a@g.us").iter().find(|m| m.id == "2").unwrap();
+        let wiped = store
+            .messages_for("a@g.us")
+            .iter()
+            .find(|m| m.id == "2")
+            .unwrap();
         assert!(wiped.revoked);
         assert!(wiped.deleted);
         assert!(wiped.text.is_empty());
@@ -2175,5 +2972,278 @@ mod tests {
         // anything already set.
         assert!(!store.mark_revoked("a@g.us", "1"));
         assert!(!store.mark_deleted("a@g.us", "2"));
+    }
+    fn receipt(level: u32) -> ParticipantReceipt {
+        let mut r = ParticipantReceipt::default();
+        r.promote(level, 10);
+        r
+    }
+
+    #[test]
+    fn group_turns_blue_only_when_every_other_member_read() {
+        let others = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let mut got: HashMap<String, ParticipantReceipt> = HashMap::new();
+        got.insert("a".into(), receipt(4));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &others), 2);
+        got.insert("b".into(), receipt(4));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &others), 2);
+        got.insert("c".into(), receipt(3));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &others), 3);
+        got.insert("c".into(), receipt(5));
+        assert_eq!(aggregate_status(true, 3, 4, &got, &others), 4);
+    }
+
+    #[test]
+    fn group_with_unknown_roster_never_passes_the_server_ack() {
+        let mut got: HashMap<String, ParticipantReceipt> = HashMap::new();
+        got.insert("a".into(), receipt(4));
+        assert_eq!(aggregate_status(true, 2, 4, &got, &[]), 2);
+        assert_eq!(aggregate_status(true, 1, 3, &got, &[]), 2);
+    }
+
+    #[test]
+    fn direct_chat_takes_the_highest_and_never_regresses() {
+        let got: HashMap<String, ParticipantReceipt> = HashMap::new();
+        assert_eq!(aggregate_status(false, 2, 4, &got, &[]), 4);
+        assert_eq!(aggregate_status(false, 4, 3, &got, &[]), 4);
+    }
+
+    #[test]
+    fn apply_receipt_in_a_group_waits_for_the_whole_roster() {
+        let mut store = Store::default();
+        store.set_self(&["me@s.whatsapp.net"]);
+        store.members.insert(
+            "g@g.us".into(),
+            ["me@s.whatsapp.net", "a@s.whatsapp.net", "b@s.whatsapp.net"]
+                .iter()
+                .map(|j| Member {
+                    jid: j.to_string(),
+                    phone: String::new(),
+                    name: String::new(),
+                    admin: false,
+                })
+                .collect(),
+        );
+        let mut m = text_msg("g@g.us", "1", "hi");
+        m.from_me = true;
+        m.status = 2;
+        store.add_message(m);
+        store.apply_receipt("g@g.us", "1", "a@s.whatsapp.net", 4, 5);
+        assert_eq!(store.messages_for("g@g.us")[0].status, 2);
+        store.apply_receipt("g@g.us", "1", "b@s.whatsapp.net", 4, 6);
+        assert_eq!(store.messages_for("g@g.us")[0].status, 4);
+    }
+
+    fn poll_msg(id: &str, ts: i64) -> StoredMessage {
+        let mut m = text_msg("a@g.us", id, "poll");
+        m.timestamp = ts;
+        m
+    }
+
+    fn votes(entries: &[(&str, &[&str], i64)]) -> HashMap<String, PollVote> {
+        entries
+            .iter()
+            .map(|(voter, picked, ts)| {
+                (
+                    voter.to_string(),
+                    PollVote {
+                        options: picked.iter().map(|name| poll_option_hash(name)).collect(),
+                        timestamp_ms: *ts,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn names(options: &[&str]) -> Vec<String> {
+        options.iter().map(|o| o.to_string()).collect()
+    }
+
+    #[test]
+    fn tally_counts_votes_per_option_and_flags_mine() {
+        let options = names(&["Pizza", "Sushi", "Tacos"]);
+        let all = votes(&[
+            ("me", &["Pizza"], 3),
+            ("a@s.whatsapp.net", &["Pizza", "Tacos"], 1),
+            ("b@s.whatsapp.net", &["Sushi"], 2),
+        ]);
+        let tally = tally_poll(&options, &all, "me", |jid| {
+            if jid == "me" {
+                "You".into()
+            } else {
+                jid.split('@').next().unwrap().to_string()
+            }
+        });
+        assert_eq!(tally[0].votes, 2);
+        assert!(tally[0].voted);
+        assert_eq!(tally[0].voters, vec!["a".to_string(), "You".to_string()]);
+        assert_eq!(tally[1].votes, 1);
+        assert!(!tally[1].voted);
+        assert_eq!(tally[2].votes, 1);
+        assert_eq!(tally[2].voters, vec!["a".to_string()]);
+        assert_eq!(poll_voter_count(&all), 3);
+    }
+
+    #[test]
+    fn tally_ignores_unknown_hashes_and_empty_votes() {
+        let options = names(&["Yes", "No"]);
+        let mut all = votes(&[("a", &["Maybe"], 1), ("b", &[], 2)]);
+        all.insert(
+            "c".into(),
+            PollVote {
+                options: vec!["zz".into()],
+                timestamp_ms: 3,
+            },
+        );
+        let tally = tally_poll(&options, &all, "me", |jid| jid.to_string());
+        assert!(tally.iter().all(|t| t.votes == 0 && !t.voted));
+        assert_eq!(poll_voter_count(&all), 2);
+    }
+
+    #[test]
+    fn selection_single_choice_replaces_and_toggles_off() {
+        let options = names(&["A", "B", "C"]);
+        assert_eq!(
+            next_poll_selection(&options, &[], 1, false),
+            Some(names(&["B"]))
+        );
+        assert_eq!(
+            next_poll_selection(&options, &names(&["A"]), 2, false),
+            Some(names(&["C"]))
+        );
+        assert_eq!(
+            next_poll_selection(&options, &names(&["B"]), 1, false),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn selection_multi_choice_flips_one_and_keeps_option_order() {
+        let options = names(&["A", "B", "C"]);
+        assert_eq!(
+            next_poll_selection(&options, &names(&["C"]), 0, true),
+            Some(names(&["A", "C"]))
+        );
+        assert_eq!(
+            next_poll_selection(&options, &names(&["A", "C"]), 2, true),
+            Some(names(&["A"]))
+        );
+        assert_eq!(
+            next_poll_selection(&options, &names(&["A"]), 0, true),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn selection_rejects_out_of_range_index() {
+        let options = names(&["A", "B"]);
+        assert_eq!(next_poll_selection(&options, &[], 2, false), None);
+        assert_eq!(next_poll_selection(&[], &[], 0, true), None);
+    }
+
+    #[test]
+    fn newer_vote_replaces_older_and_stale_votes_are_dropped() {
+        let mut store = Store::default();
+        store.add_message(poll_msg("p", 10));
+        assert!(store.apply_poll_vote("a@g.us", "p", "a", vec!["x".into()], 100));
+        assert!(!store.apply_poll_vote("a@g.us", "p", "a", vec!["y".into()], 50));
+        assert!(!store.apply_poll_vote("a@g.us", "p", "a", vec!["y".into()], 100));
+        assert!(store.apply_poll_vote("a@g.us", "p", "a", vec!["y".into()], 101));
+        assert_eq!(
+            store.messages_for("a@g.us")[0].poll_votes["a"].options,
+            vec!["y".to_string()]
+        );
+        assert!(!store.apply_poll_vote("a@g.us", "missing", "a", vec![], 1));
+    }
+
+    #[test]
+    fn active_pins_drop_expired_and_sort_newest_first() {
+        let mut expired = poll_msg("old", 1);
+        expired.pinned_until = 99;
+        let mut soon = poll_msg("soon", 2);
+        soon.pinned_until = 200;
+        let mut later = poll_msg("later", 3);
+        later.pinned_until = 900;
+        let unpinned = poll_msg("plain", 4);
+        let mut deleted = poll_msg("gone", 5);
+        deleted.pinned_until = 900;
+        deleted.deleted = true;
+        let list = vec![expired, soon, later, unpinned, deleted];
+        let ids: Vec<&str> = active_pins(&list, 100)
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["later", "soon"]);
+        assert!(active_pins(&list, 1000).is_empty());
+        assert!(active_pins(&list, 200).iter().all(|m| m.id == "later"));
+    }
+
+    #[test]
+    fn adjacent_selection_wraps_in_both_directions() {
+        assert_eq!(adjacent_index(Some(0), 3, 1), Some(1));
+        assert_eq!(adjacent_index(Some(2), 3, 1), Some(0));
+        assert_eq!(adjacent_index(Some(0), 3, -1), Some(2));
+        assert_eq!(adjacent_index(Some(1), 3, -1), Some(0));
+        assert_eq!(adjacent_index(Some(0), 1, 1), Some(0));
+        assert_eq!(adjacent_index(Some(0), 1, -1), Some(0));
+    }
+
+    #[test]
+    fn adjacent_selection_without_current_starts_at_the_ends() {
+        assert_eq!(adjacent_index(None, 4, 1), Some(0));
+        assert_eq!(adjacent_index(None, 4, -1), Some(3));
+        assert_eq!(adjacent_index(None, 0, 1), None);
+        assert_eq!(adjacent_index(Some(0), 0, -1), None);
+    }
+
+    #[test]
+    fn shortcut_index_is_bounds_checked() {
+        assert_eq!(shortcut_index(0, 3), Some(0));
+        assert_eq!(shortcut_index(2, 3), Some(2));
+        assert_eq!(shortcut_index(3, 3), None);
+        assert_eq!(shortcut_index(8, 0), None);
+        assert_eq!(shortcut_index(-1, 5), None);
+    }
+
+    #[test]
+    fn starred_messages_are_newest_first_and_filterable() {
+        let mut store = Store::default();
+        for (jid, id, ts, starred) in [
+            ("a@g.us", "1", 10, true),
+            ("a@g.us", "2", 30, true),
+            ("b@g.us", "3", 20, true),
+            ("b@g.us", "4", 40, false),
+        ] {
+            let mut m = text_msg(jid, id, "x");
+            m.timestamp = ts;
+            m.starred = starred;
+            store.add_message(m);
+        }
+        let all: Vec<&str> = store
+            .starred_messages(None)
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(all, vec!["2", "3", "1"]);
+        let one: Vec<&str> = store
+            .starred_messages(Some("a@g.us"))
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(one, vec!["2", "1"]);
+    }
+
+    #[test]
+    fn reaction_groups_order_by_count_and_skip_empty() {
+        let mut reactions = HashMap::new();
+        reactions.insert("a".to_string(), "👍".to_string());
+        reactions.insert("b".to_string(), "❤".to_string());
+        reactions.insert("c".to_string(), "👍".to_string());
+        reactions.insert("d".to_string(), String::new());
+        let groups = reaction_groups(&reactions);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, "👍");
+        assert_eq!(groups[0].1, vec!["a".to_string(), "c".to_string()]);
+        assert_eq!(groups[1].0, "❤");
     }
 }

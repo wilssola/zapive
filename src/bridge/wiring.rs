@@ -173,6 +173,9 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         anim_order: std::collections::VecDeque::new(),
         anim_bytes: 0,
         anim_timer: slint::Timer::default(),
+        avatar_order: std::collections::VecDeque::new(),
+        window_idle: false,
+        idle_since: None,
         stick_requeued: false,
         media_key: crate::vault::KeyHandle::default(),
         audio: None,
@@ -230,6 +233,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         preview_jid: None,
         preview_generation: 0,
         preview_busy: false,
+        staged_files: Vec::new(),
+        staged_total: 0,
+        staged_document: None,
+        staged_position: 0,
         last_paste: None,
         notify_queue: Vec::new(),
         notify_queued: false,
@@ -250,6 +257,10 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         call_ui: None,
         call: None,
         call_timer: slint::Timer::default(),
+        call_dismissed: HashMap::new(),
+        silenced_calls: Vec::new(),
+        call_silence_repeat: true,
+        call_silence_minutes: 10,
         ringer: None,
         requested_channels: HashSet::new(),
         sticker_model,
@@ -274,13 +285,19 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     // Update checks start here, not at boot: the banner must also reach
     // the lock and login screens.
     apply_now(|b| b.once(10_000, |b| b.update_tick()));
+    // Safety net: whatever goes wrong during startup, the splash goes away.
+    apply_now(|b| b.once(8_000, |b| b.finish_loading()));
 }
 
 pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_translation_action(|action| defer(move |b| b.translation_action(&action)));
     ui.on_translation_install(|source| defer(move |b| b.install_translation_model(&source)));
-    ui.on_translation_remove(|source, target| defer(move |b| b.remove_translation_model(&source, &target)));
-    ui.on_translation_model_selected(|source| defer(move |b| b.translation_model_selected(&source)));
+    ui.on_translation_remove(|source, target| {
+        defer(move |b| b.remove_translation_model(&source, &target))
+    });
+    ui.on_translation_model_selected(|source| {
+        defer(move |b| b.translation_model_selected(&source))
+    });
     ui.on_translation_language(|kind, value| defer(move |b| b.translation_language(&kind, &value)));
     ui.set_status_text(t("status.connecting").into());
 
@@ -340,6 +357,27 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.handle_style(&style));
     });
     ui.on_notifications_changed(|enabled| defer(move |b| b.handle_notifications(enabled)));
+    ui.on_call_silence_repeat_changed(|enabled| {
+        defer(move |b| b.handle_call_silence_repeat(enabled))
+    });
+    ui.on_call_silence_minutes_changed(|minutes| {
+        defer(move |b| b.handle_call_silence_minutes(minutes))
+    });
+    ui.on_answer_silenced_call(|id| {
+        let id = id.to_string();
+        defer(move |b| b.answer_silenced_call(&id));
+    });
+    ui.on_decline_silenced_call(|id| {
+        let id = id.to_string();
+        defer(move |b| b.decline_silenced_call(&id));
+    });
+    ui.on_wallpaper_reset(|| defer(|b| b.reset_wallpaper()));
+    ui.on_wallpaper_hex_entered(|fg, hex| {
+        let hex = hex.to_string();
+        defer(move |b| b.wallpaper_hex_entered(fg, &hex));
+    });
+    ui.on_wallpaper_colors_changed(|bg, fg| defer(move |b| b.handle_wallpaper_colors(bg, fg)));
+    ui.on_message_sound_changed(|enabled| defer(move |b| b.handle_message_sound(enabled)));
     ui.on_notify_previews_changed(|enabled| defer(move |b| b.handle_notify_previews(enabled)));
     ui.on_privacy_blur_changed(|category, enabled| {
         let category = category.to_string();
@@ -486,11 +524,27 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_send_message(|text| {
         let text = text.to_string();
-        let context = BRIDGE.with(|cell| cell.borrow().as_ref().map(|b| (b.account.clone(), b.current_jid.clone(), b.reply_to.clone(), b.mentions.clone())));
+        let context = BRIDGE.with(|cell| {
+            cell.borrow().as_ref().map(|b| {
+                (
+                    b.account.clone(),
+                    b.current_jid.clone(),
+                    b.reply_to.clone(),
+                    b.mentions.clone(),
+                )
+            })
+        });
         defer(move |b| {
             if let Some((account, jid, reply, mentions)) = context {
-                if b.account != account || b.current_jid != jid { return; }
-                if b.reply_to != reply || b.mentions != mentions || b.ui.get_composer_text().as_str() != text { return; }
+                if b.account != account || b.current_jid != jid {
+                    return;
+                }
+                if b.reply_to != reply
+                    || b.mentions != mentions
+                    || b.ui.get_composer_text().as_str() != text
+                {
+                    return;
+                }
                 b.handle_send_text(&text);
             }
         });
@@ -532,15 +586,58 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_submit_edit(|id, text| {
         let (id, text) = (id.to_string(), text.to_string());
         defer(move |b| {
-            if b.find_message(&id).is_some_and(message_editable) && !text.trim().is_empty() {
-                if let Some(jid) = b.current_jid.clone() {
-                    b.wa.send(Cmd::Edit { jid, id, text: text.trim().to_string() });
-                    b.ui.set_message_dialog_open(false);
-                }
+            if b.find_message(&id).is_some_and(message_editable)
+                && !text.trim().is_empty()
+                && let Some(jid) = b.current_jid.clone()
+            {
+                b.wa.send(Cmd::Edit {
+                    jid,
+                    id,
+                    text: text.trim().to_string(),
+                });
+                b.ui.set_message_dialog_open(false);
             }
         });
     });
     ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
+    ui.on_open_starred(|current_only| defer(move |b| b.open_starred(current_only)));
+    ui.on_open_starred_item(|jid, id| {
+        let (jid, id) = (jid.to_string(), id.to_string());
+        defer(move |b| b.open_starred_item(&jid, &id));
+    });
+    ui.on_open_pinned(|id| {
+        let id = id.to_string();
+        defer(move |b| b.open_pinned(&id));
+    });
+    ui.on_unpin_message(|id| {
+        let id = id.to_string();
+        defer(move |b| b.unpin_message(&id));
+    });
+    ui.on_open_chat_at(|position| defer(move |b| b.open_chat_at(position)));
+    ui.on_select_adjacent_chat(|delta| defer(move |b| b.select_adjacent_chat(delta)));
+    ui.on_toggle_archive_current(|| defer(|b| b.toggle_archive_current()));
+    ui.on_toggle_mute_current(|| defer(|b| b.toggle_mute_current()));
+    ui.on_edit_last_message(|| defer(|b| b.edit_last_message()));
+    ui.on_remove_own_reaction(|id| {
+        let id = id.to_string();
+        defer(move |b| b.remove_own_reaction(&id));
+    });
+    ui.on_open_poll_composer(|| {
+        defer(|b| {
+            if b.current_jid.is_some() {
+                b.ui.set_poll_composer_open(true);
+            }
+        })
+    });
+    ui.on_create_poll(|question, options, multi| {
+        let question = question.to_string();
+        let options: Vec<String> = options.iter().map(|option| option.to_string()).collect();
+        defer(move |b| b.create_poll(&question, &options, multi));
+    });
+    ui.on_poll_vote(|id, index| {
+        let id = id.to_string();
+        defer(move |b| b.poll_vote(&id, index));
+    });
     ui.on_open_quote(|jid, id| {
         let (jid, id) = (jid.to_string(), id.to_string());
         defer(move |b| {
@@ -607,7 +704,13 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let caption = caption.to_string();
         defer(move |b| b.confirm_send_image(&caption));
     });
-    ui.on_cancel_send_image(|| defer(|b| b.cancel_preview()));
+    ui.on_cancel_send_image(|| {
+        defer(|b| {
+            b.clear_staged();
+            b.cancel_preview();
+        })
+    });
+    ui.on_staged_select(|_| defer(|b| b.skip_staged()));
     ui.on_crop_preview(|x, y, w, h| {
         defer(move |b| b.edit_preview(crate::media::PreviewEdit::Crop(x, y, w, h)));
     });
@@ -704,9 +807,7 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     // Enumerating devices touches the audio and camera stacks, so it waits
     // until the user actually opens Settings.
     ui.on_settings_opened(|| defer(|b| b.refresh_devices()));
-    ui.on_settings_search(|text, query| {
-        text.to_lowercase().contains(&query.to_lowercase())
-    });
+    ui.on_settings_search(|text, query| text.to_lowercase().contains(&query.to_lowercase()));
     ui.on_start_video_call(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.start_video_call(&jid));
@@ -865,8 +966,14 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_copy_image(|id| {
         let id = id.to_string();
         defer(move |b| {
-            let Some(cached) = b.media_path.get(&id) else { return };
-            let Some(path) = crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached)) else { return };
+            let Some(cached) = b.media_path.get(&id) else {
+                return;
+            };
+            let Some(path) =
+                crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached))
+            else {
+                return;
+            };
             std::thread::spawn(move || {
                 let Ok(image) = image::open(path) else { return };
                 let image = image.to_rgba8();

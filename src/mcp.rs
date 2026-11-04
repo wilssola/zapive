@@ -150,19 +150,50 @@ pub struct ReactToMessage {
 
 tool_box!(
     ZapiveTools,
-    [ListChats, ReadMessages, SearchMessages, GetChatInfo, SendMessage, MarkAsRead, ReactToMessage]
+    [
+        ListChats,
+        ReadMessages,
+        SearchMessages,
+        GetChatInfo,
+        SendMessage,
+        MarkAsRead,
+        ReactToMessage
+    ]
 );
 
 // A tool call with its arguments checked and limits capped.
 #[derive(Debug, PartialEq)]
 pub enum Call {
-    ListChats { query: Option<String>, limit: usize },
-    ReadMessages { chat_id: String, limit: usize, before: Option<String> },
-    SearchMessages { query: String, chat_id: Option<String>, limit: usize },
-    GetChatInfo { chat_id: String },
-    SendMessage { chat_id: String, text: String, reply_to: Option<String> },
-    MarkAsRead { chat_id: String },
-    React { chat_id: String, message_id: String, emoji: String },
+    ListChats {
+        query: Option<String>,
+        limit: usize,
+    },
+    ReadMessages {
+        chat_id: String,
+        limit: usize,
+        before: Option<String>,
+    },
+    SearchMessages {
+        query: String,
+        chat_id: Option<String>,
+        limit: usize,
+    },
+    GetChatInfo {
+        chat_id: String,
+    },
+    SendMessage {
+        chat_id: String,
+        text: String,
+        reply_to: Option<String>,
+    },
+    MarkAsRead {
+        chat_id: String,
+    },
+    React {
+        chat_id: String,
+        message_id: String,
+        emoji: String,
+    },
 }
 
 impl TryFrom<ZapiveTools> for Call {
@@ -184,13 +215,17 @@ impl TryFrom<ZapiveTools> for Call {
                 chat_id: optional(t.chat_id, |id| chat_id(&id))?,
                 limit: limit(t.limit),
             },
-            ZapiveTools::GetChatInfo(t) => Call::GetChatInfo { chat_id: chat_id(&t.chat_id)? },
+            ZapiveTools::GetChatInfo(t) => Call::GetChatInfo {
+                chat_id: chat_id(&t.chat_id)?,
+            },
             ZapiveTools::SendMessage(t) => Call::SendMessage {
                 chat_id: chat_id(&t.chat_id)?,
                 text: text(&t.text)?,
                 reply_to: optional(t.reply_to, |id| message_id(&id))?,
             },
-            ZapiveTools::MarkAsRead(t) => Call::MarkAsRead { chat_id: chat_id(&t.chat_id)? },
+            ZapiveTools::MarkAsRead(t) => Call::MarkAsRead {
+                chat_id: chat_id(&t.chat_id)?,
+            },
             ZapiveTools::ReactToMessage(t) => Call::React {
                 chat_id: chat_id(&t.chat_id)?,
                 message_id: message_id(&t.message_id)?,
@@ -216,7 +251,9 @@ fn optional(
 }
 
 fn token_like(value: &str) -> bool {
-    !value.is_empty() && value.len() <= MAX_ID_LEN && !value.chars().any(|c| c.is_whitespace() || c.is_control())
+    !value.is_empty()
+        && value.len() <= MAX_ID_LEN
+        && !value.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 pub fn chat_id(value: &str) -> Result<String, String> {
@@ -233,14 +270,19 @@ pub fn message_id(value: &str) -> Result<String, String> {
     if token_like(value) {
         Ok(value.to_string())
     } else {
-        Err("Invalid message_id: expected a message_id from read_messages or search_messages.".into())
+        Err(
+            "Invalid message_id: expected a message_id from read_messages or search_messages."
+                .into(),
+        )
     }
 }
 
 fn query(value: &str) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > MAX_QUERY_LEN {
-        Err(format!("Invalid query: expected 1-{MAX_QUERY_LEN} characters."))
+        Err(format!(
+            "Invalid query: expected 1-{MAX_QUERY_LEN} characters."
+        ))
     } else {
         Ok(value.to_string())
     }
@@ -249,7 +291,9 @@ fn query(value: &str) -> Result<String, String> {
 fn text(value: &str) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > MAX_TEXT_LEN {
-        Err(format!("Invalid text: expected 1-{MAX_TEXT_LEN} characters."))
+        Err(format!(
+            "Invalid text: expected 1-{MAX_TEXT_LEN} characters."
+        ))
     } else {
         Ok(value.to_string())
     }
@@ -257,7 +301,11 @@ fn text(value: &str) -> Result<String, String> {
 
 fn emoji(value: &str) -> Result<String, String> {
     let value = value.trim();
-    if value.chars().count() > MAX_EMOJI_LEN || value.chars().any(|c| c.is_ascii_alphanumeric() || c.is_control()) {
+    if value.chars().count() > MAX_EMOJI_LEN
+        || value
+            .chars()
+            .any(|c| c.is_ascii_alphanumeric() || c.is_control())
+    {
         Err("Invalid emoji: expected a single emoji, or empty to remove the reaction.".into())
     } else {
         Ok(value.to_string())
@@ -328,8 +376,12 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 pub fn bearer_matches(header: Option<&str>, token: &str) -> bool {
     let Some(value) = header else { return false };
-    let Some((scheme, given)) = value.trim().split_once(' ') else { return false };
-    !token.is_empty() && scheme.eq_ignore_ascii_case("bearer") && constant_time_eq(given.trim().as_bytes(), token.as_bytes())
+    let Some((scheme, given)) = value.trim().split_once(' ') else {
+        return false;
+    };
+    !token.is_empty()
+        && scheme.eq_ignore_ascii_case("bearer")
+        && constant_time_eq(given.trim().as_bytes(), token.as_bytes())
 }
 
 fn loopback_host(host: &str) -> bool {
@@ -339,14 +391,18 @@ fn loopback_host(host: &str) -> bool {
 // No Origin (a desktop client) is fine; a browser page must be local.
 pub fn origin_allowed(origin: Option<&str>) -> bool {
     let Some(origin) = origin else { return true };
-    let Ok(url) = url::Url::parse(origin) else { return false };
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
     matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(loopback_host)
 }
 
 // The Host a rebinding page would send is its own domain, not ours.
 pub fn host_allowed(host: Option<&str>, port: u16) -> bool {
     let Some(host) = host else { return false };
-    let Ok(url) = url::Url::parse(&format!("http://{host}")) else { return false };
+    let Ok(url) = url::Url::parse(&format!("http://{host}")) else {
+        return false;
+    };
     url.host_str().is_some_and(loopback_host) && url.port_or_known_default() == Some(port)
 }
 
@@ -380,7 +436,9 @@ impl Shared {
             return Some(StatusCode::FORBIDDEN);
         }
         let token = self.token.read().ok()?.clone();
-        let Some(token) = token else { return Some(StatusCode::SERVICE_UNAVAILABLE) };
+        let Some(token) = token else {
+            return Some(StatusCode::SERVICE_UNAVAILABLE);
+        };
         if !bearer_matches(text(header::AUTHORIZATION), &token) {
             return Some(StatusCode::UNAUTHORIZED);
         }
@@ -404,7 +462,10 @@ async fn serve_mcp(
     if let Some(status) = app.shared.reject(&headers) {
         let mut response = status.into_response();
         if status == StatusCode::UNAUTHORIZED {
-            response.headers_mut().insert(header::WWW_AUTHENTICATE, header::HeaderValue::from_static("Bearer"));
+            response.headers_mut().insert(
+                header::WWW_AUTHENTICATE,
+                header::HeaderValue::from_static("Bearer"),
+            );
         }
         return response;
     }
@@ -412,7 +473,11 @@ async fn serve_mcp(
         return (StatusCode::BAD_REQUEST, "body must be UTF-8").into_response();
     };
     let request = McpHttpHandler::create_request(method, uri, headers, Some(payload));
-    match app.http.handle_streamable_http(request, app.state.clone()).await {
+    match app
+        .http
+        .handle_streamable_http(request, app.state.clone())
+        .await
+    {
         Ok(response) => {
             let (parts, body) = response.into_parts();
             Response::from_parts(parts, Body::new(body))
@@ -491,7 +556,10 @@ pub fn start(rt: &tokio::runtime::Handle, port: u16, token: &str) -> Result<Serv
         .map_err(|e| e.to_string())?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let shared = Arc::new(Shared { port, token: RwLock::new(Some(token.to_string())) });
+    let shared = Arc::new(Shared {
+        port,
+        token: RwLock::new(Some(token.to_string())),
+    });
     let app = Arc::new(App {
         shared: shared.clone(),
         state: app_state(),
@@ -509,11 +577,17 @@ pub fn start(rt: &tokio::runtime::Handle, port: u16, token: &str) -> Result<Serv
         let shutdown = async move {
             let _ = rx.await;
         };
-        if let Err(e) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
+        if let Err(e) = axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown)
+            .await
+        {
             eprintln!("[mcp] server stopped: {e}");
         }
     });
-    Ok(Server { shared, shutdown: Some(tx) })
+    Ok(Server {
+        shared,
+        shutdown: Some(tx),
+    })
 }
 
 #[cfg(test)]
@@ -547,10 +621,22 @@ mod tests {
     #[test]
     fn origin_and_host_checks() {
         assert!(origin_allowed(None));
-        for ok in ["http://localhost", "http://localhost:3000", "https://127.0.0.1:8443", "http://[::1]:1"] {
+        for ok in [
+            "http://localhost",
+            "http://localhost:3000",
+            "https://127.0.0.1:8443",
+            "http://[::1]:1",
+        ] {
             assert!(origin_allowed(Some(ok)), "{ok}");
         }
-        for bad in ["null", "http://evil.com", "http://localhost.evil.com", "http://127.0.0.1.nip.io", "file:///x", "chrome-extension://abc"] {
+        for bad in [
+            "null",
+            "http://evil.com",
+            "http://localhost.evil.com",
+            "http://127.0.0.1.nip.io",
+            "file:///x",
+            "chrome-extension://abc",
+        ] {
             assert!(!origin_allowed(Some(bad)), "{bad}");
         }
         assert!(host_allowed(Some("127.0.0.1:47823"), 47823));
@@ -570,7 +656,10 @@ mod tests {
 
     #[test]
     fn arguments_are_validated() {
-        assert_eq!(chat_id(" 5511@s.whatsapp.net ").as_deref(), Ok("5511@s.whatsapp.net"));
+        assert_eq!(
+            chat_id(" 5511@s.whatsapp.net ").as_deref(),
+            Ok("5511@s.whatsapp.net")
+        );
         assert!(chat_id("").is_err());
         assert!(chat_id("5511999").is_err());
         assert!(chat_id("a b@g.us").is_err());
@@ -591,7 +680,14 @@ mod tests {
             limit: Some(999),
             before: Some(" ".into()),
         }));
-        assert_eq!(call, Ok(Call::ReadMessages { chat_id: "1@g.us".into(), limit: MAX_LIMIT, before: None }));
+        assert_eq!(
+            call,
+            Ok(Call::ReadMessages {
+                chat_id: "1@g.us".into(),
+                limit: MAX_LIMIT,
+                before: None
+            })
+        );
         let call = Call::try_from(ZapiveTools::SearchMessages(SearchMessages {
             query: "x".repeat(MAX_QUERY_LEN + 1),
             chat_id: None,
@@ -615,14 +711,24 @@ mod tests {
         let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
             names,
-            ["list_chats", "read_messages", "search_messages", "get_chat_info", "send_message", "mark_as_read", "react_to_message"]
+            [
+                "list_chats",
+                "read_messages",
+                "search_messages",
+                "get_chat_info",
+                "send_message",
+                "mark_as_read",
+                "react_to_message"
+            ]
         );
         let schema = serde_json::to_value(&tools[1].input_schema).unwrap();
         assert_eq!(schema["required"], serde_json::json!(["chat_id"]));
     }
 
     async fn post(port: u16, body: &str, method: &str, extra: &str) -> (u16, String) {
-        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
         let request = format!(
             "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nMcp-Method: {method}\r\nMCP-Protocol-Version: 2026-07-28\r\nConnection: close\r\n{extra}Content-Length: {}\r\n\r\n{body}",
             body.len()
@@ -630,7 +736,11 @@ mod tests {
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut out = String::new();
         stream.read_to_string(&mut out).await.unwrap();
-        let status = out.split(' ').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let status = out
+            .split(' ')
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         (status, out)
     }
 
@@ -656,7 +766,13 @@ mod tests {
 
         let (status, _) = post(port, &rpc("server/discover"), "server/discover", "").await;
         assert_eq!(status, 401);
-        let (status, _) = post(port, &rpc("server/discover"), "server/discover", "Authorization: Bearer nope\r\n").await;
+        let (status, _) = post(
+            port,
+            &rpc("server/discover"),
+            "server/discover",
+            "Authorization: Bearer nope\r\n",
+        )
+        .await;
         assert_eq!(status, 401);
         let evil = format!("{auth}Origin: http://evil.com\r\n");
         let (status, _) = post(port, &rpc("server/discover"), "server/discover", &evil).await;
@@ -668,17 +784,30 @@ mod tests {
         let local = format!("{auth}Origin: http://localhost:5173\r\n");
         let (status, body) = post(port, &rpc("tools/list"), "tools/list", &local).await;
         assert_eq!(status, 200, "{body}");
-        assert!(body.contains("send_message") && body.contains("list_chats"), "{body}");
+        assert!(
+            body.contains("send_message") && body.contains("list_chats"),
+            "{body}"
+        );
 
         let fresh = new_token();
         server.set_token(&fresh);
         let (status, _) = post(port, &rpc("tools/list"), "tools/list", &auth).await;
         assert_eq!(status, 401);
-        let (status, _) = post(port, &rpc("tools/list"), "tools/list", &format!("Authorization: Bearer {fresh}\r\n")).await;
+        let (status, _) = post(
+            port,
+            &rpc("tools/list"),
+            "tools/list",
+            &format!("Authorization: Bearer {fresh}\r\n"),
+        )
+        .await;
         assert_eq!(status, 200);
 
         drop(server);
         tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
+        assert!(
+            tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .is_err()
+        );
     }
 }

@@ -17,11 +17,19 @@ import { ConfirmLayer, DetailsLayer, MessageDialogLayer, ReactionsLayer } from "
 import { MessageMenuLayer } from "message-menu.slint";
 import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
+import { DropOverlay } from "drop-overlay.slint";
+import { PinnedBanner } from "pinned-banner.slint";
+import { PollComposerLayer } from "poll-composer.slint";
 import { SettingsLayer } from "settings-pane.slint";
+import { SilencedCallBanner } from "silenced-call-banner.slint";
+import { Wallpaper } from "wallpaper.slint";
+import { ShortcutsLayer } from "shortcuts-dialog.slint";
+import { StarredLayer } from "starred-panel.slint";
+import { Splash } from "splash.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
-import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell, TranslationModelItem } from "types.slint";
+import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, SilencedCall, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell, TranslationModelItem } from "types.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
@@ -37,6 +45,16 @@ export component AppWindow inherits Window {
     in-out property <string> theme-style: "glass";
     in-out property <bool> notifications: true;
     in-out property <bool> notify-previews: false;
+    in-out property <bool> message-sound: true;
+    // Call anti-spam (Settings > Calls). Minutes: 2, 5, 10 or 30.
+    in-out property <bool> call-silence-repeat: true;
+    in-out property <int> call-silence-minutes: 10;
+    callback call-silence-repeat-changed(bool);
+    callback call-silence-minutes-changed(int);
+    // Calls held back for the open chat, with the two buttons' callbacks.
+    in property <[SilencedCall]> silenced-calls;
+    callback answer-silenced-call(string);
+    callback decline-silenced-call(string);
     in-out property <bool> blur-names: false;
     in-out property <bool> blur-photos: false;
     in-out property <bool> blur-messages: false;
@@ -45,15 +63,35 @@ export component AppWindow inherits Window {
     callback style-changed(string);
     callback notifications-changed(bool);
     callback notify-previews-changed(bool);
+    callback message-sound-changed(bool);
+    // Chat wallpaper (persisted by the host).
+    in-out property <color> wallpaper-bg: #efeae2;
+    in-out property <color> wallpaper-fg: #111b2114;
+    in-out property <bool> wallpaper-custom: false;
+    callback wallpaper-colors-changed(color, color);
+    callback wallpaper-reset();
+    // Hex text typed in settings (true = doodle colour); the host parses it
+    // and writes wallpaper-bg / wallpaper-fg back.
+    callback wallpaper-hex-entered(bool, string);
+    changed wallpaper-bg => { Theme.wp-custom-bg = self.wallpaper-bg; }
+    changed wallpaper-fg => { Theme.wp-custom-fg = self.wallpaper-fg; }
+    changed wallpaper-custom => { Theme.wp-custom = self.wallpaper-custom; }
+    // True until the first chat list is ready; shows the splash.
+    in-out property <bool> app-loading: true;
     callback privacy-blur-changed(string, bool);
     // Glass only while the OS backdrop is live and the window has focus;
     // an unfocused backdrop turns grey, so fall back to the opaque theme.
     out property <bool> glass: native-backdrop && theme-style == "glass" && window-active;
     background: glass ? transparent : Theme.bg;
+    changed glass => { Theme.glass = self.glass; }
     default-font-weight: 400;
     init => {
         Palette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light;
         Theme.dark = root.dark-theme;
+        Theme.glass = root.glass;
+        Theme.wp-custom-bg = root.wallpaper-bg;
+        Theme.wp-custom-fg = root.wallpaper-fg;
+        Theme.wp-custom = root.wallpaper-custom;
     }
 
     // Theme + language (resolved by the host)
@@ -314,6 +352,48 @@ export component AppWindow inherits Window {
     callback mini-audio-close();
     callback load-older();
     callback paste-clipboard();
+
+    // ---------- Polls (F1) ----------
+    in-out property <bool> poll-composer-open: false;
+    callback open-poll-composer();
+    callback create-poll(string, [string], bool);
+    callback poll-vote(string, int);
+
+    // ---------- Starred messages (F2) ----------
+    in-out property <bool> starred-open: false;
+    in property <[StarredItem]> starred-items;
+    // True while the panel lists only the open chat.
+    in-out property <bool> starred-current-only: false;
+    callback open-starred(bool);
+    callback open-starred-item(string, string);
+
+    // ---------- Pinned messages (F3) ----------
+    in property <[PinnedItem]> pinned-items;
+    in-out property <int> pinned-index: 0;
+    callback open-pinned(string);
+    callback unpin-message(string);
+
+    // ---------- Keyboard shortcuts (F4) ----------
+    in-out property <bool> shortcuts-open: false;
+    in property <bool> is-macos: false;
+    callback open-chat-at(int);
+    callback select-adjacent-chat(int);
+    callback toggle-archive-current();
+    callback toggle-mute-current();
+    callback edit-last-message();
+
+    // ---------- Reaction details (F5) ----------
+    in property <[ReactionTab]> reaction-tabs;
+    callback remove-own-reaction(string);
+    in-out property <string> reactions-msg-id;
+
+    // ---------- File drop (F6) ----------
+    in property <bool> file-drag-hover: false;
+    // Files queued for review; 0 or 1 means a single file.
+    in property <int> staged-count: 0;
+    in-out property <int> staged-index: 0;
+    in property <[image]> staged-thumbs;
+    callback staged-select(int);
     callback open-dm(string);
     callback request-forward(string);
 
@@ -497,7 +577,7 @@ export component AppWindow inherits Window {
 
     // Settings
     in-out property <bool> settings-open: false;
-    property <string> settings-section: "general";
+    in-out property <string> settings-section: "general";
     property <string> settings-query: "";
     property <[{ key: string, title: string, detail: string, icon: image }]> settings-categories: [
         { key: "account", title: @tr("settings.category.account.title"), detail: @tr("settings.category.account.description"), icon: @image-url("../icons/users.svg") },
@@ -650,6 +730,15 @@ export component AppWindow inherits Window {
         if (!root.preview-open) { image-editor.clear(); }
     }
 
+    // Colourful stand-in for the OS backdrop; only the demo screenshots set it.
+    in property <image> demo-backdrop;
+    if root.demo-backdrop.width > 0: Image {
+        source: root.demo-backdrop;
+        image-fit: fill;
+        width: 100%;
+        height: 100%;
+    }
+
     // ---------- Lock screen ----------
     if root.screen == "locked": VerticalBox {
         alignment: center;
@@ -706,7 +795,7 @@ export component AppWindow inherits Window {
         }
         Text {
             text: root.lock-error;
-            color: #f05d4d;
+            color: Theme.danger-solid;
             font-size: 13px;
             horizontal-alignment: center;
         }
@@ -733,8 +822,16 @@ export component AppWindow inherits Window {
             Rectangle {
                 width: 820px;
                 height: 420px;
-                background: Theme.panel;
-                border-radius: 12px;
+                background: Theme.glass ? Theme.glass-fill : Theme.panel;
+                border-width: Theme.glass ? 1px : 0px;
+                border-color: Theme.glass-rim;
+                drop-shadow-blur: Theme.glass ? 40px : 0px;
+                drop-shadow-color: Theme.glass-shadow;
+                if Theme.glass: Rectangle {
+                    border-radius: parent.border-radius;
+                    background: Theme.glass-sheen;
+                }
+                border-radius: 20px;
 
                 if !root.pairing-mode: HorizontalLayout {
                     padding: 48px;
@@ -832,7 +929,13 @@ export component AppWindow inherits Window {
                 width: 820px;
                 height: kept-row.preferred-height;
                 background: Theme.panel;
-                border-radius: 12px;
+                border-width: Theme.glass ? 1px : 0px;
+                border-color: Theme.glass-rim;
+                if Theme.glass: Rectangle {
+                    border-radius: parent.border-radius;
+                    background: Theme.glass-sheen;
+                }
+                border-radius: 20px;
                 kept-row := HorizontalLayout {
                     padding: 16px;
                     padding-left: 24px;
@@ -881,7 +984,13 @@ export component AppWindow inherits Window {
                 width: 820px;
                 height: others-col.preferred-height;
                 background: Theme.panel;
-                border-radius: 12px;
+                border-width: Theme.glass ? 1px : 0px;
+                border-color: Theme.glass-rim;
+                if Theme.glass: Rectangle {
+                    border-radius: parent.border-radius;
+                    background: Theme.glass-sheen;
+                }
+                border-radius: 20px;
                 others-col := VerticalLayout {
                     padding: 10px;
                     spacing: 2px;
@@ -913,8 +1022,51 @@ export component AppWindow inherits Window {
     capture-scope := FocusScope {
         visible: root.screen == "main";
         capture-key-pressed(event) => {
+            if (event.text == "/" && event.modifiers.control) {
+                root.shortcuts-open = !root.shortcuts-open;
+                return accept;
+            }
+            if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                && event.text >= "1" && event.text <= "9" && root.screen == "main") {
+                if (event.text == "1") { root.open-chat-at(0); }
+                else if (event.text == "2") { root.open-chat-at(1); }
+                else if (event.text == "3") { root.open-chat-at(2); }
+                else if (event.text == "4") { root.open-chat-at(3); }
+                else if (event.text == "5") { root.open-chat-at(4); }
+                else if (event.text == "6") { root.open-chat-at(5); }
+                else if (event.text == "7") { root.open-chat-at(6); }
+                else if (event.text == "8") { root.open-chat-at(7); }
+                else { root.open-chat-at(8); }
+                return accept;
+            }
+            if (event.text == Key.Tab && event.modifiers.control) {
+                root.select-adjacent-chat(event.modifiers.shift ? -1 : 1);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.DownArrow) {
+                root.select-adjacent-chat(1);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.UpArrow) {
+                root.select-adjacent-chat(-1);
+                return accept;
+            }
+            if (event.text.to-lowercase() == "f" && event.modifiers.control && event.modifiers.shift
+                && root.chat-open) {
+                root.menu-search();
+                return accept;
+            }
             if (event.text == "f" && event.modifiers.control) {
                 search-box.focus();
+                return accept;
+            }
+            if (event.text.to-lowercase() == "e" && event.modifiers.control && root.chat-open) {
+                root.toggle-archive-current();
+                return accept;
+            }
+            if (event.text.to-lowercase() == "m" && event.modifiers.control && event.modifiers.shift
+                && root.chat-open) {
+                root.toggle-mute-current();
                 return accept;
             }
             if (event.text == "v" && event.modifiers.control && root.chat-open) {
@@ -925,7 +1077,9 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
-                if (root.whats-new-open) { root.whats-new-open = false; }
+                if (root.shortcuts-open) { root.shortcuts-open = false; }
+                else if (root.poll-composer-open) { root.poll-composer-open = false; }
+                else if (root.whats-new-open) { root.whats-new-open = false; }
                 else if (root.video-open) { root.close-video(); }
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
@@ -947,6 +1101,7 @@ export component AppWindow inherits Window {
                 else if (root.picker-open) { root.picker-open = false; }
                 else if (root.attach-open) { root.attach-open = false; }
                 else if (root.select-mode) { root.select-cancel(); }
+                else if (root.starred-open) { root.starred-open = false; }
                 else if (root.info-open) { root.close-info(); }
                 else if (root.chat-search-open) { root.chat-search-close(); }
                 else if (root.chat-tab == "archived") {
@@ -975,7 +1130,7 @@ export component AppWindow inherits Window {
         // Icon rail
         Rectangle {
             width: 60px;
-            background: Theme.dark ? #1c2c35 : Theme.header;
+            background: Theme.rail;
             VerticalLayout {
                 width: 100%;
                 padding: 10px;
@@ -983,9 +1138,9 @@ export component AppWindow inherits Window {
                 alignment: start;
                 IconButton {
                     icon: @image-url("../icons/message-circle.svg");
-                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
-                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
-                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    active-background: Theme.rail-active;
+                    tint: self.active ? Theme.accent-text : Theme.icon;
+                    badge-border: Theme.badge-cut;
                     badge-count: root.chats-unread-count;
                     active: root.sidebar-view == "chats";
                     clicked => {
@@ -995,27 +1150,27 @@ export component AppWindow inherits Window {
                 }
                 IconButton {
                     icon: @image-url("../icons/circle-dot.svg");
-                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
-                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
-                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    active-background: Theme.rail-active;
+                    tint: self.active ? Theme.accent-text : Theme.icon;
+                    badge-border: Theme.badge-cut;
                     badge-dot: root.statuses-unseen;
                     active: root.sidebar-view == "status";
                     clicked => { root.settings-open = false; root.sidebar-view = "status"; }
                 }
                 IconButton {
                     icon: @image-url("../icons/phone.svg");
-                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
-                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
-                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    active-background: Theme.rail-active;
+                    tint: self.active ? Theme.accent-text : Theme.icon;
+                    badge-border: Theme.badge-cut;
                     badge-count: root.calls-unseen-count;
                     active: root.sidebar-view == "calls";
                     clicked => { root.settings-open = false; root.sidebar-view = "calls"; root.view-changed("calls"); }
                 }
                 IconButton {
                     icon: @image-url("../icons/speakerphone.svg");
-                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
-                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
-                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    active-background: Theme.rail-active;
+                    tint: self.active ? Theme.accent-text : Theme.icon;
+                    badge-border: Theme.badge-cut;
                     badge-count: root.channels-unread-count;
                     active: root.sidebar-view == "channels";
                     clicked => {
@@ -1025,9 +1180,9 @@ export component AppWindow inherits Window {
                 }
                 IconButton {
                     icon: @image-url("../icons/users-group.svg");
-                    active-background: Theme.dark ? #1a3d37 : Theme.chip-active-bg;
-                    tint: self.active ? (Theme.dark ? #39d99b : Theme.accent) : Theme.icon;
-                    badge-border: Theme.dark ? #1c2c35 : Theme.header;
+                    active-background: Theme.rail-active;
+                    tint: self.active ? Theme.accent-text : Theme.icon;
+                    badge-border: Theme.badge-cut;
                     badge-count: root.communities-unread-count;
                     active: root.sidebar-view == "communities";
                     clicked => {
@@ -1073,15 +1228,18 @@ export component AppWindow inherits Window {
             }
         }
 
-        Rectangle { width: 1px; background: Theme.border; }
+        Rectangle { width: Theme.glass ? 0px : 1px; background: Theme.border; }
 
         // Sidebar
         Rectangle {
             width: 380px;
-            background: root.glass
-                ? (Theme.dark ? #111b21b8 : #ffffffc8) : Theme.sidebar;
+            background: Theme.sidebar;
             border-width: root.glass ? 1px : 0px;
-            border-color: Theme.dark ? #ffffff35 : #111b2130;
+            border-color: Theme.glass-rim;
+            if Theme.glass: Rectangle {
+                border-radius: parent.border-radius;
+                background: Theme.glass-sheen;
+            }
 
             VerticalBox {
                 visible: root.sidebar-view == "status";
@@ -1109,6 +1267,9 @@ export component AppWindow inherits Window {
                     color: Theme.text-dim;
                     font-size: 13px;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
+                    height: 72px;
+                    vertical-alignment: center;
                 }
                 ListView {
                     for st[i] in root.statuses: Rectangle {
@@ -1190,6 +1351,9 @@ export component AppWindow inherits Window {
                     color: Theme.text-dim;
                     font-size: 13px;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
+                    height: 72px;
+                    vertical-alignment: center;
                 }
                 ListView {
                     for call in root.calls: Rectangle {
@@ -1288,10 +1452,9 @@ export component AppWindow inherits Window {
                         width: parent.width - 28px;
                         height: 34px;
                         border-radius: 10px;
-                        background: Theme.dark ? #1e2b34 : #ffffff;
+                        background: Theme.field;
                         border-width: 1px;
-                        border-color: search-box.has-focus ? Theme.accent
-                            : Theme.dark ? #2b3b46 : Theme.border;
+                        border-color: search-box.has-focus ? Theme.accent : Theme.field-border;
                         HorizontalLayout {
                             padding-left: 12px;
                             padding-right: 6px;
@@ -1338,7 +1501,7 @@ export component AppWindow inherits Window {
                                     for shortcut in ["Ctrl", "F"]: Rectangle {
                                         width: shortcut == "Ctrl" ? 28px : 20px;
                                         border-radius: 5px;
-                                        background: Theme.dark ? #293944 : Theme.header;
+                                        background: Theme.tile;
                                         Text {
                                             text: shortcut;
                                             color: Theme.text-dim;
@@ -1487,10 +1650,10 @@ export component AppWindow inherits Window {
                             height: parent.height - 2px;
                             border-radius: 10px;
                             background: chat.jid == root.selected-jid
-                                ? (Theme.dark ? #182f30 : #e2f3e9)
+                                ? Theme.chat-active
                                 : touch.has-hover ? Theme.hover : transparent;
                             border-width: chat.jid == root.selected-jid ? 1px : 0px;
-                            border-color: Theme.dark ? #255044 : #a6d8bf;
+                            border-color: Theme.chat-active-border;
                             animate background { duration: 140ms; easing: ease-out; }
                             animate border-color { duration: 140ms; easing: ease-out; }
                         }
@@ -1534,6 +1697,14 @@ export component AppWindow inherits Window {
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
+                                    if chat.silenced-call: Image {
+                                        source: @image-url("../icons/phone.svg");
+                                        colorize: Theme.text-dim;
+                                        width: 13px;
+                                        height: 13px;
+                                        y: (parent.height - self.height) / 2;
+                                        accessible-role: none;
+                                    }
                                     Text {
                                         text: chat.time;
                                         color: chat.unread > 0 ? Theme.accent : Theme.text-dim;
@@ -1551,7 +1722,7 @@ export component AppWindow inherits Window {
                                     }
                                     Text {
                                         text: chat.preview;
-                                        color: chat.draft ? #d99028 : chat.typing ? Theme.accent : Theme.text-dim;
+                                        color: chat.draft ? Theme.warning : chat.typing ? Theme.accent : Theme.text-dim;
                                         opacity: root.blur-messages && !touch.has-hover ? 0.08 : 1;
                                         animate opacity { duration: 120ms; easing: ease-out; }
                                         font-size: 13px;
@@ -1608,7 +1779,7 @@ export component AppWindow inherits Window {
                                         background: Theme.accent;
                                         badge-text := Text {
                                             text: chat.unread;
-                                            color: Theme.dark ? #111b21 : #ffffff;
+                                            color: #ffffff;
                                             font-size: 11px;
                                             font-weight: 700;
                                             width: parent.width;
@@ -1755,12 +1926,14 @@ export component AppWindow inherits Window {
             }
         }
 
-        Rectangle { width: 1px; background: Theme.border; }
+        Rectangle { width: Theme.glass ? 0px : 1px; background: Theme.border; }
 
         // Conversation pane
         conv-pane := Rectangle {
-            background: root.glass
-                ? (Theme.dark ? #101c2390 : #efeae2a8) : Theme.conv-background;
+            Wallpaper {
+                width: parent.width;
+                height: parent.height;
+            }
 
             HomeScreen {
                 visible: !root.chat-open;
@@ -1872,7 +2045,7 @@ export component AppWindow inherits Window {
                                 root.message-menu-open = true;
                             }
                         }
-                        property <length> header-offset: i == 0 ? contact-header.height : 0px;
+                        property <length> header-offset: i == 0 ? contact-header.height + (root.pinned-items.length > 0 ? 40px : 0px) + root.silenced-calls.length * 56px : 0px;
                         // The row crossing the top edge names the day in
                         // the floating pill. Rows sit in viewport
                         // coordinates; the ListView re-anchors every
@@ -1922,8 +2095,14 @@ export component AppWindow inherits Window {
                         if root.select-mode && msg.selected: Rectangle {
                             background: Theme.accent.with-alpha(0.14);
                         }
+                        // One short flash on arrival, then a steady tint: a finite
+                        // `animate`, never a per-frame redraw.
                         if root.highlight-id == msg.id: Rectangle {
-                            background: Theme.accent.with-alpha(0.22);
+                            property <bool> lit: false;
+                            init => { self.lit = true; }
+                            background: Theme.accent.with-alpha(self.lit ? 0.22 : 0.5);
+                            animate background { duration: 700ms; easing: ease-out; }
+                            border-radius: 10px;
                         }
                         row-hover := TouchArea {
                             mouse-cursor: default;
@@ -2095,6 +2274,8 @@ export component AppWindow inherits Window {
                                 ? transparent
                                 : (msg.fromMe ? Theme.bubble-out : Theme.bubble-in);
                             border-radius: msg-row.has-translation ? 11px : 10px;
+                            border-width: Theme.glass && !msg.sticker ? 1px : 0px;
+                            border-color: Theme.bubble-rim;
                             translation-measure := Text {
                                 text: msg.translationText;
                                 font-size: 14px;
@@ -2281,7 +2462,7 @@ export component AppWindow inherits Window {
                                         if root.blur-media && !media-hover: Rectangle {
                                             width: parent.width;
                                             height: parent.height;
-                                            background: Theme.dark ? #172126 : #dfe5e8;
+                                            background: Theme.well;
                                         }
                                     }
                                     if msg.videoLen != "": Rectangle {
@@ -2290,7 +2471,7 @@ export component AppWindow inherits Window {
                                         width: len-row.preferred-width + 12px;
                                         height: 20px;
                                         border-radius: 10px;
-                                        background: #000000a0;
+                                        background: Theme.media-chip;
                                         len-row := HorizontalLayout {
                                             padding-left: 6px;
                                             padding-right: 6px;
@@ -2317,7 +2498,7 @@ export component AppWindow inherits Window {
                                         width: gif-label.preferred-width + 12px;
                                         height: 20px;
                                         border-radius: 4px;
-                                        background: #000000a0;
+                                        background: Theme.media-chip;
                                         gif-label := Text {
                                             text: "GIF";
                                             color: white;
@@ -2335,7 +2516,7 @@ export component AppWindow inherits Window {
                                         border-radius: 28px;
                                         x: (parent.width - self.width) / 2;
                                         y: (parent.height - self.height) / 2;
-                                        background: #000000a0;
+                                        background: Theme.media-chip;
                                         Image {
                                             source: @image-url("../icons/player-play.svg");
                                             colorize: white;
@@ -2362,7 +2543,7 @@ export component AppWindow inherits Window {
                                     if root.blur-media && !media-hover: Rectangle {
                                         width: parent.width;
                                         height: parent.height;
-                                        background: Theme.dark ? #172126 : #dfe5e8;
+                                        background: Theme.well;
                                     }
                                 }
 
@@ -2371,6 +2552,7 @@ export component AppWindow inherits Window {
                                     message: msg;
                                     privacy-hidden: (root.blur-messages || (root.blur-names && msg.cardKind == "contact") || (root.blur-media && (msg.cardKind == "location" || msg.cardKind == "live-location"))) && !row-hover.has-hover;
                                     details => { root.message-action(msg.id, "details"); }
+                                    vote(i) => { root.poll-vote(msg.id, i); }
                                 }
 
                                 if msg.kind == "doc": VerticalLayout {
@@ -2444,7 +2626,7 @@ export component AppWindow inherits Window {
                                             }
                                             Text {
                                                 text: msg.mediaReady ? @tr("media.action.view") : @tr("media.action.download");
-                                                color: msg.mediaReady ? Theme.accent : Theme.text-dim;
+                                                color: msg.mediaReady ? (msg.fromMe ? Theme.bubble-action : Theme.accent-text) : (msg.fromMe ? Theme.time-out : Theme.text-dim);
                                                 font-size: 13px;
                                                 font-weight: 700;
                                                 width: parent.width;
@@ -2464,7 +2646,7 @@ export component AppWindow inherits Window {
                                             }
                                             Text {
                                                 text: @tr("file.action.save_as");
-                                                color: msg.mediaReady ? Theme.accent : Theme.text-dim;
+                                                color: msg.mediaReady ? (msg.fromMe ? Theme.bubble-action : Theme.accent-text) : (msg.fromMe ? Theme.time-out : Theme.text-dim);
                                                 font-size: 13px;
                                                 font-weight: 700;
                                                 width: parent.width;
@@ -2533,12 +2715,12 @@ export component AppWindow inherits Window {
                                                 height: 4px;
                                                 y: 15px;
                                                 border-radius: 2px;
-                                                background: #8696a060;
+                                                background: Theme.media-track;
                                                 Rectangle {
                                                     width: parent.width * msg.progress;
                                                     height: parent.height;
                                                     border-radius: 2px;
-                                                    background: #53bdeb;
+                                                    background: Theme.read;
                                                 }
                                             }
                                         }
@@ -2605,7 +2787,7 @@ export component AppWindow inherits Window {
                                                 clip: true;
                                                 Image {
                                                     source: msg.wave;
-                                                    colorize: #53bdeb;
+                                                    colorize: Theme.read;
                                                     x: 0;
                                                     y: 0;
                                                     width: wave-area.width;
@@ -2654,7 +2836,7 @@ export component AppWindow inherits Window {
                                             }
                                             if !msg.playing: Image {
                                                 source: @image-url("../icons/microphone.svg");
-                                                colorize: #53bdeb;
+                                                colorize: Theme.read;
                                                 width: 15px;
                                                 height: 15px;
                                                 x: parent.width - self.width;
@@ -2810,7 +2992,7 @@ export component AppWindow inherits Window {
                                         // skips a TextInput whose color has no
                                         // alpha, selection highlight included.
                                         color: #00000001;
-                                        selection-background-color: #3390ec;
+                                        selection-background-color: Theme.selection;
                                         selection-foreground-color: white;
                                         width: parent.width;
                                         height: parent.height;
@@ -2880,7 +3062,7 @@ export component AppWindow inherits Window {
                                         font-size: 14px;
                                         font-italic: msg.deleted;
                                         color: msg.deleted ? Theme.text-dim : Theme.bubble-text;
-                                        selection-background-color: #3390ec;
+                                        selection-background-color: Theme.selection;
                                         selection-foreground-color: white;
                                         // captions wrap to the image width
                                         width: parent.width;
@@ -2958,7 +3140,7 @@ export component AppWindow inherits Window {
                             border-radius: 11px;
                             background: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
                             drop-shadow-blur: 6px;
-                            drop-shadow-color: Theme.dark ? #00000030 : #00000012;
+                            drop-shadow-color: Theme.glass-shadow;
                             Rectangle {
                                 x: 4px;
                                 y: 1px;
@@ -2968,7 +3150,7 @@ export component AppWindow inherits Window {
                                 border-width: 1px;
                                 border-color: Theme.text-dim.with-alpha(0.18);
                                 drop-shadow-blur: 2px;
-                                drop-shadow-color: Theme.dark ? #00000020 : #00000008;
+                                drop-shadow-color: Theme.glass-shadow;
                             }
                             translated-content := VerticalLayout {
                                 x: 18px;
@@ -3001,7 +3183,7 @@ export component AppWindow inherits Window {
                                     wrap: word-wrap;
                                     font-size: 14px;
                                     color: Theme.bubble-text;
-                                    selection-background-color: #3390ec;
+                                    selection-background-color: Theme.selection;
                                     selection-foreground-color: white;
                                     opacity: root.blur-messages && !row-hover.has-hover ? 0.08 : 1;
                                     animate opacity { duration: 120ms; easing: ease-out; }
@@ -3090,8 +3272,15 @@ export component AppWindow inherits Window {
                             height: 38px;
                             border-radius: 19px;
                             background: Theme.panel;
+                            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+                            border-width: Theme.glass ? 1px : 0px;
+                            border-color: Theme.glass-rim;
+                            if Theme.glass: Rectangle {
+                                border-radius: parent.border-radius;
+                                background: Theme.glass-sheen;
+                            }
                             drop-shadow-blur: 8px;
-                            drop-shadow-color: #00000030;
+                            drop-shadow-color: Theme.glass-shadow;
                             HorizontalLayout {
                                 padding-left: 8px;
                                 padding-right: 8px;
@@ -3148,7 +3337,7 @@ export component AppWindow inherits Window {
                             border-color: Theme.conv-bg;
                             TouchArea {
                                 mouse-cursor: pointer;
-                                clicked => { root.show-reactions(msg.id); }
+                                clicked => { root.reactions-msg-id = msg.id; root.show-reactions(msg.id); }
                             }
                             // The emoji and the count apart: the emoji font
                             // has digits of its own.
@@ -3217,8 +3406,7 @@ export component AppWindow inherits Window {
                     width: parent.width;
                     height: dock-col.preferred-height;
                     y: parent.height - self.height;
-                    background: Theme.dark ? #0b141a28 : #ffffff28;
-                    backdrop-blur: 12px;
+                    background: Theme.dock;
                     dock-touch := TouchArea {
                         x: 0px;
                         y: 0px;
@@ -3285,12 +3473,19 @@ export component AppWindow inherits Window {
                     x: 12px;
                     width: parent.width - 24px;
                     height: parent.height;
-                    background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
+                    background: Theme.panel;
+                    backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
                     border-width: 1px;
-                    border-color: Theme.dark ? #24343e : Theme.border;
+                    border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                     border-radius: 18px;
                     drop-shadow-blur: 10px;
-                    drop-shadow-color: #00000040;
+                    drop-shadow-color: Theme.glass-shadow;
+                    if Theme.glass: Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: parent.border-radius;
+                        background: Theme.glass-sheen;
+                    }
                     HorizontalBox {
                         padding: 8px;
                         padding-left: 10px;
@@ -3334,33 +3529,51 @@ export component AppWindow inherits Window {
                 // Read-only conversation: announcement groups and groups
                 // we are no longer in.
                 if !root.select-mode && !root.current-can-send: Rectangle {
-                    height: 62px;
-                    background: Theme.header;
-                    HorizontalLayout {
-                        alignment: center;
-                        if root.current-left: Text {
-                            text: @tr("chat.composer.not_member");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            vertical-alignment: center;
+                    height: 52px;
+                    // Floats like the composer pill: same margins, radius and glass.
+                    Rectangle {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        background: Theme.panel;
+                        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+                        border-width: 1px;
+                        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+                        border-radius: 18px;
+                        drop-shadow-blur: 10px;
+                        drop-shadow-color: Theme.glass-shadow;
+                        if Theme.glass: Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: parent.border-radius;
+                            background: Theme.glass-sheen;
                         }
-                        if !root.current-left: Text {
-                            text: @tr("chat.composer.admins_only_prefix");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-                        if !root.current-left: Text {
-                            text: @tr("chat.composer.admins_only_highlight");
-                            color: Theme.accent;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-                        if !root.current-left: Text {
-                            text: @tr("chat.composer.admins_only_suffix");
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            alignment: center;
+                            if root.current-left: Text {
+                                text: @tr("chat.composer.not_member");
+                                color: Theme.text-dim;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if !root.current-left: Text {
+                                text: @tr("chat.composer.admins_only_prefix");
+                                color: Theme.text-dim;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if !root.current-left: Text {
+                                text: @tr("chat.composer.admins_only_highlight");
+                                color: Theme.accent-text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if !root.current-left: Text {
+                                text: @tr("chat.composer.admins_only_suffix");
+                                color: Theme.text-dim;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }
@@ -3375,12 +3588,19 @@ export component AppWindow inherits Window {
                         x: 12px;
                         width: parent.width - 24px;
                         height: parent.height;
-                        background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
+                        background: Theme.panel;
+                        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
                         border-width: 1px;
-                        border-color: Theme.dark ? #24343e : Theme.border;
+                        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                         border-radius: 18px;
                         drop-shadow-blur: 10px;
-                        drop-shadow-color: #00000040;
+                        drop-shadow-color: Theme.glass-shadow;
+                        if Theme.glass: Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: parent.border-radius;
+                            background: Theme.glass-sheen;
+                        }
 
                         // Recording bar (replaces the composer while capturing)
                         HorizontalBox {
@@ -3398,7 +3618,7 @@ export component AppWindow inherits Window {
                                 width: 10px;
                                 height: 10px;
                                 border-radius: 5px;
-                                background: #f05d4d;
+                                background: Theme.danger-solid;
                                 y: 26px;
                             }
                             Text {
@@ -3447,7 +3667,7 @@ export component AppWindow inherits Window {
                                 height: 32px;
                                 icon-size: 20px;
                                 radius: 10px;
-                                background: Theme.dark ? #17232b : Theme.pill;
+                                background: Theme.tile;
                                 icon: @image-url("../icons/plus.svg");
                                 clicked => {
                                     root.picker-open = false;
@@ -3471,7 +3691,9 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 horizontal-stretch: 1;
                                 border-radius: 12px;
-                                background: Theme.dark ? #1e2b33 : Theme.pill;
+                                background: Theme.field;
+                                border-width: 1px;
+                                border-color: Theme.field-border;
                                 composer-scroll := Flickable {
                                     x: 12px;
                                     y: 8px;
@@ -3494,7 +3716,7 @@ export component AppWindow inherits Window {
                                         single-line: false;
                                         wrap: word-wrap;
                                         vertical-alignment: center;
-                                        selection-background-color: #3390ec;
+                                        selection-background-color: Theme.selection;
                                         selection-foreground-color: white;
                                         edited => {
                                             root.composer-changed(self.text, self.cursor-position-byte-offset);
@@ -3520,6 +3742,12 @@ export component AppWindow inherits Window {
                                             }
                                             if (event.text == Key.Escape && root.mention-open) {
                                                 root.mention-close();
+                                                return accept;
+                                            }
+                                            if (event.text == Key.UpArrow && self.text == ""
+                                                && !event.modifiers.alt && !event.modifiers.control
+                                                && !root.mention-open) {
+                                                root.edit-last-message();
                                                 return accept;
                                             }
                                             reject
@@ -3548,7 +3776,7 @@ export component AppWindow inherits Window {
                                 height: 32px;
                                 icon-size: 20px;
                                 radius: 10px;
-                                background: #21885b;
+                                background: Theme.send;
                                 tint: #ffffff;
                                 icon: @image-url("../icons/send-2.svg");
                                 y: parent.height - self.height - 8px;
@@ -3571,17 +3799,17 @@ export component AppWindow inherits Window {
                 visible: root.chat-open;
                 height: 80px;
 
-                background: Theme.dark ? #0b141a28 : #ffffff28;
-                backdrop-blur: 12px;
+                background: Theme.glass ? @linear-gradient(180deg, Theme.glass-fill-strong 0%, Theme.glass-fill-strong 75%, #00000000 100%) : Theme.dock;
                 Rectangle {
                     x: 12px;
                     y: 8px;
                     width: parent.width - 24px;
                     height: 64px;
                     border-radius: 18px;
-                    background: Theme.dark ? #1c2b34ee : #f0f2f5ee;
+                    background: Theme.panel;
+                    backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
                     border-width: 1px;
-                    border-color: Theme.dark ? #24343e : Theme.border;
+                    border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                     HorizontalLayout {
                         padding-left: 18px;
                         padding-right: 14px;
@@ -3677,7 +3905,7 @@ export component AppWindow inherits Window {
                             width: 1px;
                             height: 24px;
                             y: (parent.height - self.height) / 2;
-                            background: Theme.dark ? #30414c : Theme.border;
+                            background: Theme.border;
                         }
                         VerticalLayout {
                             alignment: center;
@@ -3695,6 +3923,30 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+            }
+
+            // Calls held back by the anti-spam rule, stacked under the pinned strip.
+            if root.chat-open && root.silenced-calls.length > 0: VerticalLayout {
+                x: 0px;
+                y: contact-header.height - 6px + (root.pinned-items.length > 0 ? 44px : 0px);
+                width: parent.width;
+                spacing: 0px;
+                for call in root.silenced-calls: SilencedCallBanner {
+                    call: call;
+                    answer => { root.answer-silenced-call(call.id); }
+                    decline => { root.decline-silenced-call(call.id); }
+                }
+            }
+
+            // Pinned message strip, just under the floating header.
+            if root.chat-open && root.pinned-items.length > 0: PinnedBanner {
+                x: 0px;
+                y: contact-header.height - 6px;
+                width: parent.width;
+                items: root.pinned-items;
+                index <=> root.pinned-index;
+                open-pinned(a0) => { root.open-pinned(a0); }
+                unpin(a0) => { root.unpin-message(a0); }
             }
 
             if root.chat-open && root.sync-banner != "": Rectangle {
@@ -3743,8 +3995,15 @@ export component AppWindow inherits Window {
                 height: 42px;
                 border-radius: 21px;
                 background: Theme.panel;
+                backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+                border-width: Theme.glass ? 1px : 0px;
+                border-color: Theme.glass-rim;
+                if Theme.glass: Rectangle {
+                    border-radius: parent.border-radius;
+                    background: Theme.glass-sheen;
+                }
                 drop-shadow-blur: 6px;
-                drop-shadow-color: #00000055;
+                drop-shadow-color: Theme.glass-shadow;
                 jump-touch := TouchArea {
                     mouse-cursor: pointer;
                     // Routed through the host so the jump is re-applied
@@ -3769,9 +4028,16 @@ export component AppWindow inherits Window {
                 width: 360px;
                 height: min(320px, mention-col.preferred-height + 12px);
                 background: Theme.panel;
-                border-radius: 10px;
+                backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+                border-width: Theme.glass ? 1px : 0px;
+                border-color: Theme.glass-rim;
+                if Theme.glass: Rectangle {
+                    border-radius: parent.border-radius;
+                    background: Theme.glass-sheen;
+                }
+                border-radius: 16px;
                 drop-shadow-blur: 8px;
-                drop-shadow-color: #00000055;
+                drop-shadow-color: Theme.glass-shadow;
                 clip: true;
                 mention-col := VerticalLayout {
                     padding: 6px;
@@ -3781,6 +4047,14 @@ export component AppWindow inherits Window {
                         clicked => { root.mention-pick(i); }
                     }
                 }
+            }
+
+            drop-overlay := DropOverlay {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.file-drag-hover && root.chat-open && root.screen == "main";
             }
 
             preview-layer := ModalLayer {
@@ -3795,6 +4069,10 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     picture: root.preview-image;
                     busy: root.preview-busy;
+                    count: root.staged-count;
+                    index: root.staged-index;
+                    thumbs: root.staged-thumbs;
+                    select(i) => { root.staged-index = i; root.staged-select(i); }
                     cancel => { root.cancel-send-image(); }
                     send(caption) => { root.confirm-send-image(caption); }
                     crop(x, y, w, h) => { root.crop-preview(x, y, w, h); }
@@ -3851,6 +4129,7 @@ export component AppWindow inherits Window {
         labels: root.labels;
         menu-add-member() => { root.menu-add-member(); }
         menu-search() => { root.menu-search(); }
+        menu-starred() => { root.starred-current-only = false; root.starred-open = true; root.open-starred(false); }
         menu-mute(a0) => { root.menu-mute(a0); }
         menu-ephemeral(a0) => { root.menu-ephemeral(a0); }
         menu-favorite() => { root.menu-favorite(); }
@@ -3877,6 +4156,7 @@ export component AppWindow inherits Window {
         attach-image() => { root.attach-image(); }
         attach-audio() => { root.attach-audio(); }
         attach-doc() => { root.attach-doc(); }
+        attach-poll() => { root.poll-composer-open = true; root.open-poll-composer(); }
         conv-x: conv-pane.absolute-position.x;
         conv-y: conv-pane.absolute-position.y;
         conv-h: conv-pane.height;
@@ -3885,8 +4165,9 @@ export component AppWindow inherits Window {
     // ---------- Contact / group info ----------
     info-layer := InfoLayer {
         open: root.info-open;
-        scrim: #00000030;
+        scrim: Theme.scrim;
         dismiss => { root.close-info(); }
+        open-starred-here() => { root.starred-current-only = true; root.starred-open = true; root.open-starred(true); }
 
         current-callable: root.current-callable;
         start-call(a0) => { root.start-call(a0); }
@@ -3936,7 +4217,7 @@ export component AppWindow inherits Window {
     // ---------- Sync progress ----------
     sync-layer := SyncLayer {
         open: root.sync-open;
-        scrim: #00000088;
+        scrim: Theme.scrim;
         dismiss => { root.sync-open = false; }
 
         sync-open <=> root.sync-open;
@@ -3999,7 +4280,7 @@ export component AppWindow inherits Window {
 
     details-layer := DetailsLayer {
         open: root.details-open;
-        scrim: #00000025;
+        scrim: Theme.scrim;
         dismiss => { root.details-open = false; }
 
         details-open <=> root.details-open;
@@ -4012,7 +4293,7 @@ export component AppWindow inherits Window {
 
     message-dialog-layer := MessageDialogLayer {
         open: root.message-dialog-open;
-        scrim: #00000088;
+        scrim: Theme.scrim;
         dismiss => { root.message-dialog-open = false; }
 
         submit-edit(a0, a1) => { root.submit-edit(a0, a1); }
@@ -4027,7 +4308,7 @@ export component AppWindow inherits Window {
     // ---------- Confirm dialog ----------
     confirm-layer := ConfirmLayer {
         open: root.confirm-open;
-        scrim: #00000088;
+        scrim: Theme.scrim;
         dismiss => { root.confirm-open = false; }
 
         confirm-open <=> root.confirm-open;
@@ -4042,7 +4323,7 @@ export component AppWindow inherits Window {
     // ---------- Share group history ----------
     share-layer := ShareLayer {
         open: root.share-open;
-        scrim: #00000088;
+        scrim: Theme.scrim;
         dismiss => { root.share-cancel(); }
 
         share-name: root.share-name;
@@ -4058,7 +4339,7 @@ export component AppWindow inherits Window {
     // ---------- New list ----------
     new-list-layer := NewListLayer {
         open: root.new-list-open;
-        scrim: #00000088;
+        scrim: Theme.scrim;
         dismiss => { root.new-list-open = false; }
 
         menu-new-list(a0) => { root.menu-new-list(a0); }
@@ -4068,7 +4349,7 @@ export component AppWindow inherits Window {
     // ---------- Add member ----------
     member-pick-layer := MemberPickLayer {
         open: root.member-pick-open;
-        scrim: #000000aa;
+        scrim: Theme.scrim;
         dismiss => { root.member-pick-open = false; }
 
         member-pick-open <=> root.member-pick-open;
@@ -4082,7 +4363,7 @@ export component AppWindow inherits Window {
     // ---------- Status viewer ----------
     sv-layer := SvLayer {
         open: root.sv-open;
-        scrim: #000000f0;
+        scrim: Theme.glass ? #000000c8 : #000000ee;
         dismissible: false;
 
         sv-name: root.sv-name;
@@ -4103,7 +4384,7 @@ export component AppWindow inherits Window {
     // ---------- Blocking alert ----------
     alert-layer := AlertLayer {
         open: root.alert-open;
-        scrim: #000000aa;
+        scrim: Theme.scrim;
         dismissible: false;
 
         alert-title: root.alert-title;
@@ -4115,19 +4396,46 @@ export component AppWindow inherits Window {
 
     reactions-layer := ReactionsLayer {
         open: root.reactions-open;
-        scrim: #00000066;
+        scrim: Theme.scrim;
         dismiss => { root.reactions-open = false; }
 
         reaction-rows: root.reaction-rows;
+        reaction-tabs: root.reaction-tabs;
         reactions-title: root.reactions-title;
         reactions-open <=> root.reactions-open;
         open-dm(a0) => { root.open-dm(a0); }
+        remove-own-reaction() => { root.remove-own-reaction(root.reactions-msg-id); }
+    }
+
+    // ---------- Polls / starred / shortcuts ----------
+    poll-composer-layer := PollComposerLayer {
+        open: root.poll-composer-open && root.chat-open;
+        scrim: Theme.scrim;
+        dismiss => { root.poll-composer-open = false; }
+        poll-composer-open <=> root.poll-composer-open;
+        create-poll(a0, a1, a2) => { root.create-poll(a0, a1, a2); }
+    }
+    starred-layer := StarredLayer {
+        open: root.starred-open && root.screen == "main";
+        scrim: transparent;
+        dismiss => { root.starred-open = false; }
+        starred-open <=> root.starred-open;
+        starred-items: root.starred-items;
+        current-only: root.starred-current-only;
+        open-starred-item(a0, a1) => { root.open-starred-item(a0, a1); }
+    }
+    shortcuts-layer := ShortcutsLayer {
+        open: root.shortcuts-open;
+        scrim: Theme.scrim;
+        dismiss => { root.shortcuts-open = false; }
+        shortcuts-open <=> root.shortcuts-open;
+        is-macos: root.is-macos;
     }
 
     // ---------- Forward picker ----------
     forward-layer := ForwardLayer {
         open: root.forward-open;
-        scrim: #000000aa;
+        scrim: Theme.scrim;
         dismiss => { root.forward-open = false; }
 
         forward-open <=> root.forward-open;
@@ -4151,13 +4459,28 @@ export component AppWindow inherits Window {
         theme-style <=> root.theme-style;
         notifications: root.notifications;
         notify-previews: root.notify-previews;
+        call-silence-repeat: root.call-silence-repeat;
+        call-silence-minutes: root.call-silence-minutes;
+        message-sound: root.message-sound;
         blur-names: root.blur-names;
         blur-photos: root.blur-photos;
         blur-messages: root.blur-messages;
         blur-media: root.blur-media;
         style-changed(a0) => { root.style-changed(a0); }
         notifications-changed(a0) => { root.notifications-changed(a0); }
+        message-sound-changed(a0) => { root.message-sound-changed(a0); }
+        show-shortcuts() => { root.shortcuts-open = true; }
+        wallpaper-colors-changed(bg, fg) => {
+            root.wallpaper-bg = bg;
+            root.wallpaper-fg = fg;
+            root.wallpaper-custom = true;
+            root.wallpaper-colors-changed(bg, fg);
+        }
+        wallpaper-reset() => { root.wallpaper-custom = false; root.wallpaper-reset(); }
+        wallpaper-hex-entered(fg, hex) => { root.wallpaper-hex-entered(fg, hex); }
         notify-previews-changed(a0) => { root.notify-previews-changed(a0); }
+        call-silence-repeat-changed(a0) => { root.call-silence-repeat = a0; root.call-silence-repeat-changed(a0); }
+        call-silence-minutes-changed(a0) => { root.call-silence-minutes = a0; root.call-silence-minutes-changed(a0); }
         privacy-blur-changed(a0, a1) => { root.privacy-blur-changed(a0, a1); }
         theme-mode <=> root.theme-mode;
         language-mode <=> root.language-mode;
@@ -4251,7 +4574,7 @@ export component AppWindow inherits Window {
     // readable by the host; the pages are laid out by the host.
     Rectangle {
         visible: root.pdf-open;
-        background: Theme.dark ? #0b141a : #e9edef;
+        background: Theme.viewer;
         TouchArea { }
         VerticalLayout {
             padding: 0;
@@ -4350,7 +4673,7 @@ export component AppWindow inherits Window {
                         height: p.h * 1px;
                         background: white;
                         drop-shadow-blur: 6px;
-                        drop-shadow-color: #00000055;
+                        drop-shadow-color: Theme.glass-shadow;
                         if p.ready: Image {
                             source: p.pic;
                             width: parent.width;
@@ -4365,9 +4688,15 @@ export component AppWindow inherits Window {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     background: Theme.panel;
-                    border-radius: 12px;
+                    border-width: Theme.glass ? 1px : 0px;
+                    border-color: Theme.glass-rim;
+                    if Theme.glass: Rectangle {
+                        border-radius: parent.border-radius;
+                        background: Theme.glass-sheen;
+                    }
+                    border-radius: 20px;
                     drop-shadow-blur: 10px;
-                    drop-shadow-color: #00000055;
+                    drop-shadow-color: Theme.glass-shadow;
                     status-col := VerticalLayout {
                         padding: 20px;
                         spacing: 14px;
@@ -4403,7 +4732,7 @@ export component AppWindow inherits Window {
     // ---------- Video player ----------
     video-layer := VideoLayer {
         open: root.video-open;
-        scrim: #000000f2;
+        scrim: Theme.glass ? #000000c8 : #000000ee;
         dismissible: false;
 
         video-frame: root.video-frame;
@@ -4430,7 +4759,7 @@ export component AppWindow inherits Window {
     // ---------- Lightbox ----------
     lightbox-layer := LightboxLayer {
         open: root.lightbox-open;
-        scrim: #000000e6;
+        scrim: Theme.glass ? #000000c8 : #000000ee;
         dismiss => { root.lightbox-open = false; }
 
         lightbox-open <=> root.lightbox-open;
@@ -4439,7 +4768,7 @@ export component AppWindow inherits Window {
     }
     whats-new-layer := WhatsNewLayer {
         open: root.whats-new-open;
-        scrim: #00000088;
+        scrim: Theme.scrim;
         dismiss => { root.whats-new-open = false; }
 
         update-state: root.update-state;
@@ -4455,5 +4784,11 @@ export component AppWindow inherits Window {
         changelog-load(a0) => { root.changelog-load(a0); }
         update-apply() => { root.update-apply(); }
         update-restart() => { root.update-restart(); }
+    }
+
+    splash := Splash {
+        width: 100%;
+        height: 100%;
+        loading: root.app-loading;
     }
 }

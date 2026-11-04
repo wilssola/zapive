@@ -1,32 +1,140 @@
 name: build
 
-# Smoke builds for branches and PRs; master pushes go through release.yml.
+# Build, test and lint run on pull requests and manual runs (release.yml
+# builds master). Tests cover all three desktop platforms; formatting and
+# clippy block the merge (Linux). The dependency audit also runs on pushes
+# to master and weekly, because new advisories appear without any change
+# to this repository.
 on:
-  push:
-    branches: [rust]
   pull_request:
+  workflow_dispatch:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  linux:
-    runs-on: ubuntu-latest
+  test:
+    name: test (${{ matrix.name }})
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: macos, os: macos-latest }
+          - { name: windows, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Desktop libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential xvfb libxkbcommon-x11-0
+      - name: CMake (macOS; CTranslate2 is built from source)
+        if: runner.os == 'macOS'
+        run: command -v cmake >/dev/null || brew install cmake
+      - name: CTranslate2 DLL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/fetch-ctranslate2.ps1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build
+        run: cargo build --locked
+      # Some tests create a real Slint window, which needs a display.
+      - name: Test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a cargo test --locked
+          else
+            cargo test --locked
+          fi
+      # The offline mock-data mode is compiled out of releases, so it is
+      # only ever built here.
+      - name: Build (demo feature)
+        run: cargo build --locked --features demo
+      - name: Test (demo feature)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a cargo test --locked --features demo
+          else
+            cargo test --locked --features demo
+          fi
+
+  lint:
+    name: fmt and clippy
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Desktop libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Smoke build
-        run: cargo build --locked
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Clippy (demo feature)
+        run: cargo clippy --locked --all-targets --features demo -- -D warnings
 
-  macos:
-    runs-on: macos-latest
+  # A new advisory can appear without any change here, so it must never
+  # block an unrelated pull request: on PRs the job only reports (it stays
+  # visible and red-annotated), while the weekly schedule, manual runs and
+  # pushes to master are the ones that fail loudly.
+  audit:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@v7
-      - name: CMake (CTranslate2 is built from source)
-        run: command -v cmake >/dev/null || brew install cmake
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Smoke build
-        run: cargo build --locked
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Cache cargo-audit
+        id: cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}
+      - name: Install cargo-audit
+        if: steps.cargo-audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.2 --locked --no-default-features
+      - name: Audit locked dependencies
+        run: cargo audit
+
+  changelog-tool:
+    name: release notes generator
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Unit tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Dry run on the repository history
+        run: |
+          python3 .github/scripts/generate_changelog.py \
+            --repository "$GITHUB_REPOSITORY" --to-tag HEAD --output /tmp/notes.md
+          cat /tmp/notes.md

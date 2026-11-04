@@ -25,7 +25,14 @@ export component WhatsNewLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         opacity: root.progress;
         transform-scale: 0.96 + 0.04 * root.progress;
         TouchArea { }

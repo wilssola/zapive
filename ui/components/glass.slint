@@ -1,0 +1,25 @@
+import { Theme } from "theme.slint";
+
+// A Liquid Glass surface: translucent fill (via Theme), a bright 1px rim,
+// a soft diagonal sheen and, for floating surfaces, a blur of whatever is
+// drawn behind. In the opaque style it degrades to a plain filled card.
+export component GlassPanel inherits Rectangle {
+    // Floating panels blur what is behind them; large panes rely on the OS
+    // backdrop and skip it (the blur re-reads every pixel under the area).
+    in property <bool> blur: true;
+    // Opaque-style outline (glass always gets the rim).
+    in property <bool> outline: false;
+    // Draw the sheen (off for small controls where it would be noise).
+    in property <bool> sheen: true;
+    background: Theme.panel;
+    backdrop-blur: Theme.glass && root.blur ? Theme.glass-blur : 0px;
+    border-width: Theme.glass || root.outline ? 1px : 0px;
+    border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+    if Theme.glass && root.sheen: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: Theme.glass-sheen;
+    }
+    @children
+}

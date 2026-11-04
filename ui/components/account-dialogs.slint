@@ -15,7 +15,14 @@ export component SyncLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         opacity: root.progress;
         transform-scale: 0.96 + 0.04 * root.progress;
         TouchArea { }
@@ -65,9 +72,16 @@ export component AccountLayer inherits ModalLayer {
         width: 300px;
         height: account-col.preferred-height;
         background: Theme.panel;
-        border-radius: 10px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 16px;
         drop-shadow-blur: 10px;
-        drop-shadow-color: #00000066;
+        drop-shadow-color: Theme.glass-shadow;
         TouchArea { }
         account-col := VerticalLayout {
             padding: 6px;
@@ -97,7 +111,7 @@ export component AccountLayer inherits ModalLayer {
             MenuRow {
                 icon: @image-url("../icons/logout.svg");
                 label: @tr("account.menu.logout");
-                tint: #f05d4d;
+                tint: Theme.danger-solid;
                 clicked => {
                     root.account-menu-open = false;
                     root.logout();
@@ -122,7 +136,14 @@ export component AlertLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         alert-col := VerticalLayout {
             padding: 22px;
             spacing: 12px;

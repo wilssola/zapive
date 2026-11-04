@@ -1,4 +1,4 @@
-import { Button, ComboBox, LineEdit, ProgressIndicator, ScrollView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ProgressIndicator, ScrollView, Slider } from "std-widgets.slint";
 import { DialogButton } from "dialog-button.slint";
 import { IconButton } from "icon-button.slint";
 import { ModalLayer } from "modal.slint";
@@ -8,12 +8,14 @@ import { SettingsCard } from "settings-card.slint";
 import { SettingsRow } from "settings-row.slint";
 import { Theme } from "theme.slint";
 import { Toggle } from "toggle.slint";
+import { Wallpaper } from "wallpaper.slint";
 import { AccountItem, ReleaseItem, TranslationModelItem } from "types.slint";
 
 export component SettingsLayer inherits ModalLayer {
     in-out property <string> theme-style;
     in property <bool> notifications;
     in property <bool> notify-previews;
+    in property <bool> message-sound;
     in property <bool> blur-names;
     in property <bool> blur-photos;
     in property <bool> blur-messages;
@@ -21,6 +23,11 @@ export component SettingsLayer inherits ModalLayer {
     callback style-changed(string);
     callback notifications-changed(bool);
     callback notify-previews-changed(bool);
+    in property <bool> call-silence-repeat;
+    in property <int> call-silence-minutes;
+    callback call-silence-repeat-changed(bool);
+    callback call-silence-minutes-changed(int);
+    callback message-sound-changed(bool);
     callback privacy-blur-changed(string, bool);
     in-out property <string> theme-mode;
     in-out property <string> language-mode;
@@ -108,19 +115,33 @@ export component SettingsLayer inherits ModalLayer {
     in property <bool> auto-download-stickers;
     callback auto-download-stickers-changed(bool);
     in property <length> win-width;
+    callback show-shortcuts();
+    callback wallpaper-colors-changed(color, color);
+    callback wallpaper-reset();
+    callback wallpaper-hex-entered(bool, string);
+    property <[color]> wp-bg-presets: [#efeae2, #e3f0ea, #e8eef9, #f6e9ee, #fff4d6, #0b1a20, #101c23, #1b1f2a, #1d2a22, #2a1d2a];
+    property <[color]> wp-fg-presets: [#111b21, #008069, #1b4f9c, #9c1b5a, #7a5200, #ffffff, #7be0c4, #9bbcf5, #f5a3c8, #ffd37a];
+    property <int> wp-alpha-pct: round(Theme.wp-base-fg.alpha * 100 / 255);
+    // Cards stay <= 760px wide and centred in the area right of the category list.
+    property <length> content-margin: max(20px, (root.win-width - min(280px, root.win-width * 0.3) - 1px - 760px) / 2);
 
     if root.mounted: Rectangle {
         width: 100%;
         height: 100%;
         x: (1 - root.progress) * 16px;
         opacity: root.progress;
-        background: Theme.dark ? #091419 : Theme.sidebar;
+        background: Theme.glass ? Theme.glass-fill-cover : (Theme.dark ? #091419 : Theme.sidebar);
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            background: Theme.glass-sheen;
+        }
         TouchArea { }
         HorizontalLayout {
             spacing: 0;
             Rectangle {
                 width: min(280px, root.win-width * 0.3);
-                background: Theme.dark ? #081217 : Theme.sidebar;
+                background: Theme.glass ? Theme.glass-fill-soft.with-alpha(0.05) : (Theme.dark ? #081217 : Theme.sidebar);
                 clip: true;
                 VerticalLayout {
                     padding: 12px;
@@ -193,7 +214,7 @@ export component SettingsLayer inherits ModalLayer {
                     Rectangle {
                         height: 78px;
                         HorizontalLayout {
-                            padding-left: 20px; padding-right: 12px;
+                            padding-left: max(20px, root.content-margin); padding-right: 12px;
                             VerticalLayout {
                                 alignment: center; spacing: 4px;
                                 Text {
@@ -215,8 +236,11 @@ export component SettingsLayer inherits ModalLayer {
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
-                        padding: 20px;
+                        // Keep the cards a readable width and centred on wide windows.
+                        padding-left: max(20px, root.content-margin);
+                        padding-right: max(20px, root.content-margin);
                         padding-top: 18px;
+                        padding-bottom: 20px;
                         spacing: 20px;
                         alignment: start;
                         if ((root.settings-query == "" && (root.settings-section == "general")) || (root.settings-query != "" && root.settings-matches(@tr("settings.general.startup.title") + " " + @tr("settings.general.launch_at_login")))): SettingsCard {
@@ -229,6 +253,25 @@ export component SettingsLayer inherits ModalLayer {
                                     on: root.autostart;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.autostart-changed(!root.autostart); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.shortcuts.title");
+                                detail: @tr("settings.shortcuts.description");
+                                icon: @image-url("../icons/settings.svg");
+                                height: 54px;
+                                shortcuts-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.shortcuts.title");
+                                    clicked => { root.show-shortcuts(); }
+                                }
+                                Image {
+                                    source: @image-url("../icons/chevron-right.svg");
+                                    colorize: Theme.icon;
+                                    width: 16px;
+                                    height: 16px;
+                                    y: (parent.height - self.height) / 2;
                                 }
                             }
                         }
@@ -388,7 +431,122 @@ export component SettingsLayer inherits ModalLayer {
                                 }
                             }
                         }
-                        if ((root.settings-query == "" && (root.settings-section == "calls")) || (root.settings-query != "" && root.settings-matches(@tr("settings.calls.title") + " " + @tr("settings.calls.microphone") + " " + @tr("settings.calls.speaker") + " " + @tr("settings.calls.camera")))): SettingsCard {
+                        if ((root.settings-query == "" && (root.settings-section == "appearance")) || (root.settings-query != "" && root.settings-matches(@tr("settings.wallpaper.title") + " " + @tr("settings.wallpaper.background") + " " + @tr("settings.wallpaper.doodles")))): SettingsCard {
+                            title: @tr("settings.wallpaper.title");
+                            Rectangle {
+                                height: 150px;
+                                Wallpaper {
+                                    x: 14px;
+                                    y: 8px;
+                                    width: parent.width - 28px;
+                                    height: parent.height - 16px;
+                                    border-radius: 14px;
+                                    border-width: 1px;
+                                    border-color: Theme.glass-rim-soft;
+                                    Rectangle {
+                                        x: 16px; y: 18px; width: 150px; height: 34px;
+                                        border-radius: 10px;
+                                        background: Theme.bubble-in;
+                                        Text { text: @tr("settings.wallpaper.preview_in"); color: Theme.bubble-text; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                    Rectangle {
+                                        x: parent.width - 176px; y: 72px; width: 160px; height: 34px;
+                                        border-radius: 10px;
+                                        background: Theme.bubble-out;
+                                        Text { text: @tr("settings.wallpaper.preview_out"); color: Theme.bubble-text; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.wallpaper.background");
+                                height: 86px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: end;
+                                        for c in root.wp-bg-presets: Rectangle {
+                                            width: 22px; height: 22px; border-radius: 11px;
+                                            background: c;
+                                            border-width: Theme.wp-custom && Theme.wp-custom-bg == c ? 2px : 1px;
+                                            border-color: Theme.wp-custom && Theme.wp-custom-bg == c ? Theme.accent-text : Theme.glass-rim-soft;
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                accessible-role: button;
+                                                accessible-label: @tr("settings.wallpaper.background");
+                                                clicked => { root.wallpaper-colors-changed(c, Theme.wp-base-fg); }
+                                            }
+                                        }
+                                    }
+                                    LineEdit {
+                                        height: 30px;
+                                        width: 150px;
+                                        placeholder-text: "#rrggbb";
+                                        accessible-label: @tr("settings.wallpaper.hex");
+                                        accepted(t) => { root.wallpaper-hex-entered(false, t); }
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.wallpaper.doodles");
+                                height: 120px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: end;
+                                        for c in root.wp-fg-presets: Rectangle {
+                                            width: 22px; height: 22px; border-radius: 11px;
+                                            background: c;
+                                            border-width: Theme.wp-custom && Theme.wp-custom-fg.with-alpha(1.0) == c ? 2px : 1px;
+                                            border-color: Theme.wp-custom && Theme.wp-custom-fg.with-alpha(1.0) == c ? Theme.accent-text : Theme.glass-rim-soft;
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                accessible-role: button;
+                                                accessible-label: @tr("settings.wallpaper.doodles");
+                                                clicked => { root.wallpaper-colors-changed(Theme.wp-base-bg.with-alpha(1.0), c.with-alpha(Math.max(0.04, Theme.wp-base-fg.alpha / 255))); }
+                                            }
+                                        }
+                                    }
+                                    LineEdit {
+                                        height: 30px;
+                                        width: 150px;
+                                        placeholder-text: "#rrggbb";
+                                        accessible-label: @tr("settings.wallpaper.hex");
+                                        accepted(t) => { root.wallpaper-hex-entered(true, t); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        alignment: end;
+                                        Text { text: @tr("settings.wallpaper.intensity"); color: Theme.text-dim; font-size: 12px; vertical-alignment: center; }
+                                        Slider {
+                                            width: 150px;
+                                            minimum: 0;
+                                            maximum: 40;
+                                            value: root.wp-alpha-pct;
+                                            accessible-label: @tr("settings.wallpaper.intensity");
+                                            changed(v) => { root.wallpaper-colors-changed(Theme.wp-base-bg.with-alpha(1.0), Theme.wp-base-fg.with-alpha(v / 100)); }
+                                        }
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.wallpaper.reset");
+                                height: 50px;
+                                DialogButton {
+                                    label: @tr("settings.wallpaper.reset_button");
+                                    y: (parent.height - self.height) / 2;
+                                    enabled: Theme.wp-custom;
+                                    opacity: Theme.wp-custom ? 1.0 : 0.4;
+                                    clicked => { root.wallpaper-reset(); }
+                                }
+                            }
+                        }
+                        if ((root.settings-query == "" && (root.settings-section == "calls")) || (root.settings-query != "" && root.settings-matches(@tr("settings.calls.title") + " " + @tr("settings.calls.microphone") + " " + @tr("settings.calls.speaker") + " " + @tr("settings.calls.camera") + " " + @tr("settings.calls.silence_repeat")))): SettingsCard {
                             title: @tr("settings.calls.title");
                             hint: @tr("settings.calls.devices_hint");
                             SettingsRow {
@@ -433,6 +591,37 @@ export component SettingsLayer inherits ModalLayer {
                                     selected(value) => {
                                         root.camera-device = value;
                                         root.device-changed("camera", value);
+                                    }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.calls.silence_repeat");
+                                detail: @tr("settings.calls.silence_repeat_desc");
+                                icon: @image-url("../icons/bell-off.svg");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.calls.silence_repeat");
+                                    on: root.call-silence-repeat;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.call-silence-repeat-changed(!root.call-silence-repeat); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.calls.silence_minutes");
+                                icon: @image-url("../icons/bell.svg");
+                                opacity: root.call-silence-repeat ? 1.0 : 0.45;
+                                ComboBox {
+                                    width: 200px;
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    enabled: root.call-silence-repeat;
+                                    model: [@tr("settings.calls.silence_minutes_option", 2), @tr("settings.calls.silence_minutes_option", 5), @tr("settings.calls.silence_minutes_option", 10), @tr("settings.calls.silence_minutes_option", 30)];
+                                    current-value: @tr("settings.calls.silence_minutes_option", root.call-silence-minutes);
+                                    selected(value) => {
+                                        if (value == @tr("settings.calls.silence_minutes_option", 2)) { root.call-silence-minutes-changed(2); }
+                                        else if (value == @tr("settings.calls.silence_minutes_option", 5)) { root.call-silence-minutes-changed(5); }
+                                        else if (value == @tr("settings.calls.silence_minutes_option", 10)) { root.call-silence-minutes-changed(10); }
+                                        else { root.call-silence-minutes-changed(30); }
                                     }
                                 }
                             }
@@ -511,7 +700,7 @@ export component SettingsLayer inherits ModalLayer {
                                 }
                             }
                         }
-                        if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("settings.category.notifications.title") + " " + @tr("settings.notifications.enabled") + " " + @tr("settings.notifications.previews")))): SettingsCard {
+                        if ((root.settings-query == "" && (root.settings-section == "notifications")) || (root.settings-query != "" && root.settings-matches(@tr("settings.category.notifications.title") + " " + @tr("settings.notifications.enabled") + " " + @tr("settings.notifications.previews") + " " + @tr("settings.notifications.sound")))): SettingsCard {
                             title: @tr("settings.category.notifications.title");
                             SettingsRow {
                                 label: @tr("settings.notifications.enabled");
@@ -535,6 +724,18 @@ export component SettingsLayer inherits ModalLayer {
                                     on: root.notify-previews;
                                     y: (parent.height - self.height) / 2;
                                     clicked => { root.notify-previews-changed(!root.notify-previews); }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.notifications.sound");
+                                icon: @image-url("../icons/volume.svg");
+                                detail: @tr("settings.notifications.sound_desc");
+                                Toggle {
+                                    accessible-role: button;
+                                    accessible-label: @tr("settings.notifications.sound");
+                                    on: root.message-sound;
+                                    y: (parent.height - self.height) / 2;
+                                    clicked => { root.message-sound-changed(!root.message-sound); }
                                 }
                             }
                         }

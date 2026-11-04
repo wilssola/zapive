@@ -17,9 +17,9 @@ export component SettingsCard inherits VerticalLayout {
     Rectangle {
         height: card-content.preferred-height;
         border-radius: 10px;
-        background: Theme.dark ? #101f27 : Theme.panel;
+        background: Theme.card;
         border-width: 1px;
-        border-color: Theme.border;
+        border-color: Theme.glass ? Theme.glass-rim-soft : Theme.border;
         card-content := VerticalLayout {
             alignment: start;
             padding-top: 2px;

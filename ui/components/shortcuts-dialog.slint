@@ -1,0 +1,132 @@
+import { ScrollView } from "std-widgets.slint";
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { Theme } from "theme.slint";
+
+component KeyCap inherits Rectangle {
+    in property <string> label;
+    height: 24px;
+    width: max(24px, cap-text.preferred-width + 14px);
+    border-radius: 7px;
+    background: Theme.glass ? Theme.glass-fill-soft : Theme.tile;
+    border-width: 1px;
+    border-color: Theme.glass ? Theme.glass-rim-soft : Theme.border;
+    cap-text := Text {
+        text: root.label;
+        color: Theme.text;
+        font-size: 12px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component ShortcutRow inherits Rectangle {
+    in property <string> action;
+    in property <[string]> keys;
+    height: 36px;
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 12px;
+        Text {
+            text: root.action;
+            color: Theme.text;
+            font-size: 13.5px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            alignment: end;
+            for k in root.keys: KeyCap {
+                label: k;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}
+
+component Section inherits Text {
+    color: Theme.accent-text;
+    font-size: 12px;
+    font-weight: 700;
+    height: 30px;
+    vertical-alignment: bottom;
+}
+
+// Glass dialog listing every keyboard shortcut (Ctrl+/ toggles it).
+export component ShortcutsLayer inherits ModalLayer {
+    in-out property <bool> shortcuts-open;
+    // "Ctrl" becomes "Cmd" on macOS.
+    in property <bool> is-macos: false;
+    property <string> mod: root.is-macos ? "Cmd" : "Ctrl";
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: min(520px, parent.width - 32px);
+        height: min(parent.height - 40px, 660px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        border-radius: 20px;
+        drop-shadow-blur: Theme.glass ? 40px : 0px;
+        drop-shadow-color: Theme.glass-shadow;
+        clip: true;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        TouchArea { }
+        VerticalLayout {
+            padding: 18px;
+            spacing: 8px;
+            HorizontalLayout {
+                Text {
+                    text: @tr("shortcuts.title");
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    icon: @image-url("../icons/x.svg");
+                    accessible-role: button;
+                    accessible-label: @tr("starred.close");
+                    clicked => { root.shortcuts-open = false; }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 0px;
+                    Section { text: @tr("shortcuts.section.chats"); }
+                    ShortcutRow { action: @tr("shortcuts.open_chat_n"); keys: [root.mod, "1…9"]; }
+                    ShortcutRow { action: @tr("shortcuts.next_chat"); keys: [root.mod, "Tab"]; }
+                    ShortcutRow { action: @tr("shortcuts.prev_chat"); keys: [root.mod, "Shift", "Tab"]; }
+                    ShortcutRow { action: @tr("shortcuts.next_chat_alt"); keys: ["Alt", "↓"]; }
+                    ShortcutRow { action: @tr("shortcuts.prev_chat_alt"); keys: ["Alt", "↑"]; }
+                    ShortcutRow { action: @tr("shortcuts.archive"); keys: [root.mod, "E"]; }
+                    ShortcutRow { action: @tr("shortcuts.mute"); keys: [root.mod, "Shift", "M"]; }
+                    Section { text: @tr("shortcuts.section.search"); }
+                    ShortcutRow { action: @tr("shortcuts.search_chats"); keys: [root.mod, "F"]; }
+                    ShortcutRow { action: @tr("shortcuts.search_in_chat"); keys: [root.mod, "Shift", "F"]; }
+                    Section { text: @tr("shortcuts.section.messages"); }
+                    ShortcutRow { action: @tr("shortcuts.edit_last"); keys: ["↑"]; }
+                    ShortcutRow { action: @tr("shortcuts.paste_image"); keys: [root.mod, "V"]; }
+                    ShortcutRow { action: @tr("shortcuts.copy_selection"); keys: [root.mod, "C"]; }
+                    Section { text: @tr("shortcuts.section.general"); }
+                    ShortcutRow { action: @tr("shortcuts.close_overlay"); keys: ["Esc"]; }
+                    ShortcutRow { action: @tr("shortcuts.show_shortcuts"); keys: [root.mod, "/"]; }
+                }
+            }
+        }
+    }
+}

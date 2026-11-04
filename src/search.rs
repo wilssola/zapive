@@ -35,7 +35,7 @@
 // nothing at all.
 use crate::store::{MessageKind, StoredMessage};
 use crate::vault::{KeyHandle, Vault};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -138,7 +138,8 @@ fn term(key: &[u8; 32], word: &str) -> String {
     let mut prefix = String::new();
     for ch in word.chars().take(MAX_TERM_CHARS) {
         prefix.push(ch);
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC accepts any key size");
+        let mut mac =
+            <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC accepts any key size");
         mac.update(prefix.as_bytes());
         let digest = mac.finalize().into_bytes();
         let bits = (u16::from(digest[0]) << 8 | u16::from(digest[1])) & 0x3ff;
@@ -211,7 +212,9 @@ impl SearchIndex {
             return;
         }
         self.key = vault.key_handle();
-        let Ok(conn) = Connection::open(path) else { return };
+        let Ok(conn) = Connection::open(path) else {
+            return;
+        };
         if self.prepare_schema(&conn).is_err() {
             return;
         }
@@ -232,7 +235,9 @@ impl SearchIndex {
     fn prepare_schema(&mut self, conn: &Connection) -> rusqlite::Result<()> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v BLOB NOT NULL);")?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v BLOB NOT NULL);",
+        )?;
         let stale = meta_get(conn, "schema").as_deref() != Some(SCHEMA_VERSION)
             || match meta_get(conn, "keycheck") {
                 Some(stored) => self.key.decrypt_bytes(&stored).as_deref() != Ok(KEYCHECK_MAGIC),
@@ -269,16 +274,23 @@ impl SearchIndex {
 
     pub fn add(&mut self, jid: &str, m: &StoredMessage) {
         let Some(entry) = entry_of(m) else { return };
-        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else { return };
+        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else {
+            return;
+        };
         let key = self.key.clone();
         let Some(db) = self.db.as_mut() else { return };
         let Ok(tx) = db.transaction() else { return };
         let ok = insert_entry(&tx, &key, &index_key, jid, &entry);
-        if ok.is_ok() { let _ = tx.commit(); }
+        if ok.is_ok() {
+            let _ = tx.commit();
+        }
     }
 
+    #[cfg(test)]
     pub fn rebuild(&mut self, jid: &str, messages: &[StoredMessage]) {
-        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else { return };
+        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else {
+            return;
+        };
         let key = self.key.clone();
         let entries: Vec<Entry> = messages.iter().filter_map(entry_of).collect();
         let Some(db) = self.db.as_mut() else { return };
@@ -286,14 +298,19 @@ impl SearchIndex {
         let res = (|| -> rusqlite::Result<()> {
             for message in messages.iter().filter(|m| entry_of(m).is_none()) {
                 tx.execute("DELETE FROM fts WHERE rowid IN (SELECT rowid FROM doc WHERE jid=?1 AND msg_id=?2)", params![jid, message.id])?;
-                tx.execute("DELETE FROM doc WHERE jid=?1 AND msg_id=?2", params![jid, message.id])?;
+                tx.execute(
+                    "DELETE FROM doc WHERE jid=?1 AND msg_id=?2",
+                    params![jid, message.id],
+                )?;
             }
             for e in &entries {
                 insert_entry(&tx, &key, &index_key, jid, e)?;
             }
             Ok(())
         })();
-        if res.is_ok() { let _ = tx.commit(); }
+        if res.is_ok() {
+            let _ = tx.commit();
+        }
     }
 
     pub fn remove(&mut self, jid: &str, id: &str) {
@@ -335,10 +352,10 @@ impl SearchIndex {
     }
 
     pub fn mark_complete(&mut self, jid: &str) {
-        if let Some(db) = &self.db {
-            if meta_set(db, &format!("complete:{jid}"), &[1]).is_ok() {
-                self.indexed.insert(jid.to_string());
-            }
+        if let Some(db) = &self.db
+            && meta_set(db, &format!("complete:{jid}"), &[1]).is_ok()
+        {
+            self.indexed.insert(jid.to_string());
         }
     }
 
@@ -352,8 +369,12 @@ impl SearchIndex {
     // as-you-type search); the whole phrase appearing ranks above
     // scattered words.
     pub fn search(&self, query: &str, chat: Option<&str>, limit: usize) -> Vec<Hit> {
-        let Some(db) = &self.db else { return Vec::new() };
-        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else { return Vec::new() };
+        let Some(db) = &self.db else {
+            return Vec::new();
+        };
+        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else {
+            return Vec::new();
+        };
         let phrase = fold(query.trim());
         if phrase.is_empty() {
             return Vec::new();
@@ -365,7 +386,11 @@ impl SearchIndex {
             .enumerate()
             .map(|(i, w)| {
                 let t = term(&index_key, w);
-                if prefix_last && i + 1 == words.len() { format!("\"{t}\"*") } else { format!("\"{t}\"") }
+                if prefix_last && i + 1 == words.len() {
+                    format!("\"{t}\"*")
+                } else {
+                    format!("\"{t}\"")
+                }
             })
             .collect::<Vec<_>>()
             .join(" AND ");
@@ -393,8 +418,12 @@ impl SearchIndex {
         };
         let mut hits: Vec<(u8, Hit)> = Vec::new();
         for (jid, id, ts, from_me, blob) in rows.flatten() {
-            let Ok(plain) = self.key.decrypt_bytes(&blob) else { continue };
-            let Ok(body) = serde_json::from_slice::<DocBody>(&plain) else { continue };
+            let Ok(plain) = self.key.decrypt_bytes(&blob) else {
+                continue;
+            };
+            let Ok(body) = serde_json::from_slice::<DocBody>(&plain) else {
+                continue;
+            };
             let norm = fold(&body.text);
             let rank = if norm.contains(&phrase) {
                 2
@@ -445,13 +474,21 @@ fn insert_entry(
     e: &Entry,
 ) -> rusqlite::Result<()> {
     let exists: Option<i64> = conn
-        .query_row("SELECT rowid FROM doc WHERE jid=?1 AND msg_id=?2", params![jid, e.id], |r| r.get(0))
+        .query_row(
+            "SELECT rowid FROM doc WHERE jid=?1 AND msg_id=?2",
+            params![jid, e.id],
+            |r| r.get(0),
+        )
         .optional()?;
     if let Some(rowid) = exists {
         conn.execute("DELETE FROM fts WHERE rowid=?1", params![rowid])?;
         conn.execute("DELETE FROM doc WHERE rowid=?1", params![rowid])?;
     }
-    let body = DocBody { text: e.text.clone(), sender: e.sender.clone(), sender_jid: e.sender_jid.clone() };
+    let body = DocBody {
+        text: e.text.clone(),
+        sender: e.sender.clone(),
+        sender_jid: e.sender_jid.clone(),
+    };
     let plain = serde_json::to_vec(&body).unwrap_or_default();
     let blob = key.encrypt_bytes(&plain);
     conn.execute(
@@ -460,10 +497,12 @@ fn insert_entry(
     )?;
     let rowid = conn.last_insert_rowid();
     let terms = terms_of(index_key, &e.norm);
-    conn.execute("INSERT INTO fts(rowid, terms) VALUES(?1, ?2)", params![rowid, terms])?;
+    conn.execute(
+        "INSERT INTO fts(rowid, terms) VALUES(?1, ?2)",
+        params![rowid, terms],
+    )?;
     Ok(())
 }
-
 
 fn load_indexed(conn: &Connection) -> HashSet<String> {
     let mut out = HashSet::new();
@@ -478,7 +517,10 @@ fn load_indexed(conn: &Connection) -> HashSet<String> {
 }
 
 fn meta_get(conn: &Connection, k: &str) -> Option<Vec<u8>> {
-    conn.query_row("SELECT v FROM meta WHERE k=?1", [k], |r| r.get(0)).optional().ok().flatten()
+    conn.query_row("SELECT v FROM meta WHERE k=?1", [k], |r| r.get(0))
+        .optional()
+        .ok()
+        .flatten()
 }
 
 fn meta_set(conn: &Connection, k: &str, v: &[u8]) -> rusqlite::Result<()> {
@@ -495,7 +537,10 @@ fn snippet(text: &str, norm: &str, word: &str) -> String {
     const RADIUS: usize = 40;
     // Folding keeps one output char per input char for the cases it
     // handles, so a char index in `norm` maps onto `text` directly.
-    let at = norm.find(word).map(|byte| norm[..byte].chars().count()).unwrap_or(0);
+    let at = norm
+        .find(word)
+        .map(|byte| norm[..byte].chars().count())
+        .unwrap_or(0);
     let chars: Vec<char> = text.chars().collect();
     let start = at.saturating_sub(RADIUS);
     let end = (at + word.chars().count() + RADIUS).min(chars.len());
@@ -552,14 +597,20 @@ mod tests {
         vault.open().expect("unlock vault (no pin)");
         let mut index = SearchIndex::default();
         index.open_at(&vault, &search_path);
-        TestIndex { index, _vault: vault, vault_path, search_path }
+        TestIndex {
+            index,
+            _vault: vault,
+            vault_path,
+            search_path,
+        }
     }
 
     #[test]
     fn durable_index_keeps_old_pages_and_updates_partial_cache() {
         let mut t = test_index();
         for n in 0..650 {
-            t.index.add("a@g.us", &msg(&n.to_string(), n, "needle original"));
+            t.index
+                .add("a@g.us", &msg(&n.to_string(), n, "needle original"));
         }
         assert_eq!(t.index.search("needle", None, 1000).len(), 650);
         t.index.rebuild("a@g.us", &[msg("649", 649, "replacement")]);
@@ -580,7 +631,10 @@ mod tests {
         let whole = term(&key, "reuniao");
         for n in 1..="reuniao".chars().count() {
             let prefix: String = "reuniao".chars().take(n).collect();
-            assert!(whole.starts_with(&term(&key, &prefix)), "prefix {n} should match");
+            assert!(
+                whole.starts_with(&term(&key, &prefix)),
+                "prefix {n} should match"
+            );
         }
     }
 
@@ -592,7 +646,10 @@ mod tests {
         t.index.add("b@g.us", &msg("3", 30, "nada a ver"));
         let hits = t.index.search("reuniao amanha", None, 10);
         // The whole phrase outranks scattered words, whatever the date.
-        assert_eq!(hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), vec!["1", "2"]);
+        assert_eq!(
+            hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(),
+            vec!["1", "2"]
+        );
         let hits = t.index.search("REUNIÃO AMANHÃ", Some("a@g.us"), 10);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, "1");
@@ -607,7 +664,10 @@ mod tests {
         let mut t = test_index();
         t.index.add("a@g.us", &msg("1", 10, "Reunião amanhã"));
         assert_eq!(t.index.search("reuni", None, 10).len(), 1);
-        assert!(t.index.search("reuni ", None, 10).is_empty(), "a trailing space closes the word");
+        assert!(
+            t.index.search("reuni ", None, 10).is_empty(),
+            "a trailing space closes the word"
+        );
     }
 
     #[test]

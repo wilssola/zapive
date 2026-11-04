@@ -44,8 +44,23 @@ fn escape_md(text: &str) -> String {
         // "&amp;" an entity, and the styled text drifts from the plain.
         if matches!(
             c,
-            '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '(' | ')' | '#' | '>' | '+' | '-' | '.' | '!'
-                | '|' | '<' | '&'
+            '\\' | '`'
+                | '*'
+                | '_'
+                | '~'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '#'
+                | '>'
+                | '+'
+                | '-'
+                | '.'
+                | '!'
+                | '|'
+                | '<'
+                | '&'
         ) {
             out.push('\\');
         }
@@ -84,7 +99,8 @@ fn tokens(text: &str) -> Vec<Token<'_>> {
         if let Some(italic) = caps.get(4) {
             let before = text[..whole.start()].chars().next_back();
             let after = text[whole.end()..].chars().next();
-            if before.is_some_and(char::is_alphanumeric) || after.is_some_and(char::is_alphanumeric) {
+            if before.is_some_and(char::is_alphanumeric) || after.is_some_and(char::is_alphanumeric)
+            {
                 continue;
             }
             out.push(Token::Plain(&text[last..whole.start()]));
@@ -217,7 +233,10 @@ pub struct PlainRender {
 }
 
 pub fn render_plain(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> PlainRender {
-    let mut out = PlainRender { text: String::with_capacity(text.len()), spans: Vec::new() };
+    let mut out = PlainRender {
+        text: String::with_capacity(text.len()),
+        spans: Vec::new(),
+    };
     for token in tokens(text) {
         match token {
             Token::Plain(part) | Token::Bold(part) | Token::Italic(part) => {
@@ -256,14 +275,19 @@ fn plain_links(text: &str, out: &mut PlainRender) {
         out.text.push_str(&text[last..m.start()]);
         let start = out.text.len();
         out.text.push_str(m.as_str());
-        out.spans.push((start, out.text.len(), m.as_str().to_string()));
+        out.spans
+            .push((start, out.text.len(), m.as_str().to_string()));
         last = m.end();
     }
     out.text.push_str(&text[last..]);
 }
 
 // The link or mention under a byte offset of the plain rendering.
-pub fn target_at(text: &str, offset: usize, resolve: &dyn Fn(&str) -> MentionTarget) -> Option<String> {
+pub fn target_at(
+    text: &str,
+    offset: usize,
+    resolve: &dyn Fn(&str) -> MentionTarget,
+) -> Option<String> {
     render_plain(text, resolve)
         .spans
         .into_iter()
@@ -294,7 +318,10 @@ mod tests {
     use super::*;
 
     fn ana(num: &str) -> MentionTarget {
-        MentionTarget { name: Some("Ana".into()), jid: format!("{num}@s.whatsapp.net") }
+        MentionTarget {
+            name: Some("Ana".into()),
+            jid: format!("{num}@s.whatsapp.net"),
+        }
     }
 
     #[test]
@@ -317,8 +344,14 @@ mod tests {
         assert_eq!(r.text, "oi @Ana veja https://x.io/a fim");
         assert_eq!(r.spans[0], (3, 7, "5511999@s.whatsapp.net".to_string()));
         assert_eq!(r.spans[1], (13, 27, "https://x.io/a".to_string()));
-        assert_eq!(target_at("oi @5511999 veja *https://x.io/a* fim", 20, &ana).as_deref(), Some("https://x.io/a"));
-        assert_eq!(target_at("oi @5511999 veja *https://x.io/a* fim", 9, &ana), None);
+        assert_eq!(
+            target_at("oi @5511999 veja *https://x.io/a* fim", 20, &ana).as_deref(),
+            Some("https://x.io/a")
+        );
+        assert_eq!(
+            target_at("oi @5511999 veja *https://x.io/a* fim", 9, &ana),
+            None
+        );
     }
 
     #[test]
@@ -334,8 +367,17 @@ mod tests {
     #[test]
     fn markdown_keeps_every_line() {
         let md = to_markdown("*a*\n\n  b\n    c", &ana);
-        assert_eq!(md, "**a**\n\u{a0}\n\u{a0}\u{a0}b\n\u{a0}\u{a0}\u{a0}\u{a0}c");
-        assert_eq!(md.split('\n').count(), render_plain("*a*\n\n  b\n    c", &ana).text.split('\n').count());
+        assert_eq!(
+            md,
+            "**a**\n\u{a0}\n\u{a0}\u{a0}b\n\u{a0}\u{a0}\u{a0}\u{a0}c"
+        );
+        assert_eq!(
+            md.split('\n').count(),
+            render_plain("*a*\n\n  b\n    c", &ana)
+                .text
+                .split('\n')
+                .count()
+        );
     }
 
     // Markers that WhatsApp leaves literal stay literal in both renderings.
@@ -343,7 +385,10 @@ mod tests {
     fn loose_markers_are_literal_in_both() {
         assert_eq!(render_plain("2 * 3 * 4", &ana).text, "2 * 3 * 4");
         assert_eq!(to_markdown("2 * 3 * 4", &ana), "2 \\* 3 \\* 4");
-        assert_eq!(render_plain("snake_case_name", &ana).text, "snake_case_name");
+        assert_eq!(
+            render_plain("snake_case_name", &ana).text,
+            "snake_case_name"
+        );
         assert_eq!(to_markdown("snake_case_name", &ana), "snake\\_case\\_name");
         assert_eq!(render_plain("_it_ ok", &ana).text, "it ok");
         assert_eq!(to_markdown("_it_ ok", &ana), "*it* ok");

@@ -1,11 +1,18 @@
+// Only Windows has a working set to trim.
+pub fn trim_working_set() {}
+
 pub fn focus_window() {
-    let _ = std::process::Command::new("wmctrl").args(["-a", "Zapive"]).spawn();
+    let _ = std::process::Command::new("wmctrl")
+        .args(["-a", "Zapive"])
+        .spawn();
 }
 
 // A ringing call has to be seen. The title is deliberately not
 // translated: that is what identifies the window here.
 pub fn focus_call_window() {
-    let _ = std::process::Command::new("wmctrl").args(["-a", "Zapive Call"]).spawn();
+    let _ = std::process::Command::new("wmctrl")
+        .args(["-a", "Zapive Call"])
+        .spawn();
 }
 
 // Only Windows guards the foreground; wmctrl needs no handover.
@@ -73,11 +80,16 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
         .body(body)
         .appname("Zapive")
         .icon("io.github.wilssola.Zapive")
-        .hint(notify_rust::Hint::DesktopEntry("io.github.wilssola.Zapive".into()));
+        .hint(notify_rust::Hint::DesktopEntry(
+            "io.github.wilssola.Zapive".into(),
+        ));
     if let Some(path) = payload.thumbnail.as_deref() {
         notification.image_path(&path.to_string_lossy());
     }
     if let Some(token) = payload.token {
+        // "default" is the body click; servers only report it when the
+        // notification registered the action.
+        notification.action("default", &crate::i18n::t("notify.open"));
         if payload.play {
             notification.action(&format!("play:{token}"), &crate::i18n::t("notify.play"));
         }
@@ -85,22 +97,42 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
             notification.action(&format!("reply:{token}"), &crate::i18n::t("notify.reply"));
         }
         std::thread::spawn(move || {
-            let Ok(handle) = notification.show() else { return };
-            let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
-                if let notify_rust::NotificationResponse::Action(action) = response {
-                    if let Some((action, token)) = action.split_once(':') {
-                        let token = token.to_string();
-                        if action == "play" {
-                            crate::bridge::ui_apply(move |bridge| bridge.on_notification_play(&token));
+            let Ok(handle) = notification.show() else {
+                return;
+            };
+            let _ =
+                handle.wait_for_response(move |response: &notify_rust::NotificationResponse| {
+                    use notify_rust::NotificationResponse as Response;
+                    let open = |token: String| {
+                        crate::bridge::ui_apply(move |bridge| {
+                            bridge.on_notification_activated(&token)
+                        });
+                    };
+                    match response {
+                        Response::Default => open(token),
+                        Response::Action(action) if action == "default" => open(token),
+                        Response::Action(action) => {
+                            if let Some((kind, action_token)) = action.split_once(':') {
+                                let action_token = action_token.to_string();
+                                match kind {
+                                    "play" => crate::bridge::ui_apply(move |bridge| {
+                                        bridge.on_notification_play(&action_token)
+                                    }),
+                                    "reply" => open(action_token),
+                                    _ => {}
+                                }
+                            }
                         }
+                        _ => {}
                     }
-                }
-            });
+                });
         });
     } else {
         let sent = notification.show().is_ok();
         if !sent {
-            let _ = std::process::Command::new("notify-send").args([title, body]).spawn();
+            let _ = std::process::Command::new("notify-send")
+                .args([title, body])
+                .spawn();
         }
     }
 }
@@ -115,12 +147,20 @@ pub fn system_dark() -> bool {
 
 // ---- vault key wrapping: the Secret Service holds the secret itself ----
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn wrap_secret(inner: &str) -> String {
     use base64::Engine as _;
     use std::io::Write as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(inner.as_bytes());
     let child = std::process::Command::new("secret-tool")
-        .args(["store", "--label=Zapive", "service", "Zapive", "account", "vault"])
+        .args([
+            "store",
+            "--label=Zapive",
+            "service",
+            "Zapive",
+            "account",
+            "vault",
+        ])
         .stdin(std::process::Stdio::piped())
         .spawn();
     if let Ok(mut child) = child {
@@ -135,6 +175,7 @@ pub fn wrap_secret(inner: &str) -> String {
     format!("raw:{b64}")
 }
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn unwrap_secret(stored: &str) -> Result<String, String> {
     use base64::Engine as _;
     let b64 = if stored == "secret:" {

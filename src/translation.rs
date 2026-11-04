@@ -19,7 +19,8 @@ use models::{Catalog, Pair, code, plan_route};
 const QUEUE_CAPACITY: usize = 8;
 const MAX_REQUEST: usize = 128 * 1024;
 const MAX_TEXT: usize = 16_000;
-const MAX_ENGINES: usize = 2;
+const MAX_ENGINES: usize = 1;
+const ENGINE_IDLE: Duration = Duration::from_secs(300);
 const TRANSLATE_TIMEOUT: Duration = Duration::from_secs(180);
 type Done = Box<dyn FnOnce(Result<Value, String>) + Send>;
 type Progress = Box<dyn Fn(Value) + Send>;
@@ -177,16 +178,24 @@ fn cancelled(shared: &Mutex<State>, generation: u64) -> Result<(), String> {
 struct Core {
     engines: Vec<(PathBuf, engine::Engine)>,
     detector: Option<lingua::LanguageDetector>,
+    last_used: Option<Instant>,
+}
+
+// True once nothing has used the loaded engine for `idle`.
+fn engine_expired(last_used: Option<Instant>, now: Instant, idle: Duration) -> bool {
+    last_used.is_some_and(|at| now.saturating_duration_since(at) >= idle)
 }
 
 impl Core {
     fn reset(&mut self) {
         self.engines.clear();
         self.detector = None;
+        self.last_used = None;
     }
 
     /// The loaded engine for a package directory, most recently used last.
     fn engine(&mut self, dir: &Path) -> Result<&engine::Engine, String> {
+        self.last_used = Some(Instant::now());
         if let Some(index) = self.engines.iter().position(|(path, _)| path == dir) {
             let entry = self.engines.remove(index);
             self.engines.push(entry);
@@ -204,7 +213,26 @@ impl Core {
 
 fn serve(receiver: mpsc::Receiver<Task>, shared: Arc<Mutex<State>>, models: PathBuf) {
     let mut core = Core::default();
-    while let Ok(task) = receiver.recv() {
+    loop {
+        // While models are loaded, wake up now and then to drop them once
+        // they have sat unused; with nothing loaded just block.
+        let task = if core.engines.is_empty() && core.detector.is_none() {
+            match receiver.recv() {
+                Ok(task) => task,
+                Err(_) => break,
+            }
+        } else {
+            match receiver.recv_timeout(Duration::from_secs(30)) {
+                Ok(task) => task,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if engine_expired(core.last_used, Instant::now(), ENGINE_IDLE) {
+                        core.reset();
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             execute(&task, &shared, &models, &mut core)
         }));
@@ -256,7 +284,8 @@ fn execute(
             core.engines.clear();
             let progress = |value: Value| {
                 if let Some(progress) = &task.progress {
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| progress(value)));
+                    let _ =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| progress(value)));
                 }
             };
             downloads::install(models, source, target, &check, &progress)?;
@@ -307,8 +336,7 @@ fn translate(
     }
     let installed = models::installed(models);
     let have: BTreeSet<Pair> = installed.keys().cloned().collect();
-    let route =
-        plan_route(&source, target, &Catalog::new(), &have).ok_or("model_not_installed")?;
+    let route = plan_route(&source, target, &Catalog::new(), &have).ok_or("model_not_installed")?;
     let mut text = text.to_string();
     for edge in route {
         check()?;
@@ -326,9 +354,16 @@ pub fn missing_models(
     catalog: &BTreeSet<Pair>,
     installed: &BTreeSet<Pair>,
 ) -> Option<usize> {
-    let catalog: Catalog = catalog.iter().map(|pair| (pair.clone(), Vec::new())).collect();
-    plan_route(source, target, &catalog, installed)
-        .map(|route| route.iter().filter(|pair| !installed.contains(*pair)).count())
+    let catalog: Catalog = catalog
+        .iter()
+        .map(|pair| (pair.clone(), Vec::new()))
+        .collect();
+    plan_route(source, target, &catalog, installed).map(|route| {
+        route
+            .iter()
+            .filter(|pair| !installed.contains(*pair))
+            .count()
+    })
 }
 
 fn validate_request(request: &Value) -> Result<(), String> {
@@ -338,7 +373,16 @@ fn validate_request(request: &Value) -> Result<(), String> {
     let op = request["op"].as_str();
     if !matches!(
         op,
-        Some("status" | "refresh" | "install" | "remove" | "translate" | "stop" | "restart" | "cancel")
+        Some(
+            "status"
+                | "refresh"
+                | "install"
+                | "remove"
+                | "translate"
+                | "stop"
+                | "restart"
+                | "cancel"
+        )
     ) {
         return Err("invalid_operation".into());
     }
@@ -367,10 +411,8 @@ fn validate_request(request: &Value) -> Result<(), String> {
                 return Err("empty_text".into());
             }
         }
-        Some("install" | "remove") => {
-            if !code(source) || !code(target) || source == target {
-                return Err("invalid_language".into());
-            }
+        Some("install" | "remove") if (!code(source) || !code(target) || source == target) => {
+            return Err("invalid_language".into());
         }
         _ => {}
     }
@@ -413,11 +455,16 @@ mod tests {
             "invalid_language"
         );
         assert!(validate_request(&json!({"op":"status"})).is_ok());
-        assert_eq!(validate_request(&json!({"op":"unknown"})).unwrap_err(), "invalid_operation");
+        assert_eq!(
+            validate_request(&json!({"op":"unknown"})).unwrap_err(),
+            "invalid_operation"
+        );
         assert_eq!(validate_request(&json!([])).unwrap_err(), "invalid_request");
         assert_eq!(
-            validate_request(&json!({"op":"translate","target":"pt","text":"x".repeat(MAX_REQUEST)}))
-                .unwrap_err(),
+            validate_request(
+                &json!({"op":"translate","target":"pt","text":"x".repeat(MAX_REQUEST)})
+            )
+            .unwrap_err(),
             "request_too_large"
         );
         let translate = |source: &str, target: &str, text: &str| {
@@ -426,8 +473,14 @@ mod tests {
         assert!(translate("auto", "pt", "hello").is_ok());
         assert!(translate("", "pt", "hello").is_ok());
         assert!(translate("en", "pt", "hello").is_ok());
-        assert_eq!(translate("en", "PT", "hello").unwrap_err(), "invalid_language");
-        assert_eq!(translate("../", "pt", "hello").unwrap_err(), "invalid_language");
+        assert_eq!(
+            translate("en", "PT", "hello").unwrap_err(),
+            "invalid_language"
+        );
+        assert_eq!(
+            translate("../", "pt", "hello").unwrap_err(),
+            "invalid_language"
+        );
         assert_eq!(translate("en", "pt", "  \n").unwrap_err(), "empty_text");
         assert_eq!(
             translate("en", "pt", &"x".repeat(MAX_TEXT + 1)).unwrap_err(),
@@ -472,10 +525,19 @@ mod tests {
         assert_eq!(status["models"], "");
         assert_eq!(status["pairs"], "");
         assert_eq!(worker.status(), json!({"running":true}));
-        assert_eq!(call(&worker, json!({"op":"stop"})).unwrap(), json!({"running":false}));
+        assert_eq!(
+            call(&worker, json!({"op":"stop"})).unwrap(),
+            json!({"running":false})
+        );
         assert_eq!(worker.status(), json!({"running":false}));
-        assert_eq!(call(&worker, json!({"op":"restart"})).unwrap()["running"], true);
-        assert_eq!(call(&worker, json!({"op":"cancel"})).unwrap()["installed"], json!([]));
+        assert_eq!(
+            call(&worker, json!({"op":"restart"})).unwrap()["running"],
+            true
+        );
+        assert_eq!(
+            call(&worker, json!({"op":"cancel"})).unwrap()["installed"],
+            json!([])
+        );
         assert_eq!(
             call(&worker, json!({"op":"remove","source":"en","target":"pt"})).unwrap_err(),
             "model_not_installed"
@@ -495,13 +557,19 @@ mod tests {
         .unwrap();
         assert_eq!(same, json!({"text":"olá","source":"pt","target":"pt"}));
         assert_eq!(
-            call(&worker, json!({"op":"translate","source":"en","target":"pt","text":"hello"}))
-                .unwrap_err(),
+            call(
+                &worker,
+                json!({"op":"translate","source":"en","target":"pt","text":"hello"})
+            )
+            .unwrap_err(),
             "model_not_installed"
         );
         assert_eq!(
-            call(&worker, json!({"op":"translate","source":"auto","target":"pt","text":"hi"}))
-                .unwrap_err(),
+            call(
+                &worker,
+                json!({"op":"translate","source":"auto","target":"pt","text":"hi"})
+            )
+            .unwrap_err(),
             "source_required"
         );
         let japanese = call(
@@ -529,9 +597,16 @@ mod tests {
             .unwrap();
         let queued = tx.clone();
         worker
-            .request(json!({"op":"translate","source":"en","target":"pt","text":"hello"}), move |r| {
-                let _ = queued.send(if r == Err("request_cancelled".into()) { "cancelled" } else { "ran" });
-            })
+            .request(
+                json!({"op":"translate","source":"en","target":"pt","text":"hello"}),
+                move |r| {
+                    let _ = queued.send(if r == Err("request_cancelled".into()) {
+                        "cancelled"
+                    } else {
+                        "ran"
+                    });
+                },
+            )
             .unwrap();
         let stopped = tx.clone();
         worker
@@ -540,7 +615,9 @@ mod tests {
             })
             .unwrap();
         release_tx.send(()).unwrap();
-        let order: Vec<_> = (0..3).map(|_| rx.recv_timeout(Duration::from_secs(10)).unwrap()).collect();
+        let order: Vec<_> = (0..3)
+            .map(|_| rx.recv_timeout(Duration::from_secs(10)).unwrap())
+            .collect();
         assert_eq!(order, ["status", "cancelled", "stopped"]);
         assert_eq!(worker.status(), json!({"running":false}));
         let _ = std::fs::remove_dir_all(root);
@@ -584,5 +661,20 @@ mod tests {
         assert!(state.shutdown);
         assert!(!state.running);
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+
+    #[test]
+    fn engine_expires_only_after_the_idle_window() {
+        let now = Instant::now();
+        assert!(!engine_expired(None, now, ENGINE_IDLE));
+        assert!(!engine_expired(Some(now), now, ENGINE_IDLE));
+        assert!(engine_expired(Some(now), now + ENGINE_IDLE, ENGINE_IDLE));
+        assert!(!engine_expired(Some(now + ENGINE_IDLE), now, ENGINE_IDLE));
+        assert_eq!(MAX_ENGINES, 1);
     }
 }

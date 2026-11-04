@@ -13,9 +13,16 @@ use std::sync::mpsc;
 pub enum PdfReq {
     // Loads a document; `generation` tags every answer so a viewer that moved
     // on can drop late pages.
-    Open { path: PathBuf, generation: u64 },
+    Open {
+        path: PathBuf,
+        generation: u64,
+    },
     // Renders one page at the given pixel width.
-    Render { page: usize, width: u32, generation: u64 },
+    Render {
+        page: usize,
+        width: u32,
+        generation: u64,
+    },
     Close,
     // The engine was (re)installed; bind again on the next request.
     Rebind,
@@ -54,16 +61,11 @@ pub fn engine_asset() -> Option<&'static str> {
     })
 }
 
-pub fn engine_installed() -> bool {
-    engine_dir().join(platform_library_name()).exists()
-}
-
 // Downloads and unpacks the engine into the data directory.
 pub fn install_engine() -> Result<(), String> {
     let asset = engine_asset().ok_or_else(|| "unsupported platform".to_string())?;
-    let url = format!(
-        "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/{asset}"
-    );
+    let url =
+        format!("https://github.com/bblanchon/pdfium-binaries/releases/latest/download/{asset}");
     let mut res = ureq::get(&url)
         .header("User-Agent", "Zapive")
         .call()
@@ -87,7 +89,11 @@ pub fn install_engine() -> Result<(), String> {
             found = true;
         }
     }
-    if found { Ok(()) } else { Err(format!("{wanted} not in the archive")) }
+    if found {
+        Ok(())
+    } else {
+        Err(format!("{wanted} not in the archive"))
+    }
 }
 
 fn bind() -> Option<&'static Pdfium> {
@@ -106,7 +112,9 @@ fn bind() -> Option<&'static Pdfium> {
             return Some(Box::leak(Box::new(Pdfium::new(bindings))));
         }
     }
-    Pdfium::bind_to_system_library().ok().map(|b| &*Box::leak(Box::new(Pdfium::new(b))))
+    Pdfium::bind_to_system_library()
+        .ok()
+        .map(|b| &*Box::leak(Box::new(Pdfium::new(b))))
 }
 
 impl PdfWorker {
@@ -163,14 +171,20 @@ fn worker(rx: mpsc::Receiver<PdfReq>) {
                     }
                 }
             }
-            PdfReq::Render { page, width, generation } => {
+            PdfReq::Render {
+                page,
+                width,
+                generation,
+            } => {
                 if generation != current_gen {
                     continue;
                 }
                 let Some(open) = doc.as_ref() else { continue };
                 let rendered = render_page(open, page, width);
                 match rendered {
-                    Some(img) => crate::bridge::ui_apply(move |b| b.on_pdf_page(generation, page, img)),
+                    Some(img) => {
+                        crate::bridge::ui_apply(move |b| b.on_pdf_page(generation, page, img))
+                    }
                     None => eprintln!("[pdf] page {page} failed to render"),
                 }
             }
@@ -186,10 +200,17 @@ fn render_page(doc: &PdfDocument<'_>, index: usize, width: u32) -> Option<Decode
         .render_annotations(true);
     let bitmap = page.render_with_config(&config).ok()?;
     let rgba = bitmap.as_image().ok()?.to_rgba8();
-    Some(Decoded { w: rgba.width(), h: rgba.height(), rgba: rgba.into_raw() })
+    Some(Decoded {
+        w: rgba.width(),
+        h: rgba.height(),
+        rgba: rgba.into_raw(),
+    })
 }
 
 // Whether a document message is a PDF the viewer can open.
 pub fn is_pdf(mimetype: &str, name: &str) -> bool {
-    mimetype.starts_with("application/pdf") || Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+    mimetype.starts_with("application/pdf")
+        || Path::new(name)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
 }

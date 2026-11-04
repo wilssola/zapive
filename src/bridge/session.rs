@@ -39,10 +39,21 @@ impl Bridge {
         self.ui.set_notifications(self.notifications);
         self.notify_previews = vault.setting_get("notify_previews").as_deref() == Some("1");
         self.ui.set_notify_previews(self.notify_previews);
-        self.ui.set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
-        self.ui.set_blur_photos(vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
-        self.ui.set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
-        self.ui.set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
+        self.ui
+            .set_message_sound(vault.setting_get("message_sound").as_deref() != Some("0"));
+        self.load_wallpaper(&vault);
+        self.load_call_silence(&vault);
+        // Silence memory is per account and never outlives it.
+        self.call_dismissed.clear();
+        self.silenced_calls.clear();
+        self.ui
+            .set_blur_names(vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
+        self.ui
+            .set_blur_photos(vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
+        self.ui
+            .set_blur_messages(vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
+        self.ui
+            .set_blur_media(vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
         self.vault = Some(vault);
         self.load_translation_settings();
         self.load_mcp();
@@ -61,6 +72,12 @@ impl Bridge {
         self.refresh_accounts();
         self.refresh_labels();
         self.refresh_chats();
+        // Nothing to wait for on the login screen or when the stored chat
+        // list is already on screen; a fresh pairing keeps the splash until
+        // the first sync chunk or the safety timeout.
+        if !registered || !self.store.chats.is_empty() {
+            self.finish_loading();
+        }
         self.refresh_statuses();
         self.refresh_calls();
         // Chats stored before the search index existed get indexed from
@@ -95,6 +112,42 @@ impl Bridge {
         self.vault = Some(vault);
         self.pending_registered = registered;
         self.ui.set_screen("locked".into());
+        self.finish_loading();
+    }
+
+    // The window went to the taskbar/tray (or came back). Cosmetic timers
+    // sleep meanwhile; after 30 s idle the working set is handed back.
+    pub fn set_window_idle(&mut self, idle: bool) {
+        if self.window_idle == idle {
+            return;
+        }
+        self.window_idle = idle;
+        if idle {
+            self.anim_timer.stop();
+            self.zoom_timer.stop();
+            let since = Instant::now();
+            self.idle_since = Some(since);
+            self.once(30_000, move |b| {
+                if b.window_idle && b.idle_since == Some(since) {
+                    crate::platform::trim_working_set();
+                }
+            });
+        } else {
+            self.idle_since = None;
+            if !self.animated.is_empty() {
+                self.start_animation_timer();
+            }
+            if !self.zoom_frames.is_empty() {
+                self.start_zoom_loop();
+            }
+        }
+    }
+
+    // Drops the startup splash. Safe to call any number of times.
+    pub(super) fn finish_loading(&mut self) {
+        if self.ui.get_app_loading() {
+            self.ui.set_app_loading(false);
+        }
     }
 
     pub(super) fn handle_pairing(&mut self, phone: &str) {
@@ -110,6 +163,7 @@ impl Bridge {
     // ---- WhatsApp events (called through ui_apply) ----
 
     pub fn on_qr(&mut self, code: &str) {
+        self.finish_loading();
         self.ui.set_qr_image(qr_image(code));
         self.ui.set_status_text(t("status.scan_qr").into());
     }
@@ -174,6 +228,7 @@ impl Bridge {
     // Errors the user must act on get a modal instead of a silent retry
     // loop in the status line.
     pub fn on_fatal(&mut self, kind: &str) {
+        self.finish_loading();
         let conflict = kind == "conflict";
         self.ui.set_alert_title(
             t(if conflict {
@@ -203,6 +258,7 @@ impl Bridge {
     }
 
     pub fn on_logged_out(&mut self) {
+        self.finish_loading();
         self.registered = false;
         self.ui.set_pairing_mode(false);
         self.ui.set_pairing_code("".into());

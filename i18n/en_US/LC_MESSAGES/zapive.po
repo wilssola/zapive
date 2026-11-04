@@ -326,6 +326,9 @@ msgstr "New message"
 msgid "notify.reply"
 msgstr "notify.reply"
 
+msgid "notify.open"
+msgstr "Open"
+
 msgid "notify.play"
 msgstr "notify.play"
 
@@ -1480,6 +1483,12 @@ msgstr "Show notifications"
 msgid "settings.notifications.enabled.description"
 msgstr "When turned off, no banners appear for messages or calls. Unread counts still update."
 
+msgid "settings.notifications.sound"
+msgstr "Message sounds"
+
+msgid "settings.notifications.sound_desc"
+msgstr "Play a short sound when a new message arrives, even if notifications are off."
+
 msgid "settings.notifications.previews.description"
 msgstr "Turn off to hide message content and media in notifications."
 
@@ -1919,3 +1928,210 @@ msgstr "Stopped"
 
 msgid "settings.mcp.status_error"
 msgstr "Could not start the server: {0}"
+
+msgid "chat.attach.poll"
+msgstr "Poll"
+
+msgid "drop.overlay.title"
+msgstr "Drop files to send"
+
+msgid "drop.overlay.hint"
+msgstr "Release to review them before sending"
+
+msgid "image.review.counter"
+msgstr "{0} of {1}"
+
+msgid "pinned.banner.count"
+msgstr "{0} of {1}"
+
+msgid "pinned.banner.label"
+msgstr "Pinned message"
+
+msgid "pinned.banner.menu"
+msgstr "Pinned message options"
+
+msgid "pinned.banner.unpin"
+msgstr "Unpin"
+
+msgid "poll.composer.title"
+msgstr "New poll"
+
+msgid "poll.composer.question"
+msgstr "Question"
+
+msgid "poll.composer.question_placeholder"
+msgstr "Ask a question"
+
+msgid "poll.composer.options"
+msgstr "Options"
+
+msgid "poll.composer.option_placeholder"
+msgstr "Option"
+
+msgid "poll.composer.add_option"
+msgstr "Add option"
+
+msgid "poll.composer.remove_option"
+msgstr "Remove option"
+
+msgid "poll.composer.multiple"
+msgstr "Allow multiple answers"
+
+msgid "poll.composer.send"
+msgstr "Send poll"
+
+msgid "poll.hint.single"
+msgstr "Select one option"
+
+msgid "poll.hint.multiple"
+msgstr "Select one or more options"
+
+msgid "poll.votes.view"
+msgstr "View votes"
+
+msgid "poll.votes.hide"
+msgstr "Hide votes"
+
+msgid "reactions.tab_all"
+msgstr "All {0}"
+
+msgid "reactions.click_to_remove"
+msgstr "Click to remove"
+
+msgid "settings.shortcuts.title"
+msgstr "Keyboard shortcuts"
+
+msgid "settings.shortcuts.description"
+msgstr "See every shortcut available in Zapive"
+
+msgid "shortcuts.title"
+msgstr "Keyboard shortcuts"
+
+msgid "shortcuts.section.chats"
+msgstr "Chats"
+
+msgid "shortcuts.section.search"
+msgstr "Search"
+
+msgid "shortcuts.section.messages"
+msgstr "Messages"
+
+msgid "shortcuts.section.general"
+msgstr "General"
+
+msgid "shortcuts.open_chat_n"
+msgstr "Open chat 1 to 9"
+
+msgid "shortcuts.next_chat"
+msgstr "Next chat"
+
+msgid "shortcuts.prev_chat"
+msgstr "Previous chat"
+
+msgid "shortcuts.next_chat_alt"
+msgstr "Next chat (alternative)"
+
+msgid "shortcuts.prev_chat_alt"
+msgstr "Previous chat (alternative)"
+
+msgid "shortcuts.archive"
+msgstr "Archive or unarchive chat"
+
+msgid "shortcuts.mute"
+msgstr "Mute or unmute chat"
+
+msgid "shortcuts.search_chats"
+msgstr "Search chats"
+
+msgid "shortcuts.search_in_chat"
+msgstr "Search in this chat"
+
+msgid "shortcuts.edit_last"
+msgstr "Edit your last message (empty composer)"
+
+msgid "shortcuts.paste_image"
+msgstr "Paste image from clipboard"
+
+msgid "shortcuts.copy_selection"
+msgstr "Copy selected messages"
+
+msgid "shortcuts.close_overlay"
+msgstr "Close the topmost panel"
+
+msgid "shortcuts.show_shortcuts"
+msgstr "Show or hide this list"
+
+msgid "starred.title"
+msgstr "Starred messages"
+
+msgid "starred.title_chat"
+msgstr "Starred in this chat"
+
+msgid "starred.close"
+msgstr "Close"
+
+msgid "starred.empty.title"
+msgstr "No starred messages"
+
+msgid "starred.empty.hint"
+msgstr "Star a message to find it here later."
+
+msgid "settings.wallpaper.title"
+msgstr "Chat wallpaper"
+
+msgid "settings.wallpaper.background"
+msgstr "Background colour"
+
+msgid "settings.wallpaper.doodles"
+msgstr "Doodle colour"
+
+msgid "settings.wallpaper.hex"
+msgstr "Hex colour"
+
+msgid "settings.wallpaper.intensity"
+msgstr "Intensity"
+
+msgid "settings.wallpaper.preview_in"
+msgstr "Incoming message"
+
+msgid "settings.wallpaper.preview_out"
+msgstr "Your message"
+
+msgid "settings.wallpaper.reset"
+msgstr "Default wallpaper"
+
+msgid "settings.wallpaper.reset_button"
+msgstr "Reset to default"
+
+
+
+
+
+msgid "call.silenced.title"
+msgstr "Incoming call - silenced"
+
+msgid "call.silenced.video"
+msgstr "Video call"
+
+msgid "call.silenced.voice"
+msgstr "Voice call"
+
+
+
+msgid "settings.calls.silence_repeat"
+msgstr "Silence repeated calls"
+
+msgid "settings.calls.silence_repeat_desc"
+msgstr "If you dismissed a call from someone, new calls from them in the next N minutes won't ring or open a window; they only show in the chat."
+
+msgid "settings.calls.silence_minutes"
+msgstr "Silence window"
+
+msgid "settings.calls.silence_minutes_option"
+msgstr "{0} minutes"
+
+msgid "call.silenced.answer"
+msgstr "Answer"
+
+msgid "call.silenced.decline"
+msgstr "Decline"

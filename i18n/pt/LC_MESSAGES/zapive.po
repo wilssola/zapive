@@ -326,6 +326,9 @@ msgstr "New message"
 msgid "notify.reply"
 msgstr "Reply"
 
+msgid "notify.open"
+msgstr "Abrir"
+
 msgid "notify.play"
 msgstr "Play"
 
@@ -1480,6 +1483,12 @@ msgstr "Mostrar notificações"
 msgid "settings.notifications.enabled.description"
 msgstr "Quando desativado, nenhum aviso aparece para mensagens ou chamadas. A contagem de não lidas continua sendo atualizada."
 
+msgid "settings.notifications.sound"
+msgstr "Sons de mensagem"
+
+msgid "settings.notifications.sound_desc"
+msgstr "Toca um som curto quando chega uma nova mensagem, mesmo com as notificações desativadas."
+
 msgid "settings.notifications.previews.description"
 msgstr "Desative para ocultar o conteúdo das mensagens e mídias nas notificações."
 
@@ -1921,3 +1930,210 @@ msgstr "Parado"
 
 msgid "settings.mcp.status_error"
 msgstr "Não foi possível iniciar o servidor: {0}"
+
+msgid "chat.attach.poll"
+msgstr "Enquete"
+
+msgid "drop.overlay.title"
+msgstr "Solte os arquivos para enviar"
+
+msgid "drop.overlay.hint"
+msgstr "Solte para revisar antes de enviar"
+
+msgid "image.review.counter"
+msgstr "{0} de {1}"
+
+msgid "pinned.banner.count"
+msgstr "{0} de {1}"
+
+msgid "pinned.banner.label"
+msgstr "Mensagem fixada"
+
+msgid "pinned.banner.menu"
+msgstr "Opções da mensagem fixada"
+
+msgid "pinned.banner.unpin"
+msgstr "Desafixar"
+
+msgid "poll.composer.title"
+msgstr "Nova enquete"
+
+msgid "poll.composer.question"
+msgstr "Pergunta"
+
+msgid "poll.composer.question_placeholder"
+msgstr "Faça uma pergunta"
+
+msgid "poll.composer.options"
+msgstr "Opções"
+
+msgid "poll.composer.option_placeholder"
+msgstr "Opção"
+
+msgid "poll.composer.add_option"
+msgstr "Adicionar opção"
+
+msgid "poll.composer.remove_option"
+msgstr "Remover opção"
+
+msgid "poll.composer.multiple"
+msgstr "Permitir várias respostas"
+
+msgid "poll.composer.send"
+msgstr "Enviar enquete"
+
+msgid "poll.hint.single"
+msgstr "Selecione uma opção"
+
+msgid "poll.hint.multiple"
+msgstr "Selecione uma ou mais opções"
+
+msgid "poll.votes.view"
+msgstr "Ver votos"
+
+msgid "poll.votes.hide"
+msgstr "Ocultar votos"
+
+msgid "reactions.tab_all"
+msgstr "Todas {0}"
+
+msgid "reactions.click_to_remove"
+msgstr "Clique para remover"
+
+msgid "settings.shortcuts.title"
+msgstr "Atalhos de teclado"
+
+msgid "settings.shortcuts.description"
+msgstr "Veja todos os atalhos disponíveis no Zapive"
+
+msgid "shortcuts.title"
+msgstr "Atalhos de teclado"
+
+msgid "shortcuts.section.chats"
+msgstr "Conversas"
+
+msgid "shortcuts.section.search"
+msgstr "Busca"
+
+msgid "shortcuts.section.messages"
+msgstr "Mensagens"
+
+msgid "shortcuts.section.general"
+msgstr "Geral"
+
+msgid "shortcuts.open_chat_n"
+msgstr "Abrir conversa de 1 a 9"
+
+msgid "shortcuts.next_chat"
+msgstr "Próxima conversa"
+
+msgid "shortcuts.prev_chat"
+msgstr "Conversa anterior"
+
+msgid "shortcuts.next_chat_alt"
+msgstr "Próxima conversa (alternativo)"
+
+msgid "shortcuts.prev_chat_alt"
+msgstr "Conversa anterior (alternativo)"
+
+msgid "shortcuts.archive"
+msgstr "Arquivar ou desarquivar conversa"
+
+msgid "shortcuts.mute"
+msgstr "Silenciar ou reativar conversa"
+
+msgid "shortcuts.search_chats"
+msgstr "Buscar conversas"
+
+msgid "shortcuts.search_in_chat"
+msgstr "Buscar nesta conversa"
+
+msgid "shortcuts.edit_last"
+msgstr "Editar a última mensagem (campo vazio)"
+
+msgid "shortcuts.paste_image"
+msgstr "Colar imagem da área de transferência"
+
+msgid "shortcuts.copy_selection"
+msgstr "Copiar mensagens selecionadas"
+
+msgid "shortcuts.close_overlay"
+msgstr "Fechar o painel do topo"
+
+msgid "shortcuts.show_shortcuts"
+msgstr "Mostrar ou ocultar esta lista"
+
+msgid "starred.title"
+msgstr "Mensagens favoritas"
+
+msgid "starred.title_chat"
+msgstr "Favoritas desta conversa"
+
+msgid "starred.close"
+msgstr "Fechar"
+
+msgid "starred.empty.title"
+msgstr "Nenhuma mensagem favorita"
+
+msgid "starred.empty.hint"
+msgstr "Favorite uma mensagem para encontrá-la aqui depois."
+
+msgid "settings.wallpaper.title"
+msgstr "Papel de parede do chat"
+
+msgid "settings.wallpaper.background"
+msgstr "Cor de fundo"
+
+msgid "settings.wallpaper.doodles"
+msgstr "Cor dos desenhos"
+
+msgid "settings.wallpaper.hex"
+msgstr "Cor em hexadecimal"
+
+msgid "settings.wallpaper.intensity"
+msgstr "Intensidade"
+
+msgid "settings.wallpaper.preview_in"
+msgstr "Mensagem recebida"
+
+msgid "settings.wallpaper.preview_out"
+msgstr "Sua mensagem"
+
+msgid "settings.wallpaper.reset"
+msgstr "Papel de parede padrão"
+
+msgid "settings.wallpaper.reset_button"
+msgstr "Restaurar padrão"
+
+
+
+
+
+msgid "call.silenced.title"
+msgstr "Chamada recebida - silenciada"
+
+msgid "call.silenced.video"
+msgstr "Chamada de vídeo"
+
+msgid "call.silenced.voice"
+msgstr "Chamada de voz"
+
+
+
+msgid "settings.calls.silence_repeat"
+msgstr "Silenciar chamadas repetidas"
+
+msgid "settings.calls.silence_repeat_desc"
+msgstr "Se você dispensou uma chamada de alguém, novas chamadas dessa pessoa nos próximos N minutos não tocam nem abrem janela; só aparecem na conversa."
+
+msgid "settings.calls.silence_minutes"
+msgstr "Tempo de silêncio"
+
+msgid "settings.calls.silence_minutes_option"
+msgstr "{0} minutos"
+
+msgid "call.silenced.answer"
+msgstr "Atender"
+
+msgid "call.silenced.decline"
+msgstr "Recusar"

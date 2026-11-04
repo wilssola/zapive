@@ -1,0 +1,58 @@
+name: Report a bug
+description: Something in Zapive doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste conversations, names, phone numbers, tokens or the contents of `vault.db`/`wa.db`.**
+        If you need to show the interface, use demo mode (`zapive --demo`) or blur any personal data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the problem and what you expected to see.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Click...
+        3. See the error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Zapive version
+      description: Shown in Settings, or the tag of the installed release (for example, v0.26.2).
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Linux, macOS, Other]
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: Windows 11 23H2, Ubuntu 24.04 (Wayland), macOS 15...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log (optional)
+      description: |
+        Excerpts from `zapive.log` in the app's data folder (see docs/troubleshooting.md). Run with `ZAPIVE_LOG=debug` if needed.
+        Remove phone numbers, names and any message content before pasting.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: No real data; prefer `--demo` mode.

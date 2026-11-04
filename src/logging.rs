@@ -59,7 +59,11 @@ impl log::Log for FileLog {
 // lifecycle lines, which is what a failed call leaves behind. `debug`
 // adds the protocol chatter (stanzas, device resolution, relay).
 pub fn install() {
-    let level = match std::env::var("ZAPIVE_LOG").unwrap_or_default().to_lowercase().as_str() {
+    let level = match std::env::var("ZAPIVE_LOG")
+        .unwrap_or_default()
+        .to_lowercase()
+        .as_str()
+    {
         "off" => log::LevelFilter::Off,
         "error" => log::LevelFilter::Error,
         "warn" => log::LevelFilter::Warn,
@@ -73,8 +77,15 @@ pub fn install() {
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_BYTES) {
         let _ = std::fs::rename(&path, path.with_extension("log.old"));
     }
-    let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok();
-    let logger = Box::new(FileLog { level, file: Mutex::new(file) });
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok();
+    let logger = Box::new(FileLog {
+        level,
+        file: Mutex::new(file),
+    });
     if log::set_boxed_logger(logger).is_ok() {
         log::set_max_level(level);
         let previous_hook = std::panic::take_hook();

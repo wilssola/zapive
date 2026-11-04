@@ -1,17 +1,20 @@
 import { Theme } from "theme.slint";
-import { MessageItem } from "types.slint";
+import { MessageItem, PollOption } from "types.slint";
 
 export component SpecialMessage inherits Rectangle {
     in property <MessageItem> message;
     in property <bool> privacy-hidden;
     callback details();
+    callback vote(int);
+    property <int> expanded: -1;
+    property <bool> interactive-poll: poll && message.poll-options.length > 0;
     property <bool> location: message.cardKind == "location" || message.cardKind == "live-location";
     property <bool> contact: message.cardKind == "contact";
     property <bool> poll: message.cardKind == "poll";
     property <bool> view-once: message.cardKind == "view-once";
     property <color> surface: message.fromMe
-        ? (Theme.dark ? #003c32 : #c9edc6)
-        : (Theme.dark ? #182831 : #f3f6f5);
+        ? (Theme.glass ? Theme.bubble-out : Theme.dark ? #003c32 : #c9edc6)
+        : (Theme.glass ? Theme.glass-fill-soft : Theme.dark ? #182831 : #f3f6f5);
     height: card-layout.preferred-height;
     border-radius: 12px;
     background: root.view-once
@@ -116,8 +119,128 @@ export component SpecialMessage inherits Rectangle {
                 }
             }
         }
+        if root.interactive-poll: Rectangle {
+            height: 1px;
+            background: root.message.fromMe
+                ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
+        }
+        if root.interactive-poll: Text {
+            x: 14px;
+            text: root.message.poll-multi ? @tr("poll.hint.multiple") : @tr("poll.hint.single");
+            color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+            font-size: 11.5px;
+            height: 28px;
+            vertical-alignment: center;
+        }
+        if root.interactive-poll: VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-bottom: 6px;
+            spacing: 2px;
+            for opt[i] in root.message.poll-options: VerticalLayout {
+                spacing: 0px;
+                Rectangle {
+                    height: opt-row.preferred-height + 8px;
+                    border-radius: 8px;
+                    background: opt-touch.has-hover && root.message.poll-can-vote ? Theme.hover : transparent;
+                    opt-touch := TouchArea {
+                        enabled: root.message.poll-can-vote;
+                        mouse-cursor: root.message.poll-can-vote ? pointer : default;
+                        clicked => { root.vote(i); }
+                    }
+                    opt-row := VerticalLayout {
+                        y: 4px;
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Rectangle {
+                                width: 20px;
+                                height: 20px;
+                                border-radius: root.message.poll-multi ? 5px : 10px;
+                                border-width: opt.voted ? 0px : 2px;
+                                border-color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                                background: opt.voted ? Theme.accent : transparent;
+                                animate background { duration: Theme.motion-fast; }
+                                if opt.voted: Image {
+                                    source: @image-url("../icons/check.svg");
+                                    colorize: white;
+                                    width: 14px;
+                                    height: 14px;
+                                    x: 3px;
+                                    y: 3px;
+                                }
+                            }
+                            Text {
+                                text: opt.name;
+                                color: Theme.bubble-text;
+                                font-size: 14px;
+                                wrap: word-wrap;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: opt.votes;
+                                color: Theme.bubble-text;
+                                font-size: 13px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            height: 5px;
+                            border-radius: 2.5px;
+                            background: Theme.dark ? #ffffff1f : #1b2d4022;
+                            Rectangle {
+                                x: 0px;
+                                width: root.message.poll-total > 0
+                                    ? parent.width * Math.min(1.0, opt.votes / root.message.poll-total) : 0px;
+                                height: parent.height;
+                                border-radius: 2.5px;
+                                background: opt.voted ? Theme.accent-text : Theme.accent;
+                                animate width { duration: Theme.motion-normal; easing: ease-out; }
+                            }
+                        }
+                    }
+                }
+                if opt.votes > 0 && opt.voters != "": Rectangle {
+                    height: 20px;
+                    expand-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.expanded = root.expanded == i ? -1 : i; }
+                    }
+                    HorizontalLayout {
+                        padding-left: 34px;
+                        spacing: 4px;
+                        alignment: start;
+                        Text {
+                            text: root.expanded == i ? @tr("poll.votes.hide") : @tr("poll.votes.view");
+                            color: Theme.accent-text;
+                            font-size: 11.5px;
+                            vertical-alignment: center;
+                        }
+                        Image {
+                            source: root.expanded == i ? @image-url("../icons/chevron-up.svg") : @image-url("../icons/chevron-down.svg");
+                            colorize: Theme.accent-text;
+                            width: 12px;
+                            height: 12px;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                }
+                if root.expanded == i && opt.voters != "": Text {
+                    x: 34px;
+                    text: opt.voters;
+                    color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
         for option in root.message.cardOptions: Rectangle {
-            height: option-layout.preferred-height;
+            visible: !root.interactive-poll;
+            height: root.interactive-poll ? 0px : option-layout.preferred-height;
             border-width: 1px;
             border-color: root.message.fromMe
                 ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
@@ -145,7 +268,7 @@ export component SpecialMessage inherits Rectangle {
                 }
             }
         }
-        if root.poll: VerticalLayout {
+        if root.poll && !root.message.poll-can-vote: VerticalLayout {
             padding: 14px;
             Text {
                 text: root.message.cardDetail;

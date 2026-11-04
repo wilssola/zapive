@@ -155,26 +155,37 @@ impl Bridge {
         self.ui.set_info_is_group(group);
         self.ui.set_info_members("".into());
         self.ui.set_info_common_groups(ModelRc::default());
-        self.ui.set_info_common_groups_state(if group { "" } else { "loading" }.into());
+        self.ui
+            .set_info_common_groups_state(if group { "" } else { "loading" }.into());
         if !group {
             let contact = self.store.canon_owned(&jid);
             let cached = self.common_groups_cache.get(&contact).cloned();
             if let Some((_, groups)) = &cached {
                 self.paint_common_groups(groups);
             }
-            let fresh = cached.as_ref()
+            let fresh = cached
+                .as_ref()
                 .is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(600));
-            let pending = self.common_groups_pending.get(&contact)
+            let pending = self
+                .common_groups_pending
+                .get(&contact)
                 .is_some_and(|at| at.elapsed() < Duration::from_secs(60));
             if !fresh && !pending {
                 let mut identities = vec![jid.clone(), contact.clone()];
-                identities.extend(self.store.aliases.iter()
-                    .filter(|(_, phone)| **phone == contact)
-                    .map(|(lid, _)| lid.clone()));
+                identities.extend(
+                    self.store
+                        .aliases
+                        .iter()
+                        .filter(|(_, phone)| **phone == contact)
+                        .map(|(lid, _)| lid.clone()),
+                );
                 identities.sort();
                 identities.dedup();
                 self.common_groups_pending.insert(contact, Instant::now());
-                self.wa.send(Cmd::FetchCommonGroups { jid: jid.clone(), identities });
+                self.wa.send(Cmd::FetchCommonGroups {
+                    jid: jid.clone(),
+                    identities,
+                });
             }
         }
         self.ui.set_info_archived(archived);
@@ -232,9 +243,12 @@ impl Bridge {
         let contact = self.store.canon_owned(jid);
         self.common_groups_pending.remove(&contact);
         if let Some(groups) = &groups {
-            self.common_groups_cache.insert(contact.clone(), (Instant::now(), groups.clone()));
+            self.common_groups_cache
+                .insert(contact.clone(), (Instant::now(), groups.clone()));
         }
-        let visible = self.current_jid.as_deref()
+        let visible = self
+            .current_jid
+            .as_deref()
             .is_some_and(|current| self.store.canon(current) == contact)
             && self.ui.get_info_open()
             && !self.ui.get_info_is_group();
@@ -249,11 +263,13 @@ impl Bridge {
     }
 
     pub(super) fn paint_common_groups(&self, groups: &[(String, String)]) {
-        let mut rows: Vec<MemberItem> = groups.iter()
+        let mut rows: Vec<MemberItem> = groups
+            .iter()
             .map(|(jid, name)| self.to_member_row(jid, name, "", false, false))
             .collect();
         rows.sort_by_key(|row| row.name.to_lowercase());
-        self.ui.set_info_common_groups(ModelRc::from(Rc::new(VecModel::from(rows))));
+        self.ui
+            .set_info_common_groups(ModelRc::from(Rc::new(VecModel::from(rows))));
         self.ui.set_info_common_groups_state("ready".into());
     }
 
@@ -676,7 +692,13 @@ impl Bridge {
         }
         let id = self.store.next_label_id();
         let order = self.store.labels.len() as i32;
-        let label = Label { id: id.clone(), name: name.to_string(), color: order % 20, order, list_type: Some(5) };
+        let label = Label {
+            id: id.clone(),
+            name: name.to_string(),
+            color: order % 20,
+            order,
+            list_type: Some(5),
+        };
         self.store.upsert_label(label);
         self.wa.send(Cmd::LabelCreate {
             id: id.clone(),
@@ -709,12 +731,27 @@ impl Bridge {
         self.schedule_refresh_chats();
     }
 
-    pub fn on_label(&mut self, id: &str, name: &str, color: i32, order: i32, deleted: bool, list_type: Option<i32>) {
+    pub fn on_label(
+        &mut self,
+        id: &str,
+        name: &str,
+        color: i32,
+        order: i32,
+        deleted: bool,
+        list_type: Option<i32>,
+    ) {
         if deleted {
             self.store.remove_label(id);
         } else if !name.is_empty() {
-            let list_type = list_type.or_else(|| self.store.labels.get(id).and_then(|l| l.list_type));
-            self.store.upsert_label(Label { id: id.to_string(), name: name.to_string(), color, order, list_type });
+            let list_type =
+                list_type.or_else(|| self.store.labels.get(id).and_then(|l| l.list_type));
+            self.store.upsert_label(Label {
+                id: id.to_string(),
+                name: name.to_string(),
+                color,
+                order,
+                list_type,
+            });
         }
         self.refresh_labels();
         self.schedule_refresh_chats();

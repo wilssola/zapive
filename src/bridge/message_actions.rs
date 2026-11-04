@@ -13,7 +13,9 @@ impl Bridge {
         from_me: bool,
     ) {
         let chat_jid = self.store.canon_owned(&normalize_jid(remote_jid));
-        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &chat_jid, target); }
+        if let Some(vault) = &self.vault {
+            self.store.hydrate_id(vault, &chat_jid, target);
+        }
         let updated = self.store.apply_reaction(&chat_jid, target, reactor, emoji);
         if updated && Some(&chat_jid) == self.current_jid.as_ref() {
             let summary = self
@@ -207,6 +209,7 @@ impl Bridge {
                 };
                 let avatar = self.avatar_for(&who);
                 ReactionItem {
+                    own: who == "me",
                     jid: who.clone().into(),
                     name: name.clone().into(),
                     emoji: clean_text(emoji).into(),
@@ -225,13 +228,15 @@ impl Bridge {
         }
         let count = rows.len();
         self.reactions_model.set_vec(rows);
+        self.refresh_reaction_tabs(id);
         self.ui
             .set_reactions_title(ta("reactions.count", &[&count.to_string()]).into());
         self.ui.set_reactions_open(true);
     }
 
     pub fn message_action_failed(&mut self, error: &str) {
-        self.ui.set_message_dialog_title("Message action failed".into());
+        self.ui
+            .set_message_dialog_title("Message action failed".into());
         self.ui.set_message_dialog_text(error.into());
         self.ui.set_message_dialog_edit(false);
         self.ui.set_message_dialog_open(true);
@@ -241,18 +246,53 @@ impl Bridge {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let jid = self.store.canon_owned(&normalize_jid(jid));
         let content = content.get_base_message();
-        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
-        let text = content.conversation.clone()
-            .or_else(|| content.extended_text_message.as_option().and_then(|m| m.text.clone()))
-            .or_else(|| content.image_message.as_option().and_then(|m| m.caption.clone()))
-            .or_else(|| content.video_message.as_option().and_then(|m| m.caption.clone()));
+        if let Some(vault) = &self.vault {
+            self.store.hydrate_id(vault, &jid, id);
+        }
+        let text = content
+            .conversation
+            .clone()
+            .or_else(|| {
+                content
+                    .extended_text_message
+                    .as_option()
+                    .and_then(|m| m.text.clone())
+            })
+            .or_else(|| {
+                content
+                    .image_message
+                    .as_option()
+                    .and_then(|m| m.caption.clone())
+            })
+            .or_else(|| {
+                content
+                    .video_message
+                    .as_option()
+                    .and_then(|m| m.caption.clone())
+            });
         let Some(text) = text else { return };
-        let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) else { return };
-        if !m.record_edit(text, timestamp) { return; }
+        let Some(m) = self
+            .store
+            .messages
+            .get_mut(&jid)
+            .and_then(|v| v.iter_mut().find(|m| m.id == id))
+        else {
+            return;
+        };
+        if !m.record_edit(text, timestamp) {
+            return;
+        }
         let mut raw = m.raw.as_deref().cloned().unwrap_or_default();
-        if m.kind == MessageKind::Text { raw.conversation = Some(m.text.clone()); raw.extended_text_message = Default::default(); }
-        else if let Some(mut image) = raw.image_message.as_option().cloned() { image.caption = Some(m.text.clone()); raw.image_message = image.into(); }
-        else if let Some(mut video) = raw.video_message.as_option().cloned() { video.caption = Some(m.text.clone()); raw.video_message = video.into(); }
+        if m.kind == MessageKind::Text {
+            raw.conversation = Some(m.text.clone());
+            raw.extended_text_message = Default::default();
+        } else if let Some(mut image) = raw.image_message.as_option().cloned() {
+            image.caption = Some(m.text.clone());
+            raw.image_message = image.into();
+        } else if let Some(mut video) = raw.video_message.as_option().cloned() {
+            video.caption = Some(m.text.clone());
+            raw.video_message = video.into();
+        }
         m.raw = Some(std::sync::Arc::new(raw));
         m.link_url.clear();
         m.link_title.clear();
@@ -262,9 +302,16 @@ impl Bridge {
         self.media_failed.remove(id);
         self.store.search.remove(&jid, id);
         self.store.search.add(&jid, &updated);
-        if self.store.messages_for(&jid).last().is_some_and(|m| m.id == id) {
+        if self
+            .store
+            .messages_for(&jid)
+            .last()
+            .is_some_and(|m| m.id == id)
+        {
             let preview = crate::store::compute_preview(&updated, &self.store);
-            if let Some(meta) = self.store.chats.get_mut(&jid) { meta.preview = preview; }
+            if let Some(meta) = self.store.chats.get_mut(&jid) {
+                meta.preview = preview;
+            }
         }
         self.store.dirty_jids.insert(jid.clone());
         if self.current_jid.as_ref() == Some(&jid) {
@@ -277,17 +324,29 @@ impl Bridge {
 
     pub fn on_message_pin(&mut self, jid: &str, id: &str, until: i64) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        if let Some(vault) = &self.vault { self.store.hydrate_id(vault, &jid, id); }
-        if let Some(m) = self.store.messages.get_mut(&jid).and_then(|v| v.iter_mut().find(|m| m.id == id)) {
+        if let Some(vault) = &self.vault {
+            self.store.hydrate_id(vault, &jid, id);
+        }
+        if let Some(m) = self
+            .store
+            .messages
+            .get_mut(&jid)
+            .and_then(|v| v.iter_mut().find(|m| m.id == id))
+        {
             m.pinned_until = until;
             self.store.dirty_jids.insert(jid.clone());
-            if self.current_jid.as_ref() == Some(&jid) { self.rebuild_conversation(&jid); }
+            if self.current_jid.as_ref() == Some(&jid) {
+                self.rebuild_conversation(&jid);
+                self.refresh_pinned();
+            }
             self.schedule_save();
         }
     }
 
     pub(super) fn refresh_message_details(&mut self) {
-        if !self.ui.get_details_open() { return; }
+        if !self.ui.get_details_open() {
+            return;
+        }
         let id = self.ui.get_details_id().to_string();
         let Some(m) = self.find_message(&id).filter(|m| !m.deleted).cloned() else {
             self.ui.set_details_open(false);
@@ -296,28 +355,76 @@ impl Bridge {
         self.ui.set_details_text(preview_body(&m).into());
         let row = self.to_row(&m, None);
         self.ui.set_details_image(row.picture.clone());
-        self.ui.set_details_has_image(self.decoded.contains_key(&m.id) || self.media_previews.contains_key(&m.id));
+        self.ui.set_details_has_image(
+            self.decoded.contains_key(&m.id) || self.media_previews.contains_key(&m.id),
+        );
         let mut rows = Vec::new();
-        let heading = |title: &str| DetailRow { kind: "heading".into(), title: title.into(), ..Default::default() };
+        let heading = |title: &str| DetailRow {
+            kind: "heading".into(),
+            title: title.into(),
+            ..Default::default()
+        };
         let (known, participants) = self.store.receipt_participants(&m);
         if m.from_me {
             if is_group(&m.jid) && !known {
-                rows.push(DetailRow { kind: "note".into(), title: "Exibindo apenas confirmações disponíveis.".into(), ..Default::default() });
+                rows.push(DetailRow {
+                    kind: "note".into(),
+                    title: "Exibindo apenas confirmações disponíveis.".into(),
+                    ..Default::default()
+                });
             }
-            for (level, label) in [(4, "Lida por"), (3, "Entregue para"), (0, "Sem confirmação de entrega")] {
-                let group: Vec<_> = participants.iter().filter(|(_, r)| if level == 4 { r.status() >= 4 } else if level == 3 { r.status() == 3 } else { r.status() < 3 }).collect();
-                if group.is_empty() { continue; }
-                rows.push(DetailRow { kind: "participant-heading".into(), title: label.into(),
-                    ticks: if level >= 3 { "✓✓" } else { "✓" }.into(), blue: level == 4, ..Default::default() });
+            for (level, label) in [
+                (4, "Lida por"),
+                (3, "Entregue para"),
+                (0, "Sem confirmação de entrega"),
+            ] {
+                let group: Vec<_> = participants
+                    .iter()
+                    .filter(|(_, r)| {
+                        if level == 4 {
+                            r.status() >= 4
+                        } else if level == 3 {
+                            r.status() == 3
+                        } else {
+                            r.status() < 3
+                        }
+                    })
+                    .collect();
+                if group.is_empty() {
+                    continue;
+                }
+                rows.push(DetailRow {
+                    kind: "participant-heading".into(),
+                    title: label.into(),
+                    ticks: if level >= 3 { "✓✓" } else { "✓" }.into(),
+                    blue: level == 4,
+                    ..Default::default()
+                });
                 for (jid, receipt) in group {
-                    let name = self.store.members_of(&m.jid).iter().find(|member| self.store.canon(&member.jid) == jid)
-                        .filter(|member| !member.name.is_empty()).map(|member| member.name.clone()).unwrap_or_else(|| self.store.chat_name(jid));
+                    let name = self
+                        .store
+                        .members_of(&m.jid)
+                        .iter()
+                        .find(|member| self.store.canon(&member.jid) == jid)
+                        .filter(|member| !member.name.is_empty())
+                        .map(|member| member.name.clone())
+                        .unwrap_or_else(|| self.store.chat_name(jid));
                     let avatar = self.avatar_for(jid);
-                    let timestamp = if level == 4 { receipt.read.or(receipt.played) } else { receipt.delivered };
-                    rows.push(DetailRow { kind: "person".into(), title: name.clone().into(),
-                        initial: initial_of(&name).into(), colorIdx: color_idx_of(jid), hasAvatar: avatar.is_some(),
-                        avatar: avatar.unwrap_or_default(), time: timestamp.map(format_stamp).unwrap_or_default().into(),
-                        ..Default::default() });
+                    let timestamp = if level == 4 {
+                        receipt.read.or(receipt.played)
+                    } else {
+                        receipt.delivered
+                    };
+                    rows.push(DetailRow {
+                        kind: "person".into(),
+                        title: name.clone().into(),
+                        initial: initial_of(&name).into(),
+                        colorIdx: color_idx_of(jid),
+                        hasAvatar: avatar.is_some(),
+                        avatar: avatar.unwrap_or_default(),
+                        time: timestamp.map(format_stamp).unwrap_or_default().into(),
+                        ..Default::default()
+                    });
                 }
             }
         } else {
@@ -325,16 +432,55 @@ impl Bridge {
         }
         rows.push(heading("Histórico de edições"));
         if m.edit_versions.is_empty() {
-            rows.push(DetailRow { kind: "version".into(), title: "Versão atual".into(), text: m.text.clone().into(),
-                time: if m.edited { "Edição anterior à observação; horário desconhecido".into() } else { format_stamp(m.timestamp).into() }, ..Default::default() });
+            rows.push(DetailRow {
+                kind: "version".into(),
+                title: "Versão atual".into(),
+                text: m.text.clone().into(),
+                time: if m.edited {
+                    "Edição anterior à observação; horário desconhecido".into()
+                } else {
+                    format_stamp(m.timestamp).into()
+                },
+                ..Default::default()
+            });
         } else {
             for (index, version) in m.edit_versions.iter().enumerate().rev() {
-                rows.push(DetailRow { kind: "version".into(), title: if index + 1 == m.edit_versions.len() { "Versão atual".into() } else { format!("Versão {}", index + 1).into() },
-                    text: version.text.clone().into(), time: version.timestamp.map(format_stamp).unwrap_or_else(|| "Horário desconhecido".into()).into(), ..Default::default() });
+                rows.push(DetailRow {
+                    kind: "version".into(),
+                    title: if index + 1 == m.edit_versions.len() {
+                        "Versão atual".into()
+                    } else {
+                        format!("Versão {}", index + 1).into()
+                    },
+                    text: version.text.clone().into(),
+                    time: version
+                        .timestamp
+                        .map(format_stamp)
+                        .unwrap_or_else(|| "Horário desconhecido".into())
+                        .into(),
+                    ..Default::default()
+                });
             }
         }
-        rows.push(DetailRow { kind: "note".into(), title: format!("{} · {}", if m.from_me { t("reactions.you") } else { m.sender.clone() }, m.id).into(),
-            time: if m.pinned_until > now_secs() { format!("Fixada até {}", format_stamp(m.pinned_until)).into() } else { Default::default() }, ..Default::default() });
+        rows.push(DetailRow {
+            kind: "note".into(),
+            title: format!(
+                "{} · {}",
+                if m.from_me {
+                    t("reactions.you")
+                } else {
+                    m.sender.clone()
+                },
+                m.id
+            )
+            .into(),
+            time: if m.pinned_until > now_secs() {
+                format!("Fixada até {}", format_stamp(m.pinned_until)).into()
+            } else {
+                Default::default()
+            },
+            ..Default::default()
+        });
         self.ui.set_details_rows(ModelRc::new(VecModel::from(rows)));
     }
 
@@ -344,19 +490,32 @@ impl Bridge {
             return;
         }
         let preparation_key = format!("store:preparation:{id}");
-        let preparation = self.vault.as_ref().and_then(|vault| vault.get(&preparation_key))
+        let preparation = self
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.get(&preparation_key))
             .and_then(|json| serde_json::from_str::<crate::outbox::Preparation>(&json).ok());
         if let Some(preparation) = preparation {
             if action == "retry" {
-                if self.preparations_active.contains(id) { return; }
+                if self.preparations_active.contains(id) {
+                    return;
+                }
                 self.show_preparation(&preparation, "outbox.preparing");
-                if self.outbox_connected && self.preparations_active.insert(preparation.id.clone()) { self.wa.send(Cmd::PrepareAttachment(preparation)); }
+                if self.outbox_connected && self.preparations_active.insert(preparation.id.clone())
+                {
+                    self.wa.send(Cmd::PrepareAttachment(preparation));
+                }
                 return;
             }
             if action == "cancel" {
-                if self.vault.as_ref().is_some_and(|vault| vault.batch_checked(&[], &[&preparation_key]).is_ok()) {
+                if self
+                    .vault
+                    .as_ref()
+                    .is_some_and(|vault| vault.batch_checked(&[], &[&preparation_key]).is_ok())
+                {
                     self.preparation_states.remove(id);
-                    self.store.remove_messages(&preparation.jid, &[id.to_string()]);
+                    self.store
+                        .remove_messages(&preparation.jid, &[id.to_string()]);
                     self.rebuild_conversation(&preparation.jid);
                 }
                 return;
@@ -366,7 +525,8 @@ impl Bridge {
             if action == "recover" {
                 if let Some(message) = self.find_message(id) {
                     let text = message.text.clone();
-                    self.ui.invoke_set_composer(text.clone().into(), text.len() as i32);
+                    self.ui
+                        .invoke_set_composer(text.clone().into(), text.len() as i32);
                     self.save_draft(&text, true);
                 }
                 return;
@@ -397,8 +557,12 @@ impl Bridge {
                 return;
             }
         }
-        let Some(m) = self.find_message(id).cloned() else { return };
-        if m.deleted || m.kind == MessageKind::System { return; }
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
+        if m.deleted || m.kind == MessageKind::System {
+            return;
+        }
         match action {
             "private" if is_group(&m.jid) && !m.from_me && !m.sender_jid.is_empty() => {
                 self.open_dm(&m.sender_jid, None);
@@ -410,22 +574,49 @@ impl Bridge {
             }
             "link" => {
                 let link = message_link(&m);
-                if !link.is_empty() {
-                    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(link)) { self.message_action_failed(&e.to_string()); }
+                if !link.is_empty()
+                    && let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(link))
+                {
+                    self.message_action_failed(&e.to_string());
                 }
             }
             "save" => {
-                let Some(cached) = self.media_path.get(id) else { self.request_manual_media(id); return };
-                let Some(path) = crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached)) else { return };
-                let name = if m.kind == MessageKind::Doc { sanitize_file_name(&m.text) } else { path.file_name().unwrap_or_default().to_string_lossy().into_owned() };
+                let Some(cached) = self.media_path.get(id) else {
+                    self.request_manual_media(id);
+                    return;
+                };
+                let Some(path) =
+                    crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached))
+                else {
+                    return;
+                };
+                let name = if m.kind == MessageKind::Doc {
+                    sanitize_file_name(&m.text)
+                } else {
+                    path.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                };
                 std::thread::spawn(move || {
-                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file() {
-                        if let Err(e) = std::fs::copy(path, target) { ui_apply(move |b| b.message_action_failed(&e.to_string())); }
+                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file()
+                        && let Err(e) = std::fs::copy(path, target)
+                    {
+                        ui_apply(move |b| b.message_action_failed(&e.to_string()));
                     }
                 });
             }
-            "pin" => self.wa.send(Cmd::PinMessage { jid: m.jid.clone(), id: m.id.clone(), from_me: m.from_me, participant: self.key_participant(&m), pin: m.pinned_until <= now_secs() }),
-            "unread" => { self.close_chat(); self.wa.send(Cmd::MarkUnread(m.jid)); }
+            "pin" => self.wa.send(Cmd::PinMessage {
+                jid: m.jid.clone(),
+                id: m.id.clone(),
+                from_me: m.from_me,
+                participant: self.key_participant(&m),
+                pin: m.pinned_until <= now_secs(),
+            }),
+            "unread" => {
+                self.close_chat();
+                self.wa.send(Cmd::MarkUnread(m.jid));
+            }
             "edit" if message_editable(&m) => {
                 self.ui.set_message_dialog_id(m.id.into());
                 self.ui.set_message_dialog_title("Edit message".into());
@@ -433,15 +624,22 @@ impl Bridge {
                 self.ui.set_message_dialog_edit(true);
                 self.ui.set_message_dialog_open(true);
             }
-            "delete" => { self.select_start(id); self.confirm_delete_selected(); }
+            "delete" => {
+                self.select_start(id);
+                self.confirm_delete_selected();
+            }
             "details" => {
                 self.ui.set_details_id(m.id.clone().into());
                 self.ui.set_details_open(true);
                 self.refresh_message_details();
                 let (_, participants) = self.store.receipt_participants(&m);
-                for (jid, _) in participants { self.queue_avatar(&jid); }
+                for (jid, _) in participants {
+                    self.queue_avatar(&jid);
+                }
                 self.request_automatic_media(&m);
-                if is_group(&m.jid) { self.ensure_group_meta(&m.jid); }
+                if is_group(&m.jid) {
+                    self.ensure_group_meta(&m.jid);
+                }
             }
             _ => {}
         }

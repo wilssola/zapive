@@ -17,7 +17,13 @@ pub(super) enum ConfirmAction {
 impl Bridge {
     // ---- confirm dialog ----
 
-    pub(super) fn ask_confirm(&mut self, title: String, body: String, action: String, what: ConfirmAction) {
+    pub(super) fn ask_confirm(
+        &mut self,
+        title: String,
+        body: String,
+        action: String,
+        what: ConfirmAction,
+    ) {
         self.ui.set_chat_menu_open(false);
         self.confirm_action = Some(what);
         self.ui.set_confirm_title(title.into());

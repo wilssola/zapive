@@ -1,0 +1,177 @@
+import { ListView } from "std-widgets.slint";
+import { Avatar } from "avatar.slint";
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { Theme } from "theme.slint";
+import { StarredItem } from "types.slint";
+
+// Right-hand glass panel (like the info panel) listing starred messages.
+export component StarredLayer inherits ModalLayer {
+    in-out property <bool> starred-open;
+    in property <[StarredItem]> starred-items;
+    // True when the list is limited to the open chat.
+    in property <bool> current-only;
+    callback open-starred-item(string, string);
+
+    if root.mounted: Rectangle {
+        width: min(380px, parent.width - 16px);
+        height: parent.height - 16px;
+        x: parent.width - self.width - 8px + (1 - root.progress) * self.width;
+        y: 8px;
+        opacity: root.progress;
+        border-radius: 18px;
+        border-width: 1px;
+        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+        drop-shadow-blur: Theme.glass ? 28px : 0px;
+        drop-shadow-color: Theme.glass-shadow;
+        background: Theme.glass ? Theme.glass-fill-cover : Theme.panel;
+        clip: true;
+        if Theme.glass: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        TouchArea { }
+        VerticalLayout {
+            Rectangle {
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    Text {
+                        text: root.current-only ? @tr("starred.title_chat") : @tr("starred.title");
+                        color: Theme.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        width: 32px;
+                        height: 32px;
+                        icon-size: 18px;
+                        y: (parent.height - self.height) / 2;
+                        icon: @image-url("../icons/x.svg");
+                        accessible-role: button;
+                        accessible-label: @tr("starred.close");
+                        clicked => { root.starred-open = false; }
+                    }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            }
+            if root.starred-items.length == 0: VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+                vertical-stretch: 1;
+                padding: 28px;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 64px;
+                        height: 64px;
+                        border-radius: 32px;
+                        background: Theme.tile;
+                        Image {
+                            source: @image-url("../icons/star.svg");
+                            colorize: Theme.icon;
+                            width: 28px;
+                            height: 28px;
+                            x: 18px;
+                            y: 18px;
+                        }
+                    }
+                }
+                Text {
+                    text: @tr("starred.empty.title");
+                    color: Theme.text;
+                    font-size: 15px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: @tr("starred.empty.hint");
+                    color: Theme.text-dim;
+                    font-size: 12.5px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            if root.starred-items.length > 0: ListView {
+                vertical-stretch: 1;
+                for item in root.starred-items: Rectangle {
+                    height: 78px;
+                    background: row-touch.has-hover ? Theme.hover : transparent;
+                    animate background { duration: Theme.motion-fast; }
+                    row-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: item.chat-name + ": " + item.text;
+                        clicked => { root.open-starred-item(item.jid, item.msg-id); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        padding-top: 10px;
+                        padding-bottom: 10px;
+                        spacing: 12px;
+                        Avatar {
+                            width: 40px;
+                            height: 40px;
+                            y: 4px;
+                            src: item.avatar;
+                            has-image: true;
+                            initial: "";
+                            color-idx: 0;
+                        }
+                        VerticalLayout {
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: item.chat-name;
+                                    color: Theme.text;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: item.time;
+                                    color: Theme.text-dim;
+                                    font-size: 11.5px;
+                                }
+                            }
+                            Text {
+                                text: item.sender;
+                                color: Theme.accent-text;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Image {
+                                    source: @image-url("../icons/star.svg");
+                                    colorize: #e5a52a;
+                                    width: 12px;
+                                    height: 12px;
+                                    y: 3px;
+                                }
+                                Text {
+                                    text: item.text;
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+                    Rectangle { y: parent.height - 1px; x: 68px; height: 1px; background: Theme.border; }
+                }
+            }
+        }
+    }
+}

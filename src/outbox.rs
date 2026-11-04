@@ -20,7 +20,10 @@ pub fn new_id() -> String {
     use rand::RngCore as _;
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
-    format!("3EB0{}", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>())
+    format!(
+        "3EB0{}",
+        bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()
+    )
 }
 
 mod source_bytes {
@@ -32,7 +35,9 @@ mod source_bytes {
         serializer.serialize_str(&B64.encode(bytes))
     }
 
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
         let encoded = String::deserialize(deserializer)?;
         B64.decode(encoded).map_err(serde::de::Error::custom)
     }
@@ -110,8 +115,10 @@ mod tests {
     #[test]
     fn preparation_roundtrip_source_bytes() {
         for kind in ["image", "document", "audio", "sticker", "gif", "voice"] {
-            let data: Vec<u8> = [0.0f32, -0.5, 1.0].iter()
-                .flat_map(|sample| sample.to_le_bytes()).collect();
+            let data: Vec<u8> = [0.0f32, -0.5, 1.0]
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect();
             let preparation = Preparation {
                 id: new_id(),
                 jid: "123@s.whatsapp.net".into(),
@@ -156,7 +163,7 @@ mod tests {
         let media = wa::Message {
             image_message: MessageField::some(wa::message::ImageMessage {
                 caption: Some("photo".into()),
-                media_key: Some(vec![1, 2, 3].into()),
+                media_key: Some(vec![1, 2, 3]),
                 direct_path: Some("/media/photo".into()),
                 ..Default::default()
             }),

@@ -167,12 +167,25 @@ mod tests {
     fn statistical_detection_on_clear_text() {
         let mut detector = None;
         let cases = [
-            ("The weather is really nice today and we are going to the park.", "en"),
-            ("O tempo está muito bonito hoje e nós vamos ao parque passear.", "pt"),
-            ("Das Wetter ist heute wirklich schön und wir gehen in den Park.", "de"),
+            (
+                "The weather is really nice today and we are going to the park.",
+                "en",
+            ),
+            (
+                "O tempo está muito bonito hoje e nós vamos ao parque passear.",
+                "pt",
+            ),
+            (
+                "Das Wetter ist heute wirklich schön und wir gehen in den Park.",
+                "de",
+            ),
         ];
         for (text, expected) in cases {
-            assert_eq!(detect(text, &mut detector).as_deref(), Ok(expected), "{text}");
+            assert_eq!(
+                detect(text, &mut detector).as_deref(),
+                Ok(expected),
+                "{text}"
+            );
         }
         assert_eq!(
             detect("日本語です", &mut detector).as_deref(),

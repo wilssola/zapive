@@ -169,7 +169,7 @@ impl Bridge {
     }
 
     pub(super) fn ensure_audio_timer(&mut self) {
-        if self.audio_timer.running() {
+        if self.audio_timer.running() || self.audio.is_none() {
             return;
         }
         self.audio_timer.start(
@@ -207,14 +207,14 @@ impl Bridge {
     }
 
     pub(super) fn stop_audio(&mut self) {
-        if let Some(a) = self.audio.take() {
-            if Some(&a.jid) == self.current_jid.as_ref() {
-                self.patch_row(&a.id, |row| {
-                    row.playing = false;
-                    row.progress = 0.0;
-                    row.posLabel = "".into();
-                });
-            }
+        if let Some(a) = self.audio.take()
+            && Some(&a.jid) == self.current_jid.as_ref()
+        {
+            self.patch_row(&a.id, |row| {
+                row.playing = false;
+                row.progress = 0.0;
+                row.posLabel = "".into();
+            });
         }
         self.ui.set_mini_audio(false);
         self.ui.set_mini_audio_playing(false);

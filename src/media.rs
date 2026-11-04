@@ -17,7 +17,15 @@ pub struct Decoded {
 }
 
 pub fn sanitize(id: &str) -> String {
-    id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 // Cached media carries the app's own extensions, one per kind, since
@@ -57,15 +65,21 @@ pub fn cache_path(id: &str, mimetype: &str) -> PathBuf {
 // the current scheme once, at boot.
 pub fn migrate_cache() {
     let dir = media_cache();
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
     let mut moved = 0;
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
         let (new_stem, kind) = match ext {
             "jpg" if stem.starts_with("lnk_") => (stem["lnk_".len()..].to_string(), "link"),
             "webp" if stem.starts_with("stk_") => (stem["stk_".len()..].to_string(), "sticker"),
@@ -109,13 +123,6 @@ fn downloadable(msg: &wa::Message) -> Option<&dyn whatsapp_rust::wacore::downloa
     None
 }
 
-// Whether the message carries media Zapive can fetch from the server.
-// Outgoing messages never need it: the file came from disk, so the
-// original copy is opened instead of downloading the round trip.
-pub fn is_downloadable(msg: &wa::Message) -> bool {
-    downloadable(msg).is_some()
-}
-
 // How many plaintext bytes the download will write, as declared by the
 // message (encrypted size on the CDN, minus padding/IV/tag).
 pub fn expected_bytes(msg: &wa::Message) -> Option<u64> {
@@ -143,7 +150,12 @@ pub fn format_size(bytes: u64) -> String {
 // the same sticker sent ten times is one file and one decode.
 pub fn sticker_key(msg: &wa::Message) -> Option<String> {
     use whatsapp_rust::proto_helpers::MessageExt as _;
-    let sha = msg.get_base_message().sticker_message.as_option()?.file_sha256.as_ref()?;
+    let sha = msg
+        .get_base_message()
+        .sticker_message
+        .as_option()?
+        .file_sha256
+        .as_ref()?;
     if sha.is_empty() {
         return None;
     }
@@ -171,6 +183,7 @@ pub fn cached_path(id: &str, mimetype: &str, msg: &wa::Message) -> (PathBuf, boo
     (path, exists)
 }
 
+#[cfg(test)]
 pub async fn cache_sent(
     key: &KeyHandle,
     id: &str,
@@ -216,7 +229,8 @@ impl<F: Fn(u64)> ProgressWriter<F> {
         let written = self.bytes.position();
         let last = self.reported.load(std::sync::atomic::Ordering::Relaxed);
         if written.saturating_sub(last) >= PROGRESS_STEP_BYTES {
-            self.reported.store(written, std::sync::atomic::Ordering::Relaxed);
+            self.reported
+                .store(written, std::sync::atomic::Ordering::Relaxed);
             (self.progress)(written);
         }
     }
@@ -244,7 +258,9 @@ impl<F: Fn(u64)> std::io::Seek for ProgressWriter<F> {
 
 impl<F: Fn(u64)> whatsapp_rust::wacore::download::DownloadWriter for ProgressWriter<F> {
     fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.bytes.get_mut().truncate(usize::try_from(len).unwrap_or(usize::MAX));
+        self.bytes
+            .get_mut()
+            .truncate(usize::try_from(len).unwrap_or(usize::MAX));
         self.reported.store(0, std::sync::atomic::Ordering::Relaxed);
         (self.progress)(self.bytes.get_ref().len() as u64);
         Ok(())
@@ -292,7 +308,10 @@ where
         let _permit = sem.acquire().await;
         client.download_to_writer(target, writer()).await
     };
-    if attempt.as_ref().is_err_and(|e| rate_limited(&e.to_string())) {
+    if attempt
+        .as_ref()
+        .is_err_and(|e| rate_limited(&e.to_string()))
+    {
         // The server is throttling media: back everything off, then try
         // this one once more.
         note_rate_limit();
@@ -333,7 +352,7 @@ pub fn avatar_cache_path(jid: &str) -> PathBuf {
 // Decode sizes: a bubble is at most 330x380 logical, a link card 360
 // wide, so these cover a 2x display without keeping a screen-sized
 // bitmap per message. The lightbox re-decodes at FULL_PX on demand.
-pub const BUBBLE_PX: u32 = 720;
+pub const BUBBLE_PX: u32 = 640;
 pub const CARD_PX: u32 = 480;
 pub const FULL_PX: u32 = 2048;
 
@@ -395,7 +414,11 @@ pub fn temp_plain(key: &KeyHandle, path: &PathBuf) -> Option<PathBuf> {
     let dir = media_cache().join(".tmp");
     let _ = std::fs::create_dir_all(&dir);
     let kind = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let out = dir.join(format!("{}.{}", path.file_stem()?.to_str()?, plain_ext(kind)));
+    let out = dir.join(format!(
+        "{}.{}",
+        path.file_stem()?.to_str()?,
+        plain_ext(kind)
+    ));
     if !out.exists() {
         let plain = read_cached(key, path)?;
         std::fs::write(&out, plain).ok()?;
@@ -423,7 +446,9 @@ pub fn notification_thumbnail(bytes: &[u8]) -> Option<PathBuf> {
         return None;
     }
     let mut encoded = std::io::Cursor::new(Vec::new());
-    image.write_to(&mut encoded, image::ImageFormat::Jpeg).ok()?;
+    image
+        .write_to(&mut encoded, image::ImageFormat::Jpeg)
+        .ok()?;
     if encoded.get_ref().len() > MAX_INPUT {
         return None;
     }
@@ -437,7 +462,10 @@ pub fn notification_thumbnail(bytes: &[u8]) -> Option<PathBuf> {
     use rand::RngCore as _;
     let mut random = [0u8; 16];
     rand::rng().fill_bytes(&mut random);
-    let name = random.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let name = random
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     let path = dir.join(format!("{name}.jpg"));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -463,7 +491,13 @@ pub enum PreviewEdit {
     Draw(String, [u8; 4], f32),
 }
 
-pub fn crop_preview(image: &image::RgbaImage, x: f32, y: f32, w: f32, h: f32) -> Option<image::RgbaImage> {
+pub fn crop_preview(
+    image: &image::RgbaImage,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+) -> Option<image::RgbaImage> {
     if ![x, y, w, h].iter().all(|v| v.is_finite()) || w <= 0.0 || h <= 0.0 {
         return None;
     }
@@ -484,22 +518,38 @@ fn preview_font() -> Option<ab_glyph::FontArc> {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
         let query = fontdb::Query {
-            families: &[fontdb::Family::Name("Arial"), fontdb::Family::Name("DejaVu Sans"), fontdb::Family::SansSerif],
+            families: &[
+                fontdb::Family::Name("Arial"),
+                fontdb::Family::Name("DejaVu Sans"),
+                fontdb::Family::SansSerif,
+            ],
             weight: fontdb::Weight::BOLD,
             ..Default::default()
         };
         let preferred = db.query(&query);
-        preferred.into_iter().chain(db.faces().map(|face| face.id)).find_map(|id| {
-            db.with_face_data(id, |data, index| {
-                ab_glyph::FontVec::try_from_vec_and_index(data.to_vec(), index).ok().map(ab_glyph::FontArc::new)
-            }).flatten()
-        })
-    }).clone()
+        preferred
+            .into_iter()
+            .chain(db.faces().map(|face| face.id))
+            .find_map(|id| {
+                db.with_face_data(id, |data, index| {
+                    ab_glyph::FontVec::try_from_vec_and_index(data.to_vec(), index)
+                        .ok()
+                        .map(ab_glyph::FontArc::new)
+                })
+                .flatten()
+            })
+    })
+    .clone()
 }
 
 pub fn burn_preview_text(image: &mut image::RgbaImage, text: &str, x: f32, y: f32) -> Option<()> {
     use ab_glyph::{Font, ScaleFont};
-    if !x.is_finite() || !y.is_finite() || text.trim().is_empty() || image.width() == 0 || image.height() == 0 {
+    if !x.is_finite()
+        || !y.is_finite()
+        || text.trim().is_empty()
+        || image.width() == 0
+        || image.height() == 0
+    {
         return None;
     }
     let font = preview_font()?;
@@ -507,9 +557,14 @@ pub fn burn_preview_text(image: &mut image::RgbaImage, text: &str, x: f32, y: f3
     let scaled = font.as_scaled(size);
     let outline = (size / 16.0).ceil() as i32;
     let margin = outline as f32 + 1.0;
-    let start_x = (x.clamp(0.0, 1.0) * image.width() as f32).clamp(margin.min(image.width() as f32), (image.width() as f32 - margin).max(margin));
+    let start_x = (x.clamp(0.0, 1.0) * image.width() as f32).clamp(
+        margin.min(image.width() as f32),
+        (image.width() as f32 - margin).max(margin),
+    );
     let mut pen_x = start_x;
-    let mut pen_y = (y.clamp(0.0, 1.0) * image.height() as f32).min((image.height() as f32 - size - margin).max(0.0)) + scaled.ascent();
+    let mut pen_y = (y.clamp(0.0, 1.0) * image.height() as f32)
+        .min((image.height() as f32 - size - margin).max(0.0))
+        + scaled.ascent();
     let mut previous = None;
     let mut glyphs = Vec::new();
     for ch in text.chars().take(4096) {
@@ -534,7 +589,9 @@ pub fn burn_preview_text(image: &mut image::RgbaImage, text: &str, x: f32, y: f3
         if pen_y - scaled.ascent() >= image.height() as f32 {
             break;
         }
-        if let Some(glyph) = font.outline_glyph(id.with_scale_and_position(size, ab_glyph::point(pen_x, pen_y))) {
+        if let Some(glyph) =
+            font.outline_glyph(id.with_scale_and_position(size, ab_glyph::point(pen_x, pen_y)))
+        {
             glyphs.push(glyph);
         }
         pen_x += advance;
@@ -547,15 +604,27 @@ pub fn burn_preview_text(image: &mut image::RgbaImage, text: &str, x: f32, y: f3
                 let radius = if dark { outline } else { 0 };
                 for dy in -radius..=radius {
                     for dx in -radius..=radius {
-                        if dx * dx + dy * dy > radius * radius { continue; }
+                        if dx * dx + dy * dy > radius * radius {
+                            continue;
+                        }
                         let px = bounds.min.x as i32 + gx as i32 + dx;
                         let py = bounds.min.y as i32 + gy as i32 + dy;
-                        if px < 0 || py < 0 || px >= image.width() as i32 || py >= image.height() as i32 { continue; }
+                        if px < 0
+                            || py < 0
+                            || px >= image.width() as i32
+                            || py >= image.height() as i32
+                        {
+                            continue;
+                        }
                         let pixel = image.get_pixel_mut(px as u32, py as u32);
                         let alpha = coverage + pixel[3] as f32 / 255.0 * (1.0 - coverage);
                         for channel in 0..3 {
                             let value = if dark { 16.0 } else { 255.0 };
-                            pixel[channel] = ((value * coverage + pixel[channel] as f32 * pixel[3] as f32 / 255.0 * (1.0 - coverage)) / alpha.max(f32::EPSILON)).round() as u8;
+                            pixel[channel] = ((value * coverage
+                                + pixel[channel] as f32 * pixel[3] as f32 / 255.0
+                                    * (1.0 - coverage))
+                                / alpha.max(f32::EPSILON))
+                            .round() as u8;
                         }
                         pixel[3] = (alpha * 255.0).round() as u8;
                     }
@@ -568,14 +637,22 @@ pub fn burn_preview_text(image: &mut image::RgbaImage, text: &str, x: f32, y: f3
 
 fn preview_draw_points(points: &str) -> Option<Vec<(f32, f32)>> {
     let mut parsed = Vec::new();
-    for point in points.trim().strip_suffix(';').unwrap_or(points.trim()).split(';') {
+    for point in points
+        .trim()
+        .strip_suffix(';')
+        .unwrap_or(points.trim())
+        .split(';')
+    {
         if parsed.len() == 20_000 {
             return None;
         }
         let (x, y) = point.split_once(',')?;
         let x: f32 = x.trim().parse().ok()?;
         let y: f32 = y.trim().parse().ok()?;
-        if ![x, y].iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+        if ![x, y]
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        {
             return None;
         }
         parsed.push((x, y));
@@ -583,15 +660,28 @@ fn preview_draw_points(points: &str) -> Option<Vec<(f32, f32)>> {
     Some(parsed)
 }
 
-pub fn burn_preview_draw(image: &mut image::RgbaImage, points: &str, color: [u8; 4], thickness: f32) -> Option<()> {
-    if !thickness.is_finite() || thickness <= 0.0 || thickness > 1.0 || image.width() == 0 || image.height() == 0 {
+pub fn burn_preview_draw(
+    image: &mut image::RgbaImage,
+    points: &str,
+    color: [u8; 4],
+    thickness: f32,
+) -> Option<()> {
+    if !thickness.is_finite()
+        || thickness <= 0.0
+        || thickness > 1.0
+        || image.width() == 0
+        || image.height() == 0
+    {
         return None;
     }
     let points = preview_draw_points(points)?;
     let (w, h) = image.dimensions();
     let radius = thickness * w.min(h) as f32 * 0.5;
     let mut coverage = vec![0u8; (w as usize).checked_mul(h as usize)?];
-    let scaled: Vec<_> = points.iter().map(|&(x, y)| (x * w as f32, y * h as f32)).collect();
+    let scaled: Vec<_> = points
+        .iter()
+        .map(|&(x, y)| (x * w as f32, y * h as f32))
+        .collect();
     for i in 0..scaled.len() {
         let (ax, ay) = scaled[i.saturating_sub(1)];
         let (bx, by) = scaled[i];
@@ -606,7 +696,11 @@ pub fn burn_preview_draw(image: &mut image::RgbaImage, points: &str, color: [u8;
             for x in left..right {
                 let px = x as f32 + 0.5 - ax;
                 let py = y as f32 + 0.5 - ay;
-                let t = if length_squared > 0.0 { ((px * dx + py * dy) / length_squared).clamp(0.0, 1.0) } else { 0.0 };
+                let t = if length_squared > 0.0 {
+                    ((px * dx + py * dy) / length_squared).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 let distance = (px - t * dx).hypot(py - t * dy);
                 let alpha = ((radius + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
                 let cell = &mut coverage[y as usize * w as usize + x as usize];
@@ -616,11 +710,16 @@ pub fn burn_preview_draw(image: &mut image::RgbaImage, points: &str, color: [u8;
     }
     for (pixel, coverage) in image.pixels_mut().zip(coverage) {
         let source_alpha = coverage as f32 / 255.0 * color[3] as f32 / 255.0;
-        if source_alpha == 0.0 { continue; }
+        if source_alpha == 0.0 {
+            continue;
+        }
         let destination_alpha = pixel[3] as f32 / 255.0;
         let alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
         for channel in 0..3 {
-            pixel[channel] = ((color[channel] as f32 * source_alpha + pixel[channel] as f32 * destination_alpha * (1.0 - source_alpha)) / alpha).round() as u8;
+            pixel[channel] = ((color[channel] as f32 * source_alpha
+                + pixel[channel] as f32 * destination_alpha * (1.0 - source_alpha))
+                / alpha)
+                .round() as u8;
         }
         pixel[3] = (alpha * 255.0).round() as u8;
     }
@@ -629,24 +728,38 @@ pub fn burn_preview_draw(image: &mut image::RgbaImage, points: &str, color: [u8;
 
 pub fn edit_preview(path: &std::path::Path, edit: PreviewEdit) -> Option<(PathBuf, Decoded)> {
     let bytes = std::fs::read(path).ok()?;
-    let mut image = apply_orientation(image::load_from_memory(&bytes).ok()?, exif_rotation(&bytes)).to_rgba8();
+    let mut image =
+        apply_orientation(image::load_from_memory(&bytes).ok()?, exif_rotation(&bytes)).to_rgba8();
     match edit {
         PreviewEdit::Crop(x, y, w, h) => image = crop_preview(&image, x, y, w, h)?,
         PreviewEdit::Text(text, x, y) => burn_preview_text(&mut image, &text, x, y)?,
-        PreviewEdit::Draw(points, color, thickness) => burn_preview_draw(&mut image, &points, color, thickness)?,
+        PreviewEdit::Draw(points, color, thickness) => {
+            burn_preview_draw(&mut image, &points, color, thickness)?
+        }
     }
     let dir = media_cache().join(".tmp");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("edit-{:032x}.png", rand::random::<u128>()));
     image.save(&path).ok()?;
-    let preview = image::DynamicImage::ImageRgba8(image).thumbnail(1280, 1280).to_rgba8();
-    Some((path, Decoded { w: preview.width(), h: preview.height(), rgba: preview.into_raw() }))
+    let preview = image::DynamicImage::ImageRgba8(image)
+        .thumbnail(1280, 1280)
+        .to_rgba8();
+    Some((
+        path,
+        Decoded {
+            w: preview.width(),
+            h: preview.height(),
+            rgba: preview.into_raw(),
+        },
+    ))
 }
 
 // A 512x512 webp sticker with transparent padding, like WhatsApp makes.
 pub fn to_webp_sticker(data: &[u8]) -> Option<Vec<u8>> {
     let img = image::load_from_memory(data).ok()?;
-    let fitted = img.resize(512, 512, imageops::FilterType::Triangle).to_rgba8();
+    let fitted = img
+        .resize(512, 512, imageops::FilterType::Triangle)
+        .to_rgba8();
     let mut canvas = image::RgbaImage::new(512, 512);
     let (x, y) = ((512 - fitted.width()) / 2, (512 - fitted.height()) / 2);
     imageops::overlay(&mut canvas, &fitted, x as i64, y as i64);
@@ -685,12 +798,24 @@ pub fn decode_bytes(data: &[u8], max_dim: u32) -> Option<Decoded> {
     let img = image::load_from_memory(data).ok()?;
     let img = apply_orientation(img, orientation);
     let (w, h) = (img.width(), img.height());
-    let scale = (max_dim as f64 / w as f64).min(max_dim as f64 / h as f64).min(1.0);
-    let (tw, th) = (((w as f64 * scale) as u32).max(1), ((h as f64 * scale) as u32).max(1));
-    let resized =
-        if scale < 1.0 { img.resize(tw, th, imageops::FilterType::Triangle) } else { img };
+    let scale = (max_dim as f64 / w as f64)
+        .min(max_dim as f64 / h as f64)
+        .min(1.0);
+    let (tw, th) = (
+        ((w as f64 * scale) as u32).max(1),
+        ((h as f64 * scale) as u32).max(1),
+    );
+    let resized = if scale < 1.0 {
+        img.resize(tw, th, imageops::FilterType::Triangle)
+    } else {
+        img
+    };
     let rgba = resized.to_rgba8();
-    Some(Decoded { w: rgba.width(), h: rgba.height(), rgba: rgba.into_raw() })
+    Some(Decoded {
+        w: rgba.width(),
+        h: rgba.height(),
+        rgba: rgba.into_raw(),
+    })
 }
 
 // Square cover crop (avatars in the UI).
@@ -698,7 +823,11 @@ pub fn decode_cover(data: &[u8], size: u32) -> Option<Decoded> {
     let img = image::load_from_memory(data).ok()?;
     let resized = img.resize_to_fill(size, size, imageops::FilterType::Lanczos3);
     let rgba = resized.to_rgba8();
-    Some(Decoded { w: rgba.width(), h: rgba.height(), rgba: rgba.into_raw() })
+    Some(Decoded {
+        w: rgba.width(),
+        h: rgba.height(),
+        rgba: rgba.into_raw(),
+    })
 }
 
 // Sticker frames: animated webp/gif capped, each fit into a square box.
@@ -706,7 +835,9 @@ pub fn sticker_frames(data: &[u8], box_dim: u32, cap: usize) -> Vec<Decoded> {
     let fit = |frame: image::RgbaImage| -> Decoded {
         let img = image::DynamicImage::ImageRgba8(frame);
         let (w, h) = (img.width(), img.height());
-        let scale = (box_dim as f64 / w as f64).min(box_dim as f64 / h as f64).min(1.0);
+        let scale = (box_dim as f64 / w as f64)
+            .min(box_dim as f64 / h as f64)
+            .min(1.0);
         let resized = if scale < 1.0 {
             img.resize(
                 ((w as f64 * scale) as u32).max(1),
@@ -717,35 +848,48 @@ pub fn sticker_frames(data: &[u8], box_dim: u32, cap: usize) -> Vec<Decoded> {
             img
         };
         let rgba = resized.to_rgba8();
-        Decoded { w: rgba.width(), h: rgba.height(), rgba: rgba.into_raw() }
+        Decoded {
+            w: rgba.width(),
+            h: rgba.height(),
+            rgba: rgba.into_raw(),
+        }
     };
     // Try the animated decoders first; a still image is the fallback.
     let animated: Option<Vec<Decoded>> = (|| {
-        let frames: Vec<Decoded> = image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(data))
-            .ok()
-            .filter(|d| d.has_animation())
-            .map(|d| {
-                d.into_frames()
-                    .take(cap)
-                    .filter_map(|f| f.ok())
-                    .map(|f| fit(f.into_buffer()))
-                    .collect()
-            })
-            .or_else(|| {
-                image::codecs::gif::GifDecoder::new(std::io::Cursor::new(data)).ok().map(|d| {
+        let frames: Vec<Decoded> =
+            image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(data))
+                .ok()
+                .filter(|d| d.has_animation())
+                .map(|d| {
                     d.into_frames()
                         .take(cap)
                         .filter_map(|f| f.ok())
                         .map(|f| fit(f.into_buffer()))
                         .collect()
                 })
-            })?;
-        if frames.is_empty() { None } else { Some(frames) }
+                .or_else(|| {
+                    image::codecs::gif::GifDecoder::new(std::io::Cursor::new(data))
+                        .ok()
+                        .map(|d| {
+                            d.into_frames()
+                                .take(cap)
+                                .filter_map(|f| f.ok())
+                                .map(|f| fit(f.into_buffer()))
+                                .collect()
+                        })
+                })?;
+        if frames.is_empty() {
+            None
+        } else {
+            Some(frames)
+        }
     })();
     if let Some(frames) = animated {
         return frames;
     }
-    decode_bytes(data, box_dim).map(|d| vec![d]).unwrap_or_default()
+    decode_bytes(data, box_dim)
+        .map(|d| vec![d])
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -754,11 +898,17 @@ mod tests {
 
     #[test]
     fn preview_crop_uses_normalized_current_image_coordinates() {
-        let image = image::RgbaImage::from_fn(100, 80, |x, y| image::Rgba([x as u8, y as u8, 0, 255]));
+        let image =
+            image::RgbaImage::from_fn(100, 80, |x, y| image::Rgba([x as u8, y as u8, 0, 255]));
         let cropped = crop_preview(&image, 0.25, 0.25, 0.5, 0.5).unwrap();
         assert_eq!(cropped.dimensions(), (50, 40));
         assert_eq!(cropped.get_pixel(0, 0), image.get_pixel(25, 20));
-        assert_eq!(crop_preview(&cropped, 0.0, 0.0, 0.5, 0.5).unwrap().dimensions(), (25, 20));
+        assert_eq!(
+            crop_preview(&cropped, 0.0, 0.0, 0.5, 0.5)
+                .unwrap()
+                .dimensions(),
+            (25, 20)
+        );
         assert!(crop_preview(&image, f32::NAN, 0.0, 1.0, 1.0).is_none());
         assert!(crop_preview(&image, 1.0, 0.0, 0.1, 1.0).is_none());
         assert!(crop_preview(&image, 0.0, 0.0, 0.0, 1.0).is_none());
@@ -777,7 +927,13 @@ mod tests {
     #[test]
     fn preview_draw_segments_are_continuous_and_blended_once() {
         let mut image = image::RgbaImage::new(100, 100);
-        burn_preview_draw(&mut image, "0.1,0.2;0.8,0.2;0.8,0.9;0.8,0.9;", [12, 34, 56, 128], 0.06).unwrap();
+        burn_preview_draw(
+            &mut image,
+            "0.1,0.2;0.8,0.2;0.8,0.9;0.8,0.9;",
+            [12, 34, 56, 128],
+            0.06,
+        )
+        .unwrap();
         for x in 10..81 {
             assert_eq!(image.get_pixel(x, 20).0, [12, 34, 56, 128]);
         }
@@ -800,8 +956,22 @@ mod tests {
     fn preview_draw_rejects_invalid_input_without_changes() {
         let mut image = image::RgbaImage::new(20, 20);
         let original = image.clone();
-        for points in ["", ";", "0.5", "0.5,0.5,0.5", "NaN,0", "0,inf", "-0.1,0", "0,1.1", "0,0;;", "0,0;bad"] {
-            assert!(burn_preview_draw(&mut image, points, [255; 4], 0.1).is_none(), "{points}");
+        for points in [
+            "",
+            ";",
+            "0.5",
+            "0.5,0.5,0.5",
+            "NaN,0",
+            "0,inf",
+            "-0.1,0",
+            "0,1.1",
+            "0,0;;",
+            "0,0;bad",
+        ] {
+            assert!(
+                burn_preview_draw(&mut image, points, [255; 4], 0.1).is_none(),
+                "{points}"
+            );
             assert_eq!(image, original);
         }
         for thickness in [0.0, -0.1, 1.1, f32::NAN, f32::INFINITY] {
@@ -809,15 +979,22 @@ mod tests {
         }
         assert!(preview_draw_points(&"0,0;".repeat(20_000)).is_some());
         assert!(preview_draw_points(&"0,0;".repeat(20_001)).is_none());
-        assert!(burn_preview_draw(&mut image::RgbaImage::new(0, 20), "0,0", [255; 4], 0.1).is_none());
+        assert!(
+            burn_preview_draw(&mut image::RgbaImage::new(0, 20), "0,0", [255; 4], 0.1).is_none()
+        );
         assert_eq!(image, original);
     }
 
     #[test]
     fn preview_text_burns_white_letters_and_dark_outline() {
         let mut image = image::RgbaImage::from_pixel(640, 480, image::Rgba([120, 120, 120, 255]));
-        burn_preview_text(&mut image, "Readable text", 0.2, 0.3).expect("a system font is required");
-        assert!(image.pixels().any(|p| p[0] > 240 && p[1] > 240 && p[2] > 240));
+        burn_preview_text(&mut image, "Readable text", 0.2, 0.3)
+            .expect("a system font is required");
+        assert!(
+            image
+                .pixels()
+                .any(|p| p[0] > 240 && p[1] > 240 && p[2] > 240)
+        );
         assert!(image.pixels().any(|p| p[0] < 30 && p[1] < 30 && p[2] < 30));
         assert_eq!(image.get_pixel(0, 0), &image::Rgba([120, 120, 120, 255]));
         assert!(burn_preview_text(&mut image, "", 0.5, 0.5).is_none());
@@ -838,7 +1015,9 @@ mod tests {
         let bytes = bytes.into_inner();
         std::fs::create_dir_all(media_cache()).unwrap();
 
-        let path = cache_sent(&key, &id, "image/png", &message, &bytes).await.unwrap();
+        let path = cache_sent(&key, &id, "image/png", &message, &bytes)
+            .await
+            .unwrap();
 
         assert!(cached_path(&id, "image/png", &message).1);
         assert_ne!(std::fs::read(&path).unwrap(), bytes);
@@ -860,11 +1039,11 @@ mod tests {
             "image/png",
             &wa::Message::default(),
             b"image bytes",
-        ).await;
+        )
+        .await;
         assert!(path.is_none());
     }
 }
-
 
 #[cfg(test)]
 mod notification_tests {
@@ -887,7 +1066,11 @@ mod notification_tests {
 
     #[test]
     fn rejects_corrupt_image_headers() {
-        for bytes in [&b"\xff\xd8\xff"[..], &b"\x89PNG\r\n\x1a\n"[..], &b"not an image"[..]] {
+        for bytes in [
+            &b"\xff\xd8\xff"[..],
+            &b"\x89PNG\r\n\x1a\n"[..],
+            &b"not an image"[..],
+        ] {
             assert!(notification_thumbnail(bytes).is_none());
         }
     }

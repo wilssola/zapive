@@ -8,15 +8,23 @@ pub(super) fn image_of(d: &crate::media::Decoded) -> slint::Image {
 }
 
 pub(super) fn card_thumbnail(bytes: &[u8]) -> Option<slint::Image> {
-    if bytes.len() > 2 * 1024 * 1024 { return None; }
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    if bytes.len() > 2 * 1024 * 1024 {
+        return None;
+    }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(2048);
     limits.max_image_height = Some(2048);
     limits.max_alloc = Some(16 * 1024 * 1024);
     reader.limits(limits);
     let rgba = reader.decode().ok()?.thumbnail(480, 320).to_rgba8();
-    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
+    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+        rgba.as_raw(),
+        rgba.width(),
+        rgba.height(),
+    );
     Some(slint::Image::from_rgba8(buffer))
 }
 
@@ -45,11 +53,17 @@ pub(super) fn bubble_fit(w: i32, h: i32) -> (i32, i32) {
 }
 
 pub(super) fn quote_chat(m: &StoredMessage) -> &str {
-    if m.quote_jid.is_empty() { &m.jid } else { &m.quote_jid }
+    if m.quote_jid.is_empty() {
+        &m.jid
+    } else {
+        &m.quote_jid
+    }
 }
 
 pub(super) fn message_link(m: &StoredMessage) -> String {
-    if !m.link_url.is_empty() { return m.link_url.clone(); }
+    if !m.link_url.is_empty() {
+        return m.link_url.clone();
+    }
     crate::link_preview::first_url(&m.text)
 }
 
@@ -57,10 +71,12 @@ pub(super) fn document_type(m: &StoredMessage) -> String {
     if m.kind != MessageKind::Doc {
         return String::new();
     }
-    if let Some((_, ext)) = m.text.trim().rsplit_once('.') {
-        if !ext.is_empty() && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return ext.to_ascii_uppercase();
-        }
+    if let Some((_, ext)) = m.text.trim().rsplit_once('.')
+        && !ext.is_empty()
+        && ext.len() <= 10
+        && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+    {
+        return ext.to_ascii_uppercase();
     }
     match m.mimetype.split(';').next().unwrap_or_default().trim() {
         "application/pdf" => "PDF",
@@ -76,12 +92,18 @@ pub(super) fn document_type(m: &StoredMessage) -> String {
         "application/x-7z-compressed" => "7Z",
         "application/vnd.rar" | "application/x-rar-compressed" => "RAR",
         _ => "FILE",
-    }.into()
+    }
+    .into()
 }
 
 pub(super) fn message_editable(m: &StoredMessage) -> bool {
-    m.from_me && !m.deleted && !m.revoked && m.kind == MessageKind::Text
-        && !is_channel(&m.jid) && m.raw.is_some() && (0..900).contains(&(now_secs() - m.timestamp))
+    m.from_me
+        && !m.deleted
+        && !m.revoked
+        && m.kind == MessageKind::Text
+        && !is_channel(&m.jid)
+        && m.raw.is_some()
+        && (0..900).contains(&(now_secs() - m.timestamp))
 }
 
 pub(super) fn needs_media(m: &StoredMessage) -> bool {
@@ -196,7 +218,8 @@ mod tests {
 
     #[test]
     fn document_types_use_extension_and_mime_fallback() {
-        let mut m = crate::wa_map::system_message("peer@s.whatsapp.net", "id", 1, "report.Xlsx".into());
+        let mut m =
+            crate::wa_map::system_message("peer@s.whatsapp.net", "id", 1, "report.Xlsx".into());
         m.kind = MessageKind::Doc;
         assert_eq!(document_type(&m), "XLSX");
         m.text = "report".into();
@@ -228,18 +251,30 @@ mod tests {
         let sender = "author@s.whatsapp.net".parse().unwrap();
         let target = "peer@s.whatsapp.net".parse().unwrap();
         let meta = crate::wa_map::LiveMeta {
-            chat: "peer@s.whatsapp.net".into(), sender: "author@s.whatsapp.net".into(),
-            sender_alt: None, recipient_alt: None, id: "reply", from_me: false,
-            is_group: false, push_name: "", timestamp: 1,
+            chat: "peer@s.whatsapp.net".into(),
+            sender: "author@s.whatsapp.net".into(),
+            sender_alt: None,
+            recipient_alt: None,
+            id: "reply",
+            from_me: false,
+            push_name: "",
+            timestamp: 1,
         };
         for source in ["source@g.us", "peer@s.whatsapp.net"] {
             let ctx = whatsapp_rust::proto_helpers::build_quote_context_with_info(
-                "original", &sender, &source.parse().unwrap(), &target,
+                "original",
+                &sender,
+                &source.parse().unwrap(),
+                &target,
                 &wa::Message::text("quoted"),
             );
-            assert_eq!(ctx.remote_jid.as_deref(), (source != meta.chat).then_some(source));
+            assert_eq!(
+                ctx.remote_jid.as_deref(),
+                (source != meta.chat).then_some(source)
+            );
             let message = wa::Message::text_with_context("reply", ctx);
-            let stored = crate::wa_map::normalize(&mut store, &meta, &message, &HashMap::new(), 0).unwrap();
+            let stored =
+                crate::wa_map::normalize(&mut store, &meta, &message, &HashMap::new(), 0).unwrap();
             assert_eq!(stored.quote_id, "original");
             assert_eq!(stored.quote_text, "quoted");
             assert_eq!(stored.quote_author, "author@s.whatsapp.net");
@@ -256,7 +291,8 @@ mod tests {
 
     #[test]
     fn edit_requires_own_recent_live_text() {
-        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", "id", now_secs(), "hello".into());
+        let mut m =
+            crate::wa_map::system_message("a@s.whatsapp.net", "id", now_secs(), "hello".into());
         m.kind = MessageKind::Text;
         m.from_me = true;
         m.raw = Some(std::sync::Arc::new(wa::Message::default()));
@@ -273,7 +309,12 @@ mod tests {
 
     #[test]
     fn links_can_be_copied_without_a_preview() {
-        let mut m = crate::wa_map::system_message("a@s.whatsapp.net", "id", 1, "See https://example.com/page.".into());
+        let mut m = crate::wa_map::system_message(
+            "a@s.whatsapp.net",
+            "id",
+            1,
+            "See https://example.com/page.".into(),
+        );
         assert_eq!(message_link(&m), "https://example.com/page");
         m.text = "no link".into();
         assert!(message_link(&m).is_empty());

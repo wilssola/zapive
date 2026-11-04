@@ -3,30 +3,33 @@
 
 slint::include_modules!();
 
-mod outbox;
 mod audio;
 mod bridge;
 mod call;
 mod camera;
+#[cfg(feature = "demo")]
+mod demo;
 mod emoji;
 mod fonts;
 mod i18n;
-mod logging;
 mod link_preview;
+mod logging;
 mod markup;
 mod mcp;
 mod media;
-mod video;
+mod outbox;
 mod paths;
 mod pdf;
 mod platform;
 mod qr;
 mod search;
 mod single;
+mod sound;
 mod store;
 mod translation;
 mod update;
 mod vault;
+mod video;
 mod wa;
 mod wa_map;
 
@@ -37,6 +40,17 @@ use tokio::runtime::Runtime;
 pub(crate) static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn main() {
+    // Demo mode comes first: it redirects the data directories before any
+    // code can open the real vault or cache.
+    #[cfg(feature = "demo")]
+    if demo::requested() {
+        std::process::exit(demo::run());
+    }
+    #[cfg(not(feature = "demo"))]
+    if std::env::args().any(|a| a == "--demo" || a.starts_with("--demo-")) {
+        eprintln!("this build has no demo mode; rebuild with `--features demo`");
+        std::process::exit(2);
+    }
     paths::ensure_dirs();
     media::clean_notification_thumbnails();
     logging::install();
@@ -64,7 +78,11 @@ fn main() {
     // Developer probe: runs the self-updater against this very executable
     // (copy it somewhere disposable first) and says why it failed, if so.
     if std::env::args().any(|a| a == "--update-selftest") {
-        println!("[selftest] running {}, latest is {:?}", update::current_version(), update::check());
+        println!(
+            "[selftest] running {}, latest is {:?}",
+            update::current_version(),
+            update::check()
+        );
         println!("[selftest] apply: {:?}", update::apply());
         return;
     }
@@ -86,12 +104,18 @@ fn main() {
     };
 
     // Language: the saved setting wins; "system" falls back to the locale.
-    let language = app_vault.setting_get("language").unwrap_or_else(|| "system".into());
+    let language = app_vault
+        .setting_get("language")
+        .unwrap_or_else(|| "system".into());
     let system_pt = sys_locale::get_locale()
         .map(|l| l.to_lowercase().starts_with("pt"))
         .unwrap_or(false);
     let use_pt = language == "pt" || (language == "system" && system_pt);
-    i18n::set_locale(if use_pt { i18n::Locale::Pt } else { i18n::Locale::En });
+    i18n::set_locale(if use_pt {
+        i18n::Locale::Pt
+    } else {
+        i18n::Locale::En
+    });
     let rt = RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             // Two was enough for messaging, but a call adds the relay
@@ -102,7 +126,6 @@ fn main() {
             .build()
             .expect("failed to build the tokio runtime")
     });
-
 
     // Developer probe: exercises the whole in-process audio path
     // (opus encode -> decode with atempo -> waveform) and exits.
@@ -144,16 +167,23 @@ fn main() {
     );
 
     // Theme: explicit modes win; "system" follows the OS with a slow poll.
-    let theme = app_vault.setting_get("theme").unwrap_or_else(|| "dark".into());
+    let theme = app_vault
+        .setting_get("theme")
+        .unwrap_or_else(|| "dark".into());
     ui.set_theme_mode(theme.as_str().into());
-    let style = app_vault.setting_get("theme_style").unwrap_or_else(|| "glass".into());
+    let style = app_vault
+        .setting_get("theme_style")
+        .unwrap_or_else(|| "glass".into());
     ui.set_theme_style(if style == "opaque" { "opaque" } else { "glass" }.into());
     ui.set_blur_names(app_vault.setting_get("privacy_blur_names").as_deref() == Some("1"));
     ui.set_blur_photos(app_vault.setting_get("privacy_blur_photos").as_deref() == Some("1"));
     ui.set_blur_messages(app_vault.setting_get("privacy_blur_messages").as_deref() == Some("1"));
     ui.set_blur_media(app_vault.setting_get("privacy_blur_media").as_deref() == Some("1"));
     {
-        use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::{WindowEvent, ElementState, MouseButton}};
+        use slint::winit_030::{
+            EventResult, WinitWindowAccessor,
+            winit::event::{ElementState, MouseButton, WindowEvent},
+        };
         let handle = ui.as_weak();
         let mut cursor = None;
         let mut right_press_consumed = false;
@@ -161,7 +191,11 @@ fn main() {
             match event {
                 WindowEvent::CursorMoved { position, .. } => cursor = Some(*position),
                 WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => cursor = None,
-                WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
+                WindowEvent::MouseInput {
+                    state,
+                    button: MouseButton::Right,
+                    ..
+                } => {
                     if *state == ElementState::Released {
                         if std::mem::take(&mut right_press_consumed) {
                             return EventResult::PreventDefault;
@@ -176,12 +210,18 @@ fn main() {
                 }
                 _ => {}
             }
-            if let WindowEvent::Focused(focused) = event {
-                if let Some(ui) = handle.upgrade() {
-                    ui.set_window_active(*focused);
-                    #[cfg(windows)]
-                    platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
-                }
+            bridge::handle_file_drop_event(event);
+            if let WindowEvent::Resized(size) = event {
+                // A minimized window reports a zero size.
+                let idle = size.width == 0 || size.height == 0;
+                bridge::ui_apply(move |b| b.set_window_idle(idle));
+            }
+            if let WindowEvent::Focused(focused) = event
+                && let Some(ui) = handle.upgrade()
+            {
+                ui.set_window_active(*focused);
+                #[cfg(windows)]
+                platform::set_title_bar_theme(ui.get_dark_theme(), ui.get_glass());
             }
             EventResult::Propagate
         });
@@ -226,6 +266,7 @@ fn main() {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("[wa] failed to start: {e}");
+            ui.set_app_loading(false);
             ui.set_screen("login".into());
             ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
             ui.run().expect("event loop failed");
@@ -259,6 +300,7 @@ fn main() {
             Ok(()) => bridge::ui_apply(move |b| b.boot(app_vault, registered)),
             Err(e) => {
                 eprintln!("[vault] open failed: {e}");
+                ui.set_app_loading(false);
                 ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
             }
         }
@@ -278,7 +320,8 @@ fn main() {
     let tray_poll = slint::Timer::default();
     #[cfg(windows)]
     if let Some((_tray, open_id, exit_id)) = &tray {
-        ui.window().on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+        ui.window()
+            .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
         let handle = ui.as_weak();
         let (open_id, exit_id) = (open_id.clone(), exit_id.clone());
         tray_poll.start(
@@ -392,9 +435,7 @@ fn apply_native_backdrop(ui: &AppWindow) {
                 return;
             };
             use slint::winit_030::WinitWindowAccessor;
-            use slint::winit_030::winit::platform::windows::{
-                BackdropType, WindowExtWindows,
-            };
+            use slint::winit_030::winit::platform::windows::{BackdropType, WindowExtWindows};
             if let Ok(window) = ui.window().winit_window().await {
                 window.set_system_backdrop(BackdropType::TransientWindow);
                 ui.set_native_backdrop(true);
@@ -473,7 +514,11 @@ fn audio_selftest() {
         None => println!("[selftest] FAIL: waveform"),
     }
     let strip = audio::message_waveform(&samples);
-    println!("[selftest] message waveform {} points, peak {}", strip.len(), strip.iter().max().unwrap_or(&0));
+    println!(
+        "[selftest] message waveform {} points, peak {}",
+        strip.len(),
+        strip.iter().max().unwrap_or(&0)
+    );
     let _ = std::fs::remove_file(&tmp);
 }
 
@@ -485,7 +530,9 @@ fn player_selftest() {
     use std::sync::{Arc, Mutex};
     use video::PlayerEvent;
 
-    let given = std::env::args().skip_while(|a| a != "--player-selftest").nth(1);
+    let given = std::env::args()
+        .skip_while(|a| a != "--player-selftest")
+        .nth(1);
     let clip = match given {
         Some(path) => std::path::PathBuf::from(path),
         None => {
@@ -494,9 +541,18 @@ fn player_selftest() {
             let mut frames = Vec::new();
             for i in 0..60u32 {
                 let img = image::RgbaImage::from_fn(320, 180, |x, _| {
-                    if x / 8 == i { image::Rgba([255, 255, 255, 255]) } else { image::Rgba([20, 60, 90, 255]) }
+                    if x / 8 == i {
+                        image::Rgba([255, 255, 255, 255])
+                    } else {
+                        image::Rgba([20, 60, 90, 255])
+                    }
                 });
-                frames.push(image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(100, 1)));
+                frames.push(image::Frame::from_parts(
+                    img,
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(100, 1),
+                ));
             }
             let file = std::fs::File::create(&gif).expect("temp gif");
             let mut encoder = image::codecs::gif::GifEncoder::new(file);
@@ -504,7 +560,11 @@ fn player_selftest() {
             drop(encoder);
             // The player opens a cache entry through its plain temp copy,
             // and keeps one it finds: drop the last run's.
-            let _ = std::fs::remove_file(paths::media_cache().join(".tmp").join("zapive_selftest.mp4"));
+            let _ = std::fs::remove_file(
+                paths::media_cache()
+                    .join(".tmp")
+                    .join("zapive_selftest.mp4"),
+            );
             if video::gif_to_mp4(&gif, &mp4).is_none() {
                 println!("[selftest] FAIL: could not build the test clip");
                 return;
@@ -560,7 +620,10 @@ fn player_selftest() {
                 }
                 PlayerEvent::Ended => {
                     seen.ended = true;
-                    println!("[selftest] ended, {:.2}s in", started.elapsed().as_secs_f64());
+                    println!(
+                        "[selftest] ended, {:.2}s in",
+                        started.elapsed().as_secs_f64()
+                    );
                 }
                 PlayerEvent::Failed => {
                     seen.failed = true;
@@ -574,7 +637,10 @@ fn player_selftest() {
     let sleep = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
     let report = |what: &str| {
         let seen = seen.lock().unwrap();
-        println!("[selftest] {what}: {} frames, at {:.2}s", seen.frames, seen.last);
+        println!(
+            "[selftest] {what}: {} frames, at {:.2}s",
+            seen.frames, seen.last
+        );
         (seen.frames, seen.last)
     };
 
@@ -639,7 +705,14 @@ fn player_selftest() {
     let failed = seen.lock().unwrap().failed;
     *player.lock().unwrap() = None;
     sleep(100);
-    println!("[selftest] {}", if failed { "player FAILED" } else { "player done" });
+    println!(
+        "[selftest] {}",
+        if failed {
+            "player FAILED"
+        } else {
+            "player done"
+        }
+    );
 }
 
 // The NAL types in one Annex-B access unit, in order.
@@ -665,12 +738,16 @@ fn nal_types(au: &[u8]) -> Vec<u8> {
 // Mirrors what a video call does, in the same order, so a camera that
 // only fails inside the app shows the same failure here.
 fn video_selftest() {
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     let listed = std::time::Instant::now();
     let names: Vec<String> = camera::cameras().into_iter().map(|c| c.name).collect();
-    println!("[selftest] enumerated {} camera(s) in {:?}: {names:?}", names.len(), listed.elapsed());
+    println!(
+        "[selftest] enumerated {} camera(s) in {:?}: {names:?}",
+        names.len(),
+        listed.elapsed()
+    );
 
     // The call opens the camera off the UI thread, so the probe does too:
     // COM apartments are per thread, and that is exactly what breaks.
@@ -703,7 +780,10 @@ fn video_selftest() {
             };
             let _ = done_tx.send(Some(()));
             use whatsapp_rust::voip::VideoSource as _;
-            let source = feed.source().timed_frames().expect("the camera is timestamped");
+            let source = feed
+                .source()
+                .timed_frames()
+                .expect("the camera is timestamped");
             // The engine answers a shortfall by asking for an IDR; whether the
             // encoder actually turns that request into one, and how fast, is
             // the thing a byte count never showed.
@@ -739,10 +819,7 @@ fn video_selftest() {
                         if types.contains(&5)
                             && let Some(at) = asked.lock().unwrap().take()
                         {
-                            println!(
-                                "[selftest] IDR {:?} after the request",
-                                at.elapsed()
-                            );
+                            println!("[selftest] IDR {:?} after the request", at.elapsed());
                         }
                         if n < 3 {
                             println!(
@@ -790,8 +867,8 @@ fn stamp_window_icons() {
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM};
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IMAGE_ICON,
-        LR_LOADFROMFILE, LoadImageW, SendMessageW, WM_SETICON,
+        EnumWindows, GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_LOADFROMFILE,
+        LoadImageW, SendMessageW, WM_SETICON,
     };
     use windows::core::PCWSTR;
     unsafe extern "system" fn stamp(hwnd: HWND, lp: LPARAM) -> BOOL {
@@ -811,9 +888,16 @@ fn stamp_window_icons() {
         let ico = paths::data_dir().join("zapive.ico");
         let wide: Vec<u16> = ico.as_os_str().encode_wide().chain([0]).collect();
         let load = |size: i32| {
-            LoadImageW(None, PCWSTR(wide.as_ptr()), IMAGE_ICON, size, size, LR_LOADFROMFILE)
-                .map(|h| h.0 as isize)
-                .unwrap_or(0)
+            LoadImageW(
+                None,
+                PCWSTR(wide.as_ptr()),
+                IMAGE_ICON,
+                size,
+                size,
+                LR_LOADFROMFILE,
+            )
+            .map(|h| h.0 as isize)
+            .unwrap_or(0)
         };
         let handles = [load(16), load(32)];
         let _ = EnumWindows(Some(stamp), LPARAM(&handles as *const _ as isize));
@@ -821,20 +905,26 @@ fn stamp_window_icons() {
 }
 
 #[cfg(windows)]
-fn make_tray() -> Option<(tray_icon::TrayIcon, tray_icon::menu::MenuId, tray_icon::menu::MenuId)> {
+fn make_tray() -> Option<(
+    tray_icon::TrayIcon,
+    tray_icon::menu::MenuId,
+    tray_icon::menu::MenuId,
+)> {
     use tray_icon::menu::{Menu, MenuItem};
     // Raw RGBA came out garbled in the shell; LoadImage on the .ico (the
     // same art the exe embeds, written to the data dir at startup) lets
     // Windows pick the right size and pixel format itself.
     let ico = crate::paths::data_dir().join("zapive.ico");
-    let icon = tray_icon::Icon::from_path(&ico, Some((32, 32))).ok().or_else(|| {
-        let img = image::load_from_memory(include_bytes!("../ui/zapive.png"))
-            .ok()?
-            .resize_exact(32, 32, image::imageops::FilterType::Triangle)
-            .into_rgba8();
-        let (w, h) = img.dimensions();
-        tray_icon::Icon::from_rgba(img.into_raw(), w, h).ok()
-    })?;
+    let icon = tray_icon::Icon::from_path(&ico, Some((32, 32)))
+        .ok()
+        .or_else(|| {
+            let img = image::load_from_memory(include_bytes!("../ui/zapive.png"))
+                .ok()?
+                .resize_exact(32, 32, image::imageops::FilterType::Triangle)
+                .into_rgba8();
+            let (w, h) = img.dimensions();
+            tray_icon::Icon::from_rgba(img.into_raw(), w, h).ok()
+        })?;
     let open = MenuItem::new(i18n::t("tray.open"), true, None);
     let exit = MenuItem::new(i18n::t("tray.exit"), true, None);
     let (open_id, exit_id) = (open.id().clone(), exit.id().clone());

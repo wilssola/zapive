@@ -6,8 +6,13 @@ impl Bridge {
 
     pub(super) fn refresh_statuses(&mut self) {
         let authors = self.store.status_authors();
-        self.ui.set_statuses_unseen(self.store.statuses.values().flatten()
-            .any(|item| !item.from_me && !item.read_sent));
+        self.ui.set_statuses_unseen(
+            self.store
+                .statuses
+                .values()
+                .flatten()
+                .any(|item| !item.from_me && !item.read_sent),
+        );
         let rows: Vec<ChatItem> = authors
             .iter()
             .map(|(jid, latest, _count)| {
@@ -57,7 +62,10 @@ impl Bridge {
         };
         let (count, idx_now) = (items.len(), *idx);
         let item = items[idx_now].clone();
-        if let Some(stored) = self.store.statuses.get_mut(&item.jid)
+        if let Some(stored) = self
+            .store
+            .statuses
+            .get_mut(&item.jid)
             .and_then(|items| items.iter_mut().find(|stored| stored.id == item.id))
             && !stored.read_sent
         {

@@ -1,0 +1,237 @@
+import { LineEdit, ListView } from "std-widgets.slint";
+import { DialogButton } from "dialog-button.slint";
+import { IconButton } from "icon-button.slint";
+import { ModalLayer } from "modal.slint";
+import { SettingsRow } from "settings-row.slint";
+import { Theme } from "theme.slint";
+import { Toggle } from "toggle.slint";
+
+// Create-a-poll dialog: a question, 2..12 options and a multi-answer switch.
+export component PollComposerLayer inherits ModalLayer {
+    in-out property <bool> poll-composer-open;
+    callback create-poll(string, [string], bool);
+
+    property <string> question;
+    property <bool> multi: false;
+    // Twelve fixed slots (the maximum); `count` of them are shown.
+    property <int> count: 2;
+    property <string> o0; property <string> o1; property <string> o2; property <string> o3;
+    property <string> o4; property <string> o5; property <string> o6; property <string> o7;
+    property <string> o8; property <string> o9; property <string> o10; property <string> o11;
+    pure function slot(i: int) -> string {
+        return i == 0 ? root.o0 : i == 1 ? root.o1 : i == 2 ? root.o2 : i == 3 ? root.o3
+            : i == 4 ? root.o4 : i == 5 ? root.o5 : i == 6 ? root.o6 : i == 7 ? root.o7
+            : i == 8 ? root.o8 : i == 9 ? root.o9 : i == 10 ? root.o10 : root.o11;
+    }
+    function put(i: int, v: string) {
+        if (i == 0) { root.o0 = v; } else if (i == 1) { root.o1 = v; } else if (i == 2) { root.o2 = v; }
+        else if (i == 3) { root.o3 = v; } else if (i == 4) { root.o4 = v; } else if (i == 5) { root.o5 = v; }
+        else if (i == 6) { root.o6 = v; } else if (i == 7) { root.o7 = v; } else if (i == 8) { root.o8 = v; }
+        else if (i == 9) { root.o9 = v; } else if (i == 10) { root.o10 = v; } else { root.o11 = v; }
+    }
+    pure function filled-at(i: int) -> int { return i < root.count && root.slot(i) != "" ? 1 : 0; }
+    property <int> filled: root.filled-at(0) + root.filled-at(1) + root.filled-at(2) + root.filled-at(3)
+        + root.filled-at(4) + root.filled-at(5) + root.filled-at(6) + root.filled-at(7)
+        + root.filled-at(8) + root.filled-at(9) + root.filled-at(10) + root.filled-at(11);
+    property <bool> valid: root.question != "" && root.filled >= 2;
+    property <[int]> slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    function add-option() {
+        if (root.count < 12) { root.count += 1; }
+    }
+    function remove-option(i: int) {
+        if (root.count <= 2) { return; }
+        // Shift the later slots up by one.
+        if (i <= 0 && root.count > 1) { root.o0 = root.o1; }
+        if (i <= 1 && root.count > 2) { root.o1 = root.o2; }
+        if (i <= 2 && root.count > 3) { root.o2 = root.o3; }
+        if (i <= 3 && root.count > 4) { root.o3 = root.o4; }
+        if (i <= 4 && root.count > 5) { root.o4 = root.o5; }
+        if (i <= 5 && root.count > 6) { root.o5 = root.o6; }
+        if (i <= 6 && root.count > 7) { root.o6 = root.o7; }
+        if (i <= 7 && root.count > 8) { root.o7 = root.o8; }
+        if (i <= 8 && root.count > 9) { root.o8 = root.o9; }
+        if (i <= 9 && root.count > 10) { root.o9 = root.o10; }
+        if (i <= 10 && root.count > 11) { root.o10 = root.o11; }
+        root.put(root.count - 1, "");
+        root.count -= 1;
+    }
+    function reset() {
+        root.question = "";
+        root.multi = false;
+        root.count = 2;
+        root.o0 = ""; root.o1 = ""; root.o2 = ""; root.o3 = ""; root.o4 = ""; root.o5 = "";
+        root.o6 = ""; root.o7 = ""; root.o8 = ""; root.o9 = ""; root.o10 = ""; root.o11 = "";
+    }
+    changed open => { if (!root.open) { root.reset(); } }
+    function submit() {
+        if (!root.valid) { return; }
+        root.create-poll(root.question,
+            [root.o0, root.o1, root.o2, root.o3, root.o4, root.o5, root.o6, root.o7, root.o8, root.o9, root.o10, root.o11],
+            root.multi);
+        root.poll-composer-open = false;
+    }
+
+    if root.mounted: Rectangle {
+        opacity: root.progress;
+        transform-scale: 0.96 + 0.04 * root.progress;
+        width: min(440px, parent.width - 32px);
+        height: min(parent.height - 32px, form.preferred-height + 36px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.panel;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        border-radius: 20px;
+        drop-shadow-blur: Theme.glass ? 40px : 0px;
+        drop-shadow-color: Theme.glass-shadow;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        TouchArea { }
+        form := VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            HorizontalLayout {
+                Text {
+                    text: @tr("poll.composer.title");
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    icon: @image-url("../icons/x.svg");
+                    accessible-role: button;
+                    clicked => { root.poll-composer-open = false; }
+                }
+            }
+            Text {
+                text: @tr("poll.composer.question");
+                color: Theme.text-dim;
+                font-size: 12px;
+            }
+            Rectangle {
+                height: 40px;
+                border-radius: 12px;
+                background: Theme.field;
+                border-width: 1px;
+                border-color: q-input.has-focus ? Theme.accent : Theme.field-border;
+                q-input := LineEdit {
+                    x: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height;
+                    placeholder-text: @tr("poll.composer.question_placeholder");
+                    accessible-role: button;
+                    accessible-label: @tr("poll.composer.question");
+                    text <=> root.question;
+                }
+            }
+            Text {
+                text: @tr("poll.composer.options");
+                color: Theme.text-dim;
+                font-size: 12px;
+            }
+            VerticalLayout {
+                spacing: 6px;
+                for i in root.count: HorizontalLayout {
+                    spacing: 6px;
+                    height: 38px;
+                    Rectangle {
+                        border-radius: 12px;
+                        background: Theme.field;
+                        border-width: 1px;
+                        border-color: opt-input.has-focus ? Theme.accent : Theme.field-border;
+                        horizontal-stretch: 1;
+                        opt-input := LineEdit {
+                            x: 4px;
+                            width: parent.width - 8px;
+                            height: parent.height;
+                            placeholder-text: @tr("poll.composer.option_placeholder");
+                            accessible-role: button;
+                            accessible-label: @tr("poll.composer.options");
+                            text: root.slot(i);
+                            edited(t) => { root.put(i, t); }
+                        }
+                    }
+                    IconButton {
+                        width: 38px;
+                        height: 38px;
+                        icon: @image-url("../icons/trash.svg");
+                        icon-size: 18px;
+                        enabled: root.count > 2;
+                        opacity: root.count > 2 ? 1.0 : 0.35;
+                        accessible-role: button;
+                        accessible-label: @tr("poll.composer.remove_option");
+                        clicked => { root.remove-option(i); }
+                    }
+                }
+            }
+            if root.count < 12: Rectangle {
+                height: 36px;
+                border-radius: 12px;
+                background: add-touch.has-hover ? Theme.hover : transparent;
+                add-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: @tr("poll.composer.add_option");
+                    clicked => { root.add-option(); }
+                }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    spacing: 8px;
+                    Image {
+                        source: @image-url("../icons/plus.svg");
+                        colorize: Theme.accent-text;
+                        width: 16px;
+                        height: 16px;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    Text {
+                        text: @tr("poll.composer.add_option");
+                        color: Theme.accent-text;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            Rectangle {
+                height: 48px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: @tr("poll.composer.multiple");
+                        color: Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Toggle {
+                        on: root.multi;
+                        label: @tr("poll.composer.multiple");
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.multi = !root.multi; }
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                DialogButton {
+                    label: @tr("message.confirm.cancel");
+                    clicked => { root.poll-composer-open = false; }
+                }
+                DialogButton {
+                    label: @tr("poll.composer.send");
+                    primary: true;
+                    enabled: root.valid;
+                    opacity: root.valid ? 1.0 : 0.4;
+                    clicked => { root.submit(); }
+                }
+            }
+        }
+    }
+}

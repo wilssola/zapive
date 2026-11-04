@@ -13,15 +13,27 @@ export component CallWindow inherits Window {
     // the resize the host does when a call turns into a video one.
     preferred-width: 360px;
     preferred-height: 540px;
-    background: Theme.dark ? #111b21 : #f0f2f5;
+    // Set by the host from the theme style. A separate window has no OS
+    // backdrop of its own, so the glass look is a soft aurora gradient that
+    // the translucent controls sit on; opaque keeps the flat palette.
+    in property <bool> glass: false;
+    background: root.glass
+        ? (Theme.dark
+            ? @linear-gradient(160deg, #17323a 0%, #101f26 48%, #0b151b 100%)
+            : @linear-gradient(160deg, #e3f3ee 0%, #f2f6f7 50%, #e4ecf2 100%))
+        : (Theme.dark ? #111b21 : #f0f2f5);
     // Matches AppWindow's default-font-weight (see its comment).
     default-font-weight: 500;
     init => {
         Theme.dark = root.dark-theme;
+        Theme.glass = root.glass;
     }
     in-out property <bool> dark-theme: true;
     changed dark-theme => {
         Theme.dark = self.dark-theme;
+    }
+    changed glass => {
+        Theme.glass = self.glass;
     }
 
     // "incoming" | "outgoing" | "connecting" | "active" | "ended"
@@ -154,7 +166,7 @@ export component CallWindow inherits Window {
                 icon: @image-url("../icons/video.svg");
                 tint: root.video-wanted
                     ? #00a884
-                    : (root.video-on ? #2a3942 : (Theme.dark ? #2a3942 : #d1d7db));
+                    : (root.video-on ? #2a3942 : Theme.control);
                 icon-tint: root.video-wanted || root.video-on ? #ffffff : Theme.text;
                 clicked => { root.toggle-video(); }
             }
@@ -162,7 +174,7 @@ export component CallWindow inherits Window {
             if root.state == "active": CallAction {
                 label: root.muted ? @tr("call.controls.unmute") : @tr("call.controls.mute");
                 icon: @image-url("../icons/microphone.svg");
-                tint: root.muted ? #ea0038 : (Theme.dark ? #2a3942 : #d1d7db);
+                tint: root.muted ? #ea0038 : Theme.control;
                 icon-tint: root.muted ? #ffffff : Theme.text;
                 clicked => { root.toggle-mute(); }
             }

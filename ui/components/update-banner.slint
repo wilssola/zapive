@@ -23,17 +23,17 @@ export component UpdateBanner inherits Rectangle {
         y: 4px;
         width: parent.width - 2 * root.inset;
         height: parent.height - 12px;
-        border-radius: 10px;
-        background: Theme.accent.with-alpha(0.12);
+        border-radius: 14px;
+        background: Theme.glass ? Theme.accent.with-alpha(0.22) : Theme.accent.with-alpha(0.12);
         border-width: 1px;
-        border-color: Theme.accent.with-alpha(0.35);
+        border-color: Theme.glass ? Theme.glass-rim : Theme.accent.with-alpha(0.35);
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 10px;
             spacing: 10px;
             Image {
                 source: @image-url("../icons/refresh.svg");
-                colorize: root.state == 4 ? #f05d4d : Theme.accent;
+                colorize: root.state == 4 ? Theme.danger : Theme.accent;
                 width: 20px;
                 height: 20px;
                 y: (parent.height - self.height) / 2;

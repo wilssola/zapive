@@ -13,16 +13,17 @@ use crate::store::{
 use crate::vault::Vault;
 use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
 use crate::{
-    DetailRow, AccountItem, AppWindow, CallItem, CallWindow, ChatItem, LabelItem, LinkSpan, MemberItem,
-    MessageItem, PdfPage, ReactionItem, ReleaseItem, SearchHit, StickerCell,
+    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, DetailRow, LabelItem, LinkSpan,
+    MemberItem, MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem,
+    SearchHit, StarredItem, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
-use whatsapp_rust::types::events::MessageBatch;
 use whatsapp_rust::proto_helpers::MessageExt as _;
+use whatsapp_rust::types::events::MessageBatch;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 mod accounts;
@@ -33,6 +34,7 @@ mod chats;
 mod composer;
 mod conversation;
 mod documents;
+mod dropped;
 mod helpers;
 mod history;
 mod incoming;
@@ -42,6 +44,8 @@ mod message_actions;
 mod notifications;
 mod outbox;
 mod overlays;
+mod panels;
+mod polls;
 mod selection;
 mod session;
 mod settings;
@@ -53,6 +57,7 @@ mod wiring;
 
 use self::audio::*;
 use self::calls::*;
+pub use self::dropped::handle_file_drop_event;
 use self::helpers::*;
 use self::history::*;
 use self::media::*;
@@ -61,6 +66,9 @@ use self::selection::*;
 use self::stickers::*;
 use self::translation::*;
 pub use self::wiring::{install, replay_link_press};
+
+// An event that arrived while the vault was locked; replayed on unlock.
+type LockedEvent = Box<dyn FnOnce(&mut Bridge)>;
 
 pub struct Bridge {
     ui: AppWindow,
@@ -117,9 +125,14 @@ pub struct Bridge {
     draft_sequence: u64,
     // WhatsApp events that arrived before the vault was open (the client
     // connects while the PIN screen is still up); replayed by boot.
-    locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
+    locked_backlog: Vec<LockedEvent>,
     // Media caches (pixels live UI-side; files live encrypted on disk).
     avatars: HashMap<String, Option<slint::Image>>,
+    // Least recently stored first; bounds `avatars`.
+    avatar_order: std::collections::VecDeque<String>,
+    // The window is minimized or hidden: non-essential timers sleep.
+    window_idle: bool,
+    idle_since: Option<Instant>,
     requested_avatars: HashSet<String>,
     avatar_tries: HashMap<String, u32>,
     media_inflight: HashSet<String>,
@@ -218,6 +231,12 @@ pub struct Bridge {
     preview_jid: Option<String>,
     preview_generation: u64,
     preview_busy: bool,
+    // Images dropped together, waiting for their turn in the review.
+    staged_files: Vec<std::path::PathBuf>,
+    staged_total: usize,
+    // A dropped non-image file currently shown in the review.
+    staged_document: Option<std::path::PathBuf>,
+    staged_position: usize,
     last_paste: Option<Instant>,
     // Toast coalescing: bursts flush as one summary after 1200ms.
     notify_queue: Vec<(String, String, String, String)>,
@@ -243,6 +262,11 @@ pub struct Bridge {
     call_ui: Option<CallWindow>,
     call: Option<ActiveCall>,
     call_timer: slint::Timer,
+    // Call anti-spam, RAM only: caller jid -> when we last dismissed them.
+    call_dismissed: HashMap<String, i64>,
+    silenced_calls: Vec<SilencedCall>,
+    call_silence_repeat: bool,
+    call_silence_minutes: u32,
     ringer: Option<crate::call::Ringer>,
     requested_channels: HashSet<String>,
     // Sticker/GIF pickers and the video overlay.

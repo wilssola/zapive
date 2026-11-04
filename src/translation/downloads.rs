@@ -33,7 +33,10 @@ struct Throttle {
 
 impl Throttle {
     fn new(interval: Duration) -> Self {
-        Self { interval, last: Cell::new(None) }
+        Self {
+            interval,
+            last: Cell::new(None),
+        }
     }
 
     fn ready(&self, now: Instant, last: bool) -> bool {
@@ -171,7 +174,10 @@ pub(super) fn install(
         catalog = refresh(models, check)?;
     }
     let plan = plan_route(source, target, &catalog, &installed).ok_or("pair_unavailable")?;
-    let missing: Vec<Pair> = plan.into_iter().filter(|p| !installed.contains(p)).collect();
+    let missing: Vec<Pair> = plan
+        .into_iter()
+        .filter(|p| !installed.contains(p))
+        .collect();
     let steps = missing.len();
     for (index, pair) in missing.into_iter().enumerate() {
         check()?;
@@ -296,8 +302,8 @@ fn temporary(models: &Path) -> Result<(Temporary, std::fs::File), String> {
         .ok_or("models_directory_required")?
         .join("downloads");
     std::fs::create_dir_all(&dir).map_err(|_| "models_directory_required")?;
-    let parent = std::fs::canonicalize(models.parent().unwrap())
-        .map_err(|_| "models_directory_required")?;
+    let parent =
+        std::fs::canonicalize(models.parent().unwrap()).map_err(|_| "models_directory_required")?;
     let canonical = std::fs::canonicalize(&dir).map_err(|_| "models_directory_required")?;
     if canonical != parent.join("downloads") {
         return Err("models_directory_required".into());
@@ -369,9 +375,7 @@ fn io_error(error: &std::io::Error) -> &'static str {
         TimedOut | WouldBlock => "network_timeout",
         PermissionDenied => "network_access_denied",
         ConnectionRefused => "network_refused",
-        ConnectionReset | ConnectionAborted | Interrupted | UnexpectedEof => {
-            "network_interrupted"
-        }
+        ConnectionReset | ConnectionAborted | Interrupted | UnexpectedEof => "network_interrupted",
         _ => "network_failed",
     }
 }
@@ -639,7 +643,10 @@ mod tests {
         copy(&mut reader, &mut output, MODEL_LIMIT, &|| Ok(())).unwrap();
         let seen = seen.into_inner();
         assert_eq!(seen.first(), Some(&(64 * 1024, Some(100 * 1024))));
-        assert_eq!(seen.iter().rev().nth(1), Some(&(100 * 1024, Some(100 * 1024))));
+        assert_eq!(
+            seen.iter().rev().nth(1),
+            Some(&(100 * 1024, Some(100 * 1024)))
+        );
     }
 
     #[test]

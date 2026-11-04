@@ -3,7 +3,12 @@ name = "zapive"
 version = "0.27.0"
 edition = "2024"
 description = "Native WhatsApp desktop client"
+license = "MIT"
 publish = false
+
+[features]
+# Offline mock-data mode (`zapive --demo`) for screenshots; off in releases.
+demo = []
 
 [dependencies]
 rspolib = "=0.1.2"
@@ -175,6 +180,10 @@ winresource = "0.1"
 debug = "line-tables-only"
 
 [profile.release]
+# Measured on the demo build (docs/benchmarks.md): opt-level 3 is +24% binary
+# size for ~50 ms faster startup and no RAM/CPU gain; mimalloc raised RAM at
+# startup and was slower; panic = "abort" is not possible because
+# catch_unwind guards the single-instance and translation callbacks.
 lto = "fat"
 codegen-units = 1
 strip = true

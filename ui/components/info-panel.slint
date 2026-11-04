@@ -26,6 +26,7 @@ export component InfoLayer inherits ModalLayer {
     in property <int> info-color-idx;
     in property <[[StickerCell]]> info-media;
     callback close-info();
+    callback open-starred-here();
     callback toggle-archive();
     callback clear-chat();
     in property <bool> current-left;
@@ -48,9 +49,17 @@ export component InfoLayer inherits ModalLayer {
         opacity: root.progress;
         border-radius: 18px;
         border-width: 1px;
-        border-color: Theme.dark ? #1c3038 : Theme.border;
-        background: Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel;
+        border-color: Theme.glass ? Theme.glass-rim : (Theme.dark ? #1c3038 : Theme.border);
+        drop-shadow-blur: Theme.glass ? 28px : 0px;
+        drop-shadow-color: Theme.glass-shadow;
+        background: Theme.glass ? Theme.glass-fill-cover : (Theme.dark ? @linear-gradient(155deg, #0e1c22 0%, #0c171c 100%) : Theme.panel);
         clip: true;
+        if Theme.glass: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
         TouchArea { }
         VerticalLayout {
             padding: 0px;
@@ -205,6 +214,11 @@ export component InfoLayer inherits ModalLayer {
                             }
                             Rectangle { height: 14px; }
                             Rectangle { height: 1px; background: Theme.border; }
+                        }
+                        MenuRow {
+                            icon: @image-url("../icons/star.svg");
+                            label: @tr("starred.title_chat");
+                            clicked => { root.open-starred-here(); }
                         }
                         MenuRow {
                             icon: @image-url("../icons/photo.svg");

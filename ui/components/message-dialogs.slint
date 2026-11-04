@@ -6,7 +6,7 @@ import { IconButton } from "icon-button.slint";
 import { Ticks } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
 import { Theme } from "theme.slint";
-import { DetailRow, ReactionItem } from "types.slint";
+import { DetailRow, ReactionItem, ReactionTab } from "types.slint";
 
 export component DetailsLayer inherits ModalLayer {
     in-out property <bool> details-open;
@@ -31,7 +31,8 @@ export component DetailsLayer inherits ModalLayer {
             height: parent.height;
             x: parent.width - self.width + (1 - root.progress) * self.width;
             opacity: root.progress;
-            background: Theme.dark ? #1b252dee : Theme.panel;
+            background: Theme.panel;
+            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
             border-width: 1px;
             border-color: Theme.border;
             TouchArea { }
@@ -142,10 +143,17 @@ export component MessageDialogLayer inherits ModalLayer {
             height: message-dialog-col.preferred-height + 40px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            border-radius: 12px;
+            border-radius: 20px;
             opacity: root.progress;
             transform-scale: 0.96 + 0.04 * root.progress;
             background: Theme.panel;
+            backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+            border-width: Theme.glass ? 1px : 0px;
+            border-color: Theme.glass-rim;
+            if Theme.glass: Rectangle {
+                border-radius: parent.border-radius;
+                background: Theme.glass-sheen;
+            }
             TouchArea { }
             message-dialog-col := VerticalLayout {
                 padding: 20px;
@@ -199,7 +207,14 @@ export component ConfirmLayer inherits ModalLayer {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         TouchArea { }
         confirm-col := VerticalLayout {
             padding: 22px;
@@ -244,19 +259,31 @@ export component ConfirmLayer inherits ModalLayer {
 
 export component ReactionsLayer inherits ModalLayer {
     in property <[ReactionItem]> reaction-rows;
+    in property <[ReactionTab]> reaction-tabs;
     in property <string> reactions-title;
     in-out property <bool> reactions-open;
     callback open-dm(string);
+    callback remove-own-reaction();
+    // "" = All, otherwise the emoji of the selected tab.
+    property <string> active-tab: "";
+    changed open => { if (!root.open) { root.active-tab = ""; } }
 
     if root.mounted: Rectangle {
         opacity: root.progress;
         transform-scale: 0.96 + 0.04 * root.progress;
         width: 380px;
-        height: min(440px, 108px + root.reaction-rows.length * 56px);
+        height: min(480px, 108px + (root.reaction-tabs.length > 0 ? 44px : 0px) + root.reaction-rows.length * 56px);
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
-        border-radius: 12px;
+        backdrop-blur: Theme.glass ? Theme.glass-blur : 0px;
+        border-width: Theme.glass ? 1px : 0px;
+        border-color: Theme.glass-rim;
+        if Theme.glass: Rectangle {
+            border-radius: parent.border-radius;
+            background: Theme.glass-sheen;
+        }
+        border-radius: 20px;
         TouchArea { }
         VerticalBox {
             padding: 18px;
@@ -275,16 +302,76 @@ export component ReactionsLayer inherits ModalLayer {
                     clicked => { root.reactions-open = false; }
                 }
             }
+            if root.reaction-tabs.length > 0: HorizontalLayout {
+                spacing: 6px;
+                height: 34px;
+                alignment: start;
+                Rectangle {
+                    width: all-label.preferred-width + 22px;
+                    border-radius: 17px;
+                    background: root.active-tab == "" ? Theme.chip-active-bg : (all-touch.has-hover ? Theme.hover : Theme.chip-bg);
+                    border-width: 1px;
+                    border-color: root.active-tab == "" ? Theme.chip-active-border : Theme.glass ? Theme.glass-rim-soft : Theme.border;
+                    all-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        clicked => { root.active-tab = ""; }
+                    }
+                    all-label := Text {
+                        text: @tr("reactions.tab_all", root.reaction-rows.length);
+                        color: Theme.text;
+                        font-size: 13px;
+                        font-weight: root.active-tab == "" ? 700 : 500;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                for tab in root.reaction-tabs: Rectangle {
+                    width: tab-row.preferred-width + 22px;
+                    border-radius: 17px;
+                    background: root.active-tab == tab.emoji ? Theme.chip-active-bg : (tab-touch.has-hover ? Theme.hover : Theme.chip-bg);
+                    border-width: 1px;
+                    border-color: root.active-tab == tab.emoji ? Theme.chip-active-border : Theme.glass ? Theme.glass-rim-soft : Theme.border;
+                    tab-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: tab.emoji;
+                        clicked => { root.active-tab = tab.emoji; }
+                    }
+                    tab-row := HorizontalLayout {
+                        alignment: center;
+                        spacing: 5px;
+                        EmojiText { text: tab.emoji; font-size: 15px; }
+                        Text {
+                            text: tab.count;
+                            color: Theme.text;
+                            font-size: 13px;
+                            font-weight: root.active-tab == tab.emoji ? 700 : 500;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
             Rectangle { height: 1px; background: Theme.border; }
-            ListView {
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                alignment: start;
                 for r in root.reaction-rows: Rectangle {
-                    height: 56px;
+                    visible: root.active-tab == "" || r.emoji == root.active-tab;
+                    height: root.active-tab == "" || r.emoji == root.active-tab ? 56px : 0px;
+                    clip: true;
                     background: react-row.has-hover ? Theme.hover : transparent;
                     react-row := TouchArea {
                         mouse-cursor: pointer;
                         clicked => {
-                            root.reactions-open = false;
-                            root.open-dm(r.jid);
+                            if (r.own) {
+                                root.reactions-open = false;
+                                root.remove-own-reaction();
+                            } else {
+                                root.reactions-open = false;
+                                root.open-dm(r.jid);
+                            }
                         }
                     }
                     HorizontalLayout {
@@ -311,6 +398,12 @@ export component ReactionsLayer inherits ModalLayer {
                                 font-size: 15px;
                                 overflow: elide;
                             }
+                            if r.own: Text {
+                                text: @tr("reactions.click_to_remove");
+                                color: Theme.text-dim;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
                         }
                         VerticalLayout {
                             alignment: center;
@@ -320,6 +413,7 @@ export component ReactionsLayer inherits ModalLayer {
                             }
                         }
                     }
+                }
                 }
             }
         }

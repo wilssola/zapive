@@ -13,7 +13,9 @@ export component Toggle inherits TouchArea {
         width: parent.width;
         height: parent.height;
         border-radius: 12px;
-        background: root.on ? Theme.accent : (Theme.dark ? #3b4a54 : #c5ccd1);
+        background: root.on ? Theme.accent : (Theme.glass ? (Theme.dark ? #ffffff30 : #1b2d4033) : (Theme.dark ? #3b4a54 : #c5ccd1));
+        border-width: 1px;
+        border-color: Theme.glass ? Theme.glass-rim-soft : transparent;
         animate background { duration: Theme.motion-normal; easing: ease-out; }
         Rectangle {
             width: 18px;
