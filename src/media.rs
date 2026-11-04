@@ -183,6 +183,49 @@ pub fn cached_path(id: &str, mimetype: &str, msg: &wa::Message) -> (PathBuf, boo
     (path, exists)
 }
 
+// The mimetype a message declares for its media, if it carries any.
+pub fn declared_mimetype(msg: &wa::Message) -> Option<String> {
+    use whatsapp_rust::proto_helpers::MessageExt as _;
+    let inner = msg.get_base_message();
+    inner
+        .image_message
+        .as_option()
+        .and_then(|m| m.mimetype.clone())
+        .or_else(|| {
+            inner
+                .audio_message
+                .as_option()
+                .and_then(|m| m.mimetype.clone())
+        })
+}
+
+// Sealed copy of a file I am sending, written before the message shows, so
+// my own pictures come from disk and never depend on a download round trip
+// that can fail (rate limits, expired links) and leave a placeholder.
+pub fn seal_sent_local(
+    key: &KeyHandle,
+    id: &str,
+    msg: &wa::Message,
+    bytes: &[u8],
+) -> Option<PathBuf> {
+    if !key.unlocked() || bytes.is_empty() || bytes.len() > MAX_SEALED_SENT {
+        return None;
+    }
+    let mimetype = declared_mimetype(msg)?;
+    let (path, exists) = cached_path(id, &mimetype, msg);
+    if exists {
+        return Some(path);
+    }
+    std::fs::create_dir_all(media_cache()).ok()?;
+    if let Err(e) = std::fs::write(&path, key.encrypt_bytes(bytes)) {
+        eprintln!("[media] cache write failed for {id}: {e}");
+        return None;
+    }
+    Some(path)
+}
+
+const MAX_SEALED_SENT: usize = 32 * 1024 * 1024;
+
 #[cfg(test)]
 pub async fn cache_sent(
     key: &KeyHandle,

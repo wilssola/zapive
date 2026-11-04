@@ -112,6 +112,12 @@ impl Bridge {
         if let Some(messages) = self.store.messages.get_mut(&preparation.jid) {
             messages.retain(|message| message.id != id);
         }
+        // Images and audio I send stay on disk, so they never need a download.
+        if matches!(preparation.kind.as_str(), "image" | "audio")
+            && let Some(vault) = &self.vault
+        {
+            crate::media::seal_sent_local(&vault.key_handle(), id, &message, &preparation.data);
+        }
         self.echo_sent_from(&preparation.jid, id, message, preparation.origin);
         if self.current_jid.as_deref() == Some(&preparation.jid) {
             self.rebuild_conversation(&preparation.jid);
