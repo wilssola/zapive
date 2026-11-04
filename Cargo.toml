@@ -81,7 +81,7 @@ url = "2"
 arboard = "3"
 kamadak-exif = "0.5"
 ureq = "3"
-cpal = "0.16"
+cpal = "0.18"
 # Camera capture for video calls: MSMF/AVFoundation/V4L2 behind one API.
 # `decoding` is off on purpose -- it pulls mozjpeg (C); the `image` crate
 # already decodes MJPEG in pure Rust.
