@@ -387,7 +387,7 @@ fn configure(ui: &AppWindow, options: &Options) {
     ui.set_app_loading(options.page == Page::Splash);
     // Shows the chat-row drop target as if files were dragged over a row.
     if let Some(name) = value_of("--demo-drop-row") {
-        let jid = demo_jid_of(&ui, &name);
+        let jid = demo_jid_of(ui, &name);
         ui.set_drop_target_jid(jid.into());
     }
     if std::env::args().any(|a| a == "--demo-privacy-blur") {
