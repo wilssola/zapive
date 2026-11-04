@@ -123,13 +123,6 @@ fn downloadable(msg: &wa::Message) -> Option<&dyn whatsapp_rust::wacore::downloa
     None
 }
 
-// Whether the message carries media Zapive can fetch from the server.
-// Outgoing messages never need it: the file came from disk, so the
-// original copy is opened instead of downloading the round trip.
-pub fn is_downloadable(msg: &wa::Message) -> bool {
-    downloadable(msg).is_some()
-}
-
 // How many plaintext bytes the download will write, as declared by the
 // message (encrypted size on the CDN, minus padding/IV/tag).
 pub fn expected_bytes(msg: &wa::Message) -> Option<u64> {
@@ -190,6 +183,7 @@ pub fn cached_path(id: &str, mimetype: &str, msg: &wa::Message) -> (PathBuf, boo
     (path, exists)
 }
 
+#[cfg(test)]
 pub async fn cache_sent(
     key: &KeyHandle,
     id: &str,

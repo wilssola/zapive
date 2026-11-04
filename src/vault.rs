@@ -243,6 +243,7 @@ impl Vault {
     }
 
     // Zeroes and drops the in-memory key.
+    #[cfg(test)]
     pub fn lock(&mut self) {
         self.key.set(None);
     }
@@ -449,11 +450,6 @@ impl Vault {
             "INSERT INTO kv(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
             [k, &encoded],
         );
-    }
-
-    pub fn del(&self, k: &str) {
-        let k = format!("{}{k}", self.scope());
-        let _ = self.conn.execute("DELETE FROM kv WHERE k = ?1", [k]);
     }
 
     pub fn del_prefix(&self, prefix: &str) {

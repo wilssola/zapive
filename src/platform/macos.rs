@@ -128,6 +128,7 @@ pub fn system_dark() -> bool {
 const SERVICE: &str = "Zapive";
 const ACCOUNT: &str = "vault";
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn wrap_secret(inner: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(inner.as_bytes());
@@ -153,6 +154,7 @@ pub fn wrap_secret(inner: &str) -> String {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn unwrap_secret(stored: &str) -> Result<String, String> {
     use base64::Engine as _;
     let b64 = if stored == "keychain:" {

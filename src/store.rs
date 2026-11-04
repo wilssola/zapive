@@ -1306,6 +1306,7 @@ impl Store {
     }
 
     // Records a call event; returns true when it is new or changed.
+    #[allow(clippy::too_many_arguments)] // one call record, three call sites; a params struct adds noise
     pub fn upsert_call(
         &mut self,
         id: &str,
@@ -1409,7 +1410,7 @@ impl Store {
                     .map(|latest| (jid.clone(), latest.clone(), list.len()))
             })
             .collect();
-        out.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        out.sort_by_key(|entry| std::cmp::Reverse(entry.1.timestamp));
         out
     }
 
@@ -1421,23 +1422,6 @@ impl Store {
             .flatten()
             .filter(|m| m.timestamp > 0 && m.raw.is_some())
             .min_by_key(|m| m.timestamp)
-    }
-
-    // The oldest message of one chat (per-chat backfill anchor).
-    pub fn oldest_in_chat(&self, jid: &str) -> Option<&StoredMessage> {
-        self.messages
-            .get(jid)?
-            .iter()
-            .find(|m| m.timestamp > 0 && m.raw.is_some())
-    }
-
-    // Most recent received GIFs (gif-playback videos) for the picker.
-    pub fn recent_gifs(&self, limit: usize) -> Vec<&StoredMessage> {
-        let mut out: Vec<&StoredMessage> =
-            self.messages.values().flatten().filter(|m| m.gif).collect();
-        out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        out.truncate(limit);
-        out
     }
 
     // Stickers the user actually sent, newest first, deduped by content.
@@ -1461,7 +1445,7 @@ impl Store {
             .flatten()
             .filter(|m| m.sticker && keep(m))
             .collect();
-        items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        items.sort_by_key(|m| std::cmp::Reverse(m.timestamp));
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for m in items {
@@ -2033,7 +2017,7 @@ pub fn reaction_groups(reactions: &HashMap<String, String>) -> Vec<(String, Vec<
             None => groups.push((emoji, vec![reactor.clone()])),
         }
     }
-    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    groups.sort_by_key(|group| std::cmp::Reverse(group.1.len()));
     groups
 }
 

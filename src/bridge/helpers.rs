@@ -257,7 +257,6 @@ mod tests {
             recipient_alt: None,
             id: "reply",
             from_me: false,
-            is_group: false,
             push_name: "",
             timestamp: 1,
         };

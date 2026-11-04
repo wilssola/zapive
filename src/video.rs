@@ -42,27 +42,6 @@ fn h264_track(reader: &mp4::Mp4Reader<BufReader<std::fs::File>>) -> Option<u32> 
         .map(|(id, _)| *id)
 }
 
-pub fn probe_size(path: &Path) -> (u32, u32) {
-    let fallback = (640, 360);
-    if is_gif(path) {
-        use image::ImageDecoder;
-        return std::fs::File::open(path)
-            .ok()
-            .and_then(|f| image::codecs::gif::GifDecoder::new(BufReader::new(f)).ok())
-            .map(|d| d.dimensions())
-            .filter(|&(w, h)| w > 0 && h > 0)
-            .unwrap_or(fallback);
-    }
-    let Some(reader) = open_mp4(path) else {
-        return fallback;
-    };
-    h264_track(&reader)
-        .and_then(|id| reader.tracks().get(&id))
-        .map(|t| (t.width() as u32, t.height() as u32))
-        .filter(|&(w, h)| w > 0 && h > 0)
-        .unwrap_or(fallback)
-}
-
 // AVCC samples carry length-prefixed NALs; the decoder wants Annex-B.
 fn avcc_to_annexb(sample: &[u8], out: &mut Vec<u8>) {
     let mut i = 0usize;

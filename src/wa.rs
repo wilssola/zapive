@@ -114,13 +114,6 @@ pub enum Cmd {
     Shutdown,
     // `mentions` are the jids named as @user in the body; `mention_all`
     // carries the group subject when the body tags @all/@everyone.
-    SendText {
-        jid: String,
-        body: String,
-        quote: Option<QuoteRef>,
-        mentions: Vec<String>,
-        mention_all: Option<String>,
-    },
     SendQueued {
         id: String,
         jid: String,
@@ -1726,7 +1719,6 @@ async fn executor(
                         id: Some(id.clone()),
                         from_me: Some(from_me),
                         participant,
-                        ..Default::default()
                     };
                     let result = if pin {
                         client
@@ -2518,11 +2510,15 @@ async fn executor(
                     // One-to-one chats carry the timer as a protocol
                     // message, the way the phone announces it.
                     use whatsapp_rust::waproto::buffa::MessageField;
-                    let mut pm = wa::message::ProtocolMessage::default();
-                    pm.r#type = Some(wa::message::protocol_message::Type::EPHEMERAL_SETTING);
-                    pm.ephemeral_expiration = Some(secs);
-                    let mut message = wa::Message::default();
-                    message.protocol_message = MessageField::some(pm);
+                    let pm = wa::message::ProtocolMessage {
+                        r#type: Some(wa::message::protocol_message::Type::EPHEMERAL_SETTING),
+                        ephemeral_expiration: Some(secs),
+                        ..Default::default()
+                    };
+                    let message = wa::Message {
+                        protocol_message: MessageField::some(pm),
+                        ..Default::default()
+                    };
                     if let Err(e) = client.send_message(target, message).await {
                         action_failed(epoch, format!("[wa] ephemeral setting failed: {e}"));
                     }
@@ -3121,38 +3117,6 @@ async fn executor(
                     });
                 });
             }
-            Cmd::SendText {
-                jid,
-                body,
-                quote,
-                mentions,
-                mention_all,
-            } => {
-                let client = session.client.clone();
-                tokio::spawn(async move {
-                    let Some(to) = parse_jid(&jid) else {
-                        action_failed(epoch, "Invalid destination JID");
-                        return;
-                    };
-                    if quote.as_ref().is_some_and(|q| {
-                        parse_jid(&q.sender_jid).is_none() || parse_jid(&q.chat_jid).is_none()
-                    }) {
-                        action_failed(epoch, "Invalid quote JID");
-                        return;
-                    }
-                    let message = build_text(&jid, body, &quote, mentions, mention_all);
-
-                    match client.send_message(to, message.clone()).await {
-                        Ok(sent) => {
-                            let id = sent.message_id;
-                            crate::bridge::wa_apply_at(epoch, move |b| {
-                                b.echo_sent(&jid, &id, message)
-                            });
-                        }
-                        Err(e) => action_failed(epoch, format!("[wa] sendText failed: {e}")),
-                    }
-                });
-            }
             Cmd::FetchHistory {
                 jid,
                 oldest_id,
@@ -3385,11 +3349,13 @@ fn make_jpeg_thumb(data: &[u8]) -> Option<Vec<u8>> {
 // A view-once wrapper around any content message.
 fn wrap_view_once(inner: wa::Message) -> wa::Message {
     use whatsapp_rust::waproto::buffa::MessageField;
-    let mut wrapper = wa::message::FutureProofMessage::default();
-    wrapper.message = MessageField::some(inner);
-    let mut out = wa::Message::default();
-    out.view_once_message_v2 = MessageField::some(wrapper);
-    out
+    let wrapper = wa::message::FutureProofMessage {
+        message: MessageField::some(inner),
+    };
+    wa::Message {
+        view_once_message_v2: MessageField::some(wrapper),
+        ..Default::default()
+    }
 }
 
 fn format_pair_code(code: &str) -> String {

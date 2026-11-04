@@ -547,7 +547,6 @@ pub struct LiveMeta<'a> {
     pub recipient_alt: Option<String>,
     pub id: &'a str,
     pub from_me: bool,
-    pub is_group: bool,
     pub push_name: &'a str,
     pub timestamp: i64,
 }
@@ -562,7 +561,6 @@ pub fn from_live(store: &mut Store, inbound: &InboundMessage) -> Option<StoredMe
         recipient_alt: src.recipient_alt.as_ref().map(|j| j.to_non_ad_string()),
         id: &info.id,
         from_me: src.is_from_me,
-        is_group: src.is_group,
         push_name: &info.push_name,
         timestamp: info.timestamp.timestamp(),
     };
@@ -864,7 +862,6 @@ pub fn from_history(store: &mut Store, web: &wa::WebMessageInfo) -> Option<Store
         recipient_alt: None,
         id: key.id.as_deref()?,
         from_me,
-        is_group: false, // only used for push-name learning on the live path
         push_name: web.push_name.as_deref().unwrap_or(""),
         timestamp: web.message_timestamp.unwrap_or(0) as i64,
     };
@@ -1193,7 +1190,6 @@ mod tests {
                 recipient_alt: None,
                 id: "m1",
                 from_me: false,
-                is_group: false,
                 push_name: "Alice",
                 timestamp: 1234,
             },

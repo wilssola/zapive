@@ -286,6 +286,7 @@ impl SearchIndex {
         }
     }
 
+    #[cfg(test)]
     pub fn rebuild(&mut self, jid: &str, messages: &[StoredMessage]) {
         let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else {
             return;

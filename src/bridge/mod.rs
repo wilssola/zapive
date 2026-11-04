@@ -67,6 +67,9 @@ use self::stickers::*;
 use self::translation::*;
 pub use self::wiring::{install, replay_link_press};
 
+// An event that arrived while the vault was locked; replayed on unlock.
+type LockedEvent = Box<dyn FnOnce(&mut Bridge)>;
+
 pub struct Bridge {
     ui: AppWindow,
     wa: WaService,
@@ -122,7 +125,7 @@ pub struct Bridge {
     draft_sequence: u64,
     // WhatsApp events that arrived before the vault was open (the client
     // connects while the PIN screen is still up); replayed by boot.
-    locked_backlog: Vec<Box<dyn FnOnce(&mut Bridge)>>,
+    locked_backlog: Vec<LockedEvent>,
     // Media caches (pixels live UI-side; files live encrypted on disk).
     avatars: HashMap<String, Option<slint::Image>>,
     // Least recently stored first; bounds `avatars`.

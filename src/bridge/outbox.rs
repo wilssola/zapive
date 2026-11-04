@@ -357,7 +357,6 @@ impl Bridge {
             recipient_alt: None,
             id,
             from_me: true,
-            is_group: is_group(jid),
             push_name: "",
             timestamp: now,
         };

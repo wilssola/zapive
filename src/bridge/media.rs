@@ -1054,9 +1054,9 @@ mod lru_tests {
         assert_eq!(unique.len(), order.len());
     }
 
-    #[test]
-    fn byte_budget_is_a_hard_ceiling_below_the_old_worst_case() {
+    // Checked at compile time: the budgets are constants.
+    const _: () = {
         assert!(DECODE_CACHE_BYTES <= 64 * 1024 * 1024);
         assert!(DECODE_CACHE_BYTES + ANIM_CACHE_BYTES < 330 * 1024 * 1024);
-    }
+    };
 }

@@ -361,6 +361,7 @@ use windows::Win32::Security::Cryptography::{
     CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
 };
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 fn dpapi(input: &[u8], protect: bool) -> Result<Vec<u8>, String> {
     let blob_in = CRYPT_INTEGER_BLOB {
         cbData: input.len() as u32,
@@ -380,6 +381,7 @@ fn dpapi(input: &[u8], protect: bool) -> Result<Vec<u8>, String> {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn wrap_secret(inner: &str) -> String {
     use base64::Engine as _;
     match dpapi(inner.as_bytes(), true) {
@@ -397,6 +399,7 @@ pub fn wrap_secret(inner: &str) -> String {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn unwrap_secret(stored: &str) -> Result<String, String> {
     use base64::Engine as _;
     if let Some(b64) = stored.strip_prefix("dpapi:") {

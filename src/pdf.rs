@@ -61,10 +61,6 @@ pub fn engine_asset() -> Option<&'static str> {
     })
 }
 
-pub fn engine_installed() -> bool {
-    engine_dir().join(platform_library_name()).exists()
-}
-
 // Downloads and unpacks the engine into the data directory.
 pub fn install_engine() -> Result<(), String> {
     let asset = engine_asset().ok_or_else(|| "unsupported platform".to_string())?;

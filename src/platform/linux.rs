@@ -147,6 +147,7 @@ pub fn system_dark() -> bool {
 
 // ---- vault key wrapping: the Secret Service holds the secret itself ----
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn wrap_secret(inner: &str) -> String {
     use base64::Engine as _;
     use std::io::Write as _;
@@ -174,6 +175,7 @@ pub fn wrap_secret(inner: &str) -> String {
     format!("raw:{b64}")
 }
 
+#[cfg_attr(test, allow(dead_code))] // the vault uses a test-only stand-in
 pub fn unwrap_secret(stored: &str) -> Result<String, String> {
     use base64::Engine as _;
     let b64 = if stored == "secret:" {
