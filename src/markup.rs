@@ -138,6 +138,14 @@ fn render_links(text: &str) -> String {
 
 // Mentions arrive as @<number>; show the contact name and link it to the
 // conversation so clicking opens that chat.
+fn mention_label(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_whitespace() { NBSP } else { c })
+        .collect();
+    format!("{NBSP}@{name}{NBSP}")
+}
+
 fn render_mentions(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> String {
     let mut out = String::new();
     let mut last = 0;
@@ -149,8 +157,8 @@ fn render_mentions(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> Strin
             // A mention is always a link, named or not: an unknown id
             // still opens the conversation with that person.
             let hit = resolve(token);
-            let label = hit.name.unwrap_or_else(|| token.to_string());
-            out.push_str(&format!("[@{}]({})", escape_md(&label), hit.jid));
+            let label = mention_label(&hit.name.unwrap_or_else(|| token.to_string()));
+            out.push_str(&format!("**[{}]({})**", escape_md(&label), hit.jid));
         } else {
             out.push_str(&format!("**@{}**", escape_md(token)));
         }
@@ -223,6 +231,18 @@ pub fn to_markdown(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> Strin
     keep_lines(&out)
 }
 
+pub fn bubble_markdown(text: &str, resolve: &dyn Fn(&str) -> MentionTarget) -> String {
+    let md = to_markdown(text, resolve);
+    static MENTION_LINK: OnceLock<Regex> = OnceLock::new();
+    MENTION_LINK
+        .get_or_init(|| {
+            Regex::new(r"\[((?:\\.|[^\]\\])*)\]\([^():\s]+@(?:s\.whatsapp\.net|lid|g\.us)\)")
+                .unwrap()
+        })
+        .replace_all(&md, "<font color=\"#b9f6d0\">$1</font>")
+        .into_owned()
+}
+
 // What StyledText ends up drawing, as plain text, plus the byte ranges
 // (in that text) that are links or mentions and where they lead. This
 // is the text a transparent TextInput lays over the styled one so the
@@ -257,7 +277,7 @@ fn plain_mentions(text: &str, resolve: &dyn Fn(&str) -> MentionTarget, out: &mut
         let token = caps.get(1).unwrap().as_str();
         if token.bytes().all(|b| b.is_ascii_digit()) {
             let hit = resolve(token);
-            let label = format!("@{}", hit.name.unwrap_or_else(|| token.to_string()));
+            let label = mention_label(&hit.name.unwrap_or_else(|| token.to_string()));
             let start = out.text.len();
             out.text.push_str(&label);
             out.spans.push((start, out.text.len(), hit.jid));
@@ -341,15 +361,15 @@ mod tests {
     #[test]
     fn plain_rendering_matches_the_styled_text() {
         let r = render_plain("oi @5511999 veja *https://x.io/a* fim", &ana);
-        assert_eq!(r.text, "oi @Ana veja https://x.io/a fim");
-        assert_eq!(r.spans[0], (3, 7, "5511999@s.whatsapp.net".to_string()));
-        assert_eq!(r.spans[1], (13, 27, "https://x.io/a".to_string()));
+        assert_eq!(r.text, "oi \u{a0}@Ana\u{a0} veja https://x.io/a fim");
+        assert_eq!(r.spans[0], (3, 11, "5511999@s.whatsapp.net".to_string()));
+        assert_eq!(r.spans[1], (17, 31, "https://x.io/a".to_string()));
         assert_eq!(
             target_at("oi @5511999 veja *https://x.io/a* fim", 20, &ana).as_deref(),
             Some("https://x.io/a")
         );
         assert_eq!(
-            target_at("oi @5511999 veja *https://x.io/a* fim", 9, &ana),
+            target_at("oi @5511999 veja *https://x.io/a* fim", 12, &ana),
             None
         );
     }
@@ -357,9 +377,47 @@ mod tests {
     #[test]
     fn markdown_keeps_links_and_mentions() {
         let md = to_markdown("oi @5511999 veja https://x.io/a_b *ok*", &ana);
-        assert!(md.contains("[@Ana](5511999@s.whatsapp.net)"));
+        assert!(md.contains("**[\u{a0}@Ana\u{a0}](5511999@s.whatsapp.net)**"));
         assert!(md.contains("(https://x.io/a_b)"));
         assert!(md.ends_with("**ok**"));
+    }
+
+    #[test]
+    fn mention_labels_keep_padding_names_and_link_offsets() {
+        let resolve = |num: &str| MentionTarget {
+            name: Some("Ana [Silva] São".into()),
+            jid: format!("{num}@lid"),
+        };
+        let text = "ação @55123\n@55456 https://example.org/path";
+        let plain = render_plain(text, &resolve);
+        let label = "\u{a0}@Ana\u{a0}[Silva]\u{a0}São\u{a0}";
+        assert!(plain.text.starts_with(&format!("ação {label}\n{label}")));
+        for (start, end, target) in &plain.spans {
+            assert!(plain.text.is_char_boundary(*start));
+            assert!(plain.text.is_char_boundary(*end));
+            if target.ends_with("@lid") {
+                assert_eq!(&plain.text[*start..*end], label);
+                assert_eq!(target_at(text, *start, &resolve).as_ref(), Some(target));
+            }
+        }
+        let md = bubble_markdown(text, &resolve);
+        assert!(md.contains("**<font color=\"#b9f6d0\">"));
+        assert!(!md.contains("](55123@lid)"));
+        assert!(md.contains("(https://example.org/path)"));
+        assert!(slint::StyledText::from_markdown(&md).is_ok());
+    }
+
+    #[test]
+    fn mention_markdown_is_accepted_by_slint() {
+        for text in [
+            "oi @55123",
+            "*oi @55123 fim*",
+            "_oi @55123 fim_",
+            "@55123\n@55456",
+        ] {
+            assert!(slint::StyledText::from_markdown(&to_markdown(text, &ana)).is_ok());
+            assert!(slint::StyledText::from_markdown(&bubble_markdown(text, &ana)).is_ok());
+        }
     }
 
     // Blank lines and indentation would vanish in CommonMark and the

@@ -1005,7 +1005,53 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     // Composer: mentions.
     ui.on_composer_changed(|text, cursor| {
         let text = text.to_string();
-        defer(move |b| b.composer_changed(&text, cursor.max(0) as usize));
+        defer(move |b| {
+            if b.ui.get_composer_text().as_str() == text {
+                b.composer_changed(&text, cursor.max(0) as usize);
+            }
+        });
+    });
+    let weak = ui.as_weak();
+    ui.on_composer_key(move |key, cursor, anchor, shift, control| {
+        weak.upgrade()
+            .is_some_and(|ui| composer::composer_key(&ui, key, cursor, anchor, shift, control))
+    });
+    let cursor_generation = Rc::new(std::cell::Cell::new(0_u64));
+    let weak = ui.as_weak();
+    ui.on_composer_cursor(move |cursor, anchor| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let text = ui.get_composer_text();
+        let generation = cursor_generation.get().wrapping_add(1);
+        cursor_generation.set(generation);
+        let current = cursor_generation.clone();
+        defer(move |b| {
+            if current.get() == generation && b.ui.get_composer_text() == text {
+                b.composer_cursor(cursor, anchor);
+            }
+        });
+    });
+    let weak = ui.as_weak();
+    ui.on_mention_remove(move |start, end| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let text = ui.get_composer_text().to_string();
+        let chat = ui.get_current_jid();
+        defer(move |b| {
+            if b.ui.get_composer_text().as_str() != text || b.ui.get_current_jid() != chat {
+                return;
+            }
+            let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) else {
+                return;
+            };
+            let Some(next) = composer::remove_mention(&text, &b.mentions, start, end) else {
+                return;
+            };
+            b.ui.invoke_set_composer(next.as_str().into(), start as i32);
+            b.composer_changed(&next, start);
+        });
     });
     ui.on_mention_pick(|idx| defer(move |b| b.mention_pick(idx.max(0) as usize)));
     ui.on_mention_close(|| defer(|b| b.ui.set_mention_open(false)));
