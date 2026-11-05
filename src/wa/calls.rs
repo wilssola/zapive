@@ -310,3 +310,200 @@ pub(super) fn fail_call(reason: &str) {
     let reason = reason.to_string();
     ui_apply(move |b| b.on_call_failed(&reason));
 }
+
+pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
+    match cmd {
+        Cmd::RejectCall { id, from } => {
+            let client = ctx.client.clone();
+            tokio::spawn(async move {
+                // The parked offer carries the creator and the ringing
+                // generation, which a bare id cannot reconstruct.
+                if let Some(offer) = take_offer(&id) {
+                    if let Err(e) = client.voip().reject(&offer).await {
+                        log::warn!("[wa] call reject failed: {e}");
+                    }
+                    return;
+                }
+                let Some(peer) = parse_jid(&from) else { return };
+                if let Err(e) = client.voip().reject_call(&id, &peer, &peer).await {
+                    log::warn!("[wa] call reject failed: {e}");
+                }
+            });
+        }
+        Cmd::AcceptCall { id, video } => {
+            let client = ctx.client.clone();
+            CANCEL_PENDING.store(false, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let Some(offer) = take_offer(&id) else {
+                    fail_call(&t("call.gone"));
+                    return;
+                };
+                let Some(audio) = open_audio().await else {
+                    // No devices means no call; decline rather than
+                    // leave the caller listening to nothing.
+                    if let Err(e) = client.voip().reject(&offer).await {
+                        log::warn!("[wa] call reject failed: {e}");
+                    }
+                    fail_call(&t("call.no_devices"));
+                    return;
+                };
+                // Answering an audio-only offer with video is not on
+                // the table: the peer never offered to receive it.
+                let vision = match video {
+                    true => open_camera().await,
+                    false => None,
+                };
+                let voip = client.voip();
+                let mut builder = voip.accept(&offer).audio(audio.mic(), audio.speaker());
+                if let Some((camera, sink)) = &vision {
+                    builder = builder.video(camera.source(), sink.clone());
+                }
+                // preaccept -> callKey decrypt -> accept -> relay.
+                match builder.start().await {
+                    Ok(handle) => {
+                        run_call(handle, audio, vision.map(|(c, _)| c), false).await;
+                    }
+                    Err(e) => {
+                        log::error!("[wa] call accept failed: {e}");
+                        fail_call(&t("call.failed"));
+                    }
+                }
+            });
+        }
+        Cmd::StartCall { jid, video } => {
+            let client = ctx.client.clone();
+            CANCEL_PENDING.store(false, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let Some(peer) = parse_jid(&jid) else {
+                    fail_call(&t("call.failed"));
+                    return;
+                };
+                let Some(audio) = open_audio().await else {
+                    fail_call(&t("call.no_devices"));
+                    return;
+                };
+                let vision = match video {
+                    true => open_camera().await,
+                    false => None,
+                };
+                if video && vision.is_none() {
+                    fail_call(&t("call.no_camera"));
+                    return;
+                }
+                let voip = client.voip();
+                let mut builder = voip.call(&peer).audio(audio.mic(), audio.speaker());
+                if let Some((camera, sink)) = &vision {
+                    builder = builder.video(camera.source(), sink.clone());
+                }
+                log::info!(
+                    "[wa] placing a {} call to {peer}",
+                    if vision.is_some() { "video" } else { "voice" }
+                );
+                match builder.start().await {
+                    Ok(handle) => {
+                        // The call id is minted here, so the screen
+                        // only learns it now.
+                        let id = handle.call_id().to_string();
+                        log::info!("[wa] offer sent for call {id}; waiting for the relay");
+                        ui_apply(move |b| b.on_outgoing_call(&id));
+                        run_call(handle, audio, vision.map(|(c, _)| c), true).await;
+                    }
+                    Err(e) => {
+                        log::error!("[wa] outgoing call failed: {e}");
+                        fail_call(&t("call.failed"));
+                    }
+                }
+            });
+        }
+        Cmd::HangupCall => {
+            let client = ctx.client.clone();
+            tokio::spawn(async move {
+                let Some(live) = take_live() else {
+                    // Nothing connected yet: leave the note for the
+                    // setup task to find.
+                    CANCEL_PENDING.store(true, Ordering::SeqCst);
+                    return;
+                };
+                // terminate() tears the local media down as well, but
+                // hangup() is what guarantees it when the stanza
+                // cannot be sent.
+                if let Err(e) = client
+                    .voip()
+                    .terminate(&live.id, &live.peer, &live.creator)
+                    .await
+                {
+                    log::warn!("[wa] call terminate failed: {e}");
+                }
+                live.handle.hangup_local().await;
+            });
+        }
+        Cmd::SetCallVideo(on) => {
+            let handle = LIVE_CALL.lock().ok().and_then(|live| {
+                live.as_ref()
+                    .map(|call| (call.handle.clone(), call.id.clone()))
+            });
+            let Some((handle, id)) = handle else { return };
+            tokio::spawn(async move {
+                if !on {
+                    if let Err(e) = handle.stop_video().await {
+                        log::warn!("[wa] stopping video failed: {e}");
+                    }
+                    if let Ok(mut live) = LIVE_CALL.lock()
+                        && let Some(call) = live.as_mut()
+                    {
+                        // Dropping the feed is what releases the camera.
+                        call.camera = None;
+                        call.upgrade = None;
+                    }
+                    ui_apply(move |b| b.on_call_video(&id, false));
+                    return;
+                }
+                let Some((camera, sink)) = open_video() else {
+                    fail_call(&t("call.no_camera"));
+                    return;
+                };
+                // A parked request from the peer has to be answered with
+                // its own token; anything else is a fresh upgrade.
+                let token = LIVE_CALL
+                    .lock()
+                    .ok()
+                    .and_then(|mut live| live.as_mut().and_then(|call| call.upgrade.take()));
+                let started = match token {
+                    Some(token) => {
+                        handle
+                            .accept_video(token, camera.source(), sink.clone())
+                            .await
+                    }
+                    None => handle.start_video(camera.source(), sink.clone()).await,
+                };
+                if let Err(e) = started {
+                    log::error!("[wa] starting video failed: {e}");
+                    fail_call(&t("call.no_camera"));
+                    return;
+                }
+                if let Ok(mut live) = LIVE_CALL.lock()
+                    && let Some(call) = live.as_mut()
+                {
+                    call.camera = Some(camera);
+                }
+                ui_apply(move |b| b.on_call_video(&id, true));
+            });
+        }
+        Cmd::SetCallMuted(muted) => {
+            // set_muted announces <mute_v2> to the peer, so it has to be
+            // awaited; the capture side reads the flag either way.
+            let live = LIVE_CALL
+                .lock()
+                .ok()
+                .and_then(|live| live.as_ref().map(|c| (c.handle.clone(), c.muted.clone())));
+            let Some((handle, flag)) = live else { return };
+            flag.store(muted, Ordering::SeqCst);
+            tokio::spawn(async move {
+                if let Err(e) = handle.set_muted(muted).await {
+                    log::warn!("[wa] the peer was not told about the mute: {e}");
+                }
+            });
+        }
+        _ => unreachable!("not a calls command"),
+    }
+}

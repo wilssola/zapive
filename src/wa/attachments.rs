@@ -204,3 +204,179 @@ pub(super) async fn prepare_attachment(
     }
     Ok(message)
 }
+
+pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
+    let epoch = ctx.epoch;
+    match cmd {
+        Cmd::PrepareAttachment(preparation) => {
+            let client = ctx.client.clone();
+            tokio::spawn(async move {
+                if SESSION_EPOCH.load(Ordering::SeqCst) != epoch {
+                    return;
+                }
+                let id = preparation.id.clone();
+                let result = prepare_attachment(&client, preparation).await;
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.on_attachment_prepared(&id, result);
+                });
+            });
+        }
+        Cmd::ResendMedia { jid, message } => {
+            tokio::spawn(async move {
+                use whatsapp_rust::proto_helpers::MessageExt as _;
+                if parse_jid(&jid).is_none() {
+                    action_failed(epoch, "Invalid destination JID");
+                    return;
+                };
+                // A plain send, not forward_message: prepare_for_forward
+                // always stamps `is_forwarded`, which is wrong here --
+                // this is a fresh message that merely reuses an
+                // already-uploaded CDN blob. Clearing context_info
+                // strips it (and any stale quote/mention data) so
+                // neither side sees it as forwarded.
+                let mut message = (*message).clone();
+                message.set_context_info(wa::ContextInfo::default());
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.enqueue_prepared(&jid, message, None);
+                });
+            });
+        }
+
+        Cmd::SendImage {
+            jid,
+            path,
+            origin,
+            caption,
+        } => {
+            tokio::spawn(async move {
+                let data = match tokio::fs::read(&path).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        action_failed(epoch, format!("Failed to read media: {e}"));
+                        return;
+                    }
+                };
+                let preparation = crate::outbox::Preparation {
+                    id: crate::outbox::new_id(),
+                    jid,
+                    kind: "image".into(),
+                    filename: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "file".into()),
+                    caption,
+                    origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
+                    data,
+                    in_rate: 0,
+                    view_once: false,
+                };
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.stage_attachment(preparation);
+                });
+            });
+        }
+        Cmd::SendDocument { jid, path, origin } => {
+            tokio::spawn(async move {
+                let data = match tokio::fs::read(&path).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        action_failed(epoch, format!("Failed to read media: {e}"));
+                        return;
+                    }
+                };
+                let preparation = crate::outbox::Preparation {
+                    id: crate::outbox::new_id(),
+                    jid,
+                    kind: "document".into(),
+                    filename: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "file".into()),
+                    caption: None,
+                    origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
+                    data,
+                    in_rate: 0,
+                    view_once: false,
+                };
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.stage_attachment(preparation);
+                });
+            });
+        }
+        Cmd::SendAudioFile { jid, path, origin } => {
+            tokio::spawn(async move {
+                let data = match tokio::fs::read(&path).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        action_failed(epoch, format!("Failed to read media: {e}"));
+                        return;
+                    }
+                };
+                let preparation = crate::outbox::Preparation {
+                    id: crate::outbox::new_id(),
+                    jid,
+                    kind: "audio".into(),
+                    filename: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "file".into()),
+                    caption: None,
+                    origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
+                    data,
+                    in_rate: 0,
+                    view_once: false,
+                };
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.stage_attachment(preparation);
+                });
+            });
+        }
+        Cmd::SendSticker { jid, path } => {
+            tokio::spawn(async move {
+                let data = match tokio::fs::read(&path).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        action_failed(epoch, format!("Failed to read media: {e}"));
+                        return;
+                    }
+                };
+                let preparation = crate::outbox::Preparation {
+                    id: crate::outbox::new_id(),
+                    jid,
+                    kind: "sticker".into(),
+                    filename: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "file".into()),
+                    caption: None,
+                    origin: Some(path.to_string_lossy().into_owned()),
+                    data,
+                    in_rate: 0,
+                    view_once: false,
+                };
+                crate::bridge::wa_apply_at(epoch, move |b| {
+                    b.stage_attachment(preparation);
+                });
+            });
+        }
+
+        Cmd::SendGifUrl { jid, url } => {
+            let preparation = crate::outbox::Preparation {
+                id: crate::outbox::new_id(),
+                jid,
+                kind: "gif".into(),
+                filename: "animation.gif".into(),
+                caption: None,
+                origin: None,
+                data: url.into_bytes(),
+                in_rate: 0,
+                view_once: false,
+            };
+            crate::bridge::wa_apply_at(epoch, move |b| {
+                b.stage_attachment(preparation);
+            });
+        }
+
+        _ => unreachable!("not a attachments command"),
+    }
+}

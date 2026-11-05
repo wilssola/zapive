@@ -22,12 +22,18 @@ use whatsapp_rust::waproto::whatsapp as wa;
 
 mod attachments;
 mod calls;
+mod chats;
 mod executor;
+mod groups;
+mod local;
+mod media;
+mod messaging;
+mod polls;
+mod profile;
 mod pump;
 mod session;
 mod util;
 
-use attachments::*;
 use calls::*;
 use executor::*;
 use pump::*;
