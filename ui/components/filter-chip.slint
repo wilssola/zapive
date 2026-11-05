@@ -1,10 +1,21 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 export component FilterChip inherits TouchArea {
     in property <string> label;
     in property <int> count: 0;
     in property <bool> active: false;
     mouse-cursor: pointer;
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.active;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     width: chip.preferred-width;
     height: 28px;
     chip := Rectangle {
@@ -35,5 +46,11 @@ export component FilterChip inherits TouchArea {
                 vertical-alignment: center;
             }
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 14px;
+        shown: key-focus.has-focus;
     }
 }

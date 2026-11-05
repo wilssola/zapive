@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 export component IconButton inherits TouchArea {
     in property <image> icon;
@@ -14,6 +15,15 @@ export component IconButton inherits TouchArea {
     width: 40px;
     height: 40px;
     mouse-cursor: pointer;
+    in property <string> label;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     Rectangle {
         width: parent.width;
         height: parent.height;
@@ -47,5 +57,11 @@ export component IconButton inherits TouchArea {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.radius;
+        shown: key-focus.has-focus;
     }
 }

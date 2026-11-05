@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 // One round call button with its caption underneath.
 export component CallAction inherits TouchArea {
@@ -9,6 +10,14 @@ export component CallAction inherits TouchArea {
     // The hang-up glyph is the handset upside down.
     in property <bool> rotated: false;
     mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     width: 74px;
     height: 92px;
     VerticalLayout {
@@ -46,5 +55,11 @@ export component CallAction inherits TouchArea {
             font-size: 13px;
             horizontal-alignment: center;
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        shown: key-focus.has-focus;
     }
 }

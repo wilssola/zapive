@@ -1,11 +1,20 @@
 import { SearchHit } from "../types.slint";
 import { Avatar } from "../avatar.slint";
 import { Theme } from "../theme.slint";
+import { KeyFocus, FocusRing } from "../a11y.slint";
 
 // A search result row: avatar, who, snippet and when.
 export component HitRow inherits TouchArea {
     in property <SearchHit> hit;
     mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.hit.name + ", " + root.hit.snippet + ", " + root.hit.time;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     height: 68px;
     Rectangle {
         width: parent.width;
@@ -61,5 +70,11 @@ export component HitRow inherits TouchArea {
             height: 1px;
             background: Theme.border;
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 0px;
+        shown: key-focus.has-focus;
     }
 }

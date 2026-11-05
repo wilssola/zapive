@@ -2137,3 +2137,6 @@ msgstr "Atender"
 
 msgid "call.silenced.decline"
 msgstr "Recusar"
+
+msgid "accessibility.remove_account"
+msgstr "Remover {0} deste computador"

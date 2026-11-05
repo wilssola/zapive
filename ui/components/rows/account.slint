@@ -1,6 +1,7 @@
 import { AccountItem } from "../types.slint";
 import { Avatar } from "../avatar.slint";
 import { Theme } from "../theme.slint";
+import { KeyFocus, FocusRing } from "../a11y.slint";
 
 // One account in the switcher: the loaded one carries a check, the
 // others a button that removes them from this computer.
@@ -9,6 +10,15 @@ export component AccountRow inherits TouchArea {
     callback remove();
     mouse-cursor: pointer;
     height: 52px;
+    accessible-role: button;
+    accessible-label: root.account.detail != "" ? root.account.name + ", " + root.account.detail : root.account.name;
+    accessible-checkable: true;
+    accessible-checked: root.account.active;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        activate => { root.clicked(); }
+    }
     Rectangle {
         width: parent.width;
         height: parent.height;
@@ -62,7 +72,14 @@ export component AccountRow inherits TouchArea {
         width: 30px;
         height: 30px;
         mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: @tr("accessibility.remove_account", root.account.name);
+        accessible-action-default => { root.remove(); }
         clicked => { root.remove(); }
+        KeyFocus {
+            enabled: drop.visible;
+            activate => { root.remove(); }
+        }
         Image {
             source: @image-url("../../icons/trash.svg");
             colorize: drop.has-hover ? #f05d4d : Theme.text-dim;

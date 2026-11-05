@@ -2135,3 +2135,6 @@ msgstr "Answer"
 
 msgid "call.silenced.decline"
 msgstr "Decline"
+
+msgid "accessibility.remove_account"
+msgstr "Remove {0} from this computer"
