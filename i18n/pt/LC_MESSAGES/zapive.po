@@ -2138,5 +2138,11 @@ msgstr "Atender"
 msgid "call.silenced.decline"
 msgstr "Recusar"
 
+msgid "accessibility.qr_code"
+msgstr "QR code para conectar este computador. Não consegue ler? Use “Entrar com número de telefone” para receber um código de pareamento."
+
+msgid "accessibility.pairing_code"
+msgstr "Código de pareamento: {0}. Digite no celular em Dispositivos conectados, Conectar com número de telefone."
+
 msgid "accessibility.remove_account"
 msgstr "Remover {0} deste computador"

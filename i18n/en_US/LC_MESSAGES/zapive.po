@@ -2136,5 +2136,11 @@ msgstr "Answer"
 msgid "call.silenced.decline"
 msgstr "Decline"
 
+msgid "accessibility.qr_code"
+msgstr "QR code to link this computer. Can't scan it? Use “Log in with phone number” to get a pairing code instead."
+
+msgid "accessibility.pairing_code"
+msgstr "Pairing code: {0}. Type it on your phone under Linked devices, Link with phone number."
+
 msgid "accessibility.remove_account"
 msgstr "Remove {0} from this computer"

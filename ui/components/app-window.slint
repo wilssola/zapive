@@ -809,6 +809,7 @@ export component AppWindow inherits Window {
                 width: 220px;
                 input-type: password;
                 placeholder-text: @tr("security.unlock.pin_placeholder");
+                accessible-label: @tr("security.unlock.enter_pin_prompt");
                 accepted => { root.unlock(self.text); self.text = ""; }
             }
             Button {
@@ -897,6 +898,8 @@ export component AppWindow inherits Window {
                                 width: 240px;
                                 height: 240px;
                                 image-rendering: pixelated;
+                                accessible-role: image;
+                                accessible-label: @tr("accessibility.qr_code");
                             }
                         }
                     }
@@ -923,6 +926,8 @@ export component AppWindow inherits Window {
                         phone-input := LineEdit {
                             width: 300px;
                             placeholder-text: @tr("account.login.phone.number_placeholder");
+                            accessible-label: @tr("account.login.phone.number_placeholder");
+                            accepted => { root.request-pairing-code(self.text); }
                         }
                         Button {
                             text: @tr("account.login.phone.request_code");
@@ -932,6 +937,7 @@ export component AppWindow inherits Window {
                     }
                     Text {
                         text: root.pairing-code;
+                        accessible-label: root.pairing-code == "" ? "" : @tr("accessibility.pairing_code", root.pairing-code);
                         color: Theme.accent;
                         font-size: 36px;
                         font-weight: 700;
