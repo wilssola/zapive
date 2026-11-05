@@ -129,7 +129,31 @@ impl Bridge {
             return Err("Zapive is switching accounts. Try again in a moment.".into());
         }
         match call {
-            Call::ListChats { query, limit } => Ok(self.mcp_list_chats(query.as_deref(), limit)),
+            Call::ListChats {
+                query,
+                label,
+                limit,
+            } => self.mcp_list_chats(query.as_deref(), label.as_deref(), limit),
+            Call::ListLabels => Ok(self.mcp_list_labels()),
+            Call::CreateLabel { name } => Ok(self.mcp_create_label(&name)),
+            Call::SetChatLabel {
+                chat_id,
+                label,
+                labeled,
+            } => self.mcp_set_chat_label(&chat_id, &label, labeled),
+            Call::FindUnanswered {
+                label,
+                min_wait_minutes,
+                max_age_days,
+                include_groups,
+                limit,
+            } => self.mcp_unanswered(
+                label.as_deref(),
+                min_wait_minutes,
+                max_age_days,
+                include_groups,
+                limit,
+            ),
             Call::ReadMessages {
                 chat_id,
                 limit,
@@ -190,13 +214,20 @@ impl Bridge {
         }
     }
 
-    fn mcp_list_chats(&self, query: Option<&str>, limit: usize) -> Value {
+    fn mcp_list_chats(
+        &self,
+        query: Option<&str>,
+        label: Option<&str>,
+        limit: usize,
+    ) -> Result<Value, String> {
         let query = query.map(crate::search::fold).unwrap_or_default();
+        let in_label = self.mcp_label_members(label)?;
         let chats: Vec<Value> = self
             .store
             .sorted_chats()
             .into_iter()
             .filter(|meta| crate::store::is_displayable_jid(&meta.jid))
+            .filter(|meta| in_label.as_ref().is_none_or(|set| set.contains(&meta.jid)))
             .filter(|meta| {
                 query.is_empty()
                     || meta.jid.contains(&query)
@@ -215,10 +246,250 @@ impl Bridge {
                     "pinned": meta.pinned > 0,
                     "archived": meta.archived,
                     "muted": meta.is_muted(),
+                    "labels": self.mcp_chat_labels(&meta.jid),
                 })
             })
             .collect();
-        json!({ "chats": chats })
+        Ok(json!({ "chats": chats }))
+    }
+
+    // ---- labels ----
+
+    // The labels a user made (WhatsApp's built-in filters stay hidden,
+    // as in the chat list).
+    fn mcp_user_labels(&self) -> Vec<&crate::store::Label> {
+        self.store
+            .sorted_labels()
+            .into_iter()
+            .filter(|l| !l.is_builtin_filter())
+            .collect()
+    }
+
+    // Resolves a label_id or an exact (accent- and case-insensitive) name.
+    fn mcp_label(&self, reference: &str) -> Result<String, String> {
+        let reference = reference.trim();
+        let labels = self.mcp_user_labels();
+        if let Some(label) = labels.iter().find(|l| l.id == reference) {
+            return Ok(label.id.clone());
+        }
+        let wanted = crate::search::fold(reference);
+        let named: Vec<_> = labels
+            .iter()
+            .filter(|l| crate::search::fold(&l.name) == wanted)
+            .collect();
+        match named.as_slice() {
+            [one] => Ok(one.id.clone()),
+            [] => Err(format!(
+                "Unknown label '{reference}'. Use list_labels to see the available labels."
+            )),
+            _ => Err(format!(
+                "Several labels are named '{reference}'. Use its label_id from list_labels."
+            )),
+        }
+    }
+
+    // The chats under `label`, or None when no label filter was asked for.
+    fn mcp_label_members(&self, label: Option<&str>) -> Result<Option<HashSet<String>>, String> {
+        let Some(label) = label else { return Ok(None) };
+        let id = self.mcp_label(label)?;
+        Ok(Some(
+            self.store.label_chats.get(&id).cloned().unwrap_or_default(),
+        ))
+    }
+
+    fn mcp_chat_labels(&self, jid: &str) -> Vec<Value> {
+        self.mcp_user_labels()
+            .into_iter()
+            .filter(|l| {
+                self.store
+                    .label_chats
+                    .get(&l.id)
+                    .is_some_and(|set| set.contains(jid))
+            })
+            .map(|l| json!({ "label_id": l.id, "name": l.name }))
+            .collect()
+    }
+
+    fn mcp_list_labels(&self) -> Value {
+        let labels: Vec<Value> = self
+            .mcp_user_labels()
+            .into_iter()
+            .map(|l| {
+                json!({
+                    "label_id": l.id,
+                    "name": l.name,
+                    "chat_count": self.store.label_chats.get(&l.id).map_or(0, |set| set.len()),
+                })
+            })
+            .collect();
+        json!({ "labels": labels })
+    }
+
+    fn mcp_create_label(&mut self, name: &str) -> Value {
+        let folded = crate::search::fold(name);
+        if let Some(label) = self
+            .mcp_user_labels()
+            .into_iter()
+            .find(|l| crate::search::fold(&l.name) == folded)
+        {
+            return json!({ "label_id": label.id, "name": label.name, "created": false });
+        }
+        let id = self.store.next_label_id();
+        let order = self.store.labels.len() as i32;
+        self.store.upsert_label(crate::store::Label {
+            id: id.clone(),
+            name: name.to_string(),
+            color: order % 20,
+            order,
+            list_type: Some(5),
+        });
+        self.wa.send(Cmd::LabelCreate {
+            id: id.clone(),
+            name: name.to_string(),
+            color: order % 20,
+            order,
+        });
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+        self.schedule_save();
+        json!({ "label_id": id, "name": name, "created": true })
+    }
+
+    fn mcp_set_chat_label(
+        &mut self,
+        chat_id: &str,
+        label: &str,
+        labeled: bool,
+    ) -> Result<Value, String> {
+        let jid = self.mcp_chat(chat_id)?;
+        let id = self.mcp_label(label)?;
+        if self.store.set_label_chat(&id, &jid, labeled) {
+            self.wa.send(Cmd::LabelChat {
+                label_id: id.clone(),
+                jid: jid.clone(),
+                on: labeled,
+            });
+        }
+        self.refresh_labels();
+        self.schedule_refresh_chats();
+        self.schedule_save();
+        Ok(json!({
+            "chat_id": jid,
+            "label_id": id,
+            "labeled": labeled,
+            "labels": self.mcp_chat_labels(&jid),
+        }))
+    }
+
+    // ---- unanswered chats ----
+
+    // The newest messages of a chat, oldest first: stored history plus the
+    // live rows the vault has not received yet.
+    fn mcp_recent_messages(&self, jid: &str, count: usize) -> Result<Vec<StoredMessage>, String> {
+        let vault = self.vault.as_ref().ok_or("Zapive is locked.")?;
+        let mut by_id: HashMap<String, StoredMessage> = vault
+            .history_page(jid, None, count)?
+            .into_iter()
+            .map(|m| (m.id.clone(), m))
+            .collect();
+        for m in self.store.messages_for(jid) {
+            by_id.insert(m.id.clone(), m.clone());
+        }
+        let mut list: Vec<StoredMessage> = by_id.into_values().collect();
+        list.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
+        let skip = list.len().saturating_sub(count);
+        Ok(list.split_off(skip))
+    }
+
+    fn mcp_unanswered(
+        &self,
+        label: Option<&str>,
+        min_wait_minutes: u32,
+        max_age_days: u32,
+        include_groups: bool,
+        limit: usize,
+    ) -> Result<Value, String> {
+        const WINDOW: usize = 30;
+        const MAX_SCAN: usize = 500;
+        const SNIPPET_CHARS: usize = 300;
+        let in_label = self.mcp_label_members(label)?;
+        let now = crate::store::now_secs();
+        let oldest_activity = now - i64::from(max_age_days) * 86_400;
+        let waited_enough = now - i64::from(min_wait_minutes) * 60;
+        let mut scanned = 0;
+        let mut truncated = false;
+        let mut found: Vec<(i64, Value)> = Vec::new();
+        for meta in self.store.sorted_chats() {
+            let kind = Self::chat_kind(meta);
+            let wanted_kind = kind == "direct" || (include_groups && kind == "group");
+            if !wanted_kind
+                || !crate::store::is_displayable_jid(&meta.jid)
+                || meta.left
+                || meta.timestamp < oldest_activity
+                || in_label.as_ref().is_some_and(|set| !set.contains(&meta.jid))
+            {
+                continue;
+            }
+            if scanned >= MAX_SCAN {
+                truncated = true;
+                break;
+            }
+            scanned += 1;
+            let messages: Vec<StoredMessage> = self
+                .mcp_recent_messages(&meta.jid, WINDOW)?
+                .into_iter()
+                .filter(|m| m.kind != MessageKind::System && !m.deleted && !m.revoked)
+                .collect();
+            // The run of messages after the user's last reply.
+            let pending = messages.iter().rev().take_while(|m| !m.from_me).count();
+            if pending == 0 {
+                continue;
+            }
+            let run = &messages[messages.len() - pending..];
+            let since = run[0].timestamp;
+            if since > waited_enough {
+                continue;
+            }
+            let mut last = self.mcp_message_json(&run[pending - 1]);
+            let clipped = last["text"]
+                .as_str()
+                .filter(|text| text.chars().count() > SNIPPET_CHARS)
+                .map(|text| format!("{}…", text.chars().take(SNIPPET_CHARS).collect::<String>()));
+            if let Some(clipped) = clipped {
+                last["text"] = json!(clipped);
+            }
+            found.push((
+                since,
+                json!({
+                    "chat_id": meta.jid,
+                    "name": self.store.chat_name(&meta.jid),
+                    "type": kind,
+                    "labels": self.mcp_chat_labels(&meta.jid),
+                    "waiting_since": format_stamp(since),
+                    "timestamp": since,
+                    "waiting_minutes": (now - since) / 60,
+                    "pending_messages": pending,
+                    "last_message": last,
+                    "unread": meta.unread,
+                    "archived": meta.archived,
+                    "muted": meta.is_muted(),
+                }),
+            ));
+        }
+        found.sort_by_key(|(since, _)| *since);
+        let total = found.len();
+        let chats: Vec<Value> = found.into_iter().take(limit).map(|(_, v)| v).collect();
+        let mut result = json!({
+            "total": total,
+            "chats": chats,
+            "chats_checked": scanned,
+        });
+        if truncated {
+            result["note"] = json!(format!(
+                "Only the {MAX_SCAN} most recent matching chats were checked. Narrow it with `label` or `max_age_days`."
+            ));
+        }
+        Ok(result)
     }
 
     fn mcp_message_json(&self, m: &StoredMessage) -> Value {
@@ -351,6 +622,7 @@ impl Bridge {
             "favorite": meta.favorite,
             "can_send": meta.can_send(),
             "disappearing_seconds": meta.ephemeral,
+            "labels": self.mcp_chat_labels(&jid),
         });
         if !meta.community.is_empty() {
             value["community"] =

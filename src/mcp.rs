@@ -28,6 +28,9 @@ const MAX_ID_LEN: usize = 128;
 const MAX_QUERY_LEN: usize = 256;
 const MAX_TEXT_LEN: usize = 65_536;
 const MAX_EMOJI_LEN: usize = 32;
+const MAX_LABEL_LEN: usize = 64;
+pub const DEFAULT_MIN_WAIT_MINUTES: u32 = 60;
+pub const DEFAULT_MAX_AGE_DAYS: u32 = 30;
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
 // ---- tools ----
@@ -44,6 +47,73 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct ListChats {
     /// Only chats whose name or id contains this text.
     pub query: Option<String>,
+    /// Only chats filed under this label (label_id or exact name from list_labels).
+    pub label: Option<String>,
+    /// Maximum number of chats (1-200, default 50).
+    pub limit: Option<u32>,
+}
+
+#[mcp_tool(
+    name = "list_labels",
+    description = "Lists the user's labels (WhatsApp lists) with their label_id and how many chats each holds. A label can be given by label_id or exact name to list_chats, set_chat_label and find_unanswered_chats.",
+    read_only_hint = true,
+    destructive_hint = false,
+    idempotent_hint = true,
+    open_world_hint = false
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct ListLabels {}
+
+#[mcp_tool(
+    name = "create_label",
+    description = "Creates a label (a WhatsApp list). If a label with that name already exists it is returned instead of creating a duplicate.",
+    read_only_hint = false,
+    destructive_hint = false,
+    idempotent_hint = true,
+    open_world_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct CreateLabel {
+    /// Label name (1-64 characters).
+    pub name: String,
+}
+
+#[mcp_tool(
+    name = "set_chat_label",
+    description = "Files a chat under a label, or takes it out of that label. The change syncs to the user's WhatsApp.",
+    read_only_hint = false,
+    destructive_hint = false,
+    idempotent_hint = true,
+    open_world_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct SetChatLabel {
+    /// Chat id from list_chats.
+    pub chat_id: String,
+    /// label_id or exact name from list_labels.
+    pub label: String,
+    /// true to add the label (default), false to remove it.
+    pub labeled: Option<bool>,
+}
+
+#[mcp_tool(
+    name = "find_unanswered_chats",
+    description = "Finds chats whose latest message is from the other person and still has no reply from the user, longest waiting first. Pass `label` to check only the chats under a label, such as the one that holds customers.",
+    read_only_hint = true,
+    destructive_hint = false,
+    idempotent_hint = true,
+    open_world_hint = false
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct FindUnansweredChats {
+    /// Only chats under this label (label_id or exact name from list_labels).
+    pub label: Option<String>,
+    /// Ignore chats that have been waiting less than this many minutes (default 60).
+    pub min_wait_minutes: Option<u32>,
+    /// Ignore chats with no activity for more than this many days (1-365, default 30).
+    pub max_age_days: Option<u32>,
+    /// Also check groups (default false: direct chats only).
+    pub include_groups: Option<bool>,
     /// Maximum number of chats (1-200, default 50).
     pub limit: Option<u32>,
 }
@@ -155,6 +225,10 @@ tool_box!(
         ReadMessages,
         SearchMessages,
         GetChatInfo,
+        ListLabels,
+        CreateLabel,
+        SetChatLabel,
+        FindUnansweredChats,
         SendMessage,
         MarkAsRead,
         ReactToMessage
@@ -166,6 +240,23 @@ tool_box!(
 pub enum Call {
     ListChats {
         query: Option<String>,
+        label: Option<String>,
+        limit: usize,
+    },
+    ListLabels,
+    CreateLabel {
+        name: String,
+    },
+    SetChatLabel {
+        chat_id: String,
+        label: String,
+        labeled: bool,
+    },
+    FindUnanswered {
+        label: Option<String>,
+        min_wait_minutes: u32,
+        max_age_days: u32,
+        include_groups: bool,
         limit: usize,
     },
     ReadMessages {
@@ -203,6 +294,23 @@ impl TryFrom<ZapiveTools> for Call {
         Ok(match tool {
             ZapiveTools::ListChats(t) => Call::ListChats {
                 query: optional(t.query, |q| query(&q))?,
+                label: optional(t.label, |l| label_ref(&l))?,
+                limit: limit(t.limit),
+            },
+            ZapiveTools::ListLabels(_) => Call::ListLabels,
+            ZapiveTools::CreateLabel(t) => Call::CreateLabel {
+                name: label_name(&t.name)?,
+            },
+            ZapiveTools::SetChatLabel(t) => Call::SetChatLabel {
+                chat_id: chat_id(&t.chat_id)?,
+                label: label_ref(&t.label)?,
+                labeled: t.labeled.unwrap_or(true),
+            },
+            ZapiveTools::FindUnansweredChats(t) => Call::FindUnanswered {
+                label: optional(t.label, |l| label_ref(&l))?,
+                min_wait_minutes: t.min_wait_minutes.unwrap_or(DEFAULT_MIN_WAIT_MINUTES),
+                max_age_days: t.max_age_days.unwrap_or(DEFAULT_MAX_AGE_DAYS).clamp(1, 365),
+                include_groups: t.include_groups.unwrap_or(false),
                 limit: limit(t.limit),
             },
             ZapiveTools::ReadMessages(t) => Call::ReadMessages {
@@ -282,6 +390,32 @@ fn query(value: &str) -> Result<String, String> {
     if value.is_empty() || value.chars().count() > MAX_QUERY_LEN {
         Err(format!(
             "Invalid query: expected 1-{MAX_QUERY_LEN} characters."
+        ))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+// A label is named by its label_id or its exact name.
+fn label_ref(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > MAX_LABEL_LEN {
+        Err(format!(
+            "Invalid label: expected a label_id or name from list_labels (up to {MAX_LABEL_LEN} characters)."
+        ))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+fn label_name(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.chars().count() > MAX_LABEL_LEN
+        || value.chars().any(|c| c.is_control())
+    {
+        Err(format!(
+            "Invalid name: expected 1-{MAX_LABEL_LEN} characters without control characters."
         ))
     } else {
         Ok(value.to_string())
@@ -501,7 +635,7 @@ fn app_state() -> Arc<McpAppState> {
             ..Default::default()
         },
         instructions: Some(
-            "Reads and sends WhatsApp messages as the user logged into Zapive. Use list_chats to find a chat_id first. Confirm with the user before sending messages or reactions.".into(),
+            "Reads and sends WhatsApp messages as the user logged into Zapive. Use list_chats to find a chat_id first. Chats can be organised with labels (list_labels, create_label, set_chat_label) and find_unanswered_chats reports chats waiting for the user's reply. Confirm with the user before sending messages, reactions or changing labels.".into(),
         ),
         meta: None,
     };
@@ -697,6 +831,46 @@ mod tests {
     }
 
     #[test]
+    fn label_arguments_are_validated() {
+        assert_eq!(label_ref(" Clientes ").as_deref(), Ok("Clientes"));
+        assert!(label_ref("  ").is_err());
+        assert!(label_ref(&"x".repeat(MAX_LABEL_LEN + 1)).is_err());
+        assert_eq!(label_name(" Clientes ").as_deref(), Ok("Clientes"));
+        assert!(label_name("").is_err());
+        assert!(label_name("a\nb").is_err());
+        let call = Call::try_from(ZapiveTools::SetChatLabel(SetChatLabel {
+            chat_id: "1@s.whatsapp.net".into(),
+            label: "Clientes".into(),
+            labeled: None,
+        }));
+        assert_eq!(
+            call,
+            Ok(Call::SetChatLabel {
+                chat_id: "1@s.whatsapp.net".into(),
+                label: "Clientes".into(),
+                labeled: true
+            })
+        );
+        let call = Call::try_from(ZapiveTools::FindUnansweredChats(FindUnansweredChats {
+            label: Some(" ".into()),
+            min_wait_minutes: None,
+            max_age_days: Some(9999),
+            include_groups: None,
+            limit: Some(0),
+        }));
+        assert_eq!(
+            call,
+            Ok(Call::FindUnanswered {
+                label: None,
+                min_wait_minutes: DEFAULT_MIN_WAIT_MINUTES,
+                max_age_days: 365,
+                include_groups: false,
+                limit: 1
+            })
+        );
+    }
+
+    #[test]
     fn config_json() {
         let config: Value = serde_json::from_str(&client_config(&url_for(47823), "tok")).unwrap();
         let server = &config["mcpServers"]["zapive"];
@@ -716,6 +890,10 @@ mod tests {
                 "read_messages",
                 "search_messages",
                 "get_chat_info",
+                "list_labels",
+                "create_label",
+                "set_chat_label",
+                "find_unanswered_chats",
                 "send_message",
                 "mark_as_read",
                 "react_to_message"
