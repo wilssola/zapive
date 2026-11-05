@@ -169,16 +169,15 @@ fn mention_navigation(
             .find(|span| span.start < edge && edge < span.end)
             .map(|span| if left { span.start } else { span.end })
             .unwrap_or(edge)
-    } else if let Some(span) = spans.iter().find(|span| {
-        if left {
-            span.start < cursor && cursor <= span.end
-        } else {
-            span.start <= cursor && cursor < span.end
-        }
-    }) {
-        if left { span.start } else { span.end }
     } else {
-        return None;
+        let span = spans.iter().find(|span| {
+            if left {
+                span.start < cursor && cursor <= span.end
+            } else {
+                span.start <= cursor && cursor < span.end
+            }
+        })?;
+        if left { span.start } else { span.end }
     };
     let anchor = if shift {
         spans
