@@ -2227,3 +2227,14 @@ msgstr "Código de pareamento: {0}. Digite no celular em Dispositivos conectados
 
 msgid "accessibility.remove_account"
 msgstr "Remover {0} deste computador"
+
+msgid "accessibility.chat_row"
+msgstr "{0}, {1} {2}, {3}"
+
+msgid "accessibility.message"
+msgstr "{0}: {1}, {2}"
+
+msgid "accessibility.unread.one"
+msgid_plural "accessibility.unread.other"
+msgstr[0] "{n} mensagem não lida"
+msgstr[1] "{n} mensagens não lidas"

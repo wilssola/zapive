@@ -36,6 +36,7 @@ import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
 import { HitRow } from "rows/hit.slint";
 import { MemberRow } from "rows/member.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 export component AppWindow inherits Window {
     title: "Zapive";
@@ -1519,6 +1520,7 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 horizontal-stretch: 1;
                                 search-box := TextInput {
+                                    accessible-label: @tr("chat.search.placeholder");
                                     width: parent.width;
                                     height: parent.height;
                                     color: Theme.text;
@@ -1690,6 +1692,18 @@ export component AppWindow inherits Window {
                     for chat[i] in root.chats: Rectangle {
                         height: 56px;
                         clip: true;
+                        accessible-role: list-item;
+                        accessible-label: @tr("accessibility.chat_row", chat.name,
+                            chat.unread > 0 ? @tr("accessibility.unread.one" | "accessibility.unread.other" % chat.unread) : "",
+                            chat.typing ? @tr("presence.typing") : chat.preview, chat.time);
+                        accessible-item-selectable: true;
+                        accessible-item-selected: chat.jid == root.selected-jid;
+                        accessible-item-index: i;
+                        accessible-item-count: root.chats.length;
+                        accessible-action-default => { root.open-chat(chat.jid); }
+                        chat-key := KeyFocus {
+                            activate => { root.open-chat(chat.jid); }
+                        }
                         // Files dragged from the desktop over this row.
                         if root.drop-target-jid == chat.jid: Rectangle {
                             x: 4px;
@@ -1715,7 +1729,16 @@ export component AppWindow inherits Window {
                             animate background { duration: 140ms; easing: ease-out; }
                             animate border-color { duration: 140ms; easing: ease-out; }
                         }
+                        FocusRing {
+                            x: 4px;
+                            y: 1px;
+                            width: parent.width - 8px;
+                            height: parent.height - 2px;
+                            border-radius: 10px;
+                            shown: chat-key.has-focus;
+                        }
                         touch := TouchArea {
+                            accessible-role: none;
                             clicked => { root.open-chat(chat.jid); }
                             changed has-hover => {
                                 if (self.has-hover) { root.chat-hover(chat.jid); }
@@ -2100,6 +2123,23 @@ export component AppWindow inherits Window {
                         }
                     }
                     for msg[i] in root.messages: msg-row := Rectangle {
+                        accessible-role: list-item;
+                        accessible-label: msg.kind == "system" ? msg.text
+                            : msg.deleted ? @tr("message.deleted_by_sender")
+                            : @tr("accessibility.message",
+                                msg.fromMe ? @tr("reactions.you") : msg.sender != "" ? msg.sender : root.current-chat-name,
+                                (msg.sticker ? @tr("preview.sticker")
+                                    : msg.kind == "image" ? @tr("preview.photo")
+                                    : msg.kind == "video" ? @tr("preview.video")
+                                    : msg.kind == "audio" ? (msg.voiceMessage ? @tr("preview.voice") : @tr("preview.audio"))
+                                    : msg.kind == "doc" ? @tr("preview.document", "")
+                                    : msg.cardKind != "" ? msg.cardTitle : "")
+                                    + (msg.text != "" && msg.kind != "audio" ? " " + msg.text : "")
+                                    + (msg.cardBody != "" ? " " + msg.cardBody : ""),
+                                msg.time);
+                        accessible-description: msg.reactions;
+                        accessible-item-index: i;
+                        accessible-item-count: root.messages.length;
                         property <int> menu-request: root.message-menu-request;
                         changed menu-request => {
                             if (self.menu-request > 0 && !msg.deleted && msg.kind != "system"
@@ -3055,6 +3095,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     sel-overlay := TextInput {
+                                        accessible-role: none;
                                         text: msg.plain;
                                         read-only: true;
                                         single-line: false;
@@ -3124,6 +3165,7 @@ export component AppWindow inherits Window {
                                     width: min(plain-text.preferred-width, msg-row.content-w);
                                     height: plain-text.preferred-height;
                                     plain-text := TextInput {
+                                        accessible-role: none;
                                         text: (msg.deleted ? "🚫 " + msg.text : msg.text)
                                             + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
                                         animate opacity { duration: 120ms; easing: ease-out; }
@@ -3836,6 +3878,7 @@ export component AppWindow inherits Window {
                                     // below keeps the caret itself always visible.
                                     interactive: true;
                                     message-input := TextInput {
+                                        accessible-label: @tr("chat.composer.placeholder");
                                         width: parent.width;
                                         height: max(parent.height, self.preferred-height);
                                         color: Theme.text;

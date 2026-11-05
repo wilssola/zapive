@@ -2225,3 +2225,14 @@ msgstr "Pairing code: {0}. Type it on your phone under Linked devices, Link with
 
 msgid "accessibility.remove_account"
 msgstr "Remove {0} from this computer"
+
+msgid "accessibility.chat_row"
+msgstr "{0}, {1} {2}, {3}"
+
+msgid "accessibility.message"
+msgstr "{0}: {1}, {2}"
+
+msgid "accessibility.unread.one"
+msgid_plural "accessibility.unread.other"
+msgstr[0] "{n} unread message"
+msgstr[1] "{n} unread messages"
