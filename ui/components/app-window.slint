@@ -3026,6 +3026,91 @@ export component AppWindow inherits Window {
                                 if msg.hasStyled: Rectangle {
                                     width: styled-body.width;
                                     height: styled-body.preferred-height;
+                                    for span in msg.links: Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        visible: span.mention;
+                                        property <length> sx;
+                                        property <length> sy;
+                                        property <length> ex;
+                                        property <length> ey;
+                                        property <bool> at-end;
+                                        property <length> line-h: mention-line.preferred-height;
+                                        property <bool> one-line: abs((self.ey - self.sy) / 1px) < 2;
+                                        property <string> source: msg.plain;
+                                        property <int> start: span.start;
+                                        property <int> end: span.end;
+                                        function measure() {
+                                            if (span.mention) {
+                                                self.at-end = false;
+                                                mention-probe.set-selection-offsets(self.start, self.start);
+                                                self.at-end = true;
+                                                mention-probe.set-selection-offsets(self.end, self.end);
+                                            }
+                                        }
+                                        init => { self.measure(); }
+                                        changed source => { self.measure(); }
+                                        changed width => { self.measure(); }
+                                        changed height => { self.measure(); }
+                                        changed start => { self.measure(); }
+                                        changed end => { self.measure(); }
+                                        Timer {
+                                            interval: 30ms;
+                                            running: true;
+                                            triggered => { self.running = false; parent.measure(); }
+                                        }
+                                        mention-line := Text {
+                                            text: "Ag";
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            visible: false;
+                                        }
+                                        mention-probe := TextInput {
+                                            text: msg.plain;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            visible: false;
+                                            enabled: false;
+                                            read-only: true;
+                                            cursor-position-changed(pos) => {
+                                                if (parent.at-end) {
+                                                    parent.ex = pos.x;
+                                                    parent.ey = pos.y;
+                                                } else {
+                                                    parent.sx = pos.x;
+                                                    parent.sy = pos.y;
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            x: parent.sx;
+                                            y: parent.sy - 1px;
+                                            width: max(0px, (parent.one-line ? parent.ex : parent.width) - parent.sx);
+                                            height: parent.line-h + 2px;
+                                            border-radius: 7px;
+                                            background: #4cbb7b40;
+                                        }
+                                        Rectangle {
+                                            visible: !parent.one-line && parent.ey - parent.sy > parent.line-h * 1.5;
+                                            y: parent.sy + parent.line-h - 1px;
+                                            width: parent.width;
+                                            height: max(0px, parent.ey - parent.sy - parent.line-h + 2px);
+                                            border-radius: 7px;
+                                            background: #4cbb7b40;
+                                        }
+                                        Rectangle {
+                                            visible: !parent.one-line;
+                                            y: parent.ey - 1px;
+                                            width: max(0px, parent.ex);
+                                            height: parent.line-h + 2px;
+                                            border-radius: 7px;
+                                            background: #4cbb7b40;
+                                        }
+                                    }
                                     styled-body := StyledText {
                                         text: msg.styled;
                                         animate opacity { duration: 120ms; easing: ease-out; }

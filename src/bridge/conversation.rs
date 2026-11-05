@@ -354,16 +354,23 @@ impl Bridge {
             return none();
         }
         let resolve = self.mention_resolver(m);
-        let md = format!("{}{META_PAD}", to_markdown(body, &resolve));
+        let md = format!(
+            "{}{META_PAD}",
+            crate::markup::bubble_markdown(body, &resolve)
+        );
         match slint::StyledText::from_markdown(&md) {
             Ok(styled) => {
                 let mut plain = render_plain(body, &resolve);
                 let links = plain
                     .spans
                     .iter()
-                    .map(|(start, end, _)| LinkSpan {
+                    .map(|(start, end, target)| LinkSpan {
                         start: *start as i32,
                         end: *end as i32,
+                        mention: !target.contains("://")
+                            && ["@s.whatsapp.net", "@lid", "@g.us"]
+                                .iter()
+                                .any(|suffix| target.ends_with(suffix)),
                     })
                     .collect();
                 // The overlay text must end with the same run as the styled
