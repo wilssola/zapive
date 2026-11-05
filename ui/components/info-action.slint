@@ -1,9 +1,19 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 export component InfoAction inherits TouchArea {
     in property <image> icon;
     in property <string> label;
     mouse-cursor: self.enabled ? pointer : default;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     height: 62px;
     min-width: 0px;
     preferred-width: 0px;
@@ -32,5 +42,11 @@ export component InfoAction inherits TouchArea {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        shown: key-focus.has-focus;
     }
 }

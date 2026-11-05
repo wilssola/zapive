@@ -36,6 +36,7 @@ import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
 import { HitRow } from "rows/hit.slint";
 import { MemberRow } from "rows/member.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 export component AppWindow inherits Window {
     title: "Zapive";
@@ -809,6 +810,7 @@ export component AppWindow inherits Window {
                 width: 220px;
                 input-type: password;
                 placeholder-text: @tr("security.unlock.pin_placeholder");
+                accessible-label: @tr("security.unlock.enter_pin_prompt");
                 accepted => { root.unlock(self.text); self.text = ""; }
             }
             Button {
@@ -897,6 +899,8 @@ export component AppWindow inherits Window {
                                 width: 240px;
                                 height: 240px;
                                 image-rendering: pixelated;
+                                accessible-role: image;
+                                accessible-label: @tr("accessibility.qr_code");
                             }
                         }
                     }
@@ -923,6 +927,8 @@ export component AppWindow inherits Window {
                         phone-input := LineEdit {
                             width: 300px;
                             placeholder-text: @tr("account.login.phone.number_placeholder");
+                            accessible-label: @tr("account.login.phone.number_placeholder");
+                            accepted => { root.request-pairing-code(self.text); }
                         }
                         Button {
                             text: @tr("account.login.phone.request_code");
@@ -932,6 +938,7 @@ export component AppWindow inherits Window {
                     }
                     Text {
                         text: root.pairing-code;
+                        accessible-label: root.pairing-code == "" ? "" : @tr("accessibility.pairing_code", root.pairing-code);
                         color: Theme.accent;
                         font-size: 36px;
                         font-weight: 700;
@@ -1161,6 +1168,7 @@ export component AppWindow inherits Window {
                 spacing: 8px;
                 alignment: start;
                 IconButton {
+                    label: @tr("navigation.chats");
                     icon: @image-url("../icons/message-circle.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1173,6 +1181,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
+                    label: @tr("navigation.status");
                     icon: @image-url("../icons/circle-dot.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1182,6 +1191,7 @@ export component AppWindow inherits Window {
                     clicked => { root.settings-open = false; root.sidebar-view = "status"; }
                 }
                 IconButton {
+                    label: @tr("navigation.calls");
                     icon: @image-url("../icons/phone.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1191,6 +1201,7 @@ export component AppWindow inherits Window {
                     clicked => { root.settings-open = false; root.sidebar-view = "calls"; root.view-changed("calls"); }
                 }
                 IconButton {
+                    label: @tr("navigation.channels");
                     icon: @image-url("../icons/speakerphone.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1203,6 +1214,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
+                    label: @tr("navigation.communities");
                     icon: @image-url("../icons/users-group.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1225,6 +1237,7 @@ export component AppWindow inherits Window {
                 spacing: 8px;
                 Rectangle { height: 1px; background: Theme.border; }
                 IconButton {
+                    label: @tr("navigation.settings");
                     icon: @image-url("../icons/settings.svg");
                     active: root.settings-open;
                     clicked => {
@@ -1235,6 +1248,9 @@ export component AppWindow inherits Window {
                 }
                 // Whose conversations these are; opens the switcher.
                 TouchArea {
+                    accessible-role: button;
+                    accessible-label: @tr("accessibility.account_menu", root.my-account.name);
+                    accessible-action-default => { root.account-menu-open = !root.account-menu-open; }
                     height: 40px;
                     mouse-cursor: pointer;
                     clicked => { root.account-menu-open = !root.account-menu-open; }
@@ -1247,6 +1263,15 @@ export component AppWindow inherits Window {
                         has-image: root.my-account.hasAvatar;
                         initial: root.my-account.initial;
                         color-idx: root.my-account.colorIdx;
+                    }
+                    account-key := KeyFocus {
+                        activate => { root.account-menu-open = !root.account-menu-open; }
+                    }
+                    FocusRing {
+                        shown: account-key.has-focus;
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: 8px;
                     }
                 }
             }
@@ -1311,7 +1336,15 @@ export component AppWindow inherits Window {
                         clip: true;
                         background: st-touch.has-hover ? Theme.hover : transparent;
                         st-touch := TouchArea {
+                            accessible-role: list-item;
+                            accessible-label: st.name + ", " + st.time;
+                            accessible-item-index: i;
+                            accessible-item-count: root.statuses.length;
+                            accessible-action-default => { root.status-open(st.jid); }
                             clicked => { root.status-open(st.jid); }
+                            st-key := KeyFocus {
+                                activate => { root.status-open(st.jid); }
+                            }
                         }
                         HorizontalLayout {
                             padding-left: 13px;
@@ -1395,7 +1428,13 @@ export component AppWindow inherits Window {
                         clip: true;
                         background: call-touch.has-hover ? Theme.hover : transparent;
                         call-touch := TouchArea {
+                            accessible-role: list-item;
+                            accessible-label: call.name + ", " + call.detail + ", " + call.time;
+                            accessible-action-default => { root.open-dm(call.from); }
                             clicked => { root.open-dm(call.from); }
+                            call-key := KeyFocus {
+                                activate => { root.open-dm(call.from); }
+                            }
                         }
                         HorizontalLayout {
                             padding-left: 13px;
@@ -1442,6 +1481,7 @@ export component AppWindow inherits Window {
                                 }
                                 // Redial, the way the phone's call log does.
                                 if !call.group: IconButton {
+                                    label: @tr("accessibility.call_back");
                                     icon: @image-url("../icons/phone.svg");
                                     icon-size: 18px;
                                     width: 30px;
@@ -1506,6 +1546,7 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 horizontal-stretch: 1;
                                 search-box := TextInput {
+                                    accessible-label: @tr("chat.search.placeholder");
                                     width: parent.width;
                                     height: parent.height;
                                     color: Theme.text;
@@ -1651,10 +1692,16 @@ export component AppWindow inherits Window {
                         }
                     }
                     archive-touch := TouchArea {
+                        accessible-role: button;
+                        accessible-label: @tr("chat.filter.archived");
+                        accessible-action-default => { root.chat-tab = root.chat-tab == "archived" ? "all" : "archived"; root.tab-changed(root.chat-tab); }
                         mouse-cursor: pointer;
                         clicked => {
                             root.chat-tab = root.chat-tab == "archived" ? "all" : "archived";
                             root.tab-changed(root.chat-tab);
+                        }
+                        archive-key := KeyFocus {
+                            activate => { root.chat-tab = root.chat-tab == "archived" ? "all" : "archived"; root.tab-changed(root.chat-tab); }
                         }
                     }
                 }
@@ -1677,6 +1724,18 @@ export component AppWindow inherits Window {
                     for chat[i] in root.chats: Rectangle {
                         height: 56px;
                         clip: true;
+                        accessible-role: list-item;
+                        accessible-label: @tr("accessibility.chat_row", chat.name,
+                            chat.unread > 0 ? @tr("accessibility.unread.one" | "accessibility.unread.other" % chat.unread) : "",
+                            chat.typing ? @tr("presence.typing") : chat.preview, chat.time);
+                        accessible-item-selectable: true;
+                        accessible-item-selected: chat.jid == root.selected-jid;
+                        accessible-item-index: i;
+                        accessible-item-count: root.chats.length;
+                        accessible-action-default => { root.open-chat(chat.jid); }
+                        chat-key := KeyFocus {
+                            activate => { root.open-chat(chat.jid); }
+                        }
                         // Files dragged from the desktop over this row.
                         if root.drop-target-jid == chat.jid: Rectangle {
                             x: 4px;
@@ -1702,7 +1761,16 @@ export component AppWindow inherits Window {
                             animate background { duration: 140ms; easing: ease-out; }
                             animate border-color { duration: 140ms; easing: ease-out; }
                         }
+                        FocusRing {
+                            x: 4px;
+                            y: 1px;
+                            width: parent.width - 8px;
+                            height: parent.height - 2px;
+                            border-radius: 10px;
+                            shown: chat-key.has-focus;
+                        }
                         touch := TouchArea {
+                            accessible-role: none;
                             clicked => { root.open-chat(chat.jid); }
                             changed has-hover => {
                                 if (self.has-hover) { root.chat-hover(chat.jid); }
@@ -1887,8 +1955,14 @@ export component AppWindow inherits Window {
                 border-width: 1px;
                 border-color: #ffffff55;
                 mini-touch := TouchArea {
+                    accessible-role: button;
+                    accessible-label: @tr("accessibility.open_voice_message", root.mini-audio-name);
+                    accessible-action-default => { root.mini-audio-open(); }
                     mouse-cursor: pointer;
                     clicked => { root.mini-audio-open(); }
+                    mini-key := KeyFocus {
+                        activate => { root.mini-audio-open(); }
+                    }
                 }
                 HorizontalLayout {
                     padding-left: 14px;
@@ -1900,8 +1974,20 @@ export component AppWindow inherits Window {
                             width: 26px;
                             height: 26px;
                             play-touch := TouchArea {
+                                accessible-role: button;
+                                accessible-label: root.mini-audio-playing ? @tr("accessibility.pause") : @tr("accessibility.play");
+                                accessible-action-default => { root.mini-audio-toggle(); }
                                 mouse-cursor: pointer;
                                 clicked => { root.mini-audio-toggle(); }
+                                mini-play-key := KeyFocus {
+                                    activate => { root.mini-audio-toggle(); }
+                                }
+                                FocusRing {
+                                    shown: mini-play-key.has-focus;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 13px;
+                                }
                             }
                             Image {
                                 source: root.mini-audio-playing
@@ -1958,8 +2044,20 @@ export component AppWindow inherits Window {
                             width: 24px;
                             height: 24px;
                             close-touch := TouchArea {
+                                accessible-role: button;
+                                accessible-label: @tr("common.action.close");
+                                accessible-action-default => { root.mini-audio-close(); }
                                 mouse-cursor: pointer;
                                 clicked => { root.mini-audio-close(); }
+                                mini-close-key := KeyFocus {
+                                    activate => { root.mini-audio-close(); }
+                                }
+                                FocusRing {
+                                    shown: mini-close-key.has-focus;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 12px;
+                                }
                             }
                             Image {
                                 source: @image-url("../icons/x.svg");
@@ -2087,6 +2185,23 @@ export component AppWindow inherits Window {
                         }
                     }
                     for msg[i] in root.messages: msg-row := Rectangle {
+                        accessible-role: list-item;
+                        accessible-label: msg.kind == "system" ? msg.text
+                            : msg.deleted ? @tr("message.deleted_by_sender")
+                            : @tr("accessibility.message",
+                                msg.fromMe ? @tr("reactions.you") : msg.sender != "" ? msg.sender : root.current-chat-name,
+                                (msg.sticker ? @tr("preview.sticker")
+                                    : msg.kind == "image" ? @tr("preview.photo")
+                                    : msg.kind == "video" ? @tr("preview.video")
+                                    : msg.kind == "audio" ? (msg.voiceMessage ? @tr("preview.voice") : @tr("preview.audio"))
+                                    : msg.kind == "doc" ? @tr("preview.document", "")
+                                    : msg.cardKind != "" ? msg.cardTitle : "")
+                                    + (msg.text != "" && msg.kind != "audio" ? " " + msg.text : "")
+                                    + (msg.cardBody != "" ? " " + msg.cardBody : ""),
+                                msg.time);
+                        accessible-description: msg.reactions;
+                        accessible-item-index: i;
+                        accessible-item-count: root.messages.length;
                         property <int> menu-request: root.message-menu-request;
                         changed menu-request => {
                             if (self.menu-request > 0 && !msg.deleted && msg.kind != "system"
@@ -2175,9 +2290,23 @@ export component AppWindow inherits Window {
                             border-radius: 8px;
                             background: sys-touch.has-hover && msg.clickable ? Theme.selected : Theme.pill;
                             sys-touch := TouchArea {
+                                accessible-role: button;
+                                accessible-label: msg.text;
+                                accessible-enabled: msg.clickable;
+                                accessible-action-default => { if (msg.clickable) { root.notice-clicked(msg.id); } }
                                 enabled: sys-pill.is-system;
                                 mouse-cursor: msg.clickable ? pointer : default;
                                 clicked => { if (msg.clickable) { root.notice-clicked(msg.id); } }
+                                sys-key := KeyFocus {
+                                    enabled: sys-pill.is-system && msg.clickable;
+                                    activate => { if (msg.clickable) { root.notice-clicked(msg.id); } }
+                                }
+                                FocusRing {
+                                    shown: sys-key.has-focus;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 8px;
+                                }
                             }
                             sys-text := Text {
                                 text: sys-pill.is-system ? msg.text : "";
@@ -2367,6 +2496,9 @@ export component AppWindow inherits Window {
                                 if msg.showSender: HorizontalLayout {
                                     spacing: 8px;
                                     sender-touch := TouchArea {
+                                        accessible-role: button;
+                                        accessible-label: @tr("accessibility.message_sender", msg.senderLabel);
+                                        accessible-action-default => { root.open-dm(msg.senderJid); }
                                         width: sender-text.width;
                                         horizontal-stretch: msg-row.has-translation ? 0 : 1;
                                         height: sender-text.preferred-height;
@@ -2384,6 +2516,9 @@ export component AppWindow inherits Window {
                                                         ? num-measure.preferred-width + 24px
                                                         : 0px));
                                             overflow: elide;
+                                        }
+                                        sender-key := KeyFocus {
+                                            activate => { root.open-dm(msg.senderJid); }
                                         }
                                     }
                                     if msg.senderNumber != "" && msg-row.has-translation: Text {
@@ -2406,8 +2541,20 @@ export component AppWindow inherits Window {
                                     background: msg.fromMe ? #00000014 : #00000010;
                                     clip: true;
                                     quote-touch := TouchArea {
+                                        accessible-role: button;
+                                        accessible-label: @tr("accessibility.go_to_quoted");
+                                        accessible-action-default => { root.open-quote(msg.quoteJid, msg.quoteId); }
                                         mouse-cursor: pointer;
                                         clicked => { root.open-quote(msg.quoteJid, msg.quoteId); }
+                                        quote-key := KeyFocus {
+                                            activate => { root.open-quote(msg.quoteJid, msg.quoteId); }
+                                        }
+                                        FocusRing {
+                                            shown: quote-key.has-focus;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            border-radius: 4px;
+                                        }
                                     }
                                     Rectangle {
                                         x: 0;
@@ -2493,6 +2640,9 @@ export component AppWindow inherits Window {
                                     clicked => { root.download-media(msg.id); }
                                 }
                                 if msg.kind == "video" && msg.mediaReady && msg.picW > 0: TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: @tr("accessibility.open_video");
+                                    accessible-action-default => { root.open-video(msg.id); }
                                     property <bool> media-hover: self.has-hover;
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
@@ -2579,8 +2729,20 @@ export component AppWindow inherits Window {
                                             y: 14px;
                                         }
                                     }
+                                    video-key := KeyFocus {
+                                        activate => { root.open-video(msg.id); }
+                                    }
+                                    FocusRing {
+                                        shown: video-key.has-focus;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 6px;
+                                    }
                                 }
                                 if msg.kind == "image" && msg.mediaReady: TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: @tr("accessibility.open_image");
+                                    accessible-action-default => { root.open-lightbox(msg.id); }
                                     property <bool> media-hover: self.has-hover;
                                     width: msg.picW * 1px;
                                     height: msg.picH * 1px;
@@ -2598,6 +2760,15 @@ export component AppWindow inherits Window {
                                         radius: 6px;
                                         blur: 24px;
                                         tint: Theme.well;
+                                    }
+                                    image-key := KeyFocus {
+                                        activate => { root.open-lightbox(msg.id); }
+                                    }
+                                    FocusRing {
+                                        shown: image-key.has-focus;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 6px;
                                     }
                                 }
 
@@ -2617,6 +2788,9 @@ export component AppWindow inherits Window {
                                         border-radius: 6px;
                                         background: msg.fromMe ? #00000014 : #00000010;
                                         doc-touch := TouchArea {
+                                            accessible-role: button;
+                                            accessible-label: @tr("accessibility.open_document", msg.text);
+                                            accessible-action-default => { root.doc-view(msg.id); }
                                             mouse-cursor: pointer;
                                             clicked => { root.doc-view(msg.id); }
                                         }
@@ -2675,8 +2849,14 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             height: 30px;
                                             view-touch := TouchArea {
+                                                accessible-role: button;
+                                                accessible-label: msg.mediaReady ? @tr("media.action.view") : @tr("media.action.download");
+                                                accessible-action-default => { root.doc-view(msg.id); }
                                                 mouse-cursor: pointer;
                                                 clicked => { root.doc-view(msg.id); }
+                                                view-key := KeyFocus {
+                                                    activate => { root.doc-view(msg.id); }
+                                                }
                                             }
                                             Text {
                                                 text: msg.mediaReady ? @tr("media.action.view") : @tr("media.action.download");
@@ -2694,9 +2874,17 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             height: 30px;
                                             save-touch := TouchArea {
+                                                accessible-role: button;
+                                                accessible-label: @tr("file.action.save_as");
+                                                accessible-enabled: msg.mediaReady;
+                                                accessible-action-default => { root.doc-save(msg.id); }
                                                 mouse-cursor: pointer;
                                                 enabled: msg.mediaReady;
                                                 clicked => { root.doc-save(msg.id); }
+                                                save-key := KeyFocus {
+                                                    enabled: msg.mediaReady;
+                                                    activate => { root.doc-save(msg.id); }
+                                                }
                                             }
                                             Text {
                                                 text: @tr("file.action.save_as");
@@ -2753,6 +2941,7 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 10px;
                                         IconButton {
+                                            label: msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play");
                                             width: 34px;
                                             height: 34px;
                                             icon-size: 20px;
@@ -2760,6 +2949,11 @@ export component AppWindow inherits Window {
                                             clicked => { root.audio-toggle(msg.id); }
                                         }
                                         audio-track := TouchArea {
+                                            accessible-role: slider;
+                                            accessible-label: @tr("accessibility.playback_position");
+                                            accessible-value: round(msg.progress * 100) + "%";
+                                            accessible-action-increment => { root.audio-seek(msg.id, min(1, msg.progress + 0.1)); }
+                                            accessible-action-decrement => { root.audio-seek(msg.id, max(0, msg.progress - 0.1)); }
                                             width: 194px;
                                             height: 34px;
                                             mouse-cursor: pointer;
@@ -2803,6 +2997,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         alignment: center;
                                         IconButton {
+                                            label: msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play");
                                             icon: msg.playing
                                                 ? @image-url("../icons/player-pause.svg")
                                                 : @image-url("../icons/player-play.svg");
@@ -2814,6 +3009,11 @@ export component AppWindow inherits Window {
                                         alignment: center;
                                         spacing: 3px;
                                         wave-area := TouchArea {
+                                            accessible-role: slider;
+                                            accessible-label: @tr("accessibility.playback_position");
+                                            accessible-value: round(msg.progress * 100) + "%";
+                                            accessible-action-increment => { root.audio-seek(msg.id, min(1, msg.progress + 0.1)); }
+                                            accessible-action-decrement => { root.audio-seek(msg.id, max(0, msg.progress - 0.1)); }
                                             width: 220px;
                                             height: 30px;
                                             mouse-cursor: pointer;
@@ -2905,8 +3105,20 @@ export component AppWindow inherits Window {
                                                 background: rate-touch.has-hover
                                                     ? #00000030 : #00000018;
                                                 rate-touch := TouchArea {
+                                                    accessible-role: button;
+                                                    accessible-label: @tr("accessibility.playback_rate", root.audio-rate-label);
+                                                    accessible-action-default => { root.audio-cycle-rate(); }
                                                     mouse-cursor: pointer;
                                                     clicked => { root.audio-cycle-rate(); }
+                                                    rate-key := KeyFocus {
+                                                        activate => { root.audio-cycle-rate(); }
+                                                    }
+                                                    FocusRing {
+                                                        shown: rate-key.has-focus;
+                                                        width: parent.width;
+                                                        height: parent.height;
+                                                        border-radius: 12px;
+                                                    }
                                                 }
                                                 rate-label := Text {
                                                     text: root.audio-rate-label;
@@ -2997,8 +3209,14 @@ export component AppWindow inherits Window {
                                         height: parent.host-h;
                                     }
                                     TouchArea {
+                                        accessible-role: button;
+                                        accessible-label: msg.linkTitle != "" ? msg.linkTitle : msg.linkHost;
+                                        accessible-action-default => { root.open-dm(msg.linkUrl); }
                                         mouse-cursor: pointer;
                                         clicked => { root.open-dm(msg.linkUrl); }
+                                        link-key := KeyFocus {
+                                            activate => { root.open-dm(msg.linkUrl); }
+                                        }
                                     }
                                 }
 
@@ -3040,6 +3258,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     sel-overlay := TextInput {
+                                        accessible-role: none;
                                         text: msg.plain;
                                         read-only: true;
                                         single-line: false;
@@ -3109,6 +3328,7 @@ export component AppWindow inherits Window {
                                     width: min(plain-text.preferred-width, msg-row.content-w);
                                     height: plain-text.preferred-height;
                                     plain-text := TextInput {
+                                        accessible-role: none;
                                         text: (msg.deleted ? "🚫 " + msg.text : msg.text)
                                             + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
                                         animate opacity { duration: 120ms; easing: ease-out; }
@@ -3170,6 +3390,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     if msg-row.has-translation: IconButton {
+                                        label: @tr("chat.message.translate");
                                         width: 26px;
                                         height: 26px;
                                         radius: 6px;
@@ -3265,6 +3486,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             if msg.translationText != "": IconButton {
+                                label: @tr("chat.message.copy_translation");
                                 x: parent.width - 39px;
                                 y: 11px;
                                 width: 24px;
@@ -3307,6 +3529,7 @@ export component AppWindow inherits Window {
                                 padding-bottom: 2px;
                                 spacing: 2px;
                                 IconButton {
+                                    label: @tr("message.menu.react");
                                     icon: @image-url("../icons/mood-smile.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3319,6 +3542,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 IconButton {
+                                    label: @tr("message.menu.forward");
                                     icon: @image-url("../icons/corner-up-right.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3328,6 +3552,7 @@ export component AppWindow inherits Window {
                                     clicked => { root.request-forward(msg.id); }
                                 }
                                 if root.can-translate(msg) && !msg-row.has-translation: IconButton {
+                                    label: @tr("chat.message.translate");
                                     icon: @image-url("../icons/translate.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3340,6 +3565,7 @@ export component AppWindow inherits Window {
                                     clicked => { root.message-action(msg.id, "translate"); }
                                 }
                                 menu-button := IconButton {
+                                    label: @tr("accessibility.message_options");
                                     icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3384,10 +3610,22 @@ export component AppWindow inherits Window {
                                     Rectangle {
                                         width: 30px;
                                         emoji-touch := TouchArea {
+                                            accessible-role: button;
+                                            accessible-label: @tr("accessibility.react_with", e);
+                                            accessible-action-default => { root.react-to(msg.id, e); root.react-bar-id = ""; }
                                             mouse-cursor: pointer;
                                             clicked => {
                                                 root.react-to(msg.id, e);
                                                 root.react-bar-id = "";
+                                            }
+                                            emoji-key := KeyFocus {
+                                                activate => { root.react-to(msg.id, e); root.react-bar-id = ""; }
+                                            }
+                                            FocusRing {
+                                                shown: emoji-key.has-focus;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                border-radius: 8px;
                                             }
                                         }
                                         EmojiText {
@@ -3402,10 +3640,22 @@ export component AppWindow inherits Window {
                                 Rectangle {
                                     width: 26px;
                                     plus-touch := TouchArea {
+                                        accessible-role: button;
+                                        accessible-label: @tr("accessibility.more_reactions");
+                                        accessible-action-default => { root.react-bar-id = ""; root.react-pick(msg.id); }
                                         mouse-cursor: pointer;
                                         clicked => {
                                             root.react-bar-id = "";
                                             root.react-pick(msg.id);
+                                        }
+                                        plus-key := KeyFocus {
+                                            activate => { root.react-bar-id = ""; root.react-pick(msg.id); }
+                                        }
+                                        FocusRing {
+                                            shown: plus-key.has-focus;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            border-radius: 8px;
                                         }
                                     }
                                     Image {
@@ -3430,8 +3680,20 @@ export component AppWindow inherits Window {
                             border-width: 1.5px;
                             border-color: Theme.conv-bg;
                             TouchArea {
+                                accessible-role: button;
+                                accessible-label: @tr("accessibility.reactions_summary", msg.reactions, msg.reactionCount);
+                                accessible-action-default => { root.reactions-msg-id = msg.id; root.show-reactions(msg.id); }
                                 mouse-cursor: pointer;
                                 clicked => { root.reactions-msg-id = msg.id; root.show-reactions(msg.id); }
+                                reactions-key := KeyFocus {
+                                    activate => { root.reactions-msg-id = msg.id; root.show-reactions(msg.id); }
+                                }
+                                FocusRing {
+                                    shown: reactions-key.has-focus;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 10.5px;
+                                }
                             }
                             // The emoji and the count apart: the emoji font
                             // has digits of its own.
@@ -3454,6 +3716,11 @@ export component AppWindow inherits Window {
                         // Selection mode: a click anywhere on the row
                         // toggles it, over whatever the bubble holds.
                         if root.select-mode && msg.kind != "system": TouchArea {
+                            accessible-role: checkbox;
+                            accessible-label: @tr("accessibility.select_message");
+                            accessible-checkable: true;
+                            accessible-checked: msg.selected;
+                            accessible-action-default => { root.toggle-select(msg.id); }
                             mouse-cursor: pointer;
                             clicked => { root.toggle-select(msg.id); }
                             pointer-event(e) => {
@@ -3468,6 +3735,9 @@ export component AppWindow inherits Window {
                                 if (self.pressed) {
                                     root.drag-move(msg-row.vis-y / 1px + self.mouse-y / 1px);
                                 }
+                            }
+                            select-key := KeyFocus {
+                                activate => { root.toggle-select(msg.id); }
                             }
                         }
                     }
@@ -3555,6 +3825,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.cancel_reply");
                                 icon: @image-url("../icons/x.svg");
                                 clicked => { root.cancel-reply(); }
                             }
@@ -3588,6 +3859,7 @@ export component AppWindow inherits Window {
                         padding-right: 10px;
                         spacing: 8px;
                         IconButton {
+                            label: @tr("accessibility.cancel_selection");
                             icon: @image-url("../icons/x.svg");
                             clicked => { root.select-cancel(); }
                         }
@@ -3599,21 +3871,25 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         IconButton {
+                            label: @tr("message.menu.star");
                             icon: @image-url("../icons/star.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-star(); }
                         }
                         IconButton {
+                            label: @tr("accessibility.copy");
                             icon: @image-url("../icons/copy.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-copy(); }
                         }
                         IconButton {
+                            label: @tr("message.menu.forward");
                             icon: @image-url("../icons/corner-up-right.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-forward(); }
                         }
                         IconButton {
+                            label: @tr("message.menu.delete");
                             icon: @image-url("../icons/trash.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-delete(); }
@@ -3707,6 +3983,7 @@ export component AppWindow inherits Window {
                             padding-right: 12px;
                             spacing: 10px;
                             IconButton {
+                                label: @tr("accessibility.discard_recording");
                                 icon: @image-url("../icons/trash.svg");
                                 clicked => { root.rec-cancel(); }
                             }
@@ -3725,6 +4002,11 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
                             }
                             vo-touch := TouchArea {
+                                accessible-role: switch;
+                                accessible-label: @tr("accessibility.view_once");
+                                accessible-checkable: true;
+                                accessible-checked: root.rec-view-once;
+                                accessible-action-default => { root.rec-view-once = !root.rec-view-once; }
                                 width: 40px;
                                 height: 40px;
                                 mouse-cursor: pointer;
@@ -3744,8 +4026,18 @@ export component AppWindow inherits Window {
                                         y: 9px;
                                     }
                                 }
+                                vo-key := KeyFocus {
+                                    activate => { root.rec-view-once = !root.rec-view-once; }
+                                }
+                                FocusRing {
+                                    shown: vo-key.has-focus;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 8px;
+                                }
                             }
                             IconButton {
+                                label: @tr("accessibility.send_recording");
                                 icon: @image-url("../icons/send-2.svg");
                                 clicked => { root.rec-stop(); }
                             }
@@ -3759,6 +4051,7 @@ export component AppWindow inherits Window {
                             padding-right: 12px;
                             spacing: 8px;
                             IconButton {
+                                label: @tr("accessibility.attach");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3771,6 +4064,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             IconButton {
+                                label: @tr("accessibility.emoji");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3805,6 +4099,7 @@ export component AppWindow inherits Window {
                                     // below keeps the caret itself always visible.
                                     interactive: true;
                                     message-input := TextInput {
+                                        accessible-label: @tr("chat.composer.placeholder");
                                         width: parent.width;
                                         height: max(parent.height, self.preferred-height);
                                         color: Theme.text;
@@ -3860,6 +4155,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             IconButton {
+                                label: @tr("accessibility.record_voice");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3868,6 +4164,7 @@ export component AppWindow inherits Window {
                                 clicked => { root.rec-start(); }
                             }
                             IconButton {
+                                label: @tr("accessibility.send");
                                 width: 40px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3930,6 +4227,9 @@ export component AppWindow inherits Window {
                                     privacy-reveal: header-avatar-touch.has-hover;
                                 }
                                 header-avatar-touch := TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: @tr("accessibility.open_chat_info", root.current-chat-name);
+                                    accessible-action-default => { root.open-info(); }
                                     width: parent.width;
                                     height: parent.height;
                                     mouse-cursor: pointer;
@@ -3940,8 +4240,14 @@ export component AppWindow inherits Window {
                         Rectangle {
                             horizontal-stretch: 1;
                             head-touch := TouchArea {
+                                accessible-role: button;
+                                accessible-label: @tr("accessibility.open_chat_info", root.current-chat-name);
+                                accessible-action-default => { root.open-info(); }
                                 mouse-cursor: pointer;
                                 clicked => { root.open-info(); }
+                                head-key := KeyFocus {
+                                    activate => { root.open-info(); }
+                                }
                             }
                             VerticalLayout {
                                 alignment: center;
@@ -3979,6 +4285,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("info.action.search");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3990,6 +4297,7 @@ export component AppWindow inherits Window {
                         if root.current-callable: VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.video_call");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -4000,6 +4308,7 @@ export component AppWindow inherits Window {
                         if root.current-callable: VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.voice_call");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -4016,6 +4325,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.chat_menu");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -4068,8 +4378,20 @@ export component AppWindow inherits Window {
                         border-radius: 12px;
                         background: banner-touch.has-hover ? Theme.selected : Theme.pill;
                         banner-touch := TouchArea {
+                            accessible-role: button;
+                            accessible-label: root.sync-banner;
+                            accessible-action-default => { root.sync-clicked(); }
                             mouse-cursor: pointer;
                             clicked => { root.sync-clicked(); }
+                            banner-key := KeyFocus {
+                                activate => { root.sync-clicked(); }
+                            }
+                            FocusRing {
+                                shown: banner-key.has-focus;
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 12px;
+                            }
                         }
                         HorizontalLayout {
                             padding-left: 10px;
@@ -4111,10 +4433,22 @@ export component AppWindow inherits Window {
                 drop-shadow-blur: 6px;
                 drop-shadow-color: Theme.glass-shadow;
                 jump-touch := TouchArea {
+                    accessible-role: button;
+                    accessible-label: @tr("accessibility.jump_to_latest");
+                    accessible-action-default => { root.jump-latest(); }
                     mouse-cursor: pointer;
                     // Routed through the host so the jump is re-applied
                     // while late-growing rows settle.
                     clicked => { root.jump-latest(); }
+                    jump-key := KeyFocus {
+                        activate => { root.jump-latest(); }
+                    }
+                    FocusRing {
+                        shown: jump-key.has-focus;
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: 21px;
+                    }
                 }
                 Image {
                     source: @image-url("../icons/chevron-right.svg");
@@ -4693,6 +5027,7 @@ export component AppWindow inherits Window {
                     padding-right: 10px;
                     spacing: 6px;
                     IconButton {
+                        label: @tr("common.action.close");
                         icon: @image-url("../icons/x.svg");
                         clicked => { root.pdf-close(); }
                     }
@@ -4708,6 +5043,7 @@ export component AppWindow inherits Window {
                     if root.pdf-count > 0: HorizontalLayout {
                         spacing: 2px;
                         IconButton {
+                            label: @tr("accessibility.previous_page");
                             icon: @image-url("../icons/chevron-up.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-goto(-1); }
@@ -4719,6 +5055,7 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                         }
                         IconButton {
+                            label: @tr("accessibility.next_page");
                             icon: @image-url("../icons/chevron-down.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-goto(1); }
@@ -4728,11 +5065,15 @@ export component AppWindow inherits Window {
                     if root.pdf-count > 0: HorizontalLayout {
                         spacing: 2px;
                         IconButton {
+                            label: @tr("accessibility.zoom_out");
                             icon: @image-url("../icons/circle-minus.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-zoom(-1); }
                         }
                         zoom-touch := TouchArea {
+                            accessible-role: button;
+                            accessible-label: @tr("accessibility.reset_zoom", root.pdf-zoom-label);
+                            accessible-action-default => { root.pdf-zoom(0); }
                             width: zoom-text.preferred-width + 16px;
                             mouse-cursor: pointer;
                             clicked => { root.pdf-zoom(0); }
@@ -4745,8 +5086,18 @@ export component AppWindow inherits Window {
                                 width: parent.width;
                                 height: parent.height;
                             }
+                            zoom-key := KeyFocus {
+                                activate => { root.pdf-zoom(0); }
+                            }
+                            FocusRing {
+                                shown: zoom-key.has-focus;
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 6px;
+                            }
                         }
                         IconButton {
+                            label: @tr("accessibility.zoom_in");
                             icon: @image-url("../icons/plus.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-zoom(1); }
@@ -4754,10 +5105,12 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { width: 12px; }
                     IconButton {
+                        label: @tr("file.action.save_as");
                         icon: @image-url("../icons/download.svg");
                         clicked => { root.pdf-save-as(); }
                     }
                     IconButton {
+                        label: @tr("pdf.engine.open_external");
                         icon: @image-url("../icons/corner-up-right.svg");
                         clicked => { root.pdf-open-external(); }
                     }

@@ -227,6 +227,7 @@ export component SettingsLayer inherits ModalLayer {
                                 }
                             }
                             IconButton {
+                                label: @tr("accessibility.back");
                                 icon: @image-url("../icons/arrow-left.svg");
                                 clicked => { root.settings-open = false; }
                             }

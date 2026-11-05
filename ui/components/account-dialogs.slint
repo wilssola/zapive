@@ -1,4 +1,5 @@
 import { DialogButton } from "dialog-button.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 import { ModalLayer } from "modal.slint";
 import { AccountRow } from "rows/account.slint";
 import { MenuRow } from "rows/menu.slint";
@@ -172,8 +173,20 @@ export component AlertLayer inherits ModalLayer {
                     border-radius: 18px;
                     background: dismiss-touch.has-hover ? Theme.hover : transparent;
                     dismiss-touch := TouchArea {
+                        accessible-role: button;
+                        accessible-label: @tr("common.action.close");
+                        accessible-action-default => { root.alert-dismiss(); }
                         mouse-cursor: pointer;
                         clicked => { root.alert-dismiss(); }
+                        dismiss-key := KeyFocus {
+                            activate => { root.alert-dismiss(); }
+                        }
+                        FocusRing {
+                            shown: dismiss-key.has-focus;
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 18px;
+                        }
                     }
                     dismiss-text := Text {
                         text: @tr("common.action.close");
@@ -191,8 +204,20 @@ export component AlertLayer inherits ModalLayer {
                     border-radius: 18px;
                     background: retry-touch.has-hover ? Theme.accent.darker(0.15) : Theme.accent;
                     retry-touch := TouchArea {
+                        accessible-role: button;
+                        accessible-label: root.alert-action;
+                        accessible-action-default => { root.alert-retry(); }
                         mouse-cursor: pointer;
                         clicked => { root.alert-retry(); }
+                        retry-key := KeyFocus {
+                            activate => { root.alert-retry(); }
+                        }
+                        FocusRing {
+                            shown: retry-key.has-focus;
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 18px;
+                        }
                     }
                     retry-text := Text {
                         text: root.alert-action;

@@ -1,0 +1,27 @@
+import { Theme } from "theme.slint";
+
+// Keyboard reach for TouchArea-based controls: a zero-width FocusScope that
+// joins the Tab order, fires `activate` on Space/Enter and reports focus so
+// the owner can draw a ring. Screen readers follow it to the nearest
+// accessible parent, so the owner keeps the role and the label.
+export component KeyFocus inherits FocusScope {
+    callback activate;
+    x: 0;
+    width: 0;
+    focus-on-click: false;
+    key-pressed(event) => {
+        if (event.text == Key.Space || event.text == Key.Return) {
+            root.activate();
+            return accept;
+        }
+        reject
+    }
+}
+
+// The visible focus outline, drawn only while keyboard focus is inside.
+export component FocusRing inherits Rectangle {
+    in property <bool> shown;
+    border-width: root.shown ? 2px : 0px;
+    border-color: Theme.accent;
+    background: transparent;
+}

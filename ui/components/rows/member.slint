@@ -1,6 +1,7 @@
 import { MemberItem } from "../types.slint";
 import { Avatar } from "../avatar.slint";
 import { Theme } from "../theme.slint";
+import { KeyFocus, FocusRing } from "../a11y.slint";
 
 // One row of a people list (mention popup, member picker, group info).
 export component MemberRow inherits TouchArea {
@@ -8,6 +9,16 @@ export component MemberRow inherits TouchArea {
     in property <bool> pickable: false;
     in property <bool> compact: false;
     mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.item.number != "" ? root.item.name + ", " + root.item.number : root.item.name;
+    accessible-checkable: root.pickable;
+    accessible-checked: root.item.checked;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     height: root.compact ? 50px : 52px;
     Rectangle {
         width: parent.width;
@@ -80,5 +91,11 @@ export component MemberRow inherits TouchArea {
                 }
             }
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        shown: key-focus.has-focus;
     }
 }
