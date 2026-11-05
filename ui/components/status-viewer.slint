@@ -1,4 +1,5 @@
 import { IconButton } from "icon-button.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 import { ModalLayer } from "modal.slint";
 import { Theme } from "theme.slint";
 
@@ -65,9 +66,23 @@ export component SvLayer inherits ModalLayer {
                     y: (parent.height - self.height) / 2;
                     background: root.sv-video-ready ? Theme.media-chip : Theme.media-chip-soft;
                     TouchArea {
+                        accessible-role: button;
+                        accessible-label: @tr("accessibility.play");
+                        accessible-enabled: root.sv-video-ready;
+                        accessible-action-default => { root.status-play(); }
                         mouse-cursor: pointer;
                         enabled: root.sv-video-ready;
                         clicked => { root.status-play(); }
+                        play-key := KeyFocus {
+                            enabled: root.sv-video-ready;
+                            activate => { root.status-play(); }
+                        }
+                        FocusRing {
+                            shown: play-key.has-focus;
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 36px;
+                        }
                     }
                     Image {
                         source: @image-url("../icons/player-play.svg");

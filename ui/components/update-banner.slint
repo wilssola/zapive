@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 // Self-update banner: lives in the sidebar, and on the lock and login
 // screens so a new release is never missed behind the PIN.
@@ -92,10 +93,22 @@ export component UpdateBanner inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 update-touch := TouchArea {
+                    accessible-role: button;
+                    accessible-label: root.state == 1 ? @tr("update.action.install") : root.state == 4 ? @tr("update.action.retry") : @tr("update.action.restart");
+                    accessible-action-default => { if (root.state == 1 || root.state == 4) { root.apply-update(); } else { root.restart(); } }
                     mouse-cursor: pointer;
                     clicked => {
                         if (root.state == 1 || root.state == 4) { root.apply-update(); }
                         else { root.restart(); }
+                    }
+                    update-key := KeyFocus {
+                        activate => { if (root.state == 1 || root.state == 4) { root.apply-update(); } else { root.restart(); } }
+                    }
+                    FocusRing {
+                        shown: update-key.has-focus;
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: 15px;
                     }
                 }
             }

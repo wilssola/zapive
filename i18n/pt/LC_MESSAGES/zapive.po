@@ -2238,3 +2238,57 @@ msgid "accessibility.unread.one"
 msgid_plural "accessibility.unread.other"
 msgstr[0] "{n} mensagem não lida"
 msgstr[1] "{n} mensagens não lidas"
+
+msgid "accessibility.account_menu"
+msgstr "Conta {0}, trocar de conta"
+
+msgid "accessibility.open_voice_message"
+msgstr "Abrir mensagem de voz de {0}"
+
+msgid "accessibility.message_sender"
+msgstr "{0}, abrir conversa"
+
+msgid "accessibility.go_to_quoted"
+msgstr "Ir para a mensagem citada"
+
+msgid "accessibility.open_video"
+msgstr "Reproduzir vídeo"
+
+msgid "accessibility.open_image"
+msgstr "Abrir imagem"
+
+msgid "accessibility.open_document"
+msgstr "Abrir documento {0}"
+
+msgid "accessibility.playback_position"
+msgstr "Posição da reprodução"
+
+msgid "accessibility.playback_rate"
+msgstr "Velocidade de reprodução {0}"
+
+msgid "accessibility.react_with"
+msgstr "Reagir com {0}"
+
+msgid "accessibility.more_reactions"
+msgstr "Mais reações"
+
+msgid "accessibility.reactions_summary"
+msgstr "Reações {0} {1}, ver detalhes"
+
+msgid "accessibility.select_message"
+msgstr "Selecionar mensagem"
+
+msgid "accessibility.view_once"
+msgstr "Visualização única"
+
+msgid "accessibility.open_chat_info"
+msgstr "{0}, abrir dados do contato"
+
+msgid "accessibility.jump_to_latest"
+msgstr "Ir para as mensagens mais recentes"
+
+msgid "accessibility.reset_zoom"
+msgstr "Zoom {0}, redefinir"
+
+msgid "accessibility.ink_color"
+msgstr "Cor da caneta {0}"

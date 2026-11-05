@@ -2236,3 +2236,57 @@ msgid "accessibility.unread.one"
 msgid_plural "accessibility.unread.other"
 msgstr[0] "{n} unread message"
 msgstr[1] "{n} unread messages"
+
+msgid "accessibility.account_menu"
+msgstr "Account {0}, switch accounts"
+
+msgid "accessibility.open_voice_message"
+msgstr "Open voice message from {0}"
+
+msgid "accessibility.message_sender"
+msgstr "{0}, open conversation"
+
+msgid "accessibility.go_to_quoted"
+msgstr "Go to quoted message"
+
+msgid "accessibility.open_video"
+msgstr "Play video"
+
+msgid "accessibility.open_image"
+msgstr "Open image"
+
+msgid "accessibility.open_document"
+msgstr "Open document {0}"
+
+msgid "accessibility.playback_position"
+msgstr "Playback position"
+
+msgid "accessibility.playback_rate"
+msgstr "Playback speed {0}"
+
+msgid "accessibility.react_with"
+msgstr "React with {0}"
+
+msgid "accessibility.more_reactions"
+msgstr "More reactions"
+
+msgid "accessibility.reactions_summary"
+msgstr "Reactions {0} {1}, view details"
+
+msgid "accessibility.select_message"
+msgstr "Select message"
+
+msgid "accessibility.view_once"
+msgstr "View once"
+
+msgid "accessibility.open_chat_info"
+msgstr "{0}, open contact info"
+
+msgid "accessibility.jump_to_latest"
+msgstr "Jump to latest messages"
+
+msgid "accessibility.reset_zoom"
+msgstr "Zoom {0}, reset"
+
+msgid "accessibility.ink_color"
+msgstr "Pen color {0}"

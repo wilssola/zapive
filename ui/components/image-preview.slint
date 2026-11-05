@@ -1,5 +1,6 @@
 import { LineEdit, Button } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 import { IconButton } from "icon-button.slint";
 
 component PreviewTool inherits TouchArea {
@@ -182,14 +183,32 @@ export component ImagePreview inherits Rectangle {
                 HorizontalLayout {
                     visible: root.tool == "pencil";
                     spacing: 6px;
-                    for ink-color in [#ff3b30, #ffcc00, #34c759, #007aff, #af52de, #ffffff, #000000]: Rectangle {
+                    for ink-color[ci] in [#ff3b30, #ffcc00, #34c759, #007aff, #af52de, #ffffff, #000000]: Rectangle {
                         width: 26px;
                         height: 26px;
                         border-radius: 13px;
                         background: ink-color;
                         border-width: root.ink == ink-color ? 3px : 1px;
                         border-color: root.ink == ink-color ? Theme.accent : Theme.icon;
-                        TouchArea { enabled: !root.busy && !root.drawing; clicked => { root.ink = ink-color; } }
+                        TouchArea {
+                            enabled: !root.busy && !root.drawing;
+                            accessible-role: radio-button;
+                            accessible-label: @tr("accessibility.ink_color", ci + 1);
+                            accessible-checkable: true;
+                            accessible-checked: root.ink == ink-color;
+                            accessible-action-default => { root.ink = ink-color; }
+                            clicked => { root.ink = ink-color; }
+                            ink-key := KeyFocus {
+                                enabled: !root.busy && !root.drawing;
+                                activate => { root.ink = ink-color; }
+                            }
+                            FocusRing {
+                                shown: ink-key.has-focus;
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 13px;
+                            }
+                        }
                     }
                     Button {
                         text: @tr("image.text.stroke_thin");

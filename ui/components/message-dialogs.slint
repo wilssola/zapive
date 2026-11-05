@@ -1,4 +1,5 @@
 import { ListView, ScrollView, VerticalBox } from "std-widgets.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 import { Avatar } from "avatar.slint";
 import { DialogButton } from "dialog-button.slint";
 import { EmojiText } from "emoji.slint";
@@ -47,7 +48,13 @@ export component DetailsLayer inherits ModalLayer {
                         Rectangle {
                             width: 28px;
                             Text { text: "×"; color: Theme.text-dim; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.details-open = false; } }
+                            TouchArea {
+                                accessible-role: button;
+                                accessible-label: @tr("common.action.close");
+                                accessible-action-default => { root.details-open = false; }
+                                clicked => { root.details-open = false; }
+                                KeyFocus { activate => { root.details-open = false; } }
+                            }
                         }
                     }
                 }
@@ -364,6 +371,9 @@ export component ReactionsLayer inherits ModalLayer {
                     clip: true;
                     background: react-row.has-hover ? Theme.hover : transparent;
                     react-row := TouchArea {
+                        accessible-role: button;
+                        accessible-label: r.name + " " + r.emoji + (r.own ? ", " + @tr("reactions.click_to_remove") : "");
+                        accessible-action-default => { if (r.own) { root.reactions-open = false; root.remove-own-reaction(); } else { root.reactions-open = false; root.open-dm(r.jid); } }
                         mouse-cursor: pointer;
                         clicked => {
                             if (r.own) {
@@ -373,6 +383,9 @@ export component ReactionsLayer inherits ModalLayer {
                                 root.reactions-open = false;
                                 root.open-dm(r.jid);
                             }
+                        }
+                        react-key := KeyFocus {
+                            activate => { if (r.own) { root.reactions-open = false; root.remove-own-reaction(); } else { root.reactions-open = false; root.open-dm(r.jid); } }
                         }
                     }
                     HorizontalLayout {
