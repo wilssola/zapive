@@ -298,6 +298,7 @@ export component ReactionsLayer inherits ModalLayer {
                     vertical-alignment: center;
                 }
                 IconButton {
+                    label: @tr("common.action.close");
                     icon: @image-url("../icons/x.svg");
                     clicked => { root.reactions-open = false; }
                 }

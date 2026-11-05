@@ -2136,6 +2136,87 @@ msgstr "Answer"
 msgid "call.silenced.decline"
 msgstr "Decline"
 
+msgid "accessibility.attach"
+msgstr "Attach"
+
+msgid "accessibility.back"
+msgstr "Back"
+
+msgid "accessibility.call_back"
+msgstr "Call back"
+
+msgid "accessibility.cancel"
+msgstr "Cancel"
+
+msgid "accessibility.cancel_reply"
+msgstr "Cancel reply"
+
+msgid "accessibility.cancel_selection"
+msgstr "Cancel selection"
+
+msgid "accessibility.chat_menu"
+msgstr "Chat menu"
+
+msgid "accessibility.copy"
+msgstr "Copy"
+
+msgid "accessibility.discard_recording"
+msgstr "Discard recording"
+
+msgid "accessibility.emoji"
+msgstr "Emoji"
+
+msgid "accessibility.message_options"
+msgstr "Message options"
+
+msgid "accessibility.next"
+msgstr "Next"
+
+msgid "accessibility.next_page"
+msgstr "Next page"
+
+msgid "accessibility.next_result"
+msgstr "Next result"
+
+msgid "accessibility.pause"
+msgstr "Pause"
+
+msgid "accessibility.play"
+msgstr "Play"
+
+msgid "accessibility.previous"
+msgstr "Previous"
+
+msgid "accessibility.previous_page"
+msgstr "Previous page"
+
+msgid "accessibility.previous_result"
+msgstr "Previous result"
+
+msgid "accessibility.record_voice"
+msgstr "Record voice message"
+
+msgid "accessibility.replay"
+msgstr "Replay"
+
+msgid "accessibility.send"
+msgstr "Send"
+
+msgid "accessibility.send_recording"
+msgstr "Send recording"
+
+msgid "accessibility.video_call"
+msgstr "Video call"
+
+msgid "accessibility.voice_call"
+msgstr "Voice call"
+
+msgid "accessibility.zoom_in"
+msgstr "Zoom in"
+
+msgid "accessibility.zoom_out"
+msgstr "Zoom out"
+
 msgid "accessibility.qr_code"
 msgstr "QR code to link this computer. Can't scan it? Use “Log in with phone number” to get a pairing code instead."
 

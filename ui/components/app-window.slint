@@ -1167,6 +1167,7 @@ export component AppWindow inherits Window {
                 spacing: 8px;
                 alignment: start;
                 IconButton {
+                    label: @tr("navigation.chats");
                     icon: @image-url("../icons/message-circle.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1179,6 +1180,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
+                    label: @tr("navigation.status");
                     icon: @image-url("../icons/circle-dot.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1188,6 +1190,7 @@ export component AppWindow inherits Window {
                     clicked => { root.settings-open = false; root.sidebar-view = "status"; }
                 }
                 IconButton {
+                    label: @tr("navigation.calls");
                     icon: @image-url("../icons/phone.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1197,6 +1200,7 @@ export component AppWindow inherits Window {
                     clicked => { root.settings-open = false; root.sidebar-view = "calls"; root.view-changed("calls"); }
                 }
                 IconButton {
+                    label: @tr("navigation.channels");
                     icon: @image-url("../icons/speakerphone.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1209,6 +1213,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 IconButton {
+                    label: @tr("navigation.communities");
                     icon: @image-url("../icons/users-group.svg");
                     active-background: Theme.rail-active;
                     tint: self.active ? Theme.accent-text : Theme.icon;
@@ -1231,6 +1236,7 @@ export component AppWindow inherits Window {
                 spacing: 8px;
                 Rectangle { height: 1px; background: Theme.border; }
                 IconButton {
+                    label: @tr("navigation.settings");
                     icon: @image-url("../icons/settings.svg");
                     active: root.settings-open;
                     clicked => {
@@ -1448,6 +1454,7 @@ export component AppWindow inherits Window {
                                 }
                                 // Redial, the way the phone's call log does.
                                 if !call.group: IconButton {
+                                    label: @tr("accessibility.call_back");
                                     icon: @image-url("../icons/phone.svg");
                                     icon-size: 18px;
                                     width: 30px;
@@ -2759,6 +2766,7 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 10px;
                                         IconButton {
+                                            label: msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play");
                                             width: 34px;
                                             height: 34px;
                                             icon-size: 20px;
@@ -2809,6 +2817,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         alignment: center;
                                         IconButton {
+                                            label: msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play");
                                             icon: msg.playing
                                                 ? @image-url("../icons/player-pause.svg")
                                                 : @image-url("../icons/player-play.svg");
@@ -3176,6 +3185,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     if msg-row.has-translation: IconButton {
+                                        label: @tr("chat.message.translate");
                                         width: 26px;
                                         height: 26px;
                                         radius: 6px;
@@ -3271,6 +3281,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             if msg.translationText != "": IconButton {
+                                label: @tr("chat.message.copy_translation");
                                 x: parent.width - 39px;
                                 y: 11px;
                                 width: 24px;
@@ -3313,6 +3324,7 @@ export component AppWindow inherits Window {
                                 padding-bottom: 2px;
                                 spacing: 2px;
                                 IconButton {
+                                    label: @tr("message.menu.react");
                                     icon: @image-url("../icons/mood-smile.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3325,6 +3337,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 IconButton {
+                                    label: @tr("message.menu.forward");
                                     icon: @image-url("../icons/corner-up-right.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3334,6 +3347,7 @@ export component AppWindow inherits Window {
                                     clicked => { root.request-forward(msg.id); }
                                 }
                                 if root.can-translate(msg) && !msg-row.has-translation: IconButton {
+                                    label: @tr("chat.message.translate");
                                     icon: @image-url("../icons/translate.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3346,6 +3360,7 @@ export component AppWindow inherits Window {
                                     clicked => { root.message-action(msg.id, "translate"); }
                                 }
                                 menu-button := IconButton {
+                                    label: @tr("accessibility.message_options");
                                     icon: @image-url("../icons/chevron-down.svg");
                                     icon-size: 17px;
                                     width: 28px;
@@ -3561,6 +3576,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.cancel_reply");
                                 icon: @image-url("../icons/x.svg");
                                 clicked => { root.cancel-reply(); }
                             }
@@ -3594,6 +3610,7 @@ export component AppWindow inherits Window {
                         padding-right: 10px;
                         spacing: 8px;
                         IconButton {
+                            label: @tr("accessibility.cancel_selection");
                             icon: @image-url("../icons/x.svg");
                             clicked => { root.select-cancel(); }
                         }
@@ -3605,21 +3622,25 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         IconButton {
+                            label: @tr("message.menu.star");
                             icon: @image-url("../icons/star.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-star(); }
                         }
                         IconButton {
+                            label: @tr("accessibility.copy");
                             icon: @image-url("../icons/copy.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-copy(); }
                         }
                         IconButton {
+                            label: @tr("message.menu.forward");
                             icon: @image-url("../icons/corner-up-right.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-forward(); }
                         }
                         IconButton {
+                            label: @tr("message.menu.delete");
                             icon: @image-url("../icons/trash.svg");
                             enabled: root.select-count > 0;
                             clicked => { root.select-delete(); }
@@ -3713,6 +3734,7 @@ export component AppWindow inherits Window {
                             padding-right: 12px;
                             spacing: 10px;
                             IconButton {
+                                label: @tr("accessibility.discard_recording");
                                 icon: @image-url("../icons/trash.svg");
                                 clicked => { root.rec-cancel(); }
                             }
@@ -3752,6 +3774,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             IconButton {
+                                label: @tr("accessibility.send_recording");
                                 icon: @image-url("../icons/send-2.svg");
                                 clicked => { root.rec-stop(); }
                             }
@@ -3765,6 +3788,7 @@ export component AppWindow inherits Window {
                             padding-right: 12px;
                             spacing: 8px;
                             IconButton {
+                                label: @tr("accessibility.attach");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3777,6 +3801,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             IconButton {
+                                label: @tr("accessibility.emoji");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3866,6 +3891,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             IconButton {
+                                label: @tr("accessibility.record_voice");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3874,6 +3900,7 @@ export component AppWindow inherits Window {
                                 clicked => { root.rec-start(); }
                             }
                             IconButton {
+                                label: @tr("accessibility.send");
                                 width: 40px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3985,6 +4012,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("info.action.search");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -3996,6 +4024,7 @@ export component AppWindow inherits Window {
                         if root.current-callable: VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.video_call");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -4006,6 +4035,7 @@ export component AppWindow inherits Window {
                         if root.current-callable: VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.voice_call");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -4022,6 +4052,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             IconButton {
+                                label: @tr("accessibility.chat_menu");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
@@ -4699,6 +4730,7 @@ export component AppWindow inherits Window {
                     padding-right: 10px;
                     spacing: 6px;
                     IconButton {
+                        label: @tr("common.action.close");
                         icon: @image-url("../icons/x.svg");
                         clicked => { root.pdf-close(); }
                     }
@@ -4714,6 +4746,7 @@ export component AppWindow inherits Window {
                     if root.pdf-count > 0: HorizontalLayout {
                         spacing: 2px;
                         IconButton {
+                            label: @tr("accessibility.previous_page");
                             icon: @image-url("../icons/chevron-up.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-goto(-1); }
@@ -4725,6 +4758,7 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                         }
                         IconButton {
+                            label: @tr("accessibility.next_page");
                             icon: @image-url("../icons/chevron-down.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-goto(1); }
@@ -4734,6 +4768,7 @@ export component AppWindow inherits Window {
                     if root.pdf-count > 0: HorizontalLayout {
                         spacing: 2px;
                         IconButton {
+                            label: @tr("accessibility.zoom_out");
                             icon: @image-url("../icons/circle-minus.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-zoom(-1); }
@@ -4753,6 +4788,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         IconButton {
+                            label: @tr("accessibility.zoom_in");
                             icon: @image-url("../icons/plus.svg");
                             icon-size: 18px;
                             clicked => { root.pdf-zoom(1); }
@@ -4760,10 +4796,12 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { width: 12px; }
                     IconButton {
+                        label: @tr("file.action.save_as");
                         icon: @image-url("../icons/download.svg");
                         clicked => { root.pdf-save-as(); }
                     }
                     IconButton {
+                        label: @tr("pdf.engine.open_external");
                         icon: @image-url("../icons/corner-up-right.svg");
                         clicked => { root.pdf-open-external(); }
                     }

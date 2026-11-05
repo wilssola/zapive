@@ -204,6 +204,7 @@ export component MemberPickLayer inherits ModalLayer {
                     vertical-alignment: center;
                 }
                 IconButton {
+                    label: @tr("common.action.close");
                     icon: @image-url("../icons/x.svg");
                     clicked => { root.member-pick-open = false; }
                 }
@@ -279,6 +280,7 @@ export component ForwardLayer inherits ModalLayer {
                     vertical-alignment: center;
                 }
                 IconButton {
+                    label: @tr("common.action.close");
                     icon: @image-url("../icons/x.svg");
                     clicked => { root.forward-open = false; }
                 }

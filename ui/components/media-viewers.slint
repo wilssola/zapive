@@ -129,11 +129,13 @@ export component VideoLayer inherits ModalLayer {
                 spacing: 6px;
                 alignment: end;
                 if root.video-is-clip: IconButton {
+                    label: @tr("media.action.download");
                     icon: @image-url("../icons/download.svg");
                     tint: white;
                     clicked => { root.video-save(); }
                 }
                 IconButton {
+                    label: @tr("common.action.close");
                     icon: @image-url("../icons/x.svg");
                     tint: white;
                     clicked => { root.close-video(); }
@@ -195,6 +197,7 @@ export component VideoLayer inherits ModalLayer {
                 height: 36px;
                 spacing: 10px;
                 IconButton {
+                    label: root.video-ended ? @tr("accessibility.replay") : (root.video-playing ? @tr("accessibility.pause") : @tr("accessibility.play"));
                     icon: root.video-ended
                         ? @image-url("../icons/rotate-clockwise.svg")
                         : (root.video-playing
@@ -211,6 +214,7 @@ export component VideoLayer inherits ModalLayer {
                 }
                 Rectangle { horizontal-stretch: 1; }
                 IconButton {
+                    label: root.video-muted || root.video-volume <= 0 ? @tr("call.controls.unmute") : @tr("call.controls.mute");
                     icon: root.video-muted || root.video-volume <= 0
                         ? @image-url("../icons/volume-off.svg")
                         : @image-url("../icons/volume.svg");
@@ -271,6 +275,7 @@ export component LightboxLayer inherits ModalLayer {
             image-fit: contain;
         }
         IconButton {
+            label: @tr("common.action.close");
             icon: @image-url("../icons/x.svg");
             x: parent.width - self.width - 16px;
             y: 16px;

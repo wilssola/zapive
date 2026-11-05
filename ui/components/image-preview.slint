@@ -91,6 +91,7 @@ export component ImagePreview inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             IconButton {
+                label: @tr("accessibility.cancel");
                 icon: @image-url("../icons/x.svg");
                 clicked => { root.cancel(); }
             }
@@ -342,6 +343,7 @@ export component ImagePreview inherits Rectangle {
                 accepted => { if (!root.busy) { root.send(self.text); } }
             }
             IconButton {
+                label: @tr("accessibility.send");
                 icon: @image-url("../icons/send-2.svg");
                 tint: white;
                 background: Theme.accent;

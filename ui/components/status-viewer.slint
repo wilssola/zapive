@@ -42,6 +42,7 @@ export component SvLayer inherits ModalLayer {
                     horizontal-stretch: 1;
                 }
                 IconButton {
+                    label: @tr("common.action.close");
                     icon: @image-url("../icons/x.svg");
                     clicked => { root.status-close(); }
                 }
@@ -97,12 +98,14 @@ export component SvLayer inherits ModalLayer {
                     }
                 }
                 IconButton {
+                    label: @tr("accessibility.previous");
                     icon: @image-url("../icons/chevron-left.svg");
                     x: 4px;
                     y: (parent.height - self.height) / 2;
                     clicked => { root.status-prev(); }
                 }
                 IconButton {
+                    label: @tr("accessibility.next");
                     icon: @image-url("../icons/chevron-right.svg");
                     x: parent.width - self.width - 4px;
                     y: (parent.height - self.height) / 2;

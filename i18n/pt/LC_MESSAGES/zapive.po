@@ -2138,6 +2138,87 @@ msgstr "Atender"
 msgid "call.silenced.decline"
 msgstr "Recusar"
 
+msgid "accessibility.attach"
+msgstr "Anexar"
+
+msgid "accessibility.back"
+msgstr "Voltar"
+
+msgid "accessibility.call_back"
+msgstr "Retornar ligação"
+
+msgid "accessibility.cancel"
+msgstr "Cancelar"
+
+msgid "accessibility.cancel_reply"
+msgstr "Cancelar resposta"
+
+msgid "accessibility.cancel_selection"
+msgstr "Cancelar seleção"
+
+msgid "accessibility.chat_menu"
+msgstr "Menu da conversa"
+
+msgid "accessibility.copy"
+msgstr "Copiar"
+
+msgid "accessibility.discard_recording"
+msgstr "Descartar gravação"
+
+msgid "accessibility.emoji"
+msgstr "Emoji"
+
+msgid "accessibility.message_options"
+msgstr "Opções da mensagem"
+
+msgid "accessibility.next"
+msgstr "Próximo"
+
+msgid "accessibility.next_page"
+msgstr "Próxima página"
+
+msgid "accessibility.next_result"
+msgstr "Próximo resultado"
+
+msgid "accessibility.pause"
+msgstr "Pausar"
+
+msgid "accessibility.play"
+msgstr "Reproduzir"
+
+msgid "accessibility.previous"
+msgstr "Anterior"
+
+msgid "accessibility.previous_page"
+msgstr "Página anterior"
+
+msgid "accessibility.previous_result"
+msgstr "Resultado anterior"
+
+msgid "accessibility.record_voice"
+msgstr "Gravar mensagem de voz"
+
+msgid "accessibility.replay"
+msgstr "Reproduzir novamente"
+
+msgid "accessibility.send"
+msgstr "Enviar"
+
+msgid "accessibility.send_recording"
+msgstr "Enviar gravação"
+
+msgid "accessibility.video_call"
+msgstr "Chamada de vídeo"
+
+msgid "accessibility.voice_call"
+msgstr "Chamada de voz"
+
+msgid "accessibility.zoom_in"
+msgstr "Aumentar zoom"
+
+msgid "accessibility.zoom_out"
+msgstr "Diminuir zoom"
+
 msgid "accessibility.qr_code"
 msgstr "QR code para conectar este computador. Não consegue ler? Use “Entrar com número de telefone” para receber um código de pareamento."
 

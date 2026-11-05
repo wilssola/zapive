@@ -103,6 +103,7 @@ export component PollComposerLayer inherits ModalLayer {
                     vertical-alignment: center;
                 }
                 IconButton {
+                    label: @tr("common.action.close");
                     icon: @image-url("../icons/x.svg");
                     accessible-role: button;
                     clicked => { root.poll-composer-open = false; }
@@ -157,6 +158,7 @@ export component PollComposerLayer inherits ModalLayer {
                         }
                     }
                     IconButton {
+                        label: @tr("poll.composer.remove_option");
                         width: 38px;
                         height: 38px;
                         icon: @image-url("../icons/trash.svg");
