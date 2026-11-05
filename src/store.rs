@@ -1162,6 +1162,53 @@ impl Store {
         self.messages.get(jid).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    pub fn recent_messages(
+        &self,
+        vault: &Vault,
+        jid: &str,
+        count: usize,
+    ) -> Result<Vec<StoredMessage>, String> {
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let jid = self.canon_owned(jid);
+        let mut by_id = HashMap::new();
+        if !self.deleted_jids.contains(&jid) {
+            let mut cursor: Option<(i64, String)> = None;
+            while by_id.len() < count {
+                let page = vault.history_page(
+                    &jid,
+                    cursor.as_ref().map(|(ts, id)| (*ts, id.as_str())),
+                    count.min(100),
+                )?;
+                let Some(first) = page.first() else {
+                    break;
+                };
+                cursor = Some((first.timestamp, first.id.clone()));
+                for message in page {
+                    if !self
+                        .pending_removals
+                        .contains(&(jid.clone(), message.id.clone()))
+                    {
+                        by_id.insert(message.id.clone(), message);
+                    }
+                }
+            }
+        }
+        for message in self.messages_for(&jid) {
+            if !self
+                .pending_removals
+                .contains(&(jid.clone(), message.id.clone()))
+            {
+                by_id.insert(message.id.clone(), message.clone());
+            }
+        }
+        let mut list: Vec<StoredMessage> = by_id.into_values().collect();
+        list.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
+        let skip = list.len().saturating_sub(count);
+        Ok(list.split_off(skip))
+    }
+
     // Loads a chat's message list from the vault, merging with whatever
     // arrived over the socket while the chat was cold.
     pub fn hydrate(&mut self, vault: &Vault, jid: &str) {
@@ -2150,6 +2197,90 @@ mod tests {
         );
         message.kind = MessageKind::Text;
         message
+    }
+
+    #[test]
+    fn recent_messages_merges_live_and_pages_past_pending_removals() {
+        let path = std::env::temp_dir().join(format!(
+            "zapive_recent_messages_removals_{}.db",
+            std::process::id()
+        ));
+        crate::paths::remove_db(&path);
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            for n in 0..300 {
+                store.add_message(history_message("chat", n));
+            }
+            store.save_checked(&vault).unwrap();
+            assert!(store.messages_for("chat").is_empty());
+            let removed: Vec<_> = (150..300).map(|n| format!("{n:05}")).collect();
+            assert!(store.remove_messages("chat", &removed));
+            let mut edited = history_message("chat", 149);
+            edited.text = "live edit".into();
+            assert!(store.add_message(edited));
+            assert!(store.add_message(history_message("chat", 301)));
+            store.aliases.insert("alias@lid".into(), "chat".into());
+
+            let recent = store.recent_messages(&vault, "alias@lid", 5).unwrap();
+            assert_eq!(
+                recent.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+                ["00146", "00147", "00148", "00149", "00301"]
+            );
+            assert_eq!(recent[3].text, "live edit");
+            assert_eq!(
+                store.recent_messages(&vault, "chat", 500).unwrap().len(),
+                151
+            );
+            assert!(store.recent_messages(&vault, "chat", 0).unwrap().is_empty());
+            assert_eq!(store.pending_removals.len(), 150);
+            assert!(store.dirty_jids.contains("chat"));
+            assert!(store.hydrated.is_empty());
+            assert!(vault.history_id("chat", "00299").unwrap().is_some());
+            assert!(vault.history_id("chat", "00301").unwrap().is_none());
+            assert_ne!(
+                vault.history_id("chat", "00149").unwrap().unwrap().text,
+                "live edit"
+            );
+        }
+        crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn recent_messages_respects_clear_and_new_incoming_before_save() {
+        let path = std::env::temp_dir().join(format!(
+            "zapive_recent_messages_clear_{}.db",
+            std::process::id()
+        ));
+        crate::paths::remove_db(&path);
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            store.add_message(history_message("chat", 1));
+            store.save_checked(&vault).unwrap();
+            store.clear_messages("chat");
+            assert!(store.recent_messages(&vault, "chat", 5).unwrap().is_empty());
+            let mut incoming = history_message("chat", 2);
+            incoming.from_me = false;
+            assert!(store.add_message(incoming));
+            assert_eq!(
+                store.recent_messages(&vault, "chat", 5).unwrap()[0].id,
+                "00002"
+            );
+            assert_eq!(store.recent_messages(&vault, "chat", 5).unwrap().len(), 1);
+            assert!(store.remove_messages("chat", &["00002".into()]));
+            assert!(store.recent_messages(&vault, "chat", 5).unwrap().is_empty());
+            assert!(store.add_message(history_message("chat", 3)));
+            store.delete_chat("chat");
+            assert!(store.recent_messages(&vault, "chat", 5).unwrap().is_empty());
+            assert!(store.deleted_jids.contains("chat"));
+            assert!(vault.history_id("chat", "00001").unwrap().is_some());
+            assert!(vault.history_id("chat", "00002").unwrap().is_none());
+            assert!(vault.history_id("chat", "00003").unwrap().is_none());
+        }
+        crate::paths::remove_db(&path);
     }
 
     #[test]

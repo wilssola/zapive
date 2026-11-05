@@ -387,18 +387,7 @@ impl Bridge {
     // live rows the vault has not received yet.
     fn mcp_recent_messages(&self, jid: &str, count: usize) -> Result<Vec<StoredMessage>, String> {
         let vault = self.vault.as_ref().ok_or("Zapive is locked.")?;
-        let mut by_id: HashMap<String, StoredMessage> = vault
-            .history_page(jid, None, count)?
-            .into_iter()
-            .map(|m| (m.id.clone(), m))
-            .collect();
-        for m in self.store.messages_for(jid) {
-            by_id.insert(m.id.clone(), m.clone());
-        }
-        let mut list: Vec<StoredMessage> = by_id.into_values().collect();
-        list.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
-        let skip = list.len().saturating_sub(count);
-        Ok(list.split_off(skip))
+        self.store.recent_messages(vault, jid, count)
     }
 
     fn mcp_unanswered(
@@ -426,7 +415,9 @@ impl Bridge {
                 || !crate::store::is_displayable_jid(&meta.jid)
                 || meta.left
                 || meta.timestamp < oldest_activity
-                || in_label.as_ref().is_some_and(|set| !set.contains(&meta.jid))
+                || in_label
+                    .as_ref()
+                    .is_some_and(|set| !set.contains(&meta.jid))
             {
                 continue;
             }
