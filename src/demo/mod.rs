@@ -317,6 +317,8 @@ fn show(options: &Options) -> i32 {
                     if let Some(ui) = weak.upgrade() {
                         ui.set_demo_hover_x(x as f32);
                         ui.set_demo_hover_y(y as f32);
+                        ui.set_pointer_x(x as f32);
+                        ui.set_pointer_y(y as f32);
                         // Simulated inside the window only; the real cursor never moves.
                         ui.window()
                             .dispatch_event(slint::platform::WindowEvent::PointerMoved {

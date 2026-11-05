@@ -190,8 +190,21 @@ fn main() {
         let mut right_press_consumed = false;
         ui.window().on_winit_window_event(move |window, event| {
             match event {
-                WindowEvent::CursorMoved { position, .. } => cursor = Some(*position),
-                WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => cursor = None,
+                WindowEvent::CursorMoved { position, .. } => {
+                    cursor = Some(*position);
+                    if let Some(ui) = handle.upgrade() {
+                        let p = position.to_logical::<f32>(f64::from(window.scale_factor()));
+                        ui.set_pointer_x(p.x);
+                        ui.set_pointer_y(p.y);
+                    }
+                }
+                WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => {
+                    cursor = None;
+                    if let Some(ui) = handle.upgrade() {
+                        ui.set_pointer_x(-1.0);
+                        ui.set_pointer_y(-1.0);
+                    }
+                }
                 WindowEvent::MouseInput {
                     state,
                     button: MouseButton::Right,

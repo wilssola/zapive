@@ -348,6 +348,11 @@ export component AppWindow inherits Window {
     callback react-pick(string);
     // Quick reaction bar: the message it belongs to, empty when hidden.
     in-out property <string> react-bar-id;
+    // Pointer position in window coordinates, fed by the host from the OS
+    // events (negative = outside). Message hover is computed from it, so it
+    // never depends on which overlapping TouchArea currently holds the hover.
+    in property <length> pointer-x: -1px;
+    in property <length> pointer-y: -1px;
     // Reply being composed.
     in-out property <bool> reply-open;
     in-out property <string> reply-name;
@@ -3275,11 +3280,15 @@ export component AppWindow inherits Window {
                         }
                         // Hover actions like WhatsApp Web: one small pill
                         // beside the bubble (react, forward, translate, menu).
-                        // It sits inside msg-row and reports its own hover,
-                        // so reaching for it keeps it shown (no flicker).
-                        property <bool> show-actions: (row-hover.has-hover || root.react-bar-id == msg.id || msg-row.actions-hover)
+                        // Shown while the pointer is anywhere on the row's
+                        // line, so moving onto the pill never hides it.
+                        // The pointer is over this row (bubble line, full width).
+                        property <bool> pointer-in: root.pointer-y >= self.absolute-position.y + bubble.y - 6px
+                            && root.pointer-y < self.absolute-position.y + bubble.y + max(bubble.height, 36px) + 6px
+                            && root.pointer-x >= self.absolute-position.x
+                            && root.pointer-x < self.absolute-position.x + self.width;
+                        property <bool> show-actions: (msg-row.pointer-in || row-hover.has-hover || root.react-bar-id == msg.id)
                             && !root.select-mode && msg.kind != "system" && !msg.deleted;
-                        property <bool> actions-hover: false;
                         if msg-row.show-actions: Rectangle {
                             width: actions-row.preferred-width + 8px;
                             height: 32px;
@@ -3291,9 +3300,6 @@ export component AppWindow inherits Window {
                             background: Theme.panel;
                             border-width: Theme.glass ? 1px : 0px;
                             border-color: Theme.glass-rim;
-                            pill-touch := TouchArea {
-                                changed has-hover => { msg-row.actions-hover = self.has-hover; }
-                            }
                             actions-row := HorizontalLayout {
                                 padding-left: 4px;
                                 padding-right: 4px;
