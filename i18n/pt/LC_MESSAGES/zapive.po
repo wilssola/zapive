@@ -235,6 +235,27 @@ msgid_plural "ephemeral.minutes.other"
 msgstr[0] "{n} minuto"
 msgstr[1] "{n} minutos"
 
+msgid "Remove mention"
+msgstr "Remover menção"
+
+msgid "All members"
+msgstr "Todos os membros"
+
+msgid "Mention all {} participants"
+msgstr "Mencionar todos os {} participantes"
+
+msgid "Mention everyone in the group"
+msgstr "Mencionar todos os participantes do grupo"
+
+msgid "@all"
+msgstr "@todos"
+
+msgid "Admin"
+msgstr "Admin"
+
+msgid "Group participants"
+msgstr "Participantes do grupo"
+
 msgid "mention.all"
 msgstr "todos"
 

@@ -111,6 +111,12 @@ export struct CallItem {
     group: bool,
 }
 
+export struct ComposerMention {
+    start: int,
+    end: int,
+    label: string,
+}
+
 // A link (or mention) inside a styled bubble: byte offsets into `plain`.
 export struct LinkSpan {
     start: int,

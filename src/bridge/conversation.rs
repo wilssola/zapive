@@ -132,6 +132,7 @@ impl Bridge {
             self.mentions = draft.mentions;
             let cursor = draft.text.len() as i32;
             self.ui.invoke_set_composer(draft.text.into(), cursor);
+            self.refresh_composer_mentions(None);
         }
         self.ui.set_selected_jid(jid.into());
         self.refresh_pinned();
