@@ -4305,7 +4305,7 @@ export component AppWindow inherits Window {
                                             height: parent.height - 6px;
                                             mouse-cursor: pointer;
                                             accessible-role: button;
-                                            accessible-label: @tr("Remove mention");
+                                            accessible-label: @tr("accessibility.remove_mention");
                                             clicked => { root.mention-remove(mention.start, mention.end); }
                                             Image {
                                                 x: 4px;
@@ -4652,6 +4652,25 @@ export component AppWindow inherits Window {
                 }
             }
 
+            Rectangle {
+                width: 1px;
+                height: 1px;
+                accessible-role: text;
+                accessible-live-region: AccessibleLiveness.polite;
+                property <bool> announce: root.mention-open && root.chat-open && !root.select-mode
+                    && root.mention-index >= 0 && root.mention-index < root.mention-rows.length;
+                property <MemberItem> active-member: root.mention-rows[root.mention-index];
+                property <string> active-name: self.active-member.jid == "all"
+                    ? @tr("mention.picker.all_members") + ", " + (root.mention-member-count > 0
+                        ? @tr("mention.picker.all_count", root.mention-member-count)
+                        : @tr("mention.picker.all_hint"))
+                    : self.active-member.name + (self.active-member.number != "" ? ", " + self.active-member.number : "")
+                        + (self.active-member.admin ? ", " + @tr("mention.picker.admin") : "");
+                accessible-label: self.announce
+                    ? @tr("accessibility.mention_suggestion", self.active-name, root.mention-index + 1, root.mention-rows.length)
+                    : "";
+            }
+
             // "@" mention list above the composer.
             if root.mention-open && root.chat-open && !root.select-mode: MentionPicker {
                 x: 12px;
@@ -4662,6 +4681,8 @@ export component AppWindow inherits Window {
                 selected-index: root.mention-index;
                 member-count: root.mention-member-count;
                 pick(i) => { root.mention-pick(i); }
+                select(i) => { root.mention-index = i; }
+                dismiss => { root.mention-close(); root.focus-composer(); }
             }
 
             drop-overlay := DropOverlay {

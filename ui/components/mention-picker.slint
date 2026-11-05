@@ -1,12 +1,17 @@
 import { Avatar } from "avatar.slint";
 import { Theme } from "theme.slint";
 import { MemberItem } from "types.slint";
+import { FocusRing } from "a11y.slint";
 
 export component MentionPicker inherits Rectangle {
     in property <[MemberItem]> rows;
     in property <int> selected-index;
     in property <int> member-count: 0;
     callback pick(int);
+    callback select(int);
+    callback dismiss();
+    accessible-role: list;
+    accessible-label: @tr("accessibility.mention_suggestions");
     property <bool> has-all: root.rows.length > 0 && root.rows[0].jid == "all";
     property <length> section-height: root.rows.length > (root.has-all ? 1 : 0) ? 34px : 0px;
     property <length> list-height: root.rows.length * 60px + (root.has-all ? 16px : 0px) + root.section-height;
@@ -33,6 +38,40 @@ export component MentionPicker inherits Rectangle {
 
         for m[i] in root.rows: Rectangle {
             property <bool> all: m.jid == "all";
+            accessible-role: list-item;
+            accessible-label: self.all
+                ? @tr("mention.picker.all_members") + ", " + (root.member-count > 0
+                    ? @tr("mention.picker.all_count", root.member-count)
+                    : @tr("mention.picker.all_hint"))
+                : m.name + (m.number != "" ? ", " + m.number : "") + (m.admin ? ", " + @tr("mention.picker.admin") : "");
+            accessible-item-selectable: true;
+            accessible-item-selected: root.selected-index == i;
+            accessible-item-index: i + 1;
+            accessible-item-count: root.rows.length;
+            accessible-action-default => { root.pick(i); }
+            forward-focus: row-focus;
+            row-focus := FocusScope {
+                x: 0px;
+                width: 0px;
+                focus-on-click: false;
+                changed has-focus => { if (self.has-focus) { root.select(i); } }
+                key-pressed(event) => {
+                    if (event.text == Key.Return || event.text == Key.Space || (event.text == Key.Tab && !event.modifiers.shift)) {
+                        root.pick(root.selected-index);
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                        root.select(Math.mod(root.selected-index + root.rows.length
+                            + (event.text == Key.DownArrow ? 1 : -1), root.rows.length));
+                        return accept;
+                    }
+                    if (event.text == Key.Escape) {
+                        root.dismiss();
+                        return accept;
+                    }
+                    reject
+                }
+            }
             x: 0px;
             y: self.all ? 0px : i * 60px + (root.has-all ? 16px : 0px) + root.section-height;
             width: mention-list.width;
@@ -80,7 +119,7 @@ export component MentionPicker inherits Rectangle {
                     spacing: 4px;
                     horizontal-stretch: 1;
                     Text {
-                        text: m.jid == "all" ? @tr("All members") : m.name;
+                        text: m.jid == "all" ? @tr("mention.picker.all_members") : m.name;
                         color: Theme.text;
                         font-size: 14px;
                         font-weight: m.jid == "all" ? 700 : 500;
@@ -88,8 +127,8 @@ export component MentionPicker inherits Rectangle {
                     }
                     if m.jid == "all" || m.number != "": Text {
                         text: m.jid == "all" ? (root.member-count > 0
-                            ? @tr("Mention all {} participants", root.member-count)
-                            : @tr("Mention everyone in the group")) : m.number;
+                            ? @tr("mention.picker.all_count", root.member-count)
+                            : @tr("mention.picker.all_hint")) : m.number;
                         color: Theme.accent-text;
                         font-size: 12px;
                         overflow: elide;
@@ -113,7 +152,7 @@ export component MentionPicker inherits Rectangle {
                             colorize: Theme.accent-text;
                         }
                         badge := Text {
-                            text: m.jid == "all" ? @tr("@all") : @tr("Admin");
+                            text: m.jid == "all" ? @tr("mention.picker.all_tag") : @tr("mention.picker.admin");
                             color: Theme.text-dim;
                             font-size: 11px;
                             font-weight: 600;
@@ -133,6 +172,12 @@ export component MentionPicker inherits Rectangle {
                 height: 1px;
                 background: Theme.glass-divider;
             }
+            FocusRing {
+                width: parent.width;
+                height: parent.height;
+                border-radius: parent.border-radius;
+                shown: row-focus.has-focus;
+            }
             row-touch := TouchArea {
                 mouse-cursor: pointer;
                 clicked => { root.pick(i); }
@@ -146,7 +191,7 @@ export component MentionPicker inherits Rectangle {
                 x: 10px;
                 width: parent.width - 20px;
                 height: parent.height;
-                text: @tr("Group participants");
+                text: @tr("mention.picker.participants");
                 color: Theme.text-dim;
                 font-size: 11px;
                 font-weight: 600;
