@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 component HomeAction inherits TouchArea {
     in property <string> label;
@@ -6,6 +7,12 @@ component HomeAction inherits TouchArea {
     mouse-cursor: pointer;
     accessible-role: button;
     accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
 
     Rectangle {
         width: parent.width;
@@ -36,6 +43,12 @@ component HomeAction inherits TouchArea {
             vertical-alignment: center;
             wrap: word-wrap;
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 14px;
+        shown: key-focus.has-focus;
     }
 }
 

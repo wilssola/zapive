@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 import { MessageItem, PollOption } from "types.slint";
 import { PrivacyVeil } from "privacy-veil.slint";
 
@@ -143,9 +144,25 @@ export component SpecialMessage inherits Rectangle {
                     border-radius: 8px;
                     background: opt-touch.has-hover && root.message.poll-can-vote ? Theme.hover : transparent;
                     opt-touch := TouchArea {
+                        accessible-role: checkbox;
+                        accessible-label: opt.name + ", " + opt.votes;
+                        accessible-checkable: true;
+                        accessible-checked: opt.voted;
+                        accessible-enabled: root.message.poll-can-vote;
+                        accessible-action-default => { root.vote(i); }
                         enabled: root.message.poll-can-vote;
                         mouse-cursor: root.message.poll-can-vote ? pointer : default;
                         clicked => { root.vote(i); }
+                        opt-key := KeyFocus {
+                            enabled: root.message.poll-can-vote;
+                            activate => { root.vote(i); }
+                        }
+                        FocusRing {
+                            shown: opt-key.has-focus;
+                            width: parent.width;
+                            height: parent.height;
+                            border-radius: 8px;
+                        }
                     }
                     opt-row := VerticalLayout {
                         y: 4px;
@@ -206,8 +223,14 @@ export component SpecialMessage inherits Rectangle {
                 if opt.votes > 0 && opt.voters != "": Rectangle {
                     height: 20px;
                     expand-touch := TouchArea {
+                        accessible-role: button;
+                        accessible-label: root.expanded == i ? @tr("poll.votes.hide") : @tr("poll.votes.view");
+                        accessible-action-default => { root.expanded = root.expanded == i ? -1 : i; }
                         mouse-cursor: pointer;
                         clicked => { root.expanded = root.expanded == i ? -1 : i; }
+                        expand-key := KeyFocus {
+                            activate => { root.expanded = root.expanded == i ? -1 : i; }
+                        }
                     }
                     HorizontalLayout {
                         padding-left: 34px;
@@ -282,6 +305,9 @@ export component SpecialMessage inherits Rectangle {
                 ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
         }
         details-touch := TouchArea {
+            accessible-role: button;
+            accessible-label: @tr("message.special.view_details");
+            accessible-action-default => { root.details(); }
             height: 42px;
             mouse-cursor: pointer;
             clicked => { root.details(); }
@@ -308,6 +334,9 @@ export component SpecialMessage inherits Rectangle {
                     font-weight: 600;
                     vertical-alignment: center;
                 }
+            }
+            details-key := KeyFocus {
+                activate => { root.details(); }
             }
         }
     }

@@ -1,8 +1,17 @@
 import { Theme } from "theme.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 
 export component GreenLink inherits TouchArea {
     in property <string> label;
     mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     height: t.preferred-height;
     width: t.preferred-width;
     t := Text {
@@ -10,5 +19,11 @@ export component GreenLink inherits TouchArea {
         color: Theme.accent;
         font-size: 14px;
         font-weight: 700;
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 4px;
+        shown: key-focus.has-focus;
     }
 }

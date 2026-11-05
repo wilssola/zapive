@@ -1,4 +1,5 @@
 import { Avatar } from "avatar.slint";
+import { KeyFocus, FocusRing } from "a11y.slint";
 import { IconButton } from "icon-button.slint";
 import { InfoAction } from "info-action.slint";
 import { ModalLayer } from "modal.slint";
@@ -79,6 +80,7 @@ export component InfoLayer inherits ModalLayer {
                         horizontal-stretch: 1;
                     }
                     IconButton {
+                        label: @tr("common.action.close");
                         width: 32px;
                         height: 32px;
                         icon-size: 18px;
@@ -266,6 +268,9 @@ export component InfoLayer inherits ModalLayer {
                                 horizontal-stretch: 1;
                             }
                             if !root.current-left: TouchArea {
+                                accessible-role: button;
+                                accessible-label: @tr("info.group.add_member");
+                                accessible-action-default => { root.close-info(); root.menu-add-member(); }
                                 width: add-member-label.preferred-width;
                                 height: 24px;
                                 mouse-cursor: pointer;
@@ -277,6 +282,15 @@ export component InfoLayer inherits ModalLayer {
                                     vertical-alignment: center;
                                 }
                                 clicked => { root.close-info(); root.menu-add-member(); }
+                                add-member-key := KeyFocus {
+                                    activate => { root.close-info(); root.menu-add-member(); }
+                                }
+                                FocusRing {
+                                    shown: add-member-key.has-focus;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    border-radius: 4px;
+                                }
                             }
                         }
                         if !root.info-is-group: VerticalLayout {

@@ -119,6 +119,7 @@ export component PickerLayer inherits ModalLayer {
                         accepted => { root.gif-search(self.text); }
                     }
                     IconButton {
+                        label: @tr("chat.picker.search_gifs");
                         icon: @image-url("../icons/search.svg");
                         clicked => { root.gif-search(gif-input.text); }
                     }
@@ -533,6 +534,7 @@ export component ChatSearchLayer inherits ModalLayer {
                     padding-right: 10px;
                     spacing: 10px;
                     IconButton {
+                        label: @tr("common.action.close");
                         icon: @image-url("../icons/x.svg");
                         clicked => { root.chat-search-close(); }
                     }
@@ -545,11 +547,13 @@ export component ChatSearchLayer inherits ModalLayer {
                         horizontal-stretch: 1;
                     }
                     IconButton {
+                        label: @tr("accessibility.previous_result");
                         icon: @image-url("../icons/chevron-up.svg");
                         enabled: root.chat-search-rows.length > 0;
                         clicked => { root.chat-search-step(1); }
                     }
                     IconButton {
+                        label: @tr("accessibility.next_result");
                         icon: @image-url("../icons/chevron-down.svg");
                         enabled: root.chat-search-rows.length > 0;
                         clicked => { root.chat-search-step(-1); }

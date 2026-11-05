@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { KeyFocus, FocusRing } from "../a11y.slint";
 
 export component MenuRow inherits TouchArea {
     in property <image> icon;
@@ -8,6 +9,14 @@ export component MenuRow inherits TouchArea {
     in property <bool> submenu: false;
     in property <color> tint: Theme.text;
     mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.detail != "" ? root.label + ", " + root.detail : root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: key-focus;
+    key-focus := KeyFocus {
+        enabled: root.enabled;
+        activate => { root.clicked(); }
+    }
     height: root.detail != "" ? 50px : 40px;
     Rectangle {
         width: parent.width;
@@ -50,5 +59,11 @@ export component MenuRow inherits TouchArea {
                 y: (parent.height - self.height) / 2;
             }
         }
+    }
+    FocusRing {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        shown: key-focus.has-focus;
     }
 }
