@@ -15,6 +15,7 @@ import { LinkHover } from "link-hover.slint";
 import { LightboxLayer, VideoLayer } from "media-viewers.slint";
 import { ConfirmLayer, DetailsLayer, MessageDialogLayer, ReactionsLayer } from "message-dialogs.slint";
 import { MessageMenuLayer } from "message-menu.slint";
+import { ChatRowMenuLayer } from "chat-row-menu.slint";
 import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
 import { MentionPicker } from "mention-picker.slint";
@@ -329,7 +330,37 @@ export component AppWindow inherits Window {
         if (row < 0 || row >= root.chats.length) { return ""; }
         return root.chats[row].jid;
     }
+    // Right-click menu of a conversation-list row (opened from Rust via
+    // `open-message-menu`, which routes the click to the row or the message).
+    in-out property <bool> row-menu-open: false;
+    // "" | "mute"
+    in-out property <string> row-menu-sub: "";
+    in-out property <string> row-menu-jid: "";
+    in-out property <length> row-menu-x;
+    in-out property <length> row-menu-y;
+    in-out property <bool> row-menu-pinned;
+    in-out property <bool> row-menu-muted;
+    in-out property <bool> row-menu-archived;
+    in-out property <bool> row-menu-favorite;
+    in-out property <bool> row-menu-unread;
+    // Rust fills the flags above for this chat and opens the menu.
+    callback row-menu-request(string);
+    callback row-menu-action(string, string, int);
     public function open-message-menu(x: float, y: float) -> bool {
+        let row-jid = root.chat-at(x, y);
+        if (row-jid != "") {
+            if (root.screen != "main" || root.message-menu-open || root.message-dialog-open || root.details-open
+                || root.confirm-open || root.forward-open || root.share-open || root.preview-open
+                || root.lightbox-open || root.video-open || root.pdf-open || root.sv-open
+                || root.alert-open || root.member-pick-open || root.reactions-open
+                || root.chat-menu-open || root.account-menu-open || root.shortcuts-open) {
+                return false;
+            }
+            root.row-menu-x = x * 1px;
+            root.row-menu-y = y * 1px;
+            root.row-menu-request(row-jid);
+            return true;
+        }
         if (root.screen != "main" || !root.chat-open || !root.conv-ready || root.select-mode
             || root.message-menu-open || root.message-dialog-open || root.details-open || root.confirm-open
             || root.settings-open || root.forward-open || root.share-open || root.preview-open
@@ -1125,6 +1156,7 @@ export component AppWindow inherits Window {
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
                 else if (root.message-menu-open) { root.message-menu-open = false; }
+                else if (root.row-menu-open) { root.row-menu-open = false; }
                 else if (root.details-open) { root.details-open = false; }
                 else if (root.message-dialog-open) { root.message-dialog-open = false; }
                 else if (root.confirm-open) { root.confirm-open = false; }
@@ -4924,6 +4956,26 @@ export component AppWindow inherits Window {
         can-translate(a0) => { return root.can-translate(a0); }
         win-width: root.width;
         win-height: root.height;
+    }
+
+    row-menu-layer := ChatRowMenuLayer {
+        open: root.row-menu-open;
+        scrim: transparent;
+        dismiss => { root.row-menu-open = false; }
+
+        row-menu-open <=> root.row-menu-open;
+        row-menu-sub <=> root.row-menu-sub;
+        row-menu-jid: root.row-menu-jid;
+        row-menu-x: root.row-menu-x;
+        row-menu-y: root.row-menu-y;
+        pinned: root.row-menu-pinned;
+        muted: root.row-menu-muted;
+        archived: root.row-menu-archived;
+        favorite: root.row-menu-favorite;
+        unread: root.row-menu-unread;
+        win-width: root.width;
+        win-height: root.height;
+        act(a0, a1, a2) => { root.row-menu-action(a0, a1, a2); }
     }
 
     details-layer := DetailsLayer {

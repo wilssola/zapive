@@ -1081,6 +1081,15 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_select_forward(|| defer(|b| b.request_forward_selected()));
     ui.on_select_star(|| defer(|b| b.star_selected()));
     ui.on_select_delete(|| defer(|b| b.confirm_delete_selected()));
+    // Right-click menu on a conversation-list row.
+    ui.on_row_menu_request(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.open_row_menu(&jid));
+    });
+    ui.on_row_menu_action(|jid, action, arg| {
+        let (jid, action) = (jid.to_string(), action.to_string());
+        defer(move |b| b.row_menu_action(&jid, &action, arg));
+    });
     // Chat menu.
     ui.on_menu_add_member(|| defer(|b| b.open_member_picker()));
     ui.on_menu_search(|| defer(|b| b.open_chat_search()));

@@ -61,6 +61,7 @@ pub(super) async fn executor(
             | Cmd::AvatarLarge { .. }
             | Cmd::SubscribePresence { .. }) => profile::run(&ctx, cmd).await,
             cmd @ (Cmd::Archive { .. }
+            | Cmd::PinChat { .. }
             | Cmd::Mute { .. }
             | Cmd::Unmute { .. }
             | Cmd::SetEphemeral { .. }

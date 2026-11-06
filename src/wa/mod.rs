@@ -385,6 +385,10 @@ pub enum Cmd {
         jid: String,
         archived: bool,
     },
+    PinChat {
+        jid: String,
+        pinned: bool,
+    },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.

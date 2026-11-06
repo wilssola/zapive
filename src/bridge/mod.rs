@@ -32,6 +32,7 @@ mod accounts;
 mod audio;
 mod calls;
 mod chat_info;
+mod chat_row_menu;
 mod chats;
 mod composer;
 mod conversation;

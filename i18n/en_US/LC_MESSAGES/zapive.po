@@ -2317,3 +2317,9 @@ msgstr "Zoom {0}, reset"
 
 msgid "accessibility.ink_color"
 msgstr "Pen color {0}"
+
+msgid "chat.row_menu.pin"
+msgstr "Pin chat"
+
+msgid "chat.row_menu.unpin"
+msgstr "Unpin chat"

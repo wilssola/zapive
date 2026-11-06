@@ -2319,3 +2319,9 @@ msgstr "Zoom {0}, redefinir"
 
 msgid "accessibility.ink_color"
 msgstr "Cor da caneta {0}"
+
+msgid "chat.row_menu.pin"
+msgstr "Fixar conversa"
+
+msgid "chat.row_menu.unpin"
+msgstr "Desafixar conversa"
