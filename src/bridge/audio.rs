@@ -249,6 +249,13 @@ impl Bridge {
         });
     }
 
+    fn set_rec_levels(&self, levels: Vec<f32>, filled: usize, head: usize) {
+        self.ui
+            .set_rec_levels(ModelRc::new(VecModel::from(levels)));
+        self.ui.set_rec_filled(filled as i32);
+        self.ui.set_rec_head(head as i32);
+    }
+
     pub(super) fn start_recording(&mut self) {
         if self.recorder.is_some() || self.current_jid.is_none() {
             return;
@@ -256,30 +263,119 @@ impl Bridge {
         match crate::audio::Recorder::start() {
             Some(recorder) => {
                 self.recorder = Some(recorder);
-                self.rec_started = Some(Instant::now());
+                self.rec_preview = None;
+                self.ui.set_rec_paused(false);
+                self.ui.set_rec_previewing(false);
                 self.ui.set_rec_elapsed("0:00".into());
+                self.set_rec_levels(vec![0.0; crate::audio::REC_BARS], 0, 0);
                 self.ui.set_rec_active(true);
                 self.rec_timer.start(
                     slint::TimerMode::Repeated,
-                    Duration::from_millis(500),
-                    || {
-                        apply_now(|b| {
-                            if let Some(started) = b.rec_started {
-                                let secs = started.elapsed().as_secs() as u32;
-                                b.ui.set_rec_elapsed(crate::store::format_duration(secs).into());
-                            }
-                        });
-                    },
+                    Duration::from_millis(50),
+                    || apply_now(|b| b.tick_recording()),
                 );
             }
             None => self.ui.set_status_text(t("rec.no_mic").into()),
         }
     }
 
+    // Live: newest levels and the clock. Paused: only the preview moves.
+    fn tick_recording(&mut self) {
+        let bars = crate::audio::REC_BARS;
+        let Some(recorder) = &self.recorder else {
+            self.rec_timer.stop();
+            return;
+        };
+        if recorder.is_paused() {
+            let Some((player, total)) = &self.rec_preview else {
+                return;
+            };
+            if player.finished() {
+                self.stop_rec_preview();
+                return;
+            }
+            let pos = player.position_secs();
+            let head = ((pos / total).clamp(0.0, 1.0) * bars as f64).round() as usize;
+            let label = format!(
+                "{} / {}",
+                crate::store::format_duration(pos as u32),
+                crate::store::format_duration(total.round() as u32)
+            );
+            self.ui.set_rec_head(head as i32);
+            self.ui.set_rec_elapsed(label.into());
+            return;
+        }
+        let label = crate::store::format_duration(recorder.elapsed_secs() as u32);
+        let (levels, filled) = recorder.recent_levels(bars);
+        self.ui.set_rec_elapsed(label.into());
+        self.set_rec_levels(levels, filled, filled);
+    }
+
+    // Stops capturing without ending the recording; the waveform becomes
+    // an overview of everything said so far.
+    pub(super) fn pause_recording(&mut self) {
+        let bars = crate::audio::REC_BARS;
+        let Some(recorder) = &self.recorder else {
+            return;
+        };
+        recorder.pause();
+        let overview = recorder.overview_levels(bars);
+        let label = crate::store::format_duration(recorder.elapsed_secs() as u32);
+        self.ui.set_rec_paused(true);
+        self.ui.set_rec_elapsed(label.into());
+        self.set_rec_levels(overview, bars, bars);
+    }
+
+    pub(super) fn resume_recording(&mut self) {
+        self.rec_preview = None;
+        self.ui.set_rec_previewing(false);
+        let Some(recorder) = &self.recorder else {
+            return;
+        };
+        recorder.resume();
+        self.ui.set_rec_paused(false);
+    }
+
+    // Plays the paused recording from the start, or stops that preview.
+    pub(super) fn toggle_rec_preview(&mut self) {
+        if self.rec_preview.is_some() {
+            self.stop_rec_preview();
+            return;
+        }
+        let Some(recorder) = &self.recorder else {
+            return;
+        };
+        if !recorder.is_paused() {
+            return;
+        }
+        let (samples, rate) = recorder.snapshot();
+        let Some(buffer) = crate::audio::recording_buffer(&samples, rate) else {
+            return;
+        };
+        let Some(player) = crate::audio::Player::start(&buffer, 0.0) else {
+            return;
+        };
+        self.rec_preview = Some((player, buffer.duration_secs()));
+        self.ui.set_rec_head(0);
+        self.ui.set_rec_previewing(true);
+    }
+
+    fn stop_rec_preview(&mut self) {
+        self.rec_preview = None;
+        self.ui.set_rec_previewing(false);
+        self.ui.set_rec_head(crate::audio::REC_BARS as i32);
+        if let Some(recorder) = &self.recorder {
+            let label = crate::store::format_duration(recorder.elapsed_secs() as u32);
+            self.ui.set_rec_elapsed(label.into());
+        }
+    }
+
     pub(super) fn stop_recording(&mut self, send: bool) {
         self.rec_timer.stop();
-        self.rec_started = None;
+        self.rec_preview = None;
         self.ui.set_rec_active(false);
+        self.ui.set_rec_paused(false);
+        self.ui.set_rec_previewing(false);
         let view_once = self.ui.get_rec_view_once();
         self.ui.set_rec_view_once(false);
         let Some(recorder) = self.recorder.take() else {

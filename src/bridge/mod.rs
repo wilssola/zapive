@@ -172,7 +172,8 @@ pub struct Bridge {
     waves: HashMap<String, slint::Image>,
     recorder: Option<crate::audio::Recorder>,
     rec_timer: slint::Timer,
-    rec_started: Option<Instant>,
+    // The paused recording being listened to, with its length in seconds.
+    rec_preview: Option<(crate::audio::Player, f64)>,
     // Message actions and outgoing media.
     reactions_model: Rc<VecModel<ReactionItem>>,
     forward_model: Rc<VecModel<ChatItem>>,

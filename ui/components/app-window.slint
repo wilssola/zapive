@@ -8,7 +8,7 @@ import { FilterChip } from "filter-chip.slint";
 import { GreenLink } from "green-link.slint";
 import { ForwardLayer, MemberPickLayer, NewListLayer, ShareLayer } from "group-dialogs.slint";
 import { HomeScreen } from "home-screen.slint";
-import { IconButton } from "icon-button.slint";
+import { IconButton, TipBubble } from "icon-button.slint";
 import { ImagePreview } from "image-preview.slint";
 import { InfoLayer } from "info-panel.slint";
 import { LinkHover } from "link-hover.slint";
@@ -252,6 +252,12 @@ export component AppWindow inherits Window {
     in-out property <bool> rec-active: false;
     in-out property <string> rec-elapsed: "0:00";
     in-out property <bool> rec-view-once: false;
+    in-out property <bool> rec-paused: false;
+    in-out property <bool> rec-previewing: false;
+    // Waveform bars (0..1), how many hold audio, and where the playhead is.
+    in-out property <[float]> rec-levels;
+    in-out property <int> rec-filled: 0;
+    in-out property <int> rec-head: 0;
     callback jump-latest();
     // Contact / group info
     in-out property <bool> info-open: false;
@@ -274,6 +280,9 @@ export component AppWindow inherits Window {
     callback rec-start();
     callback rec-stop();
     callback rec-cancel();
+    callback rec-pause();
+    callback rec-resume();
+    callback rec-preview();
     callback emoji-pick(string);
     callback sticker-send(string);
     callback picker-opened();
@@ -4127,29 +4136,63 @@ export component AppWindow inherits Window {
                         // Recording bar (replaces the composer while capturing)
                         HorizontalBox {
                             visible: root.rec-active;
-                            padding-top: 8px;
-                            padding-bottom: 8px;
-                            padding-left: 12px;
-                            padding-right: 12px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            padding-left: 8px;
+                            padding-right: 8px;
                             spacing: 10px;
                             IconButton {
                                 label: @tr("accessibility.discard_recording");
+                                tip: @tr("accessibility.discard_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.tile;
                                 icon: @image-url("../icons/trash.svg");
                                 clicked => { root.rec-cancel(); }
                             }
                             Rectangle {
                                 width: 10px;
-                                height: 10px;
-                                border-radius: 5px;
-                                background: Theme.danger-solid;
-                                y: 26px;
+                                Rectangle {
+                                    width: 10px;
+                                    height: 10px;
+                                    border-radius: 5px;
+                                    y: (parent.height - self.height) / 2;
+                                    background: root.rec-paused ? Theme.text-dim : Theme.danger-solid;
+                                }
                             }
                             Text {
                                 text: root.rec-elapsed;
                                 color: Theme.text;
-                                font-size: 15px;
+                                font-size: 18px;
                                 vertical-alignment: center;
+                                horizontal-stretch: 0;
+                                min-width: 56px;
+                            }
+                            // Live waveform: green up to the playhead, dim after it.
+                            Rectangle {
                                 horizontal-stretch: 1;
+                                min-width: 60px;
+                                clip: true;
+                                property <length> pitch: min(7px, self.width / max(1, root.rec-levels.length));
+                                property <length> x0: (self.width - self.pitch * root.rec-levels.length) / 2;
+                                for level[i] in root.rec-levels: Rectangle {
+                                    x: parent.x0 + i * parent.pitch;
+                                    width: max(2px, parent.pitch * 0.55);
+                                    height: i < root.rec-filled ? max(4px, level * (parent.height - 10px)) : 4px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: self.width / 2;
+                                    background: i < root.rec-head ? Theme.accent-text : Theme.text-dim.with-alpha(0.35);
+                                }
+                                Rectangle {
+                                    x: parent.x0 + root.rec-head * parent.pitch - 1px;
+                                    y: 4px;
+                                    width: 2px;
+                                    height: parent.height - 8px;
+                                    border-radius: 1px;
+                                    background: Theme.text;
+                                    visible: root.rec-head > 0;
+                                }
                             }
                             vo-touch := TouchArea {
                                 accessible-role: switch;
@@ -4164,9 +4207,9 @@ export component AppWindow inherits Window {
                                 Rectangle {
                                     width: parent.width;
                                     height: parent.height;
-                                    border-radius: 8px;
+                                    border-radius: 20px;
                                     background: root.rec-view-once ? Theme.chip-active-bg
-                                        : vo-touch.has-hover ? Theme.hover : transparent;
+                                        : vo-touch.has-hover ? Theme.hover : Theme.tile;
                                     Image {
                                         source: @image-url("../icons/eye.svg");
                                         colorize: root.rec-view-once ? Theme.accent : Theme.icon;
@@ -4183,11 +4226,49 @@ export component AppWindow inherits Window {
                                     shown: vo-key.has-focus;
                                     width: parent.width;
                                     height: parent.height;
-                                    border-radius: 8px;
+                                    border-radius: 20px;
+                                }
+                                Tooltip {
+                                    TipBubble { text: @tr("accessibility.view_once"); }
+                                }
+                            }
+                            // Listen to the paused recording before sending it.
+                            if root.rec-paused: IconButton {
+                                label: root.rec-previewing ? @tr("accessibility.stop_preview") : @tr("accessibility.preview_recording");
+                                tip: root.rec-previewing ? @tr("accessibility.stop_preview") : @tr("accessibility.preview_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.tile;
+                                icon: root.rec-previewing ? @image-url("../icons/player-stop.svg") : @image-url("../icons/player-play.svg");
+                                clicked => { root.rec-preview(); }
+                            }
+                            // Pause keeps what was said; resume goes on from there.
+                            IconButton {
+                                label: root.rec-paused ? @tr("accessibility.resume_recording") : @tr("accessibility.pause_recording");
+                                tip: root.rec-paused ? @tr("accessibility.resume_recording") : @tr("accessibility.pause_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.tile;
+                                icon: root.rec-paused ? @image-url("../icons/microphone.svg") : @image-url("../icons/player-pause.svg");
+                                clicked => {
+                                    if (root.rec-paused) {
+                                        root.rec-resume();
+                                    } else {
+                                        root.rec-pause();
+                                    }
                                 }
                             }
                             IconButton {
                                 label: @tr("accessibility.send_recording");
+                                tip: @tr("accessibility.send_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.send;
+                                hover-background: Theme.send.brighter(0.2);
+                                tint: #ffffff;
                                 icon: @image-url("../icons/send-2.svg");
                                 clicked => { root.rec-stop(); }
                             }
@@ -4400,22 +4481,29 @@ export component AppWindow inherits Window {
                                     vertical-alignment: center;
                                 }
                             }
-                            IconButton {
+                            if message-input.text == "": IconButton {
                                 label: @tr("accessibility.record_voice");
+                                tip: @tr("accessibility.record_voice");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
+                                radius: 10px;
+                                background: transparent;
+                                hover-background: Theme.send;
+                                hover-tint: #ffffff;
                                 icon: @image-url("../icons/microphone.svg");
                                 y: parent.height - self.height - 8px;
                                 clicked => { root.rec-start(); }
                             }
-                            IconButton {
+                            if message-input.text != "": IconButton {
                                 label: @tr("accessibility.send");
+                                tip: @tr("accessibility.send");
                                 width: 40px;
                                 height: 32px;
                                 icon-size: 20px;
                                 radius: 10px;
                                 background: Theme.send;
+                                hover-background: Theme.send.brighter(0.2);
                                 tint: #ffffff;
                                 icon: @image-url("../icons/send-2.svg");
                                 y: parent.height - self.height - 8px;

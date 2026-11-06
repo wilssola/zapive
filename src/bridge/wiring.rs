@@ -187,7 +187,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         waves: HashMap::new(),
         recorder: None,
         rec_timer: slint::Timer::default(),
-        rec_started: None,
+        rec_preview: None,
         reactions_model,
         forward_model,
         react_pick_for: None,
@@ -865,6 +865,9 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_rec_start(|| defer(|b| b.start_recording()));
     ui.on_rec_stop(|| defer(|b| b.stop_recording(true)));
     ui.on_rec_cancel(|| defer(|b| b.stop_recording(false)));
+    ui.on_rec_pause(|| defer(|b| b.pause_recording()));
+    ui.on_rec_resume(|| defer(|b| b.resume_recording()));
+    ui.on_rec_preview(|| defer(|b| b.toggle_rec_preview()));
     ui.on_play_audio(|path| {
         // Documents (and, until phase 4, audio files) open with whatever
         // the OS associates; the handler needs a decrypted copy.

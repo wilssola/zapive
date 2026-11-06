@@ -2377,3 +2377,15 @@ msgstr "Catching up on your messages"
 
 msgid "sync.screen.catchup_subtitle"
 msgstr "Fetching what arrived while you were away."
+
+msgid "accessibility.pause_recording"
+msgstr "Pause recording"
+
+msgid "accessibility.resume_recording"
+msgstr "Resume recording"
+
+msgid "accessibility.preview_recording"
+msgstr "Listen to recording"
+
+msgid "accessibility.stop_preview"
+msgstr "Stop listening"

@@ -2379,3 +2379,15 @@ msgstr "Atualizando suas mensagens"
 
 msgid "sync.screen.catchup_subtitle"
 msgstr "Buscando o que chegou enquanto você estava fora."
+
+msgid "accessibility.pause_recording"
+msgstr "Pausar gravação"
+
+msgid "accessibility.resume_recording"
+msgstr "Continuar gravando"
+
+msgid "accessibility.preview_recording"
+msgstr "Ouvir gravação"
+
+msgid "accessibility.stop_preview"
+msgstr "Parar de ouvir"
