@@ -160,6 +160,8 @@ pub struct Bridge {
     anim_order: std::collections::VecDeque<String>,
     anim_bytes: usize,
     anim_timer: slint::Timer,
+    // Stamps "last active" while the app runs.
+    activity_timer: slint::Timer,
     stick_requeued: bool,
     media_key: crate::vault::KeyHandle,
     // Voice-note playback and recording.

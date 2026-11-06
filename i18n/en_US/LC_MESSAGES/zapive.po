@@ -2371,3 +2371,9 @@ msgstr "Disconnect"
 
 msgid "sync.screen.keep_open"
 msgstr "Do not close this window. Your messages are being downloaded."
+
+msgid "sync.screen.catchup_title"
+msgstr "Catching up on your messages"
+
+msgid "sync.screen.catchup_subtitle"
+msgstr "Fetching what arrived while you were away."

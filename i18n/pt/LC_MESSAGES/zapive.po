@@ -2373,3 +2373,9 @@ msgstr "Desconectar"
 
 msgid "sync.screen.keep_open"
 msgstr "Não feche esta janela. Suas mensagens estão sendo baixadas."
+
+msgid "sync.screen.catchup_title"
+msgstr "Atualizando suas mensagens"
+
+msgid "sync.screen.catchup_subtitle"
+msgstr "Buscando o que chegou enquanto você estava fora."

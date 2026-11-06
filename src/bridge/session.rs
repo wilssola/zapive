@@ -76,8 +76,14 @@ impl Bridge {
         // Nothing to wait for on the login screen or when the stored chat
         // list is already on screen. A paired account with nothing stored
         // (first run, or closed mid-sync) shows the sync page instead.
+        let away = self.away_secs();
         if registered && self.store.chats.is_empty() {
             self.begin_initial_sync();
+        } else if registered {
+            self.begin_catchup_if_away(away);
+        }
+        if registered {
+            self.start_activity_tracking();
         }
         self.finish_loading();
         self.refresh_statuses();
@@ -204,6 +210,7 @@ impl Bridge {
             self.begin_initial_sync();
         }
         self.registered = true;
+        self.catchup_connected();
         self.store.set_self(&[pn, lid]);
         // A LID-primary session may carry no phone jid at all; our own
         // rows (voice notes, search hits) still need an identity.

@@ -87,6 +87,7 @@ export component AppWindow inherits Window {
     in-out property <bool> sync-screen-open: false;
     in-out property <int> sync-screen-percent: 0;
     in-out property <bool> sync-screen-started: false;
+    in-out property <bool> sync-screen-catchup: false;
     in-out property <string> sync-screen-account: "";
     in-out property <string> sync-screen-messages: "0";
     in-out property <string> sync-screen-chats: "0";
@@ -5022,6 +5023,7 @@ export component AppWindow inherits Window {
         open: root.sync-screen-open && root.screen == "main";
         percent: root.sync-screen-percent;
         started: root.sync-screen-started;
+        catchup: root.sync-screen-catchup;
         account: root.sync-screen-account;
         messages: root.sync-screen-messages;
         chats: root.sync-screen-chats;

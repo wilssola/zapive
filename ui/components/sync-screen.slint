@@ -41,6 +41,8 @@ export component SyncScreen inherits Rectangle {
     in property <int> percent: 0;
     // False until the first chunk lands (the phone is still preparing it).
     in property <bool> started: false;
+    // Catching up after time away: no percentage, a moving bar instead.
+    in property <bool> catchup: false;
     in property <string> account;
     in property <string> messages;
     in property <string> chats;
@@ -122,7 +124,7 @@ export component SyncScreen inherits Rectangle {
         }
         Rectangle { height: 28px; }
         Text {
-            text: @tr("sync.screen.title");
+            text: root.catchup ? @tr("sync.screen.catchup_title") : @tr("sync.screen.title");
             color: Theme.text;
             font-size: 24px;
             font-weight: 700;
@@ -130,7 +132,7 @@ export component SyncScreen inherits Rectangle {
         }
         Rectangle { height: 8px; }
         Text {
-            text: @tr("sync.screen.subtitle");
+            text: root.catchup ? @tr("sync.screen.catchup_subtitle") : @tr("sync.screen.subtitle");
             color: Theme.text-dim;
             font-size: 15px;
             horizontal-alignment: center;
@@ -188,7 +190,7 @@ export component SyncScreen inherits Rectangle {
                                 overflow: elide;
                             }
                         }
-                        Text {
+                        if !root.catchup: Text {
                             text: root.percent + "%";
                             color: Theme.accent-text;
                             font-size: 24px;
@@ -202,8 +204,9 @@ export component SyncScreen inherits Rectangle {
                         border-radius: 4px;
                         background: Theme.dark ? #ffffff14 : Theme.well;
                         Rectangle {
-                            x: 0px;
-                            width: parent.width * clamp(root.percent, 0, 100) / 100;
+                            x: root.catchup && Math.mod(root.seconds, 2) == 1 ? parent.width * 0.65 : 0px;
+                            width: root.catchup ? parent.width * 0.35 : parent.width * clamp(root.percent, 0, 100) / 100;
+                            animate x { duration: 1s; easing: ease-in-out; }
                             height: parent.height;
                             border-radius: parent.border-radius;
                             background: Theme.accent-text;

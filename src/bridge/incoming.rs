@@ -169,6 +169,7 @@ impl Bridge {
     }
 
     pub fn on_messages(&mut self, batch: &MessageBatch) {
+        self.note_catchup_messages(batch);
         for inbound in batch.iter() {
             let info = &inbound.info;
             let chat = info.source.chat.to_non_ad_string();
