@@ -5060,14 +5060,6 @@ export component AppWindow inherits Window {
         current-only: root.starred-current-only;
         open-starred-item(a0, a1) => { root.open-starred-item(a0, a1); }
     }
-    shortcuts-layer := ShortcutsLayer {
-        open: root.shortcuts-open;
-        scrim: Theme.scrim;
-        dismiss => { root.shortcuts-open = false; }
-        shortcuts-open <=> root.shortcuts-open;
-        is-macos: root.is-macos;
-    }
-
     // ---------- Forward picker ----------
     forward-layer := ForwardLayer {
         open: root.forward-open;
@@ -5203,6 +5195,15 @@ export component AppWindow inherits Window {
         auto-download-stickers: root.auto-download-stickers;
         auto-download-stickers-changed(a0) => { root.auto-download-stickers-changed(a0); }
         win-width: root.width;
+    }
+
+    // Declared after Settings so it stacks above it (opened from Settings > General).
+    shortcuts-layer := ShortcutsLayer {
+        open: root.shortcuts-open;
+        scrim: Theme.scrim;
+        dismiss => { root.shortcuts-open = false; }
+        shortcuts-open <=> root.shortcuts-open;
+        is-macos: root.is-macos;
     }
 
     // ---------- PDF viewer ----------
