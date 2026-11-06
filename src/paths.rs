@@ -101,11 +101,25 @@ pub fn sweep_accounts(known: &[String]) {
 
 // A sqlite database together with its WAL sidecars.
 pub fn remove_db(path: &std::path::Path) {
+    remove_db_checked(path);
+}
+
+// Like remove_db, but says whether every file is gone. Windows refuses to
+// delete a database another handle still has open, and a session that
+// survives a logout is a stale login, so callers that care must know.
+pub fn remove_db_checked(path: &std::path::Path) -> bool {
+    let mut gone = true;
     for suffix in ["", "-wal", "-shm"] {
         let mut p = path.as_os_str().to_owned();
         p.push(suffix);
-        let _ = std::fs::remove_file(PathBuf::from(p));
+        let p = PathBuf::from(p);
+        match std::fs::remove_file(&p) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => gone = false,
+        }
     }
+    gone
 }
 
 pub fn media_cache() -> PathBuf {

@@ -16,17 +16,21 @@ pub(super) async fn executor(
     mut cmd_rx: mpsc::UnboundedReceiver<Cmd>,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
 ) {
-    let mut ctx = Ctx {
-        client: session.client.clone(),
-        epoch: 0,
-        media_key: crate::vault::KeyHandle::default(),
-        media_sem: Arc::new(tokio::sync::Semaphore::new(3)),
-        avatar_sem: Arc::new(tokio::sync::Semaphore::new(8)),
-    };
+    let mut media_key = crate::vault::KeyHandle::default();
+    let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
+    let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
     while let Some(cmd) = cmd_rx.recv().await {
         let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
-        ctx.epoch = epoch;
-        ctx.client = session.client.clone();
+        // Built per command, not kept across them: a Ctx that outlives the
+        // command would hold the client of a session that was just replaced
+        // (logout, account switch) and keep its database open.
+        let ctx = Ctx {
+            client: session.client.clone(),
+            epoch,
+            media_key: media_key.clone(),
+            media_sem: media_sem.clone(),
+            avatar_sem: avatar_sem.clone(),
+        };
         match cmd {
             cmd @ (Cmd::PrepareAttachment { .. }
             | Cmd::ResendMedia { .. }
@@ -79,7 +83,7 @@ pub(super) async fn executor(
             | Cmd::FetchCommonGroups { .. }
             | Cmd::FetchGroups) => groups::run(&ctx, cmd).await,
             Cmd::MediaKey(key) => {
-                ctx.media_key = key;
+                media_key = key;
             }
             Cmd::Start | Cmd::Resume => {
                 let client = session.client.clone();
@@ -125,6 +129,7 @@ pub(super) async fn executor(
                 }
                 session.client.disconnect().await;
                 let previous = session.account.clone();
+                drop(ctx);
                 drop(session);
                 SESSION_EPOCH.fetch_add(1, Ordering::SeqCst);
                 let opened = match build_session(cmd_tx.clone(), &account).await {
@@ -157,8 +162,14 @@ pub(super) async fn executor(
             Cmd::ResetSession => {
                 session.client.disconnect().await;
                 let account = session.account.clone();
+                drop(ctx);
                 drop(session);
-                crate::paths::remove_db(&wa_session_path(&account));
+                if !discard_session_store(&wa_session_path(&account), 40).await {
+                    // The old credentials are still on disk, so the client
+                    // built below logs in as the removed account, gets 401
+                    // and asks for another reset instead of showing a QR.
+                    eprintln!("[wa] could not remove the logged-out session");
+                }
                 match build_session(cmd_tx.clone(), &account).await {
                     Ok(next) => {
                         session = next;
@@ -189,5 +200,58 @@ pub(super) async fn executor(
                 return;
             }
         }
+    }
+}
+
+// Deletes a logged-out account's whatsapp-rust database so the next client
+// starts unpaired and shows a QR code. The old client's tasks may still be
+// winding down and Windows will not delete a database that is open, so the
+// removal is retried (250 ms apart) before giving up.
+async fn discard_session_store(path: &std::path::Path, attempts: u32) -> bool {
+    for _ in 0..attempts {
+        if crate::paths::remove_db_checked(path) {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    crate::paths::remove_db_checked(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zapive-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn logout_discards_the_session_database_and_its_sidecars() {
+        let dir = scratch("discard");
+        let db = dir.join("wa-test.db");
+        for suffix in ["", "-wal", "-shm"] {
+            std::fs::write(dir.join(format!("wa-test.db{suffix}")), b"x").unwrap();
+        }
+        assert!(discard_session_store(&db, 1).await);
+        for suffix in ["", "-wal", "-shm"] {
+            assert!(!dir.join(format!("wa-test.db{suffix}")).exists());
+        }
+        // Nothing left is not a failure either: a second reset is harmless.
+        assert!(discard_session_store(&db, 1).await);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_session_that_cannot_be_removed_is_reported() {
+        let dir = scratch("stuck");
+        let db = dir.join("wa-stuck.db");
+        // A directory cannot be unlinked like a file, which stands in for a
+        // database another handle still holds open.
+        std::fs::create_dir_all(&db).unwrap();
+        assert!(!discard_session_store(&db, 1).await);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

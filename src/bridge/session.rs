@@ -276,8 +276,12 @@ impl Bridge {
         self.finish_loading();
         self.end_initial_sync();
         self.registered = false;
-        self.ui.set_pairing_mode(false);
-        self.ui.set_pairing_code("".into());
+        // A repeated logout of a slot that is already on the login screen
+        // must not yank the user out of the phone-number form mid-typing.
+        if self.ui.get_screen() != "login" {
+            self.ui.set_pairing_mode(false);
+            self.ui.set_pairing_code("".into());
+        }
         self.ui.set_qr_image(crate::qr::empty_image());
         self.ui.set_screen("login".into());
         self.close_session_views();
