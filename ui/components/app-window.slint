@@ -346,7 +346,7 @@ export component AppWindow inherits Window {
         if (px < left || px >= left + chat-list.width || py < top || py >= top + chat-list.height) {
             return "";
         }
-        let row = ((py - top - chat-list.viewport-y) / 56px).floor();
+        let row = ((py - top - chat-list.content-y) / 56px).floor();
         if (row < 0 || row >= root.chats.length) { return ""; }
         return root.chats[row].jid;
     }
@@ -606,7 +606,7 @@ export component AppWindow inherits Window {
     in-out property <bool> pdf-installing: false;
     out property <float> pdf-view-w: pdf-flick.width / 1px;
     out property <float> pdf-view-h: pdf-flick.height / 1px;
-    out property <float> pdf-scroll: -pdf-flick.viewport-y / 1px;
+    out property <float> pdf-scroll: -pdf-flick.content-y / 1px;
     callback pdf-close();
     callback pdf-scrolled(float);
     callback pdf-zoom(int);
@@ -616,7 +616,7 @@ export component AppWindow inherits Window {
     callback pdf-save-as();
     callback pdf-install-engine();
     public function pdf-set-scroll(y: float) {
-        pdf-flick.viewport-y = -y * 1px;
+        pdf-flick.content-y = -y * 1px;
     }
 
     // Status viewer: video updates
@@ -649,13 +649,13 @@ export component AppWindow inherits Window {
         message-input.focus();
     }
     public function scroll-conversation-end() {
-        msg-list.viewport-y = min(0px, msg-list.height - msg-list.viewport-height);
+        msg-list.content-y = min(0px, msg-list.height - msg-list.content-height);
     }
     public function scroll-conversation-top() {
-        msg-list.viewport-y = 0;
+        msg-list.content-y = 0;
     }
     public function set-conversation-scroll(y: length) {
-        msg-list.viewport-y = y;
+        msg-list.content-y = y;
     }
 
     // Settings
@@ -1674,9 +1674,9 @@ export component AppWindow inherits Window {
                     if (chips.preferred-width <= chips-flick.width) { return reject; }
                     // Touchpads already send horizontal deltas; the Flickable handles those.
                     if (event.delta-x != 0px || event.delta-y == 0px) { return reject; }
-                    chips-flick.viewport-x = max(
+                    chips-flick.content-x = max(
                         chips-flick.width - chips.preferred-width,
-                        min(0px, chips-flick.viewport-x + event.delta-y));
+                        min(0px, chips-flick.content-x + event.delta-y));
                     return accept;
                   }
                   chips-flick := Flickable {
@@ -2237,17 +2237,17 @@ export component AppWindow inherits Window {
                     changed typing-space => {
                         typing-restick.running = root.conv-ready && root.stick-bottom;
                     }
-                    changed viewport-height => {
-                        root.conv-viewport-h = self.viewport-height;
+                    changed content-height => {
+                        root.conv-viewport-h = self.content-height;
                     }
-                    changed viewport-y => {
-                        root.conv-scroll = self.viewport-y;
+                    changed content-y => {
+                        root.conv-scroll = self.content-y;
                         root.stick-bottom =
-                            self.viewport-y <= self.height - self.viewport-height + 60px;
-                        if (self.viewport-y < -120px && root.conv-ready) {
+                            self.content-y <= self.height - self.content-height + 60px;
+                        if (self.content-y < -120px && root.conv-ready) {
                             root.scroll-armed = true;
                         }
-                        if (self.viewport-y >= -4px && self.viewport-height > self.height
+                        if (self.content-y >= -4px && self.content-height > self.height
                             && root.scroll-armed) {
                             root.load-older();
                         }
@@ -2295,7 +2295,7 @@ export component AppWindow inherits Window {
                         // coordinates; the ListView re-anchors every
                         // visible row on each scroll step, so the check
                         // rides on y as well as on the visible offset.
-                        property <length> vis-y: self.y + msg-list.viewport-y;
+                        property <length> vis-y: self.y + msg-list.content-y;
                         changed vis-y => {
                             if (self.vis-y <= contact-header.height + 6px && self.vis-y + self.height > contact-header.height + 6px) {
                                 root.day-at-top(msg.dayFull);
@@ -4345,11 +4345,11 @@ export component AppWindow inherits Window {
                                         }
                                         cursor-position-changed(pos) => {
                                             root.composer-cursor(self.cursor-position-byte-offset, self.anchor-position-byte-offset);
-                                            if (pos.y < -composer-scroll.viewport-y) {
-                                                composer-scroll.viewport-y = -pos.y;
+                                            if (pos.y < -composer-scroll.content-y) {
+                                                composer-scroll.content-y = -pos.y;
                                             } else if (pos.y + self.font-size * 1.3
-                                                    > -composer-scroll.viewport-y + composer-scroll.height) {
-                                                composer-scroll.viewport-y =
+                                                    > -composer-scroll.content-y + composer-scroll.height) {
+                                                composer-scroll.content-y =
                                                     composer-scroll.height - pos.y - self.font-size * 1.3;
                                             }
                                         }
@@ -4374,7 +4374,7 @@ export component AppWindow inherits Window {
                                                     root.mention-pick(root.mention-index);
                                                 } else {
                                                     root.send-message(self.text);
-                                                    composer-scroll.viewport-y = 0;
+                                                    composer-scroll.content-y = 0;
                                                 }
                                                 return accept;
                                             }
@@ -4509,7 +4509,7 @@ export component AppWindow inherits Window {
                                 y: parent.height - self.height - 8px;
                                 clicked => {
                                     root.send-message(message-input.text);
-                                    composer-scroll.viewport-y = 0;
+                                    composer-scroll.content-y = 0;
                                 }
                             }
                         }
@@ -5499,10 +5499,10 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     content-height: max(self.height, root.pdf-total-h * 1px);
                     content-width: max(self.width, root.pdf-total-w * 1px);
-                    changed viewport-y => { root.pdf-scrolled(-self.viewport-y / 1px); }
+                    changed content-y => { root.pdf-scrolled(-self.content-y / 1px); }
                     changed width => { if (root.pdf-open) { root.pdf-view-resized(); } }
                     for p in root.pdf-pages: Rectangle {
-                        x: (pdf-flick.viewport-width - p.w * 1px) / 2;
+                        x: (pdf-flick.content-width - p.w * 1px) / 2;
                         y: p.y * 1px;
                         width: p.w * 1px;
                         height: p.h * 1px;
