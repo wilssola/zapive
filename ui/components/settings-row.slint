@@ -6,6 +6,10 @@ export component SettingsRow inherits Rectangle {
     in property <string> label;
     in property <string> detail;
     in property <image> icon;
+    // Makes the whole row a button (children are laid out inside the row, so a
+    // TouchArea passed as a child would only cover its own small slot).
+    in property <bool> clickable: false;
+    callback clicked();
     height: max(46px, row.preferred-height);
     hover := TouchArea {
         width: parent.width;
@@ -50,5 +54,13 @@ export component SettingsRow inherits Rectangle {
             }
         }
         @children
+    }
+    if root.clickable: TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: root.label;
+        clicked => { root.clicked(); }
     }
 }

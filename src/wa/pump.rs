@@ -194,6 +194,7 @@ impl EventHandler for Pump {
                         || hs.sync_type == wa::history_sync::HistorySyncType::OnDemand;
                     let mut chunk = HistoryChunk {
                         on_demand,
+                        progress: hs.progress,
                         chats: Vec::new(),
                         messages: Vec::new(),
                         pushnames: Vec::new(),

@@ -32,6 +32,7 @@ mod accounts;
 mod audio;
 mod calls;
 mod chat_info;
+mod chat_row_menu;
 mod chats;
 mod composer;
 mod conversation;
@@ -159,6 +160,8 @@ pub struct Bridge {
     anim_order: std::collections::VecDeque<String>,
     anim_bytes: usize,
     anim_timer: slint::Timer,
+    // Stamps "last active" while the app runs.
+    activity_timer: slint::Timer,
     stick_requeued: bool,
     media_key: crate::vault::KeyHandle,
     // Voice-note playback and recording.
@@ -169,7 +172,8 @@ pub struct Bridge {
     waves: HashMap<String, slint::Image>,
     recorder: Option<crate::audio::Recorder>,
     rec_timer: slint::Timer,
-    rec_started: Option<Instant>,
+    // The paused recording being listened to, with its length in seconds.
+    rec_preview: Option<(crate::audio::Player, f64)>,
     // Message actions and outgoing media.
     reactions_model: Rc<VecModel<ReactionItem>>,
     forward_model: Rc<VecModel<ChatItem>>,
@@ -179,6 +183,8 @@ pub struct Bridge {
     // History sync progress, for the banner and its dialog.
     sync_batches: u32,
     sync_messages: usize,
+    // The page shown while the first history is downloaded.
+    initial_sync: history::InitialSync,
     // Multi-select mode over the open conversation.
     select_mode: bool,
     selected: Vec<String>,

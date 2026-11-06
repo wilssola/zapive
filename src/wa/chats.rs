@@ -21,6 +21,23 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 }
             });
         }
+        Cmd::PinChat { jid, pinned } => {
+            let client = ctx.client.clone();
+            tokio::spawn(async move {
+                let Some(target) = parse_jid(&jid) else {
+                    return;
+                };
+                let actions = client.chat_actions();
+                let result = if pinned {
+                    actions.pin_chat(&target).await
+                } else {
+                    actions.unpin_chat(&target).await
+                };
+                if let Err(e) = result {
+                    eprintln!("[wa] pin failed: {e}");
+                }
+            });
+        }
         Cmd::Mute { jid, until_ms } => {
             let client = ctx.client.clone();
             tokio::spawn(async move {

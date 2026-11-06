@@ -718,8 +718,20 @@ msgid "message.menu.delete"
 msgstr "Delete"
 
 
-msgid "message.dialog.save"
-msgstr "Save"
+msgid "message.dialog.edit_title"
+msgstr "Edit message"
+
+msgid "message.dialog.edit_subtitle"
+msgstr "You can edit this message after sending it."
+
+msgid "message.dialog.cancel"
+msgstr "Cancel"
+
+msgid "message.dialog.save_changes"
+msgstr "Save changes"
+
+msgid "message.dialog.counter"
+msgstr "{0}/4,096"
 
 msgid "message.confirm.cancel"
 msgstr "Cancel"
@@ -2317,3 +2329,75 @@ msgstr "Zoom {0}, reset"
 
 msgid "accessibility.ink_color"
 msgstr "Pen color {0}"
+
+msgid "chat.row_menu.pin"
+msgstr "Pin chat"
+
+msgid "chat.row_menu.unpin"
+msgstr "Unpin chat"
+
+msgid "sync.screen.title"
+msgstr "Setting up your conversations"
+
+msgid "sync.screen.subtitle"
+msgstr "Downloading and organizing your messages securely."
+
+msgid "sync.screen.waiting_title"
+msgstr "Connecting to your phone"
+
+msgid "sync.screen.waiting_detail"
+msgstr "Waiting for the first messages to arrive…"
+
+msgid "sync.screen.card_title"
+msgstr "Loading your conversations"
+
+msgid "sync.screen.card_detail"
+msgstr "Syncing messages, media and files…"
+
+msgid "sync.screen.finishing_title"
+msgstr "Almost done"
+
+msgid "sync.screen.finishing_detail"
+msgstr "Organizing your conversations…"
+
+msgid "sync.screen.messages"
+msgstr "messages"
+
+msgid "sync.screen.chats"
+msgstr "chats"
+
+msgid "sync.screen.media"
+msgstr "media"
+
+msgid "sync.screen.files"
+msgstr "files"
+
+msgid "sync.screen.elapsed"
+msgstr "Elapsed time"
+
+msgid "sync.screen.encrypted"
+msgstr "Protected with end-to-end encryption"
+
+msgid "sync.screen.disconnect"
+msgstr "Disconnect"
+
+msgid "sync.screen.keep_open"
+msgstr "Do not close this window. Your messages are being downloaded."
+
+msgid "sync.screen.catchup_title"
+msgstr "Catching up on your messages"
+
+msgid "sync.screen.catchup_subtitle"
+msgstr "Fetching what arrived while you were away."
+
+msgid "accessibility.pause_recording"
+msgstr "Pause recording"
+
+msgid "accessibility.resume_recording"
+msgstr "Resume recording"
+
+msgid "accessibility.preview_recording"
+msgstr "Listen to recording"
+
+msgid "accessibility.stop_preview"
+msgstr "Stop listening"
