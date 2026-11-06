@@ -44,8 +44,9 @@ impl Bridge {
             }
             ConfirmAction::ClearChat(jid) => self.clear_chat(&jid, true),
             ConfirmAction::DeleteChat(jid) => {
+                let newest = self.store.chats.get(&jid).map_or(0, |c| c.timestamp);
                 self.store.delete_chat(&jid);
-                self.wa.send(Cmd::DeleteChat(jid.clone()));
+                self.wa.send(Cmd::DeleteChat(jid.clone(), newest));
                 if Some(&jid) == self.current_jid.as_ref() {
                     self.close_chat();
                 }

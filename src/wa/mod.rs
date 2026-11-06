@@ -186,8 +186,9 @@ pub enum Cmd {
         members: Vec<String>,
     },
     // App-state chat actions mirrored to the phone.
-    ClearChat(String),
-    DeleteChat(String),
+    // (chat, newest message timestamp in unix seconds; 0 = unknown)
+    ClearChat(String, i64),
+    DeleteChat(String, i64),
     DeleteForMe {
         jid: String,
         id: String,

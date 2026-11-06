@@ -74,9 +74,50 @@ pub(super) fn format_pair_code(code: &str) -> String {
     }
 }
 
+// The newest message a synced "delete chat" / "clear chat" covers, in unix
+// seconds. WhatsApp sends seconds; a millisecond value is scaled down.
+pub(super) fn range_cutoff(last: Option<i64>, last_system: Option<i64>) -> Option<i64> {
+    let newest = last
+        .into_iter()
+        .chain(last_system)
+        .filter(|t| *t > 0)
+        .max()?;
+    Some(if newest > 100_000_000_000 {
+        newest / 1000
+    } else {
+        newest
+    })
+}
+
+// What a delete or clear from here covers, so a later replay of it on
+// another device keeps the messages that came after.
+pub(super) fn cleared_range(
+    newest: i64,
+) -> Option<whatsapp_rust::features::SyncActionMessageRange> {
+    (newest > 0).then(|| whatsapp_rust::features::SyncActionMessageRange {
+        last_message_timestamp: Some(newest),
+        ..Default::default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn range_cutoff_takes_the_newest_timestamp_in_seconds() {
+        assert_eq!(range_cutoff(None, None), None);
+        assert_eq!(range_cutoff(Some(0), None), None);
+        assert_eq!(range_cutoff(Some(1_700_000_000), None), Some(1_700_000_000));
+        assert_eq!(
+            range_cutoff(Some(1_700_000_000), Some(1_700_000_500)),
+            Some(1_700_000_500)
+        );
+        assert_eq!(
+            range_cutoff(Some(1_700_000_000_123), None),
+            Some(1_700_000_000)
+        );
+    }
 
     #[test]
     fn pairing_code_only_formats_eight_bytes() {
