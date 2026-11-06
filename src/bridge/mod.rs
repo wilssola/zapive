@@ -382,3 +382,60 @@ impl Bridge {
         self.oneshots.push(timer);
     }
 }
+
+// One process-wide Slint thread for every test that needs an AppWindow.
+// Slint binds its platform to the first thread that touches it, so tests
+// on separate libtest threads fail with "platform was initialized in
+// another thread". `ui_thread::run` sends a closure to that thread, which
+// runs the event loop for the whole process; the closure reports through
+// the `done` callback it is given (so it can wait on timers). Calls are
+// serialised by a mutex.
+#[cfg(test)]
+pub(crate) mod ui_thread {
+    use std::sync::mpsc::{Sender, channel};
+    use std::sync::{Mutex, OnceLock};
+
+    type Job = Box<dyn FnOnce(Box<dyn FnOnce(Result<(), String>)>) + Send>;
+
+    // The thread builds a window first (that is what initialises the
+    // Slint platform and its event-loop proxy), reports ready, and only
+    // then runs the loop; `run` waits for the ready signal, so
+    // invoke_from_event_loop never races the platform setup.
+    fn started() -> &'static Mutex<()> {
+        static GATE: OnceLock<Mutex<()>> = OnceLock::new();
+        GATE.get_or_init(|| {
+            let (ready_tx, ready_rx) = channel::<()>();
+            std::thread::Builder::new()
+                .name("slint-test-ui".into())
+                .spawn(move || {
+                    let _anchor = crate::AppWindow::new().expect("anchor window");
+                    ready_tx.send(()).expect("ready signal");
+                    slint::run_event_loop_until_quit().expect("slint event loop");
+                })
+                .expect("spawn slint test thread");
+            ready_rx
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("slint thread never became ready");
+            Mutex::new(())
+        })
+    }
+
+    // Runs `job` on the Slint thread and blocks until it calls `done`.
+    pub(crate) fn run(job: impl FnOnce(Box<dyn FnOnce(Result<(), String>)>) + Send + 'static) {
+        let _gate = started().lock().unwrap_or_else(|p| p.into_inner());
+        let (tx, rx) = channel::<Result<(), String>>();
+        let job: Job = Box::new(job);
+        let report: Sender<_> = tx;
+        slint::invoke_from_event_loop(move || {
+            job(Box::new(move |result| {
+                let _ = report.send(result);
+            }))
+        })
+        .expect("slint thread alive");
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => panic!("{message}"),
+            Err(e) => panic!("ui job never finished: {e}"),
+        }
+    }
+}
