@@ -1614,9 +1614,20 @@ export component AppWindow inherits Window {
                 }
 
                 // Filter chips scroll sideways once the lists add up.
-                Flickable {
-                    height: root.sidebar-view == "chats" ? 40px : 0;
-                    visible: root.sidebar-view == "chats";
+                // The mouse wheel scrolls them too (vertical wheel -> sideways).
+                TouchArea {
+                  height: root.sidebar-view == "chats" ? 40px : 0;
+                  visible: root.sidebar-view == "chats";
+                  scroll-event(event) => {
+                    if (chips.preferred-width <= chips-flick.width) { return reject; }
+                    // Touchpads already send horizontal deltas; the Flickable handles those.
+                    if (event.delta-x != 0px || event.delta-y == 0px) { return reject; }
+                    chips-flick.viewport-x = max(
+                        chips-flick.width - chips.preferred-width,
+                        min(0px, chips-flick.viewport-x + event.delta-y));
+                    return accept;
+                  }
+                  chips-flick := Flickable {
                     content-width: chips.preferred-width;
                     content-height: self.height;
                     interactive: chips.preferred-width > self.width;
@@ -1660,6 +1671,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                  }
                 }
 
                 if root.sidebar-view == "chats" && root.search-hits.length == 0: Rectangle {
