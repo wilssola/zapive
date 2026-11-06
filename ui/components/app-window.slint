@@ -2431,6 +2431,13 @@ export component AppWindow inherits Window {
                         // Whether the time/ticks float on the last text line (text paths only).
                         property <bool> has-translation: root.can-translate(msg)
                             && (msg.translationText != "" || msg.translationBusy || msg.translationError != "");
+                        // Spaces reserving room for the time cluster; a longer label
+                        // (pinned mark, edited) needs more. Keep in step with
+                        // `meta_pad` in conversation.rs, which pads the styled text.
+                        property <string> meta-pad: msg.time.character-count > 11 ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}"
+                            : msg.time.character-count > 8 ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}"
+                            : msg.time.character-count > 5 ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}"
+                            : "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}";
                         property <bool> meta-inline:
                             msg.cardKind == "" && (msg.hasStyled || msg.kind == "text"
                                 || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
@@ -3490,7 +3497,7 @@ export component AppWindow inherits Window {
                                     plain-text := TextInput {
                                         accessible-role: none;
                                         text: (msg.deleted ? "🚫 " + msg.text : msg.text)
-                                            + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
+                                            + (msg-row.meta-inline ? msg-row.meta-pad : "");
                                         animate opacity { duration: 120ms; easing: ease-out; }
                                         read-only: true;
                                         single-line: false;
