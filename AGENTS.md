@@ -1,51 +1,20 @@
-# Instruções para agentes
+# Agent instructions
 
-## Padrão de commits
+Work in English: source code, identifiers, comments, documentation, issue and pull-request text, and commit messages. Portuguese belongs in app localization (`i18n/pt/LC_MESSAGES/zapive.po`); every user-visible string needs a semantic id in both English and Portuguese catalogs. Preserve existing product names and historical release artifacts when citing them.
 
-- Use Conventional Commits: `tipo(escopo): descrição`.
-- Escreva o tipo em inglês, em letras minúsculas, e a descrição em português, preferencialmente no infinitivo e sem ponto final.
-- Use um escopo curto que identifique a área afetada, como `changelog`, `updates`, `messages`, `settings` ou `media`.
-- Faça commits atômicos: uma mudança lógica por commit, incluindo implementação, traduções e testes necessários para que ela funcione. Separe mudanças independentes e mantenha cada commit compilável.
-- Escreva descrições claras sobre o resultado da mudança. O changelog automático aproveita o título sem o prefixo técnico; não use títulos genéricos como “ajustes”, “melhorias diversas” ou “corrigir bug”.
-- Use o corpo opcional para explicar motivação, comportamento e limitações. O corpo não é exibido como tópico no changelog.
+## Read the relevant guide before changing code
 
-### Tipos e categorias do changelog
+- Architecture, runtime flow, and existing seams: [docs/architecture.md](docs/architecture.md).
+- Module responsibilities and where a change belongs: [docs/modules.md](docs/modules.md).
+- Design, privacy, tests, and contribution standards: [docs/project-conventions.md](docs/project-conventions.md).
+- Importing or modifying icons: [docs/icons.md](docs/icons.md).
+- Build commands and platform requirements: [docs/building.md](docs/building.md).
+- Releases and changelog behavior: [docs/releases.md](docs/releases.md).
 
-| Tipo | Uso | Categoria |
-| --- | --- | --- |
-| `feat` | Nova funcionalidade | Novidades |
-| `fix` | Correção de comportamento | Correções |
-| `perf` | Melhoria de desempenho | Melhorias |
-| `refactor` | Reestruturação sem nova funcionalidade | Melhorias |
-| `security` | Correção ou melhoria de segurança | Segurança |
-| `chore` | Manutenção interna | Omitido, salvo breaking change |
-| `ci`, `build`, `test`, `docs`, `style` | Pipeline, build, testes isolados, documentação ou formatação | Omitidos, salvo breaking change |
+## Commits and publication
 
-Não classifique uma funcionalidade como manutenção para escondê-la do changelog. Evite tipos fora desta tabela; tipos desconhecidos aparecem em “Outras alterações”.
+Use Conventional Commits: `type(scope): description`, all in English. Keep the type lowercase, the scope short, and the description specific and imperative, with no trailing period. Examples: `feat(updates): show release notes before download`, `fix(messages): preserve unsent text`, `docs(architecture): describe WhatsApp modules`.
 
-### Alterações incompatíveis e versionamento
+Make one logical change per commit, including the translations and tests it needs; keep each commit buildable. `feat` is a feature, not a `chore`. Use `!` in the subject for breaking changes and explain the incompatibility and migration in a `BREAKING CHANGE:` body. Do not manually bump versions or create release commits; the pipeline owns releases. See [docs/releases.md](docs/releases.md) for type categories and versioning.
 
-- Marque alterações incompatíveis com `!` no título: `feat(storage)!: alterar o formato do histórico local`.
-- Explique a incompatibilidade e a migração no corpo com `BREAKING CHANGE: ...`.
-- Use sempre `!` no título quando houver incompatibilidade: o versionamento atual examina os títulos, enquanto o gerador de notas também reconhece o marcador no corpo.
-- O pipeline atual incrementa major para títulos incompatíveis, minor para `feat` e patch para os demais commits elegíveis.
-- Apenas `chore` sem `!` é excluído do cálculo de versão. Embora `docs`, `ci`, `build`, `test` e `style` sejam omitidos das notas, atualmente ainda podem provocar uma release patch.
-- Não altere versões manualmente nem crie commits `chore(release)` por iniciativa própria: o pipeline de release controla essa etapa.
-
-### Exemplos
-
-```text
-feat(updates): exibir novidades antes de baixar a atualização
-fix(messages): preservar o texto quando o envio falhar
-perf(media): reduzir o uso de memória das miniaturas
-security(storage): impedir exportação de conteúdo temporário expirado
-chore(deps): atualizar dependências de desenvolvimento
-docs(agents): definir o padrão de commits do projeto
-```
-
-### Segurança e publicação
-
-- Crie commits somente quando o usuário solicitar. Faça push apenas mediante solicitação explícita.
-- Revise o diff e os arquivos staged antes de commitar; não inclua mudanças alheias à tarefa nem segredos, tokens, credenciais ou arquivos `.env`.
-- Execute as verificações pertinentes e informe eventuais falhas ou validações não realizadas.
-- Não use force push, não ignore hooks e não altere commits de terceiros com amend.
+Only commit when asked and push only when explicitly asked. Before committing, review the diff and staged files: exclude unrelated work and secrets, tokens, credentials, and `.env` files. Run relevant checks and report failures or checks not run. Never force-push, bypass hooks, or amend someone else's commit.
