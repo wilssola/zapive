@@ -64,7 +64,7 @@ impl Bridge {
                 self.store.hydrate(vault, &jid);
             }
         }
-        self.wa.send(Cmd::GifSearch(String::new()));
+        crate::jobs::gif_search(String::new());
         let favs = self.store.starred_stickers(32);
         self.ui.set_fav_hint(if favs.is_empty() {
             t("fav.empty").into()

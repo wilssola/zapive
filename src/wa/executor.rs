@@ -9,8 +9,6 @@ pub(super) struct Ctx {
     pub(super) media_key: crate::vault::KeyHandle,
     pub(super) media_sem: Arc<tokio::sync::Semaphore>,
     pub(super) avatar_sem: Arc<tokio::sync::Semaphore>,
-    pub(super) link_cache: Arc<std::sync::Mutex<crate::link_preview::Cache>>,
-    pub(super) link_sem: Arc<tokio::sync::Semaphore>,
 }
 
 pub(super) async fn executor(
@@ -24,8 +22,6 @@ pub(super) async fn executor(
         media_key: crate::vault::KeyHandle::default(),
         media_sem: Arc::new(tokio::sync::Semaphore::new(3)),
         avatar_sem: Arc::new(tokio::sync::Semaphore::new(8)),
-        link_cache: Arc::new(std::sync::Mutex::new(crate::link_preview::Cache::default())),
-        link_sem: Arc::new(tokio::sync::Semaphore::new(2)),
     };
     while let Some(cmd) = cmd_rx.recv().await {
         let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
@@ -36,19 +32,7 @@ pub(super) async fn executor(
             | Cmd::ResendMedia { .. }
             | Cmd::SendFile { .. }
             | Cmd::SendGifUrl { .. }) => attachments::run(&ctx, cmd).await,
-            cmd @ Cmd::Media { .. } => media::run(&ctx, cmd).await,
-            cmd @ (Cmd::DecodePreview { .. }
-            | Cmd::LinkPreview { .. }
-            | Cmd::DecodeThumb { .. }
-            | Cmd::GifSearch { .. }
-            | Cmd::ZoomFrames { .. }
-            | Cmd::CheckUpdate
-            | Cmd::ApplyUpdate
-            | Cmd::AudioDecode { .. }
-            | Cmd::Waveform { .. }
-            | Cmd::PdfEngineInstall
-            | Cmd::DecodeFull { .. }
-            | Cmd::LinkThumb { .. }) => local::run(&ctx, cmd).await,
+            cmd @ (Cmd::Media { .. } | Cmd::LinkThumb { .. }) => media::run(&ctx, cmd).await,
             cmd @ (Cmd::React { .. }
             | Cmd::Revoke { .. }
             | Cmd::Edit { .. }

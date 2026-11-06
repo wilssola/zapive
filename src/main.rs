@@ -12,6 +12,7 @@ mod demo;
 mod emoji;
 mod fonts;
 mod i18n;
+mod jobs;
 mod link_preview;
 mod logging;
 mod markup;

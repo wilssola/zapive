@@ -25,7 +25,6 @@ mod calls;
 mod chats;
 mod executor;
 mod groups;
-mod local;
 mod media;
 mod messaging;
 mod polls;
@@ -219,34 +218,11 @@ pub enum Cmd {
         message: std::sync::Arc<wa::Message>,
         want: MediaWant,
     },
-    // Decodes an embedded thumbnail (link previews, video posters).
-    DecodeThumb {
-        id: String,
-        bytes: Vec<u8>,
-        link: bool,
-    },
-    DecodePreview {
-        id: String,
-        bytes: Vec<u8>,
-    },
-    LinkPreview {
-        jid: String,
-        id: String,
-        text: String,
-        url: String,
-    },
     FetchAvatar(String),
     // The full-size picture for the info panel.
     AvatarLarge(String),
-    // Downloads pdfium into the data directory for the PDF viewer.
-    PdfEngineInstall,
     // First frame of a video status, for the viewer.
     StatusPoster {
-        id: String,
-        path: std::path::PathBuf,
-    },
-    // The full-resolution decode of a cached photo, for the lightbox.
-    DecodeFull {
         id: String,
         path: std::path::PathBuf,
     },
@@ -266,17 +242,7 @@ pub enum Cmd {
         enc_sha256: Vec<u8>,
         fallback: Vec<u8>,
     },
-    // Voice notes: full decode at a speed, waveform bars, send recording.
-    AudioDecode {
-        id: String,
-        plain: std::path::PathBuf,
-        rate_idx: usize,
-        rate: f64,
-    },
-    Waveform {
-        id: String,
-        path: std::path::PathBuf,
-    },
+    // Voice notes: send a recording.
     SendVoice {
         jid: String,
         samples: Vec<f32>,
@@ -380,18 +346,10 @@ pub enum Cmd {
         caption: Option<String>,
     },
     // Stickers and GIFs (the video player runs its own threads).
-    GifSearch(String),
     SendGifUrl {
         jid: String,
         url: String,
     },
-    ZoomFrames {
-        id: String,
-        path: std::path::PathBuf,
-    },
-    // Self-update.
-    CheckUpdate,
-    ApplyUpdate,
     // Calls, channels and the info panel.
     RejectCall {
         id: String,

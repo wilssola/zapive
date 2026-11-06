@@ -40,20 +40,6 @@ pub(super) fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-pub(super) fn urlencode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 // Small jpeg preview embedded in outgoing image messages.
 pub(super) fn make_jpeg_thumb(data: &[u8]) -> Option<Vec<u8>> {
     let img = image::load_from_memory(data).ok()?;
@@ -91,14 +77,6 @@ pub(super) fn format_pair_code(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn url_encoding_uses_form_spaces_and_utf8_bytes() {
-        assert_eq!(urlencode(""), "");
-        assert_eq!(urlencode("Az09-_.~"), "Az09-_.~");
-        assert_eq!(urlencode("a b+c/&"), "a+b%2Bc%2F%26");
-        assert_eq!(urlencode("é"), "%C3%A9");
-    }
 
     #[test]
     fn pairing_code_only_formats_eight_bytes() {
