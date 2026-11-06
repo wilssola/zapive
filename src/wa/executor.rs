@@ -34,10 +34,7 @@ pub(super) async fn executor(
         match cmd {
             cmd @ (Cmd::PrepareAttachment { .. }
             | Cmd::ResendMedia { .. }
-            | Cmd::SendImage { .. }
-            | Cmd::SendDocument { .. }
-            | Cmd::SendAudioFile { .. }
-            | Cmd::SendSticker { .. }
+            | Cmd::SendFile { .. }
             | Cmd::SendGifUrl { .. }) => attachments::run(&ctx, cmd).await,
             cmd @ Cmd::Media { .. } => media::run(&ctx, cmd).await,
             cmd @ (Cmd::DecodePreview { .. }

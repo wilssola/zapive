@@ -744,7 +744,13 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
                 if let Some(path) = picked {
                     ui_apply(move |b| {
                         if let Some(jid) = b.current_jid.clone() {
-                            b.wa.send(Cmd::SendSticker { jid, path });
+                            b.wa.send(Cmd::SendFile {
+                                jid,
+                                path,
+                                kind: AttachmentKind::Sticker,
+                                origin: None,
+                                caption: None,
+                            });
                         }
                     });
                 }

@@ -242,9 +242,10 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
             });
         }
 
-        Cmd::SendImage {
+        Cmd::SendFile {
             jid,
             path,
+            kind,
             origin,
             caption,
         } => {
@@ -259,97 +260,13 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 let preparation = crate::outbox::Preparation {
                     id: crate::outbox::new_id(),
                     jid,
-                    kind: "image".into(),
+                    kind: kind.as_str().into(),
                     filename: path
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "file".into()),
                     caption,
                     origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
-                    data,
-                    in_rate: 0,
-                    view_once: false,
-                };
-                crate::bridge::wa_apply_at(epoch, move |b| {
-                    b.stage_attachment(preparation);
-                });
-            });
-        }
-        Cmd::SendDocument { jid, path, origin } => {
-            tokio::spawn(async move {
-                let data = match tokio::fs::read(&path).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        action_failed(epoch, format!("Failed to read media: {e}"));
-                        return;
-                    }
-                };
-                let preparation = crate::outbox::Preparation {
-                    id: crate::outbox::new_id(),
-                    jid,
-                    kind: "document".into(),
-                    filename: path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "file".into()),
-                    caption: None,
-                    origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
-                    data,
-                    in_rate: 0,
-                    view_once: false,
-                };
-                crate::bridge::wa_apply_at(epoch, move |b| {
-                    b.stage_attachment(preparation);
-                });
-            });
-        }
-        Cmd::SendAudioFile { jid, path, origin } => {
-            tokio::spawn(async move {
-                let data = match tokio::fs::read(&path).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        action_failed(epoch, format!("Failed to read media: {e}"));
-                        return;
-                    }
-                };
-                let preparation = crate::outbox::Preparation {
-                    id: crate::outbox::new_id(),
-                    jid,
-                    kind: "audio".into(),
-                    filename: path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "file".into()),
-                    caption: None,
-                    origin: origin.or_else(|| Some(path.to_string_lossy().into_owned())),
-                    data,
-                    in_rate: 0,
-                    view_once: false,
-                };
-                crate::bridge::wa_apply_at(epoch, move |b| {
-                    b.stage_attachment(preparation);
-                });
-            });
-        }
-        Cmd::SendSticker { jid, path } => {
-            tokio::spawn(async move {
-                let data = match tokio::fs::read(&path).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        action_failed(epoch, format!("Failed to read media: {e}"));
-                        return;
-                    }
-                };
-                let preparation = crate::outbox::Preparation {
-                    id: crate::outbox::new_id(),
-                    jid,
-                    kind: "sticker".into(),
-                    filename: path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "file".into()),
-                    caption: None,
-                    origin: Some(path.to_string_lossy().into_owned()),
                     data,
                     in_rate: 0,
                     view_once: false,

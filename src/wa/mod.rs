@@ -118,6 +118,26 @@ pub enum MediaWant {
     Video,
 }
 
+// What an outgoing file is sent as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachmentKind {
+    Image,
+    Document,
+    Audio,
+    Sticker,
+}
+
+impl AttachmentKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Document => "document",
+            Self::Audio => "audio",
+            Self::Sticker => "sticker",
+        }
+    }
+}
+
 pub enum Cmd {
     // Spawns the connection loop; sent once the bridge is installed so no
     // early event is lost.
@@ -352,27 +372,14 @@ pub enum Cmd {
     // Outgoing media (paths are plain files picked by the user). `origin` is
     // that same file as shown in the row, which then reopens it instead of
     // downloading the copy that just went up.
-    SendImage {
+    SendFile {
         jid: String,
         path: std::path::PathBuf,
+        kind: AttachmentKind,
         origin: Option<String>,
         caption: Option<String>,
     },
-    SendDocument {
-        jid: String,
-        path: std::path::PathBuf,
-        origin: Option<String>,
-    },
-    SendAudioFile {
-        jid: String,
-        path: std::path::PathBuf,
-        origin: Option<String>,
-    },
     // Stickers and GIFs (the video player runs its own threads).
-    SendSticker {
-        jid: String,
-        path: std::path::PathBuf,
-    },
     GifSearch(String),
     SendGifUrl {
         jid: String,
