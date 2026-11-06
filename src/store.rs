@@ -1079,6 +1079,84 @@ impl Store {
         }
     }
 
+    // Mirrors a "delete chat" or "clear chat" done on another device. It
+    // covers the messages up to `cutoff` (unix seconds; None = all of them).
+    // WhatsApp replays these on every full app-state sync, so a chat that
+    // was deleted long ago and has had new messages since keeps what came
+    // after the cutoff, as it does on the phone. Returns whether the chat
+    // itself is gone.
+    pub fn apply_remote_clear(
+        &mut self,
+        vault: Option<&Vault>,
+        jid: &str,
+        cutoff: Option<i64>,
+        delete: bool,
+    ) -> bool {
+        let jid = self.canon_owned(jid);
+        let Some(cutoff) = cutoff else {
+            if delete {
+                self.delete_chat(&jid);
+                return true;
+            }
+            self.clear_messages(&jid);
+            return false;
+        };
+        // The replay can land before the chat (or its LID alias) is known:
+        // only the covered range goes, nothing that arrives later.
+        let newer = self
+            .chats
+            .get(&jid)
+            .is_some_and(|meta| meta.timestamp > cutoff);
+        if !newer && self.chats.contains_key(&jid) {
+            if delete {
+                self.delete_chat(&jid);
+                return true;
+            }
+            self.clear_messages(&jid);
+            return false;
+        }
+        // The vault first: pruning RAM alone would let the rows come back
+        // on the next hydration.
+        if let Some(vault) = vault {
+            if let Err(e) = self
+                .flush_history(vault)
+                .and_then(|()| vault.history_prune(&jid, cutoff))
+            {
+                eprintln!("[store] prune {jid} failed: {e}");
+                return false;
+            }
+            self.search.remove_chat(&jid);
+            self.index_from_vault(vault, &jid);
+        }
+        if let Some(list) = self.messages.get_mut(&jid) {
+            let gone: Vec<String> = list
+                .iter()
+                .filter(|m| m.timestamp <= cutoff)
+                .map(|m| m.id.clone())
+                .collect();
+            list.retain(|m| m.timestamp > cutoff);
+            for id in &gone {
+                self.search.remove(&jid, id);
+            }
+        }
+        let newest = match vault {
+            Some(vault) => self
+                .recent_messages(vault, &jid, 1)
+                .ok()
+                .and_then(|list| list.into_iter().next()),
+            None => self
+                .messages_for(&jid)
+                .iter()
+                .max_by_key(|m| m.timestamp)
+                .cloned(),
+        };
+        let preview = newest.as_ref().map(|m| compute_preview(m, self));
+        if let Some(meta) = self.chats.get_mut(&jid) {
+            meta.preview = preview.unwrap_or_default();
+        }
+        false
+    }
+
     // Removes a chat entirely (WhatsApp's "delete chat").
     pub fn delete_chat(&mut self, jid: &str) {
         let canonical = self.canon_owned(jid);
@@ -2228,6 +2306,51 @@ mod tests {
         );
         message.kind = MessageKind::Text;
         message
+    }
+
+    #[test]
+    fn remote_delete_keeps_a_chat_with_messages_after_the_cutoff() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_remote_clear_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        let jid = "5511999990000@s.whatsapp.net";
+        for n in [30, 60, 90, 120] {
+            assert!(store.add_message(history_message(jid, n)));
+        }
+        store.save_checked(&vault).unwrap();
+        // Deleted on the phone when the newest message was at t=20;
+        // messages at t=30 and t=40 came after and must survive.
+        assert!(!store.apply_remote_clear(Some(&vault), jid, Some(25), true));
+        assert!(store.chats.contains_key(jid));
+        let kept: Vec<i64> = store
+            .recent_messages(&vault, jid, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.timestamp)
+            .collect();
+        assert_eq!(kept, vec![30, 40]);
+        assert!(vault.history_id(jid, "00030").unwrap().is_none());
+        assert!(vault.history_id(jid, "00090").unwrap().is_some());
+        // A delete that covers everything still removes the chat.
+        assert!(store.apply_remote_clear(Some(&vault), jid, Some(40), true));
+        assert!(!store.chats.contains_key(jid));
+
+        let other = "5511888880000@s.whatsapp.net";
+        assert!(store.add_message(history_message(other, 30)));
+        assert!(!store.apply_remote_clear(Some(&vault), other, None, false));
+        assert!(store.chats.contains_key(other));
+        assert!(store.recent_messages(&vault, other, 10).unwrap().is_empty());
+
+        // Replayed before the chat is known: nothing is marked for a full wipe.
+        let unknown = "123456789@lid";
+        assert!(!store.apply_remote_clear(Some(&vault), unknown, Some(25), true));
+        assert!(!store.deleted_jids.contains(unknown));
+        assert!(store.add_message(history_message(unknown, 90)));
+        assert!(store.chats.contains_key(unknown));
+        crate::paths::remove_db(&path);
     }
 
     #[test]

@@ -652,6 +652,18 @@ impl Vault {
         Ok(messages)
     }
 
+    // Drops a chat's messages at or before `cutoff` (unix seconds).
+    pub fn history_prune(&self, jid: &str, cutoff: i64) -> Result<(), String> {
+        self.history_page(jid, None, 0)?;
+        self.conn
+            .execute(
+                "DELETE FROM history WHERE account=?1 AND jid=?2 AND timestamp<=?3",
+                params![self.account(), jid, cutoff],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn history_after(
         &self,
         jid: &str,

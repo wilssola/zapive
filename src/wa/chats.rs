@@ -96,7 +96,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 }
             });
         }
-        Cmd::ClearChat(jid) => {
+        Cmd::ClearChat(jid, newest) => {
             let client = ctx.client.clone();
             tokio::spawn(async move {
                 let Some(target) = parse_jid(&jid) else {
@@ -104,14 +104,14 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 };
                 if let Err(e) = client
                     .chat_actions()
-                    .clear_chat(&target, false, false, None)
+                    .clear_chat(&target, false, false, cleared_range(newest))
                     .await
                 {
                     eprintln!("[wa] clear chat failed: {e}");
                 }
             });
         }
-        Cmd::DeleteChat(jid) => {
+        Cmd::DeleteChat(jid, newest) => {
             let client = ctx.client.clone();
             tokio::spawn(async move {
                 let Some(target) = parse_jid(&jid) else {
@@ -119,7 +119,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 };
                 if let Err(e) = client
                     .chat_actions()
-                    .delete_chat(&target, false, None)
+                    .delete_chat(&target, false, cleared_range(newest))
                     .await
                 {
                     eprintln!("[wa] delete chat failed: {e}");

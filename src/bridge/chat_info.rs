@@ -311,30 +311,35 @@ impl Bridge {
     // Empties a conversation here and, when asked, on the phone too.
     pub(super) fn clear_chat(&mut self, jid: &str, remote: bool) {
         self.translation_cache.retain(|key, _| key.0 != jid);
+        let newest = self.store.chats.get(jid).map_or(0, |c| c.timestamp);
         self.store.clear_messages(jid);
         if Some(jid) == self.current_jid.as_deref() {
             self.messages_model.set_vec(Vec::new());
             self.select_end();
         }
         if remote {
-            self.wa.send(Cmd::ClearChat(jid.to_string()));
+            self.wa.send(Cmd::ClearChat(jid.to_string(), newest));
         }
         self.schedule_refresh_chats();
     }
 
     // The phone cleared or deleted a chat; mirror it.
-    pub fn on_chat_cleared(&mut self, jid: &str, deleted: bool) {
+    // `cutoff` is the newest message the action covers; later messages stay.
+    pub fn on_chat_cleared(&mut self, jid: &str, deleted: bool, cutoff: Option<i64>) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        if deleted {
-            self.translation_cache.retain(|key, _| key.0 != jid);
-            self.store.delete_chat(&jid);
-            if Some(&jid) == self.current_jid.as_ref() {
+        self.translation_cache.retain(|key, _| key.0 != jid);
+        let removed = self
+            .store
+            .apply_remote_clear(self.vault.as_ref(), &jid, cutoff, deleted);
+        if Some(&jid) == self.current_jid.as_ref() {
+            if removed {
                 self.close_chat();
+            } else {
+                self.select_end();
+                self.rebuild_conversation(&jid);
             }
-            self.schedule_refresh_chats();
-        } else {
-            self.clear_chat(&jid, false);
         }
+        self.schedule_refresh_chats();
     }
 
     pub(super) fn close_chat(&mut self) {

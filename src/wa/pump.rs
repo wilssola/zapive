@@ -340,11 +340,17 @@ impl EventHandler for Pump {
             }
             Event::ClearChatUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
-                ui_apply(move |b| b.on_chat_cleared(&jid, false));
+                let cutoff = u.action.message_range.as_option().and_then(|r| {
+                    range_cutoff(r.last_message_timestamp, r.last_system_message_timestamp)
+                });
+                ui_apply(move |b| b.on_chat_cleared(&jid, false, cutoff));
             }
             Event::DeleteChatUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
-                ui_apply(move |b| b.on_chat_cleared(&jid, true));
+                let cutoff = u.action.message_range.as_option().and_then(|r| {
+                    range_cutoff(r.last_message_timestamp, r.last_system_message_timestamp)
+                });
+                ui_apply(move |b| b.on_chat_cleared(&jid, true, cutoff));
             }
             Event::LabelEditUpdate(u) => {
                 let id = u.label_id.clone();
