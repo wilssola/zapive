@@ -144,6 +144,9 @@ impl Bridge {
                 c.pinned,
                 c.archived,
             );
+            if let Some(muted) = c.muted {
+                self.store.set_muted(&c.jid, muted);
+            }
         }
         let mut added = 0usize;
         let mut added_to_current = false;

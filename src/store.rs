@@ -944,6 +944,19 @@ impl Store {
         }
     }
 
+    // Mute state synced from the phone. Creates the chat entry when the
+    // mute arrives before the conversation does.
+    pub fn set_muted(&mut self, jid: &str, muted: i64) {
+        let jid = self.canon_owned(&normalize_jid(jid));
+        if !is_displayable_jid(&jid) {
+            return;
+        }
+        let mut meta = self.chats.get(&jid).cloned().unwrap_or_default();
+        meta.jid = jid.clone();
+        meta.muted = muted;
+        self.chats.insert(jid, meta);
+    }
+
     // A jid counts as saved when the address book knows it, or when the
     // phone gave its DM a name (which it only does for saved contacts).
     pub fn is_saved(&self, jid: &str) -> bool {
@@ -2213,6 +2226,17 @@ mod tests {
         assert!(!store.hydrate_id(&vault, "chat", "00001"));
         drop(vault);
         crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn set_muted_creates_and_updates_chat_mute_state() {
+        let mut store = Store::default();
+        store.set_muted("111@g.us", -1);
+        assert!(store.chats["111@g.us"].is_muted());
+        store.set_muted("111@g.us", 0);
+        assert!(!store.chats["111@g.us"].is_muted());
+        store.set_muted("status@broadcast", -1);
+        assert!(!store.chats.contains_key("status@broadcast"));
     }
 
     #[test]

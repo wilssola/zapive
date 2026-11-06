@@ -413,6 +413,7 @@ pub struct HistChat {
     pub timestamp: i64,
     pub unread: Option<u32>,
     pub pinned: Option<i64>,
+    pub muted: Option<i64>,
     pub archived: Option<bool>,
 }
 
@@ -897,6 +898,22 @@ mod receipt_tests {
     }
 
     #[test]
+    fn history_sync_carries_the_previous_mute() {
+        assert_eq!(history_mute(None), None);
+        assert_eq!(history_mute(Some(0)), None);
+        assert_eq!(history_mute(Some(4_102_444_800)), Some(4_102_444_800));
+        assert_eq!(history_mute(Some(u64::MAX)), Some(-1));
+        assert_eq!(history_mute(Some(i64::MAX as u64 + 1)), Some(-1));
+        assert_eq!(history_mute(Some(40_000_000_000)), Some(-1));
+        let in_an_hour = crate::store::now_secs() + 3600;
+        assert_eq!(
+            history_mute(Some(in_an_hour as u64 * 1000)),
+            Some(in_an_hour),
+            "a millisecond expiry must stay finite"
+        );
+    }
+
+    #[test]
     fn receipt_kinds_map_to_tick_levels() {
         assert_eq!(receipt_status(&ReceiptType::Sent), 2);
         assert_eq!(receipt_status(&ReceiptType::Delivered), 3);
@@ -1077,6 +1094,7 @@ impl EventHandler for Pump {
                             timestamp: conv.conversation_timestamp.unwrap_or(0) as i64,
                             unread: conv.unread_count,
                             pinned: history_pin(conv.pinned),
+                            muted: history_mute(conv.mute_end_time),
                             archived: conv.archived,
                         });
                         for hm in &conv.messages {
@@ -1333,6 +1351,23 @@ fn pin_stamp(pinned: bool, ts: i64) -> i64 {
 // value is news; unpinning arrives as a PinUpdate.
 fn history_pin(pinned: Option<u32>) -> Option<i64> {
     pinned.filter(|p| *p > 0).map(i64::from)
+}
+
+const MUTE_FOREVER_HORIZON_SECS: i64 = 100 * 365 * 24 * 3600;
+const MUTE_MILLIS_THRESHOLD: u64 = 100_000_000_000;
+
+fn history_mute(mute_end_time: Option<u64>) -> Option<i64> {
+    let until = mute_end_time.filter(|until| *until > 0)?;
+    let until = if until > MUTE_MILLIS_THRESHOLD {
+        until / 1000
+    } else {
+        until
+    };
+    let horizon = crate::store::now_secs().saturating_add(MUTE_FOREVER_HORIZON_SECS);
+    Some(match i64::try_from(until) {
+        Ok(until) if until <= horizon => until,
+        _ => -1,
+    })
 }
 
 impl Pump {
@@ -3469,5 +3504,15 @@ mod tests {
     fn thumbnail_rejects_invalid_images() {
         assert!(make_jpeg_thumb(&[]).is_none());
         assert!(make_jpeg_thumb(b"not an image").is_none());
+    }
+}
+
+#[cfg(test)]
+impl WaService {
+    // A service whose commands go nowhere; lets bridge tests build a Bridge
+    // without a network session.
+    pub(crate) fn detached() -> Self {
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        Self { cmd_tx }
     }
 }
