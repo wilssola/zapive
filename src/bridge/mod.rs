@@ -57,6 +57,8 @@ mod stickers;
 mod translation;
 mod updates;
 mod wiring;
+#[cfg(test)]
+mod chat_list_tests;
 
 use self::audio::*;
 use self::calls::*;
