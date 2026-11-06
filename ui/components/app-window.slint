@@ -317,6 +317,7 @@ export component AppWindow inherits Window {
     callback delete-message(string);
     callback message-action(string, string);
     callback submit-edit(string, string);
+    callback edit-newline(string, int, int) -> string;
     in-out property <bool> details-open;
     in-out property <string> details-id;
     in-out property <string> details-text;
@@ -5096,6 +5097,7 @@ export component AppWindow inherits Window {
         dismiss => { root.message-dialog-open = false; }
 
         submit-edit(a0, a1) => { root.submit-edit(a0, a1); }
+        edit-newline(a0, a1, a2) => { return root.edit-newline(a0, a1, a2); }
         message-dialog-open <=> root.message-dialog-open;
         message-dialog-edit: root.message-dialog-edit;
         message-dialog-title: root.message-dialog-title;

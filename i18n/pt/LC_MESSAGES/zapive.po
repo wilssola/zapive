@@ -718,6 +718,21 @@ msgid "message.menu.delete"
 msgstr "Apagar"
 
 
+msgid "message.dialog.edit_title"
+msgstr "Editar mensagem"
+
+msgid "message.dialog.edit_subtitle"
+msgstr "Você pode editar esta mensagem após o envio."
+
+msgid "message.dialog.cancel"
+msgstr "Cancelar"
+
+msgid "message.dialog.save_changes"
+msgstr "Salvar alterações"
+
+msgid "message.dialog.counter"
+msgstr "{0}/4.096"
+
 msgid "message.dialog.save"
 msgstr "Salvar"
 

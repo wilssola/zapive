@@ -128,12 +128,17 @@ export component DetailsLayer inherits ModalLayer {
 
 export component MessageDialogLayer inherits ModalLayer {
     callback submit-edit(string, string);
+    // Splices a line break into the text (Slint's TextInput ignores Ctrl+Enter).
+    callback edit-newline(string, int, int) -> string;
     in-out property <bool> message-dialog-open;
     in property <bool> message-dialog-edit;
     in property <string> message-dialog-title;
     in-out property <string> message-dialog-text;
     in property <string> message-dialog-id;
     in property <length> win-width;
+    property <int> max-chars: 4096;
+    property <bool> can-save: root.message-dialog-text.character-count > 0
+        && root.message-dialog-text.character-count <= root.max-chars;
 
     if root.mounted: Rectangle {
         width: 100%;
@@ -146,8 +151,8 @@ export component MessageDialogLayer inherits ModalLayer {
             }
         }
         Rectangle {
-            width: min(480px, root.win-width - 32px);
-            height: message-dialog-col.preferred-height + 40px;
+            width: min(root.message-dialog-edit ? 520px : 480px, root.win-width - 32px);
+            height: (root.message-dialog-edit ? edit-col.preferred-height : message-dialog-col.preferred-height) + 40px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: 20px;
@@ -163,20 +168,14 @@ export component MessageDialogLayer inherits ModalLayer {
             }
             TouchArea { }
             message-dialog-col := VerticalLayout {
+                visible: !root.message-dialog-edit;
                 padding: 20px;
                 spacing: 14px;
                 Text { text: root.message-dialog-title; color: Theme.text; font-size: 18px; }
-                if !root.message-dialog-edit: Text {
+                Text {
                     text: root.message-dialog-text;
                     color: Theme.text-dim;
                     wrap: word-wrap;
-                }
-                if root.message-dialog-edit: TextInput {
-                    text <=> root.message-dialog-text;
-                    color: Theme.text;
-                    wrap: word-wrap;
-                    height: 120px;
-                    init => { self.focus(); }
                 }
                 HorizontalLayout {
                     alignment: end;
@@ -185,10 +184,136 @@ export component MessageDialogLayer inherits ModalLayer {
                         label: @tr("common.action.close");
                         clicked => { root.message-dialog-open = false; }
                     }
-                    if root.message-dialog-edit: DialogButton {
-                        label: @tr("message.dialog.save");
+                }
+            }
+            edit-col := VerticalLayout {
+                visible: root.message-dialog-edit;
+                padding: 24px;
+                spacing: 18px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 14px;
+                        background: Theme.accent.with-alpha(0.18);
+                        Image {
+                            width: 22px;
+                            height: 22px;
+                            source: @image-url("../icons/edit.svg");
+                            colorize: Theme.accent-text;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: @tr("message.dialog.edit_title");
+                            color: Theme.text;
+                            font-size: 18px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: @tr("message.dialog.edit_subtitle");
+                            color: Theme.text-dim;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: start;
+                        IconButton {
+                            label: @tr("common.action.close");
+                            icon: @image-url("../icons/x.svg");
+                            clicked => { root.message-dialog-open = false; }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 170px;
+                    border-radius: 16px;
+                    background: Theme.field;
+                    border-width: 1px;
+                    border-color: edit-input.has-focus ? Theme.accent : Theme.field-border;
+                    animate border-color { duration: Theme.motion-fast; easing: ease-out; }
+                    edit-scroll := Flickable {
+                        x: 16px;
+                        y: 14px;
+                        width: parent.width - 32px;
+                        height: parent.height - 48px;
+                        content-height: max(self.height, edit-input.preferred-height);
+                        content-width: self.width;
+                        interactive: true;
+                        edit-input := TextInput {
+                            accessible-label: @tr("message.dialog.edit_title");
+                            width: parent.width;
+                            height: max(parent.height, self.preferred-height);
+                            text <=> root.message-dialog-text;
+                            color: Theme.text;
+                            font-size: 15px;
+                            single-line: false;
+                            wrap: word-wrap;
+                            vertical-alignment: top;
+                            selection-background-color: Theme.selection;
+                            selection-foreground-color: white;
+                            // TextInput never scrolls itself into view.
+                            cursor-position-changed(pos) => {
+                                if (pos.y < -edit-scroll.content-y) {
+                                    edit-scroll.content-y = -pos.y;
+                                } else if (pos.y + self.font-size * 1.4
+                                        > -edit-scroll.content-y + edit-scroll.height) {
+                                    edit-scroll.content-y =
+                                        edit-scroll.height - pos.y - self.font-size * 1.4;
+                                }
+                            }
+                            init => {
+                                if (!root.message-dialog-edit) { return; }
+                                self.focus();
+                                // Opens with the caret after the last character.
+                                self.set-selection-offsets(1000000000, 1000000000);
+                            }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) {
+                                    root.message-dialog-open = false;
+                                    return accept;
+                                }
+                                if (e.text == Key.Return && e.modifiers.control) {
+                                    let at = min(self.cursor-position-byte-offset, self.anchor-position-byte-offset);
+                                    self.text = root.edit-newline(self.text, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                                    self.set-selection-offsets(at + 1, at + 1);
+                                    return accept;
+                                }
+                                if (e.text == Key.Return && !e.modifiers.shift) {
+                                    if (root.can-save) {
+                                        root.submit-edit(root.message-dialog-id, root.message-dialog-text);
+                                    }
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+                    }
+                    Text {
+                        x: parent.width - self.width - 16px;
+                        y: parent.height - self.height - 10px;
+                        text: @tr("message.dialog.counter", root.message-dialog-text.character-count);
+                        color: root.message-dialog-text.character-count > root.max-chars ? Theme.danger : Theme.text-dim;
+                        font-size: 12px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    DialogButton {
+                        label: @tr("message.dialog.cancel");
+                        clicked => { root.message-dialog-open = false; }
+                    }
+                    DialogButton {
+                        label: @tr("message.dialog.save_changes");
                         primary: true;
-                        enabled: root.message-dialog-text != "";
+                        enabled: root.can-save;
+                        opacity: self.enabled ? 1 : 0.5;
                         clicked => { root.submit-edit(root.message-dialog-id, root.message-dialog-text); }
                     }
                 }

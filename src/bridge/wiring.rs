@@ -602,6 +602,26 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
+    // Ctrl+Enter in the edit dialog: Slint's TextInput ignores Ctrl-modified
+    // keys, so the newline is spliced in here, replacing any selection.
+    ui.on_edit_newline(|text, a, b| {
+        let (lo, hi) = (a.min(b).max(0) as usize, a.max(b).max(0) as usize);
+        let text = text.as_str();
+        let clamp = |i: usize| {
+            (0..=i.min(text.len()))
+                .rev()
+                .find(|&i| text.is_char_boundary(i))
+                .unwrap_or(0)
+        };
+        let (lo, hi) = (clamp(lo), clamp(hi));
+        format!(
+            "{}
+{}",
+            &text[..lo],
+            &text[hi..]
+        )
+        .into()
+    });
     ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
     ui.on_open_starred(|current_only| defer(move |b| b.open_starred(current_only)));
     ui.on_open_starred_item(|jid, id| {
