@@ -168,7 +168,7 @@ pub(super) async fn executor(
                     // The old credentials are still on disk, so the client
                     // built below logs in as the removed account, gets 401
                     // and asks for another reset instead of showing a QR.
-                    eprintln!("[wa] could not remove the logged-out session of {account:?}");
+                    eprintln!("[wa] could not remove the logged-out session");
                 }
                 match build_session(cmd_tx.clone(), &account).await {
                     Ok(next) => {
