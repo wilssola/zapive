@@ -17,6 +17,7 @@ import { ConfirmLayer, DetailsLayer, MessageDialogLayer, ReactionsLayer } from "
 import { MessageMenuLayer } from "message-menu.slint";
 import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
+import { MentionPicker } from "mention-picker.slint";
 import { DropOverlay } from "drop-overlay.slint";
 import { PinnedBanner } from "pinned-banner.slint";
 import { PrivacyVeil } from "privacy-veil.slint";
@@ -30,7 +31,7 @@ import { Splash } from "splash.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
-import { AccountItem, CallItem, ChatItem, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, SilencedCall, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell, TranslationModelItem } from "types.slint";
+import { AccountItem, CallItem, ChatItem, ComposerMention, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, SilencedCall, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell, TranslationModelItem } from "types.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
@@ -445,9 +446,18 @@ export component AppWindow inherits Window {
     in-out property <string> current-ephemeral-label: "";
     out property <string> composer-text: message-input.text;
     callback composer-changed(string, int);
+    callback composer-key(string, int, int, bool, bool) -> bool;
+    callback composer-cursor(int, int);
+    in-out property <[ComposerMention]> composer-mentions;
+    in-out property <int> mention-index: 0;
+    public function select-composer(anchor: int, cursor: int) {
+        message-input.set-selection-offsets(anchor, cursor);
+    }
     in-out property <bool> mention-open: false;
     in-out property <[MemberItem]> mention-rows;
+    in property <int> mention-member-count: 0;
     callback mention-pick(int);
+    callback mention-remove(int, int);
     callback mention-close();
 
     // Selection mode over the conversation
@@ -3234,6 +3244,91 @@ export component AppWindow inherits Window {
                                 if msg.hasStyled: Rectangle {
                                     width: styled-body.width;
                                     height: styled-body.preferred-height;
+                                    for span in msg.links: Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        visible: span.mention;
+                                        property <length> sx;
+                                        property <length> sy;
+                                        property <length> ex;
+                                        property <length> ey;
+                                        property <bool> at-end;
+                                        property <length> line-h: mention-line.preferred-height;
+                                        property <bool> one-line: abs((self.ey - self.sy) / 1px) < 2;
+                                        property <string> source: msg.plain;
+                                        property <int> start: span.start;
+                                        property <int> end: span.end;
+                                        function measure() {
+                                            if (span.mention) {
+                                                self.at-end = false;
+                                                mention-probe.set-selection-offsets(self.start, self.start);
+                                                self.at-end = true;
+                                                mention-probe.set-selection-offsets(self.end, self.end);
+                                            }
+                                        }
+                                        init => { self.measure(); }
+                                        changed source => { self.measure(); }
+                                        changed width => { self.measure(); }
+                                        changed height => { self.measure(); }
+                                        changed start => { self.measure(); }
+                                        changed end => { self.measure(); }
+                                        Timer {
+                                            interval: 30ms;
+                                            running: true;
+                                            triggered => { self.running = false; parent.measure(); }
+                                        }
+                                        mention-line := Text {
+                                            text: "Ag";
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            visible: false;
+                                        }
+                                        mention-probe := TextInput {
+                                            text: msg.plain;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            visible: false;
+                                            enabled: false;
+                                            read-only: true;
+                                            cursor-position-changed(pos) => {
+                                                if (parent.at-end) {
+                                                    parent.ex = pos.x;
+                                                    parent.ey = pos.y;
+                                                } else {
+                                                    parent.sx = pos.x;
+                                                    parent.sy = pos.y;
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            x: parent.sx;
+                                            y: parent.sy - 1px;
+                                            width: max(0px, (parent.one-line ? parent.ex : parent.width) - parent.sx);
+                                            height: parent.line-h + 2px;
+                                            border-radius: 7px;
+                                            background: #4cbb7b40;
+                                        }
+                                        Rectangle {
+                                            visible: !parent.one-line && parent.ey - parent.sy > parent.line-h * 1.5;
+                                            y: parent.sy + parent.line-h - 1px;
+                                            width: parent.width;
+                                            height: max(0px, parent.ey - parent.sy - parent.line-h + 2px);
+                                            border-radius: 7px;
+                                            background: #4cbb7b40;
+                                        }
+                                        Rectangle {
+                                            visible: !parent.one-line;
+                                            y: parent.ey - 1px;
+                                            width: max(0px, parent.ex);
+                                            height: parent.line-h + 2px;
+                                            border-radius: 7px;
+                                            background: #4cbb7b40;
+                                        }
+                                    }
                                     styled-body := StyledText {
                                         text: msg.styled;
                                         animate opacity { duration: 120ms; easing: ease-out; }
@@ -4080,7 +4175,7 @@ export component AppWindow inherits Window {
                             // host where the cursor is (for "@" mentions).
                             Rectangle {
                                 horizontal-stretch: 1;
-                                border-radius: 12px;
+                                border-radius: 22px;
                                 background: Theme.field;
                                 border-width: 1px;
                                 border-color: Theme.field-border;
@@ -4113,6 +4208,7 @@ export component AppWindow inherits Window {
                                             root.composer-changed(self.text, self.cursor-position-byte-offset);
                                         }
                                         cursor-position-changed(pos) => {
+                                            root.composer-cursor(self.cursor-position-byte-offset, self.anchor-position-byte-offset);
                                             if (pos.y < -composer-scroll.viewport-y) {
                                                 composer-scroll.viewport-y = -pos.y;
                                             } else if (pos.y + self.font-size * 1.3
@@ -4122,9 +4218,24 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                         key-pressed(event) => {
+                                            if (root.mention-open && root.mention-rows.length > 0) {
+                                                if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                                    root.mention-index = Math.mod(root.mention-index + root.mention-rows.length
+                                                        + (event.text == Key.DownArrow ? 1 : -1), root.mention-rows.length);
+                                                    return accept;
+                                                }
+                                                if (event.text == Key.Tab || (event.text == Key.Return && !event.modifiers.shift)) {
+                                                    root.mention-pick(root.mention-index);
+                                                    return accept;
+                                                }
+                                            }
+                                            if (root.composer-key(event.text, self.cursor-position-byte-offset,
+                                                self.anchor-position-byte-offset, event.modifiers.shift, event.modifiers.control)) {
+                                                return accept;
+                                            }
                                             if (event.text == Key.Return && !event.modifiers.shift) {
                                                 if (root.mention-open) {
-                                                    root.mention-pick(0);
+                                                    root.mention-pick(root.mention-index);
                                                 } else {
                                                     root.send-message(self.text);
                                                     composer-scroll.viewport-y = 0;
@@ -4142,6 +4253,86 @@ export component AppWindow inherits Window {
                                                 return accept;
                                             }
                                             reject
+                                        }
+                                    }
+                                    for mention in root.composer-mentions: Rectangle {
+                                        property <{ x: length, y: length }> token-start;
+                                        property <{ x: length, y: length }> token-end;
+                                        x: self.token-start.x - 5px;
+                                        y: self.token-start.y - 5px;
+                                        width: max(0px, self.token-end.x - self.token-start.x) + 7px;
+                                        height: 29px;
+                                        border-radius: 15px;
+                                        background: Theme.dark ? #075348 : #d3f4e6;
+                                        border-width: 1px;
+                                        border-color: Theme.accent.with-alpha(0.8);
+                                        visible: message-input.text != "" && self.token-start.y == self.token-end.y;
+                                        function measure() {
+                                            token-probe.set-selection-offsets(mention.start, mention.start);
+                                            token-probe.set-selection-offsets(mention.end, mention.end);
+                                        }
+                                        init => { self.measure(); }
+                                        property <string> source: message-input.text;
+                                        property <length> editor-width: message-input.width;
+                                        property <length> editor-height: message-input.height;
+                                        changed source => { self.measure(); }
+                                        changed editor-width => { self.measure(); }
+                                        changed editor-height => { self.measure(); }
+                                        property <int> start-offset: mention.start;
+                                        property <int> end-offset: mention.end;
+                                        changed start-offset => { self.measure(); }
+                                        changed end-offset => { self.measure(); }
+                                        Timer {
+                                            interval: 30ms;
+                                            running: true;
+                                            triggered => { self.running = false; parent.measure(); }
+                                        }
+                                        Text {
+                                            x: 9px;
+                                            width: max(0px, parent.width - 29px);
+                                            height: parent.height;
+                                            text: "@" + mention.label;
+                                            font-size: 15px;
+                                            font-weight: 600;
+                                            color: Theme.text;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        TouchArea {
+                                            x: parent.width - 23px;
+                                            y: 3px;
+                                            width: 22px;
+                                            height: parent.height - 6px;
+                                            mouse-cursor: pointer;
+                                            accessible-role: button;
+                                            accessible-label: @tr("accessibility.remove_mention");
+                                            clicked => { root.mention-remove(mention.start, mention.end); }
+                                            Image {
+                                                x: 4px;
+                                                y: (parent.height - 14px) / 2;
+                                                width: 14px;
+                                                height: 14px;
+                                                source: @image-url("../icons/x.svg");
+                                                colorize: Theme.text-dim;
+                                            }
+                                        }
+                                        token-probe := TextInput {
+                                            width: message-input.width;
+                                            height: message-input.height;
+                                            text: message-input.text;
+                                            font-size: message-input.font-size;
+                                            wrap: word-wrap;
+                                            single-line: false;
+                                            vertical-alignment: center;
+                                            opacity: 0;
+                                            enabled: false;
+                                            cursor-position-changed(pos) => {
+                                                if (self.cursor-position-byte-offset == mention.start) {
+                                                    parent.token-start = { x: pos.x, y: pos.y };
+                                                } else {
+                                                    parent.token-end = { x: pos.x, y: pos.y };
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -4461,32 +4652,37 @@ export component AppWindow inherits Window {
                 }
             }
 
+            Rectangle {
+                width: 1px;
+                height: 1px;
+                accessible-role: text;
+                accessible-live-region: AccessibleLiveness.polite;
+                property <bool> announce: root.mention-open && root.chat-open && !root.select-mode
+                    && root.mention-index >= 0 && root.mention-index < root.mention-rows.length;
+                property <MemberItem> active-member: root.mention-rows[root.mention-index];
+                property <string> active-name: self.active-member.jid == "all"
+                    ? @tr("mention.picker.all_members") + ", " + (root.mention-member-count > 0
+                        ? @tr("mention.picker.all_count", root.mention-member-count)
+                        : @tr("mention.picker.all_hint"))
+                    : self.active-member.name + (self.active-member.number != "" ? ", " + self.active-member.number : "")
+                        + (self.active-member.admin ? ", " + @tr("mention.picker.admin") : "");
+                accessible-label: self.announce
+                    ? @tr("accessibility.mention_suggestion", self.active-name, root.mention-index + 1, root.mention-rows.length)
+                    : "";
+            }
+
             // "@" mention list above the composer.
-            if root.mention-open && root.chat-open && !root.select-mode: Rectangle {
+            if root.mention-open && root.chat-open && !root.select-mode: MentionPicker {
                 x: 12px;
                 y: parent.height - self.height - composer-dock.height - 8px;
-                width: 360px;
-                height: min(320px, mention-col.preferred-height + 12px);
-                background: Theme.panel;
-                backdrop-blur: 0px;
-                border-width: Theme.glass ? 1px : 0px;
-                border-color: Theme.glass-rim;
-                if Theme.glass: Rectangle {
-                    border-radius: parent.border-radius;
-                    background: Theme.glass-sheen;
-                }
-                border-radius: 16px;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: Theme.glass-shadow;
-                clip: true;
-                mention-col := VerticalLayout {
-                    padding: 6px;
-                    spacing: 0;
-                    for m[i] in root.mention-rows: MemberRow {
-                        item: m;
-                        clicked => { root.mention-pick(i); }
-                    }
-                }
+                width: min(460px, max(0px, parent.width - 24px));
+                height: min(420px, self.preferred-height, max(0px, parent.height - composer-dock.height - 16px));
+                rows: root.mention-rows;
+                selected-index: root.mention-index;
+                member-count: root.mention-member-count;
+                pick(i) => { root.mention-pick(i); }
+                select(i) => { root.mention-index = i; }
+                dismiss => { root.mention-close(); root.focus-composer(); }
             }
 
             drop-overlay := DropOverlay {

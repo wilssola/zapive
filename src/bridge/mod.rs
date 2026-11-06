@@ -3,7 +3,7 @@
 // through WaService commands. Port of src/bridge.ts on master (phases 1-2:
 // login, chat list, conversation, text messages, replies, backfill).
 use crate::i18n::{t, ta};
-use crate::markup::{MentionTarget, has_markup, render_plain, target_at, to_markdown};
+use crate::markup::{MentionTarget, has_markup, render_plain, target_at};
 use crate::qr::{empty_image, qr_image};
 use crate::store::{
     Label, Member, MessageKind, Store, StoredMessage, clean_text, display_id, format_clock,
@@ -11,7 +11,9 @@ use crate::store::{
     now_secs, preview_body, reaction_summary, ticks_for,
 };
 use crate::vault::Vault;
-use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
+use crate::wa::{
+    AttachmentKind, Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService,
+};
 use crate::{
     AccountItem, AppWindow, CallItem, CallWindow, ChatItem, DetailRow, LabelItem, LinkSpan,
     MemberItem, MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem,

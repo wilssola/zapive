@@ -34,6 +34,7 @@ impl Bridge {
             self.video_volume = volume.clamp(0.0, 1.0);
         }
         self.wa.send(Cmd::MediaKey(vault.key_handle()));
+        crate::jobs::set_media_key(vault.key_handle());
         // On unless turned off, so existing installs keep their banners.
         self.notifications = vault.setting_get("notifications").as_deref() != Some("0");
         self.ui.set_notifications(self.notifications);

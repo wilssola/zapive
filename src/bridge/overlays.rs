@@ -19,10 +19,7 @@ impl Bridge {
         self.ui.set_lightbox_id(id.into());
         self.ui.set_lightbox_open(true);
         if let Some(path) = self.media_path.get(id) {
-            self.wa.send(Cmd::DecodeFull {
-                id: id.to_string(),
-                path: std::path::PathBuf::from(path),
-            });
+            crate::jobs::decode_full(id.to_string(), std::path::PathBuf::from(path));
         }
     }
 
@@ -56,10 +53,7 @@ impl Bridge {
             self.ui.set_video_w(m.media_w.max(320) as i32);
             self.ui.set_video_h(m.media_h.max(240) as i32);
             self.ui.set_video_open(true);
-            self.wa.send(Cmd::ZoomFrames {
-                id: id.to_string(),
-                path,
-            });
+            crate::jobs::zoom_frames(id.to_string(), path);
             return;
         }
         let poster = self.decoded.get(id).map(|(img, _, _)| img.clone());

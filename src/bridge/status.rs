@@ -112,11 +112,7 @@ impl Bridge {
                     })
                     .filter(|t| !t.is_empty());
                 if let Some(thumb) = thumb {
-                    self.wa.send(Cmd::DecodeThumb {
-                        id: item.id.clone(),
-                        bytes: thumb.to_vec(),
-                        link: false,
-                    });
+                    crate::jobs::decode_thumb(item.id.clone(), thumb.to_vec(), false);
                 }
                 if inner.image_message.is_set() && !self.media_inflight.contains(&item.id) {
                     self.media_inflight.insert(item.id.clone());

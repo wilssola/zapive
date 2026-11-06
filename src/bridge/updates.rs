@@ -93,7 +93,7 @@ impl Bridge {
     }
 
     pub(super) fn update_tick(&mut self) {
-        self.wa.send(Cmd::CheckUpdate);
+        crate::jobs::check_update();
         // Check again every hour while the app stays open: a release
         // published during the day shows up the same day.
         self.once(3_600_000, |b| b.update_tick());

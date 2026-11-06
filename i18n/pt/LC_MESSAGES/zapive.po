@@ -235,6 +235,33 @@ msgid_plural "ephemeral.minutes.other"
 msgstr[0] "{n} minuto"
 msgstr[1] "{n} minutos"
 
+msgid "accessibility.mention_suggestions"
+msgstr "Sugestões de menção"
+
+msgid "accessibility.mention_suggestion"
+msgstr "Sugestão de menção: {}, {} de {}"
+
+msgid "accessibility.remove_mention"
+msgstr "Remover menção"
+
+msgid "mention.picker.all_members"
+msgstr "Todos os membros"
+
+msgid "mention.picker.all_count"
+msgstr "Mencionar todos os {} participantes"
+
+msgid "mention.picker.all_hint"
+msgstr "Mencionar todos os participantes do grupo"
+
+msgid "mention.picker.all_tag"
+msgstr "@todos"
+
+msgid "mention.picker.admin"
+msgstr "Admin"
+
+msgid "mention.picker.participants"
+msgstr "Participantes do grupo"
+
 msgid "mention.all"
 msgstr "todos"
 

@@ -255,7 +255,13 @@ impl Bridge {
         self.cancel_preview();
         if let Some(jid) = jid {
             let origin = Some(path.to_string_lossy().into_owned());
-            self.wa.send(Cmd::SendDocument { jid, origin, path });
+            self.wa.send(Cmd::SendFile {
+                jid,
+                origin,
+                path,
+                kind: AttachmentKind::Document,
+                caption: None,
+            });
         }
         self.next_staged();
         true
