@@ -815,18 +815,28 @@ impl Store {
     }
 
     pub fn chat_name(&self, jid: &str) -> String {
-        if let Some(contact) = self.contacts.get(jid) {
-            return clean_text(contact);
+        // Names are stored under the canonical jid; rows written before an
+        // alias was learned may still sit under the raw one.
+        let canon = self.canon(jid);
+        let keys = [canon, jid];
+        for key in keys {
+            if let Some(contact) = self.contacts.get(key) {
+                return clean_text(contact);
+            }
         }
-        if let Some(meta) = self.chats.get(jid)
-            && !meta.name.is_empty()
-        {
-            return clean_text(&meta.name);
+        for key in keys {
+            if let Some(meta) = self.chats.get(key)
+                && !meta.name.is_empty()
+            {
+                return clean_text(&meta.name);
+            }
         }
-        if let Some(push) = self.push_names.get(jid) {
-            return clean_text(push);
+        for key in keys {
+            if let Some(push) = self.push_names.get(key) {
+                return clean_text(push);
+            }
         }
-        display_id(jid)
+        display_id(canon)
     }
 
     // Turns "@5511999999999" into "@Name" wherever we know who it is, so
@@ -922,7 +932,7 @@ impl Store {
     }
 
     pub fn upsert_contact(&mut self, jid: &str, name: Option<&str>, notify: Option<&str>) {
-        let jid = normalize_jid(jid);
+        let jid = self.canon_owned(&normalize_jid(jid));
         if jid.is_empty() {
             return;
         }
@@ -934,9 +944,23 @@ impl Store {
         }
     }
 
+    // Mute state synced from the phone. Creates the chat entry when the
+    // mute arrives before the conversation does.
+    pub fn set_muted(&mut self, jid: &str, muted: i64) {
+        let jid = self.canon_owned(&normalize_jid(jid));
+        if !is_displayable_jid(&jid) {
+            return;
+        }
+        let mut meta = self.chats.get(&jid).cloned().unwrap_or_default();
+        meta.jid = jid.clone();
+        meta.muted = muted;
+        self.chats.insert(jid, meta);
+    }
+
     // A jid counts as saved when the address book knows it, or when the
     // phone gave its DM a name (which it only does for saved contacts).
     pub fn is_saved(&self, jid: &str) -> bool {
+        let jid = self.canon(jid);
         if self.saved_contacts.contains(jid) {
             return true;
         }
@@ -981,10 +1005,11 @@ impl Store {
 
     // Group subjects / contact names discovered outside the chat events.
     pub fn set_name(&mut self, jid: &str, name: &str) {
-        if let Some(existing) = self.chats.get_mut(jid) {
+        let jid = self.canon_owned(jid);
+        if let Some(existing) = self.chats.get_mut(&jid) {
             existing.name = name.to_string();
         } else {
-            self.contacts.insert(jid.to_string(), name.to_string());
+            self.contacts.insert(jid, name.to_string());
         }
     }
 
@@ -1297,7 +1322,13 @@ impl Store {
         if self.messages_for(&jid).iter().any(|m| m.id == id) {
             return true;
         }
-        if self.flush_history(vault).is_err() {
+        // A message that is not in RAM was either never seen or already
+        // flushed, so the vault is current unless a clear or a merge is
+        // still queued. Flushing on every call turned a history sync into
+        // one transaction plus one index rewrite per message.
+        if (!self.deleted_jids.is_empty() || !self.pending_merges.is_empty())
+            && self.flush_history(vault).is_err()
+        {
             return false;
         }
         let Ok(Some(message)) = vault.history_id(&jid, id) else {
@@ -2200,6 +2231,35 @@ mod tests {
     }
 
     #[test]
+    fn history_chunk_ingest_writes_once_per_save_not_per_message() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_history_chunk_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        let started = std::time::Instant::now();
+        for n in 0..300 {
+            let stored = history_message("chat", n);
+            store.hydrate_id(&vault, "chat", &stored.id);
+            assert!(store.add_message(stored));
+        }
+        let ingest = started.elapsed();
+        let persisted = vault.history_page("chat", None, 1000).unwrap().len();
+        eprintln!(
+            "[bench] 300 messages ingested in {ingest:?}, {persisted} rows persisted before save"
+        );
+        assert_eq!(
+            persisted, 0,
+            "ingesting a history chunk must not commit to the vault per message"
+        );
+        store.save_checked(&vault).unwrap();
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 300);
+        drop(vault);
+        crate::paths::remove_db(&path);
+    }
+
+    #[test]
     fn recent_messages_merges_live_and_pages_past_pending_removals() {
         let path = std::env::temp_dir().join(format!(
             "zapive_recent_messages_removals_{}.db",
@@ -2248,6 +2308,22 @@ mod tests {
     }
 
     #[test]
+    fn hydrate_id_still_flushes_when_a_clear_is_queued() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_hydrate_clear_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        store.add_message(history_message("chat", 1));
+        store.save_checked(&vault).unwrap();
+        store.clear_messages("chat");
+        assert!(!store.hydrate_id(&vault, "chat", "00001"));
+        drop(vault);
+        crate::paths::remove_db(&path);
+    }
+
+    #[test]
     fn recent_messages_respects_clear_and_new_incoming_before_save() {
         let path = std::env::temp_dir().join(format!(
             "zapive_recent_messages_clear_{}.db",
@@ -2281,6 +2357,44 @@ mod tests {
             assert!(vault.history_id("chat", "00003").unwrap().is_none());
         }
         crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn set_muted_creates_and_updates_chat_mute_state() {
+        let mut store = Store::default();
+        store.set_muted("111@g.us", -1);
+        assert!(store.chats["111@g.us"].is_muted());
+        store.set_muted("111@g.us", 0);
+        assert!(!store.chats["111@g.us"].is_muted());
+        store.set_muted("status@broadcast", -1);
+        assert!(!store.chats.contains_key("status@broadcast"));
+    }
+
+    #[test]
+    fn contact_name_for_a_lid_shows_under_its_phone_number_alias() {
+        let mut store = Store::default();
+        store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
+        store.upsert_contact("111@lid", Some("Ana"), None);
+        assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Ana");
+    }
+
+    #[test]
+    fn contact_name_is_found_through_the_raw_lid_and_saved_state_follows() {
+        let mut store = Store::default();
+        store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
+        store.upsert_contact("111@lid", Some("Ana"), None);
+        assert_eq!(store.chat_name("111@lid"), "Ana");
+        assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Ana");
+        assert!(store.is_saved("111@lid"));
+    }
+
+    #[test]
+    fn set_name_for_a_lid_lands_on_the_phone_number_chat() {
+        let mut store = Store::default();
+        store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
+        store.set_name("111@lid", "Bia");
+        assert_eq!(store.chat_name("111@lid"), "Bia");
+        assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Bia");
     }
 
     #[test]

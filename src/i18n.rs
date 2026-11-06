@@ -554,11 +554,23 @@ mod tests {
         let _lock = LOCALE_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _ui = crate::AppWindow::new().expect("create Slint component");
-        for locale in ["en_US", "pt"] {
-            slint::select_bundled_translation(locale).expect("bundled locale exists");
-        }
-        slint::select_bundled_translation("en_US").expect("restore English bundle");
+        crate::bridge::ui_thread::run(|done| {
+            let ui = match crate::AppWindow::new() {
+                Ok(ui) => ui,
+                Err(error) => return done(Err(format!("create Slint component: {error:?}"))),
+            };
+            let mut result = Ok(());
+            for locale in ["en_US", "pt"] {
+                if let Err(error) = slint::select_bundled_translation(locale) {
+                    result = Err(format!("bundled locale {locale} missing: {error:?}"));
+                    break;
+                }
+            }
+            let restored = slint::select_bundled_translation("en_US")
+                .map_err(|error| format!("restore English bundle: {error:?}"));
+            drop(ui);
+            done(result.and(restored));
+        });
     }
 
     #[test]

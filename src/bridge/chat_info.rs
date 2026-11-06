@@ -584,9 +584,7 @@ impl Bridge {
 
     pub fn on_mute(&mut self, jid: &str, muted: i64) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        if let Some(meta) = self.store.chats.get_mut(&jid) {
-            meta.muted = muted;
-        }
+        self.store.set_muted(&jid, muted);
         if Some(&jid) == self.current_jid.as_ref() {
             self.apply_chat_settings_ui();
         }
@@ -903,5 +901,31 @@ impl Bridge {
             self.ui
                 .set_info_members(ta("info.members", &[&count.to_string()]).into());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn mute_for_a_chat_not_yet_in_the_store_is_kept() {
+        const GROUP: &str = "120363000000000003@g.us";
+        super::ui_thread::run(|done| {
+            let ui = AppWindow::new().expect("create Slint component");
+            wiring::install(&ui, WaService::detached());
+            let kept = Cell::new(false);
+            apply_now(|b| {
+                b.on_mute(GROUP, -1);
+                kept.set(b.store.chats.get(GROUP).is_some_and(|meta| meta.is_muted()));
+            });
+            drop(ui);
+            done(if kept.get() {
+                Ok(())
+            } else {
+                Err("mute for an unknown chat was dropped".to_string())
+            });
+        });
     }
 }

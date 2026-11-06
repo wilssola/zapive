@@ -390,3 +390,216 @@ impl Bridge {
         self.oneshots.push(timer);
     }
 }
+
+// One process-wide Slint thread for every test that needs an AppWindow.
+// Slint binds its platform to the first thread that touches it, so tests
+// on separate libtest threads fail with "platform was initialized in
+// another thread". `ui_thread::run` sends a closure to that thread, which
+// runs the event loop for the whole process; the closure reports through
+// the `done` callback it is given (so it can wait on timers). Calls are
+// serialised by a mutex.
+#[cfg(test)]
+pub(crate) mod ui_thread {
+    use std::sync::mpsc::{Sender, channel};
+    use std::sync::{Mutex, OnceLock};
+
+    type Job = Box<dyn FnOnce(Box<dyn FnOnce(Result<(), String>)>) + Send>;
+
+    // The thread builds a window first (that is what initialises the
+    // Slint platform and its event-loop proxy), reports ready, and only
+    // then runs the loop; `run` waits for the ready signal, so
+    // invoke_from_event_loop never races the platform setup.
+    fn started() -> &'static Mutex<()> {
+        static GATE: OnceLock<Mutex<()>> = OnceLock::new();
+        GATE.get_or_init(|| {
+            let (ready_tx, ready_rx) = channel::<()>();
+            std::thread::Builder::new()
+                .name("slint-test-ui".into())
+                .spawn(move || {
+                    let _anchor = crate::AppWindow::new().expect("anchor window");
+                    ready_tx.send(()).expect("ready signal");
+                    slint::run_event_loop_until_quit().expect("slint event loop");
+                })
+                .expect("spawn slint test thread");
+            ready_rx
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("slint thread never became ready");
+            Mutex::new(())
+        })
+    }
+
+    // Runs `job` on the Slint thread and blocks until it calls `done`.
+    pub(crate) fn run(job: impl FnOnce(Box<dyn FnOnce(Result<(), String>)>) + Send + 'static) {
+        let _gate = started().lock().unwrap_or_else(|p| p.into_inner());
+        let (tx, rx) = channel::<Result<(), String>>();
+        let job: Job = Box::new(job);
+        let report: Sender<_> = tx;
+        slint::invoke_from_event_loop(move || {
+            job(Box::new(move |result| {
+                let _ = report.send(result);
+            }))
+        })
+        .expect("slint thread alive");
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => panic!("{message}"),
+            Err(e) => panic!("ui job never finished: {e}"),
+        }
+    }
+}
+
+// RED fixtures for BUG-006: a group message delivered through the same
+// path wa.rs uses (wa_apply_at -> on_messages) while the user is not
+// navigating must reach the store and the visible chat list on its own.
+#[cfg(test)]
+mod idle_event_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::sync::Arc;
+    use whatsapp_rust::Jid;
+    use whatsapp_rust::types::events::{BatchOrigin, InboundMessage};
+    use whatsapp_rust::types::message::{MessageInfo, MessageSource};
+    use whatsapp_rust::waproto::whatsapp as wa;
+
+    const IDLE_GROUP: &str = "120363000000000001@g.us";
+    const ACTIVE_GROUP: &str = "120363000000000002@g.us";
+
+    #[derive(Debug, Default)]
+    struct Snapshot {
+        // Messages of the chat once the store has been written to the vault
+        // and hydrated back: cold chats are dropped from RAM after a flush
+        // by design, so RAM alone is not what "arrived" means.
+        persisted: usize,
+        rows: Vec<(String, String, i32)>,
+        refresh_queued: bool,
+        current_jid: Option<String>,
+    }
+
+    fn group_batch(group: &str, id: &str, text: &str) -> MessageBatch {
+        let info = MessageInfo {
+            source: MessageSource {
+                chat: group.parse::<Jid>().expect("group jid"),
+                sender: Jid::pn("5500000000001"),
+                is_from_me: false,
+                is_group: true,
+                ..Default::default()
+            },
+            id: id.into(),
+            push_name: "Fixture Sender".into(),
+            timestamp: whatsapp_rust::chrono::Utc::now(),
+            ..Default::default()
+        };
+        let message = wa::Message {
+            conversation: Some(text.to_string()),
+            ..Default::default()
+        };
+        let inbound = InboundMessage::builder()
+            .message(Arc::new(message))
+            .info(Arc::new(info))
+            .build();
+        MessageBatch::builder()
+            .messages(Arc::from(vec![inbound]))
+            .origin(BatchOrigin::Live)
+            .build()
+    }
+
+    // Delivers from a foreign thread, exactly like Pump::handle_event.
+    fn deliver(batch: MessageBatch) {
+        std::thread::spawn(move || wa_apply_at(0, move |b| b.on_messages(&batch)))
+            .join()
+            .expect("wa thread");
+    }
+
+    fn snapshot(group: &str) -> Snapshot {
+        let seen = Cell::new(Snapshot::default());
+        apply_now(|b| {
+            let persisted = match b.vault.take() {
+                Some(vault) => {
+                    let saved = b.store.save_checked(&vault);
+                    b.store.evict(group);
+                    b.store.hydrate(&vault, group);
+                    b.vault = Some(vault);
+                    saved
+                        .map(|_| b.store.messages_for(group).len())
+                        .unwrap_or(0)
+                }
+                None => 0,
+            };
+            seen.set(Snapshot {
+                persisted,
+                rows: (0..b.chats_model.row_count())
+                    .filter_map(|i| b.chats_model.row_data(i))
+                    .map(|r| (r.jid.to_string(), r.preview.to_string(), r.unread))
+                    .collect(),
+                refresh_queued: b.refresh_queued,
+                current_jid: b.current_jid.clone(),
+            })
+        });
+        seen.into_inner()
+    }
+
+    fn check(s: &Snapshot, group: &str, text: &str) -> Result<(), String> {
+        if s.current_jid.is_some() {
+            return Err(format!("fixture navigated: {s:?}"));
+        }
+        if s.persisted != 1 {
+            return Err(format!("message not stored: {s:?}"));
+        }
+        if s.refresh_queued {
+            return Err(format!("chat-list refresh never drained: {s:?}"));
+        }
+        let Some(row) = s.rows.iter().find(|(jid, _, _)| jid == group) else {
+            return Err(format!("group missing from chat list: {s:?}"));
+        };
+        if !row.1.contains(text) {
+            return Err(format!("stale preview in chat list: {s:?}"));
+        }
+        if row.2 != 1 {
+            return Err(format!("unread not updated: {s:?}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn group_message_updates_chat_list_without_navigation_idle_and_active() {
+        let path =
+            std::env::temp_dir().join(format!("zapive-red-bug006-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = path.to_string_lossy().to_string();
+        ui_thread::run(move |done| {
+            let ui = AppWindow::new().expect("create Slint component");
+            wiring::install(&ui, WaService::detached());
+            apply_now(|b| {
+                let mut vault = Vault::open_at(&db).expect("temp vault");
+                vault.open().expect("open temp vault");
+                b.vault = Some(vault);
+                b.epoch = 0;
+                b.notifications = false;
+                b.ui.set_message_sound(false);
+                b.set_window_idle(true);
+            });
+            slint::Timer::single_shot(Duration::from_millis(100), || {
+                deliver(group_batch(IDLE_GROUP, "RED-BUG006-IDLE", "red-idle-text"));
+            });
+            slint::Timer::single_shot(Duration::from_millis(600), || {
+                apply_now(|b| b.set_window_idle(false));
+                deliver(group_batch(
+                    ACTIVE_GROUP,
+                    "RED-BUG006-ACTIVE",
+                    "red-active-text",
+                ));
+            });
+            slint::Timer::single_shot(Duration::from_millis(1300), move || {
+                let idle = check(&snapshot(IDLE_GROUP), IDLE_GROUP, "red-idle-text");
+                let active = check(&snapshot(ACTIVE_GROUP), ACTIVE_GROUP, "red-active-text");
+                drop(ui);
+                done(if idle.is_ok() && active.is_ok() {
+                    Ok(())
+                } else {
+                    Err(format!("idle: {idle:?}; active: {active:?}"))
+                });
+            });
+        });
+        let _ = std::fs::remove_file(&path);
+    }
+}

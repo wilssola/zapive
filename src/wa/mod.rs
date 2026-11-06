@@ -36,6 +36,7 @@ mod util;
 use calls::*;
 use executor::*;
 use pump::*;
+pub use pump::{chat_tag, delay_secs};
 use session::*;
 use util::*;
 
@@ -402,6 +403,7 @@ pub struct HistChat {
     pub timestamp: i64,
     pub unread: Option<u32>,
     pub pinned: Option<i64>,
+    pub muted: Option<i64>,
     pub archived: Option<bool>,
 }
 
@@ -465,3 +467,13 @@ impl WaService {
 }
 
 // ---- call plumbing ----
+
+#[cfg(test)]
+impl WaService {
+    // A service whose commands go nowhere; lets bridge tests build a Bridge
+    // without a network session.
+    pub(crate) fn detached() -> Self {
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        Self { cmd_tx }
+    }
+}

@@ -239,3 +239,141 @@ mod wallpaper_tests {
         assert_eq!(parse_hex_color(&color_hex(color)), Some((0x12, 0xAB, 0xEF)));
     }
 }
+
+#[cfg(test)]
+mod shortcuts_row_tests {
+    use crate::AppWindow;
+    use slint::ComponentHandle;
+    use slint::platform::{PointerEventButton, WindowEvent};
+    use std::time::Duration;
+
+    const SIZE: (f32, f32) = (1100.0, 700.0);
+
+    // Lets the 180ms modal fade and the 300ms splash fade finish.
+    fn settle() {
+        for _ in 0..3 {
+            std::thread::sleep(Duration::from_millis(250));
+            slint::platform::update_timers_and_animations();
+        }
+    }
+
+    fn open_settings_general() -> AppWindow {
+        let ui = AppWindow::new().expect("create Slint component");
+        slint::select_bundled_translation("en_US").expect("bundled locale exists");
+        ui.set_screen("main".into());
+        // The splash (TouchArea over the whole window, ui/components/splash.slint)
+        // stays up while app-loading is true, which is the default.
+        ui.set_app_loading(false);
+        ui.set_settings_section("general".into());
+        ui.set_settings_open(true);
+        ui.show().expect("show window");
+        ui.window()
+            .set_size(slint::LogicalSize::new(SIZE.0, SIZE.1));
+        settle();
+        ui
+    }
+
+    fn click(ui: &AppWindow, x: f32, y: f32) {
+        let position = slint::LogicalPosition::new(x, y);
+        let window = ui.window();
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        window.dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    }
+
+    // Runs on the process-wide Slint thread shared with the other window
+    // tests (`ui_thread`), so it can coexist with them in one test run. The
+    // two scenarios stay in one test: they reuse that thread sequentially.
+    #[test]
+    fn settings_general_shortcuts_row_opens_a_visible_dialog() {
+        crate::bridge::ui_thread::run(|done| {
+            let outcome = std::panic::catch_unwind(|| {
+                shortcuts_row_opens_the_dialog();
+                shortcuts_dialog_is_clickable_above_open_settings();
+            });
+            done(outcome.map_err(|payload| {
+                payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "shortcuts test panicked".to_string())
+            }));
+        });
+    }
+
+    // Clicks the content area of Settings > General (right of the category
+    // list) until the "Keyboard shortcuts" row reacts.
+    fn shortcuts_row_opens_the_dialog() {
+        let ui = open_settings_general();
+        let size = ui.window().size();
+        assert!(ui.get_settings_open());
+        assert!(!ui.get_shortcuts_open());
+        // Content starts below the 78px header; stay under it so the back
+        // button (top-right) is never hit. Diagnostics say what the clicks
+        // reached when the row does not react.
+        let toggled = std::rc::Rc::new(std::cell::Cell::new(false));
+        let probe = toggled.clone();
+        ui.on_autostart_changed(move |_| probe.set(true));
+        let mut toggled_at = None;
+        let mut closed_at = None;
+        let mut opened_at = None;
+        let mut y = 100.0;
+        'scan: while y < SIZE.1 - 10.0 {
+            let mut x = 380.0;
+            while x < SIZE.0 - 10.0 {
+                click(&ui, x, y);
+                if toggled_at.is_none() && toggled.get() {
+                    toggled_at = Some((x, y));
+                }
+                if !ui.get_settings_open() {
+                    closed_at = Some((x, y));
+                    break 'scan;
+                }
+                if ui.get_shortcuts_open() {
+                    opened_at = Some((x, y));
+                    break 'scan;
+                }
+                x += 20.0;
+            }
+            y += 4.0;
+        }
+        assert!(
+            opened_at.is_some(),
+            "no click reached the Keyboard shortcuts row: window={}x{} scale={} autostart_toggle_hit={toggled_at:?} settings_closed_by_click={closed_at:?}",
+            size.width,
+            size.height,
+            ui.window().scale_factor(),
+        );
+    }
+
+    // With Settings open, the shortcuts dialog must sit above it: a click on
+    // its close button (top-right of the centred 520px dialog) closes it.
+    fn shortcuts_dialog_is_clickable_above_open_settings() {
+        let ui = open_settings_general();
+        ui.set_shortcuts_open(true);
+        settle();
+        assert!(ui.get_settings_open());
+        let mut y = 22.0;
+        'scan: while y < 90.0 {
+            let mut x = 700.0;
+            while x < 806.0 {
+                click(&ui, x, y);
+                if !ui.get_shortcuts_open() {
+                    break 'scan;
+                }
+                x += 6.0;
+            }
+            y += 6.0;
+        }
+        assert!(
+            !ui.get_shortcuts_open(),
+            "the shortcuts dialog did not receive clicks while Settings was open"
+        );
+    }
+}
