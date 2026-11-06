@@ -44,7 +44,7 @@ pub(super) async fn build_session(
     let client = bot.client();
     client
         .subscribe_handler(Arc::new(Pump {
-            client: client.clone(),
+            client: Arc::downgrade(&client),
             cmd_tx,
             epoch: SESSION_EPOCH.load(Ordering::SeqCst),
             rt: tokio::runtime::Handle::current(),

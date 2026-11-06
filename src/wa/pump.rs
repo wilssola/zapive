@@ -17,7 +17,10 @@ pub(crate) fn receipt_status(kind: &ReceiptType) -> u32 {
 // Sync event tap on the library's dispatch thread: converts each event
 // into UI work (via ui_apply) or a command back to the executor.
 pub(super) struct Pump {
-    pub(super) client: Arc<Client>,
+    // Weak on purpose: the pump is registered on this very client's event
+    // bus, so a strong handle would be a cycle that keeps the client (and
+    // its session database open) alive for the rest of the process.
+    pub(super) client: std::sync::Weak<Client>,
     pub(super) cmd_tx: mpsc::UnboundedSender<Cmd>,
     // The epoch this client was built under; see SESSION_EPOCH.
     pub(super) epoch: u64,
@@ -44,18 +47,19 @@ impl EventHandler for Pump {
                 log::info!("[wa] connected ts={}", crate::store::now_secs());
                 self.failures.store(0, Ordering::Relaxed);
                 self.stopped.store(false, Ordering::Relaxed);
-                let pn = self
-                    .client
+                let Some(client) = self.client.upgrade() else {
+                    return;
+                };
+                let pn = client
                     .pn()
                     .map(|j| j.to_non_ad_string())
                     .unwrap_or_default();
-                let lid = self
-                    .client
+                let lid = client
                     .lid()
                     .map(|j| j.to_non_ad_string())
                     .unwrap_or_default();
                 // What the account switcher calls this account.
-                let name = self.client.push_name();
+                let name = client.push_name();
                 ui_apply(move |b| b.on_open(&pn, &lid, &name));
             }
             Event::StreamReplaced(_) => {
