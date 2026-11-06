@@ -439,3 +439,159 @@ pub(crate) mod ui_thread {
         }
     }
 }
+
+// RED fixtures for BUG-006: a group message delivered through the same
+// path wa.rs uses (wa_apply_at -> on_messages) while the user is not
+// navigating must reach the store and the visible chat list on its own.
+#[cfg(test)]
+mod idle_event_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::sync::Arc;
+    use whatsapp_rust::Jid;
+    use whatsapp_rust::types::events::{BatchOrigin, InboundMessage};
+    use whatsapp_rust::types::message::{MessageInfo, MessageSource};
+    use whatsapp_rust::waproto::whatsapp as wa;
+
+    const IDLE_GROUP: &str = "120363000000000001@g.us";
+    const ACTIVE_GROUP: &str = "120363000000000002@g.us";
+
+    #[derive(Debug, Default)]
+    struct Snapshot {
+        // Messages of the chat once the store has been written to the vault
+        // and hydrated back: cold chats are dropped from RAM after a flush
+        // by design, so RAM alone is not what "arrived" means.
+        persisted: usize,
+        rows: Vec<(String, String, i32)>,
+        refresh_queued: bool,
+        current_jid: Option<String>,
+    }
+
+    fn group_batch(group: &str, id: &str, text: &str) -> MessageBatch {
+        let info = MessageInfo {
+            source: MessageSource {
+                chat: group.parse::<Jid>().expect("group jid"),
+                sender: Jid::pn("5500000000001"),
+                is_from_me: false,
+                is_group: true,
+                ..Default::default()
+            },
+            id: id.into(),
+            push_name: "Fixture Sender".into(),
+            timestamp: whatsapp_rust::chrono::Utc::now(),
+            ..Default::default()
+        };
+        let message = wa::Message {
+            conversation: Some(text.to_string()),
+            ..Default::default()
+        };
+        let inbound = InboundMessage::builder()
+            .message(Arc::new(message))
+            .info(Arc::new(info))
+            .build();
+        MessageBatch::builder()
+            .messages(Arc::from(vec![inbound]))
+            .origin(BatchOrigin::Live)
+            .build()
+    }
+
+    // Delivers from a foreign thread, exactly like Pump::handle_event.
+    fn deliver(batch: MessageBatch) {
+        std::thread::spawn(move || wa_apply_at(0, move |b| b.on_messages(&batch)))
+            .join()
+            .expect("wa thread");
+    }
+
+    fn snapshot(group: &str) -> Snapshot {
+        let seen = Cell::new(Snapshot::default());
+        apply_now(|b| {
+            let persisted = match b.vault.take() {
+                Some(vault) => {
+                    let saved = b.store.save_checked(&vault);
+                    b.store.evict(group);
+                    b.store.hydrate(&vault, group);
+                    b.vault = Some(vault);
+                    saved
+                        .map(|_| b.store.messages_for(group).len())
+                        .unwrap_or(0)
+                }
+                None => 0,
+            };
+            seen.set(Snapshot {
+                persisted,
+                rows: (0..b.chats_model.row_count())
+                    .filter_map(|i| b.chats_model.row_data(i))
+                    .map(|r| (r.jid.to_string(), r.preview.to_string(), r.unread))
+                    .collect(),
+                refresh_queued: b.refresh_queued,
+                current_jid: b.current_jid.clone(),
+            })
+        });
+        seen.into_inner()
+    }
+
+    fn check(s: &Snapshot, group: &str, text: &str) -> Result<(), String> {
+        if s.current_jid.is_some() {
+            return Err(format!("fixture navigated: {s:?}"));
+        }
+        if s.persisted != 1 {
+            return Err(format!("message not stored: {s:?}"));
+        }
+        if s.refresh_queued {
+            return Err(format!("chat-list refresh never drained: {s:?}"));
+        }
+        let Some(row) = s.rows.iter().find(|(jid, _, _)| jid == group) else {
+            return Err(format!("group missing from chat list: {s:?}"));
+        };
+        if !row.1.contains(text) {
+            return Err(format!("stale preview in chat list: {s:?}"));
+        }
+        if row.2 != 1 {
+            return Err(format!("unread not updated: {s:?}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn group_message_updates_chat_list_without_navigation_idle_and_active() {
+        let path =
+            std::env::temp_dir().join(format!("zapive-red-bug006-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = path.to_string_lossy().to_string();
+        ui_thread::run(move |done| {
+            let ui = AppWindow::new().expect("create Slint component");
+            wiring::install(&ui, WaService::detached());
+            apply_now(|b| {
+                let mut vault = Vault::open_at(&db).expect("temp vault");
+                vault.open().expect("open temp vault");
+                b.vault = Some(vault);
+                b.epoch = 0;
+                b.notifications = false;
+                b.ui.set_message_sound(false);
+                b.set_window_idle(true);
+            });
+            slint::Timer::single_shot(Duration::from_millis(100), || {
+                deliver(group_batch(IDLE_GROUP, "RED-BUG006-IDLE", "red-idle-text"));
+            });
+            slint::Timer::single_shot(Duration::from_millis(600), || {
+                apply_now(|b| b.set_window_idle(false));
+                deliver(group_batch(
+                    ACTIVE_GROUP,
+                    "RED-BUG006-ACTIVE",
+                    "red-active-text",
+                ));
+            });
+            slint::Timer::single_shot(Duration::from_millis(1300), move || {
+                let idle = check(&snapshot(IDLE_GROUP), IDLE_GROUP, "red-idle-text");
+                let active = check(&snapshot(ACTIVE_GROUP), ACTIVE_GROUP, "red-active-text");
+                drop(ui);
+                done(if idle.is_ok() && active.is_ok() {
+                    Ok(())
+                } else {
+                    Err(format!("idle: {idle:?}; active: {active:?}"))
+                });
+            });
+        });
+        let _ = std::fs::remove_file(&path);
+    }
+}

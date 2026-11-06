@@ -898,6 +898,18 @@ mod receipt_tests {
     }
 
     #[test]
+    fn diagnostic_chat_tag_is_short_stable_and_hides_the_jid() {
+        let jid = "120363000000000001@g.us";
+        let tag = chat_tag(jid);
+        assert_eq!(tag.len(), 6);
+        assert_eq!(tag, chat_tag(jid));
+        assert_ne!(tag, chat_tag("120363000000000002@g.us"));
+        assert_ne!(salted_tag(&[1; 16], jid), salted_tag(&[2; 16], jid));
+        assert_eq!(salted_tag(&[1; 16], jid), salted_tag(&[1; 16], jid));
+        assert_eq!(delay_secs(1_000, 940), 60);
+    }
+
+    #[test]
     fn history_sync_carries_the_previous_mute() {
         assert_eq!(history_mute(None), None);
         assert_eq!(history_mute(Some(0)), None);
@@ -966,6 +978,7 @@ impl EventHandler for Pump {
                 ui_apply(|b| b.on_status(&t("status.connecting")));
             }
             Event::Connected(_) => {
+                log::info!("[wa] connected ts={}", crate::store::now_secs());
                 self.failures.store(0, Ordering::Relaxed);
                 self.stopped.store(false, Ordering::Relaxed);
                 let pn = self
@@ -1002,9 +1015,48 @@ impl EventHandler for Pump {
                 }
             }
             Event::Disconnected(d) => {
+                log::info!(
+                    "[wa] disconnected ts={} kind={} clean={}",
+                    crate::store::now_secs(),
+                    disconnect_kind(&d.reason),
+                    d.reason.is_clean_shutdown()
+                );
                 if !d.reason.is_clean_shutdown() && !self.stopped.load(Ordering::Relaxed) {
                     self.count_failure();
                 }
+            }
+            Event::UndecryptableMessage(u) => {
+                log::info!(
+                    "[wa] undecryptable ts={} msg_ts={} group={} unavailable={} chat={}",
+                    crate::store::now_secs(),
+                    u.info.timestamp.timestamp(),
+                    u.info.source.is_group,
+                    u.is_unavailable,
+                    chat_tag(&u.info.source.chat.to_non_ad_string())
+                );
+            }
+            Event::OfflineSyncPreview(p) => {
+                log::info!(
+                    "[wa] offline preview ts={} total={} messages={}",
+                    crate::store::now_secs(),
+                    p.total,
+                    p.messages
+                );
+            }
+            Event::OfflineSyncCompleted(c) => {
+                log::info!(
+                    "[wa] offline completed ts={} count={}",
+                    crate::store::now_secs(),
+                    c.count
+                );
+            }
+            Event::OfflineSyncInterrupted(i) => {
+                log::info!(
+                    "[wa] offline interrupted ts={} total={} delivered={}",
+                    crate::store::now_secs(),
+                    i.total,
+                    i.delivered
+                );
             }
             Event::Messages(_) => {
                 let event = event.clone();
@@ -1351,6 +1403,47 @@ fn pin_stamp(pinned: bool, ts: i64) -> i64 {
 // value is news; unpinning arrives as a PinUpdate.
 fn history_pin(pinned: Option<u32>) -> Option<i64> {
     pinned.filter(|p| *p > 0).map(i64::from)
+}
+
+fn tag_salt() -> &'static [u8; 16] {
+    static SALT: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+    SALT.get_or_init(|| {
+        use rand::RngCore as _;
+        let mut salt = [0u8; 16];
+        rand::rng().fill_bytes(&mut salt);
+        salt
+    })
+}
+
+fn salted_tag(salt: &[u8; 16], chat: &str) -> String {
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(salt);
+    hasher.update(chat.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .take(3)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+pub fn chat_tag(chat: &str) -> String {
+    salted_tag(tag_salt(), chat)
+}
+
+pub fn delay_secs(now: i64, message_ts: i64) -> i64 {
+    now.saturating_sub(message_ts)
+}
+
+fn disconnect_kind(reason: &whatsapp_rust::wacore::net::DisconnectReason) -> String {
+    use whatsapp_rust::wacore::net::DisconnectReason as R;
+    match reason {
+        R::ServerClose { code, .. } => format!("server_close:{}", code.unwrap_or(0)),
+        R::StreamEnded => "stream_ended".into(),
+        R::ReadError(_) => "read_error".into(),
+        R::Unknown => "unknown".into(),
+    }
 }
 
 const MUTE_FOREVER_HORIZON_SECS: i64 = 100 * 365 * 24 * 3600;

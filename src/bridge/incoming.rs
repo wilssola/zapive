@@ -21,6 +21,41 @@ pub(super) fn group_typing_status(names: &[String], overflow: bool) -> String {
     )
 }
 
+#[derive(Default)]
+pub(super) struct BatchSummary {
+    pub count: usize,
+    pub max_delay: i64,
+    pub group: bool,
+    pub offline: bool,
+    pub tag: String,
+}
+
+impl BatchSummary {
+    pub(super) fn add(
+        &mut self,
+        delay: i64,
+        group: bool,
+        offline: bool,
+        tag: impl FnOnce() -> String,
+    ) {
+        if self.count == 0 || delay > self.max_delay {
+            self.max_delay = delay;
+            self.tag = tag();
+        }
+        self.count += 1;
+        self.group |= group;
+        self.offline |= offline;
+    }
+
+    pub(super) fn level(&self) -> log::Level {
+        if self.offline || self.max_delay > 30 {
+            log::Level::Info
+        } else {
+            log::Level::Debug
+        }
+    }
+}
+
 pub(super) type TypingMap = HashMap<String, HashMap<String, (u64, String)>>;
 
 pub(super) fn drop_typing(
@@ -214,7 +249,39 @@ impl Bridge {
         }
     }
 
+    fn log_batch(&self, batch: &MessageBatch) {
+        let now = now_secs();
+        let mut summary = BatchSummary::default();
+        for inbound in batch.iter() {
+            let info = &inbound.info;
+            let chat = info.source.chat.to_non_ad_string();
+            if chat == "status@broadcast" {
+                continue;
+            }
+            summary.add(
+                crate::wa::delay_secs(now, info.timestamp.timestamp()),
+                info.source.is_group,
+                info.is_offline,
+                || crate::wa::chat_tag(&chat),
+            );
+        }
+        if summary.count == 0 {
+            return;
+        }
+        log::log!(
+            summary.level(),
+            "[wa] messages count={} max_delay={}s group={} offline={} origin={:?} chat={}",
+            summary.count,
+            summary.max_delay,
+            summary.group,
+            summary.offline,
+            batch.origin,
+            summary.tag
+        );
+    }
+
     pub fn on_messages(&mut self, batch: &MessageBatch) {
+        self.log_batch(batch);
         for inbound in batch.iter() {
             let info = &inbound.info;
             let chat = info.source.chat.to_non_ad_string();
@@ -794,5 +861,23 @@ mod tests {
         assert!(typing[phone].contains_key(phone));
         assert!(typing[group].contains_key(phone));
         assert!(!typing.contains_key(lid));
+    }
+
+    #[test]
+    fn batch_summary_logs_at_info_only_for_offline_or_late_batches() {
+        let mut live = BatchSummary::default();
+        live.add(2, true, false, || "aaaaaa".to_string());
+        live.add(5, false, false, || "bbbbbb".to_string());
+        assert_eq!((live.count, live.max_delay, live.group), (2, 5, true));
+        assert_eq!(live.tag, "bbbbbb");
+        assert_eq!(live.level(), log::Level::Debug);
+
+        let mut late = BatchSummary::default();
+        late.add(31, false, false, || "cccccc".to_string());
+        assert_eq!(late.level(), log::Level::Info);
+
+        let mut offline = BatchSummary::default();
+        offline.add(0, false, true, || "dddddd".to_string());
+        assert_eq!(offline.level(), log::Level::Info);
     }
 }
