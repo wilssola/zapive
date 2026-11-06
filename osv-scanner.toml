@@ -1,0 +1,51 @@
+# OSV-Scanner configuration, picked up from the directory that holds Cargo.lock.
+#
+# Every entry below is an "unmaintained crate" RUSTSEC advisory: none describes
+# an exploitable vulnerability, and none has a fixed release to upgrade to.
+# Each is ignored by ID, with an expiry, so the scanner keeps flagging any new
+# advisory (including a real vulnerability in these same crates).
+# Re-review before the ignoreUntil date; remove an entry as soon as the
+# upstream dependency drops the crate.
+
+# Build-time only: pulled by slint-build -> i-slint-compiler, never linked
+# into the shipped binary.
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0141"
+ignoreUntil = 2027-02-06
+reason = "bincode 2.0.1 unmaintained advisory; build-time only via slint-build/i-slint-compiler (typed-index-collections), not in the runtime binary; no fixed release"
+
+# Compile-time proc-macro only (nokhwa, pulp/exr via image, etc.).
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+ignoreUntil = 2027-02-06
+reason = "paste 1.0.15 unmaintained advisory; proc-macro executed at compile time only, not in the runtime binary; no fixed release"
+
+# Runtime, but only via spin_on in i-slint-renderer-skia (Slint pinned git rev).
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0441"
+ignoreUntil = 2027-02-06
+reason = "pin-utils 0.1.0 unmaintained advisory (repository archived); pulled transitively by spin_on in i-slint-renderer-skia, no known vulnerability, no fixed release; removal depends on a Slint bump"
+
+# Runtime: direct ab_glyph (src/media.rs preview font) and winit's sctk-adwaita.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+ignoreUntil = 2027-02-06
+reason = "ttf-parser 0.25.1 unmaintained advisory; via owned_ttf_parser/ab_glyph (latest 0.2.32 still depends on it), no known vulnerability, no fixed release; migrate when ab_glyph moves to skrifa"
+
+# Runtime on Linux only: zbus 5 stack pulled by notify-rust and accesskit_unix/atspi.
+# The merge into zbus 6 is blocked: notify-rust 4.18.2 and accesskit_unix 0.24.1
+# (both latest) still require zbus ^5. 4.3.5 / 5.15.1 are still flagged.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+ignoreUntil = 2027-02-06
+reason = "zbus_names 4.3.4 unmaintained advisory (merged into zbus 6); latest standalone release still flagged, upgrade blocked by notify-rust/accesskit_unix requiring zbus ^5"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+ignoreUntil = 2027-02-06
+reason = "zvariant 5.15.0 unmaintained advisory (merged into zbus 6); latest standalone release still flagged, upgrade blocked by notify-rust/accesskit_unix requiring zbus ^5"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+ignoreUntil = 2027-02-06
+reason = "zvariant_derive 5.15.0 unmaintained advisory (merged into zbus 6); latest standalone release still flagged, upgrade blocked by notify-rust/accesskit_unix requiring zbus ^5"
