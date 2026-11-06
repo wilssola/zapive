@@ -21,6 +21,53 @@ pub(super) fn group_typing_status(names: &[String], overflow: bool) -> String {
     )
 }
 
+pub(super) type TypingMap = HashMap<String, HashMap<String, (u64, String)>>;
+
+pub(super) fn drop_typing(
+    typing: &mut TypingMap,
+    chat: &str,
+    sender: &str,
+    generation: Option<u64>,
+    canon: impl Fn(&str) -> String,
+) -> bool {
+    let (chat, sender) = (canon(chat), canon(sender));
+    let mut removed = false;
+    typing.retain(|key, members| {
+        if canon(key) != chat {
+            return true;
+        }
+        members.retain(|member, (token, _)| {
+            let hit = canon(member) == sender && generation.is_none_or(|g| g == *token);
+            removed |= hit;
+            !hit
+        });
+        !members.is_empty()
+    });
+    removed
+}
+
+pub(super) fn canonicalize_typing(typing: &mut TypingMap, canon: impl Fn(&str) -> String) -> bool {
+    let stale = typing.iter().any(|(chat, members)| {
+        canon(chat) != *chat || members.keys().any(|member| canon(member) != *member)
+    });
+    if !stale {
+        return false;
+    }
+    for (chat, members) in std::mem::take(typing) {
+        let merged = typing.entry(canon(&chat)).or_default();
+        for (member, value) in members {
+            let member = canon(&member);
+            if merged
+                .get(&member)
+                .is_none_or(|(token, _)| *token < value.0)
+            {
+                merged.insert(member, value);
+            }
+        }
+    }
+    true
+}
+
 pub(super) fn typing_participants(members: &HashMap<String, (u64, String)>) -> (Vec<String>, i32) {
     let mut participants: Vec<_> = members.keys().cloned().collect();
     participants.sort();
@@ -466,17 +513,22 @@ impl Bridge {
         self.update_typing_status();
         self.schedule_refresh_chats();
         self.once(25_000, move |b| {
-            if b.chat_typing
-                .get(&jid)
-                .and_then(|members| members.get(&sender))
-                .is_some_and(|(token, _)| *token == generation)
-            {
-                b.clear_participant_typing(&jid, &sender);
+            if b.remove_typing(&jid, &sender, Some(generation)) {
+                b.schedule_refresh_chats();
+                b.update_typing_status();
             }
         });
     }
 
+    pub(super) fn canonicalize_typing_keys(&mut self) -> bool {
+        let store = &self.store;
+        canonicalize_typing(&mut self.chat_typing, |jid| {
+            store.canon_owned(&normalize_jid(jid))
+        })
+    }
+
     pub(super) fn update_typing_status(&mut self) {
+        self.canonicalize_typing_keys();
         let text = if let Some(jid) = self.current_jid.as_ref().filter(|jid| is_group(jid)) {
             let typing = self.chat_typing.get(jid);
             if let Some(members) = typing.filter(|members| !members.is_empty()) {
@@ -540,18 +592,20 @@ impl Bridge {
     }
 
     pub(super) fn clear_participant_typing(&mut self, jid: &str, sender: &str) {
-        let sender = self.store.canon_owned(&normalize_jid(sender));
-        if let Some(members) = self.chat_typing.get_mut(jid) {
-            members.remove(&sender);
-            if members.is_empty() {
-                self.chat_typing.remove(jid);
-            }
-        }
+        self.remove_typing(jid, sender, None);
         self.schedule_refresh_chats();
         self.update_typing_status();
     }
 
+    fn remove_typing(&mut self, jid: &str, sender: &str, generation: Option<u64>) -> bool {
+        let store = &self.store;
+        drop_typing(&mut self.chat_typing, jid, sender, generation, |j| {
+            store.canon_owned(&normalize_jid(j))
+        })
+    }
+
     pub(super) fn clear_chat_typing(&mut self, jid: &str) {
+        self.canonicalize_typing_keys();
         if self.chat_typing.remove(jid).is_some() {
             self.schedule_refresh_chats();
         }
@@ -564,6 +618,7 @@ impl Bridge {
             self.peer_online = available;
         }
         if !available {
+            self.canonicalize_typing_keys();
             let groups: Vec<_> = self
                 .chat_typing
                 .iter()
@@ -697,5 +752,44 @@ mod tests {
         assert_eq!(members.len(), 2);
         members.remove("a");
         assert_eq!(typing_participants(&members).0, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn typing_entry_keyed_by_a_later_aliased_id_still_clears() {
+        let group = "120363000000000000@g.us";
+        let lid = "100000000000001@lid";
+        let phone = "5511999999999@s.whatsapp.net";
+        let mut store = crate::store::Store::default();
+        let mut typing: TypingMap = HashMap::from([(
+            group.to_string(),
+            HashMap::from([(lid.to_string(), (7, String::new()))]),
+        )]);
+        assert!(store.learn_alias(lid, phone));
+        let canon = |j: &str| store.canon_owned(&normalize_jid(j));
+        assert!(drop_typing(&mut typing, group, lid, Some(7), canon));
+        assert!(typing.is_empty(), "a stale typing entry never expires");
+    }
+
+    #[test]
+    fn typing_keys_follow_an_alias_learned_after_they_were_stored() {
+        let group = "120363000000000000@g.us";
+        let lid = "100000000000001@lid";
+        let phone = "5511999999999@s.whatsapp.net";
+        let mut store = crate::store::Store::default();
+        let mut typing: TypingMap = HashMap::from([(
+            lid.to_string(),
+            HashMap::from([(lid.to_string(), (7, "typing".to_string()))]),
+        )]);
+        typing.insert(
+            group.to_string(),
+            HashMap::from([(lid.to_string(), (8, "typing".to_string()))]),
+        );
+        assert!(store.learn_alias(lid, phone));
+        let canon = |j: &str| store.canon_owned(&normalize_jid(j));
+        assert!(canonicalize_typing(&mut typing, canon));
+        assert!(typing.contains_key(phone), "chat key still the old alias");
+        assert!(typing[phone].contains_key(phone));
+        assert!(typing[group].contains_key(phone));
+        assert!(!typing.contains_key(lid));
     }
 }
