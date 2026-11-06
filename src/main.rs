@@ -11,6 +11,7 @@ mod camera;
 mod demo;
 mod emoji;
 mod fonts;
+mod gfx;
 mod i18n;
 mod jobs;
 mod link_preview;
@@ -56,11 +57,6 @@ fn main() {
     paths::ensure_dirs();
     media::clean_notification_thumbnails();
     logging::install();
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .renderer_name("skia".into())
-        .select()
-        .expect("failed to select the Skia backend");
     // The previous binary, left by an update that ran in the last session.
     update::sweep();
 
@@ -96,6 +92,7 @@ fn main() {
     let Some(instance_guard) = single::claim_single_instance() else {
         return;
     };
+    let graphics = select_renderer();
 
     let mut app_vault = match vault::Vault::new() {
         Ok(vault) => vault,
@@ -142,6 +139,7 @@ fn main() {
 
     fonts::install_emoji();
     let ui = AppWindow::new().expect("failed to create the main window");
+    watch_first_frame(&ui, &graphics);
     slint::select_bundled_translation(if use_pt { "pt" } else { "en_US" })
         .expect("selected bundled locale must exist");
     ui.set_native_backdrop(false);
@@ -284,6 +282,7 @@ fn main() {
             ui.set_app_loading(false);
             ui.set_screen("login".into());
             ui.set_status_text(i18n::ta("status.connect_failed", &[&e]).into());
+            arm_marker_clear();
             ui.run().expect("event loop failed");
             return;
         }
@@ -411,10 +410,12 @@ fn main() {
     if park_in_tray {
         if !autostarted {
             ui.show().expect("failed to show the main window");
+            arm_marker_clear();
         }
         slint::run_event_loop_until_quit().expect("event loop failed");
         let _ = ui.hide();
     } else {
+        arm_marker_clear();
         ui.run().expect("event loop failed");
     }
     wa.send(wa::Cmd::Shutdown);
@@ -496,6 +497,7 @@ fn apply_native_backdrop(ui: &AppWindow) {
 fn raise_window(handle: &slint::Weak<AppWindow>) {
     if let Some(ui) = handle.upgrade() {
         let _ = ui.show();
+        arm_marker_clear();
         platform::focus_window();
     }
 }
@@ -535,6 +537,73 @@ fn audio_selftest() {
         strip.iter().max().unwrap_or(&0)
     );
     let _ = std::fs::remove_file(&tmp);
+}
+
+struct GraphicsStart {
+    active: gfx::GfxChoice,
+    marked: bool,
+}
+
+impl Drop for GraphicsStart {
+    fn drop(&mut self) {
+        if gfx::should_clear_on_exit(self.marked, std::thread::panicking()) {
+            gfx::finish_start(&paths::data_dir());
+        }
+    }
+}
+
+fn select_renderer() -> GraphicsStart {
+    let dir = paths::data_dir();
+    let compiled = gfx::Compiled::from_build();
+    let choice = gfx::read_choice(&dir);
+    let (state, marked) = match gfx::begin_start(&dir) {
+        Ok(state) => (state, true),
+        Err(error) => {
+            log::warn!("[gfx] cannot write the start marker: {error}");
+            (gfx::StartState::Clean, false)
+        }
+    };
+    if state == gfx::StartState::Crashed {
+        log::warn!("[gfx] the previous start never drew a frame; using a software renderer");
+    }
+    gfx::remember_startup_choice(choice);
+    let chain = gfx::plan_after_marker(choice, &compiled, state);
+    let selected = gfx::select_first(&chain, |attempt| {
+        let selector = slint::BackendSelector::new().backend_name("winit".into());
+        let selector = match attempt {
+            Some(name) => selector.renderer_name(name.into()),
+            None => selector,
+        };
+        selector.select().map_err(|error| error.to_string())
+    });
+    let active = match selected {
+        Ok(attempt) => {
+            log::info!("[gfx] renderer selected: {}", attempt.unwrap_or("auto"));
+            gfx::choice_for_attempt(attempt)
+        }
+        Err(errors) => {
+            for (attempt, error) in errors {
+                log::warn!("[gfx] {} rejected: {error}", attempt.unwrap_or("auto"));
+            }
+            gfx::GfxChoice::Auto
+        }
+    };
+    GraphicsStart { active, marked }
+}
+
+static MARKER_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn watch_first_frame(ui: &AppWindow, graphics: &GraphicsStart) {
+    ui.set_graphics_active(i18n::t(gfx::label_key(graphics.active)).into());
+    MARKER_PENDING.store(graphics.marked, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn arm_marker_clear() {
+    if MARKER_PENDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        slint::Timer::single_shot(std::time::Duration::from_secs(5), || {
+            gfx::finish_start(&paths::data_dir());
+        });
+    }
 }
 
 // Developer probe: drives the video player with no window -- play, pause,

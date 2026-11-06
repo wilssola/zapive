@@ -73,6 +73,8 @@ export component AppWindow inherits Window {
     in-out property <color> wallpaper-bg: #efeae2;
     in-out property <color> wallpaper-fg: #111b2114;
     in-out property <bool> wallpaper-custom: false;
+    in-out property <float> wallpaper-scale: 1.0;
+    callback wallpaper-scale-changed(float);
     callback wallpaper-colors-changed(color, color);
     callback wallpaper-reset();
     // Hex text typed in settings (true = doodle colour); the host parses it
@@ -81,6 +83,7 @@ export component AppWindow inherits Window {
     changed wallpaper-bg => { Theme.wp-custom-bg = self.wallpaper-bg; }
     changed wallpaper-fg => { Theme.wp-custom-fg = self.wallpaper-fg; }
     changed wallpaper-custom => { Theme.wp-custom = self.wallpaper-custom; }
+    changed wallpaper-scale => { Theme.wp-scale = self.wallpaper-scale; }
     // True until the first chat list is ready; shows the splash.
     in-out property <bool> app-loading: true;
     // First-sync page: shown while the initial history is downloaded.
@@ -107,6 +110,7 @@ export component AppWindow inherits Window {
         Theme.wp-custom-bg = root.wallpaper-bg;
         Theme.wp-custom-fg = root.wallpaper-fg;
         Theme.wp-custom = root.wallpaper-custom;
+        Theme.wp-scale = root.wallpaper-scale;
     }
 
     // Theme + language (resolved by the host)
@@ -115,6 +119,11 @@ export component AppWindow inherits Window {
     in-out property <string> language-mode: "system"; // "pt" | "en" | "system"
     callback theme-changed(string);
     callback language-changed(string);
+    in property <[string]> graphics-labels;
+    in-out property <int> graphics-index: 0;
+    in property <string> graphics-active;
+    in-out property <bool> graphics-restart-needed: false;
+    callback graphics-renderer-changed(int);
     changed dark-theme => {
         Theme.dark = self.dark-theme;
         Palette.color-scheme = self.dark-theme ? ColorScheme.dark : ColorScheme.light;
@@ -1340,8 +1349,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        Rectangle { width: Theme.glass ? 0px : 1px; background: Theme.border; }
-
         // Sidebar
         Rectangle {
             width: 380px;
@@ -1349,13 +1356,6 @@ export component AppWindow inherits Window {
             if Theme.glass: Rectangle {
                 border-radius: parent.border-radius;
                 background: Theme.glass-sheen;
-            }
-            // Side rims only: a full border drew a grey line along the
-            // window's top and bottom edges too.
-            if root.glass: Rectangle {
-                x: 0px;
-                width: 1px;
-                background: Theme.glass-rim;
             }
             if root.glass: Rectangle {
                 x: parent.width - 1px;
@@ -1988,13 +1988,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                        }
-                        Rectangle {
-                            x: 67px;
-                            y: parent.height - 1px;
-                            width: parent.width - 85px;
-                            height: 1px;
-                            background: chat.jid == root.selected-jid ? transparent : Theme.border;
                         }
                     }
                 }
@@ -4009,8 +4002,6 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     background: Theme.panel;
                     backdrop-blur: 0px;
-                    border-width: 1px;
-                    border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                     border-radius: 18px;
                     drop-shadow-blur: 10px;
                     drop-shadow-color: Theme.glass-shadow;
@@ -4076,8 +4067,6 @@ export component AppWindow inherits Window {
                         height: parent.height;
                         background: Theme.panel;
                         backdrop-blur: 0px;
-                        border-width: 1px;
-                        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                         border-radius: 18px;
                         drop-shadow-blur: 10px;
                         drop-shadow-color: Theme.glass-shadow;
@@ -4129,8 +4118,6 @@ export component AppWindow inherits Window {
                         height: parent.height;
                         background: Theme.panel;
                         backdrop-blur: 0px;
-                        border-width: 1px;
-                        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                         border-radius: 18px;
                         drop-shadow-blur: 10px;
                         drop-shadow-color: Theme.glass-shadow;
@@ -4545,8 +4532,6 @@ export component AppWindow inherits Window {
                     border-radius: 18px;
                     background: Theme.panel;
                     backdrop-blur: 0px;
-                    border-width: 1px;
-                    border-color: Theme.glass ? Theme.glass-rim : Theme.border;
                     HorizontalLayout {
                         padding-left: 18px;
                         padding-right: 14px;
@@ -5292,7 +5277,7 @@ export component AppWindow inherits Window {
             root.wallpaper-custom = true;
             root.wallpaper-colors-changed(bg, fg);
         }
-        wallpaper-reset() => { root.wallpaper-custom = false; root.wallpaper-reset(); }
+        wallpaper-reset() => { root.wallpaper-custom = false; root.wallpaper-scale = 1.0; root.wallpaper-reset(); }
         wallpaper-hex-entered(fg, hex) => { root.wallpaper-hex-entered(fg, hex); }
         notify-previews-changed(a0) => { root.notify-previews-changed(a0); }
         call-silence-repeat-changed(a0) => { root.call-silence-repeat = a0; root.call-silence-repeat-changed(a0); }
@@ -5302,6 +5287,12 @@ export component AppWindow inherits Window {
         language-mode <=> root.language-mode;
         theme-changed(a0) => { root.theme-changed(a0); }
         language-changed(a0) => { root.language-changed(a0); }
+        graphics-labels: root.graphics-labels;
+        graphics-index <=> root.graphics-index;
+        graphics-active: root.graphics-active;
+        graphics-restart-needed <=> root.graphics-restart-needed;
+        graphics-renderer-changed(a0) => { root.graphics-renderer-changed(a0); }
+        wallpaper-scale-changed(a0) => { root.wallpaper-scale = a0; root.wallpaper-scale-changed(a0); }
         mic-devices: root.mic-devices;
         speaker-devices: root.speaker-devices;
         camera-devices: root.camera-devices;

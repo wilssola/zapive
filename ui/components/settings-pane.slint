@@ -33,6 +33,12 @@ export component SettingsLayer inherits ModalLayer {
     in-out property <string> language-mode;
     callback theme-changed(string);
     callback language-changed(string);
+    in property <[string]> graphics-labels;
+    in-out property <int> graphics-index: 0;
+    in property <string> graphics-active;
+    callback graphics-renderer-changed(int);
+    callback wallpaper-scale-changed(float);
+    in-out property <bool> graphics-restart-needed: false;
     in property <[string]> mic-devices;
     in property <[string]> speaker-devices;
     in property <[string]> camera-devices;
@@ -131,8 +137,6 @@ export component SettingsLayer inherits ModalLayer {
         x: (1 - root.progress) * 16px;
         opacity: root.progress;
         background: Theme.glass ? Theme.glass-fill-cover : (Theme.dark ? #091419 : Theme.sidebar);
-        border-width: Theme.glass ? 1px : 0px;
-        border-color: Theme.glass-rim;
         if Theme.glass: Rectangle {
             background: Theme.glass-sheen;
         }
@@ -377,7 +381,7 @@ export component SettingsLayer inherits ModalLayer {
                                 }
                             }
                         }
-                        if ((root.settings-query == "" && (root.settings-section == "appearance")) || (root.settings-query != "" && root.settings-matches(@tr("settings.appearance.title") + " " + @tr("settings.appearance.theme") + " " + @tr("settings.appearance.style") + " " + @tr("settings.language.title")))): SettingsCard {
+                        if ((root.settings-query == "" && (root.settings-section == "appearance")) || (root.settings-query != "" && root.settings-matches(@tr("settings.appearance.title") + " " + @tr("settings.appearance.theme") + " " + @tr("settings.appearance.style") + " " + @tr("settings.language.title") + " " + @tr("settings.graphics.renderer")))): SettingsCard {
                             title: @tr("settings.appearance.title");
                             SettingsRow {
                                 label: @tr("settings.appearance.theme");
@@ -408,6 +412,23 @@ export component SettingsLayer inherits ModalLayer {
                                     selected(value) => {
                                         root.theme-style = value == @tr("settings.appearance.style_glass") ? "glass" : "opaque";
                                         root.style-changed(root.theme-style);
+                                    }
+                                }
+                            }
+                            if root.graphics-labels.length > 1: SettingsRow {
+                                label: @tr("settings.graphics.renderer");
+                                detail: root.graphics-restart-needed ? @tr("settings.graphics.restart")
+                                    : root.graphics-active != "" ? @tr("settings.graphics.active", root.graphics-active)
+                                    : @tr("settings.graphics.renderer.description");
+                                icon: @image-url("../icons/eye.svg");
+                                ComboBox {
+                                    width: min(210px, root.win-width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    model: root.graphics-labels;
+                                    current-index <=> root.graphics-index;
+                                    selected(value) => {
+                                        root.graphics-renderer-changed(self.current-index);
                                     }
                                 }
                             }
@@ -525,10 +546,29 @@ export component SettingsLayer inherits ModalLayer {
                                             minimum: 0;
                                             maximum: 40;
                                             value: root.wp-alpha-pct;
+                                            property <int> model-pct: root.wp-alpha-pct;
+                                            changed model-pct => { self.value = self.model-pct; }
                                             accessible-label: @tr("settings.wallpaper.intensity");
                                             changed(v) => { root.wallpaper-colors-changed(Theme.wp-base-bg.with-alpha(1.0), Theme.wp-base-fg.with-alpha(v / 100)); }
                                         }
                                     }
+                                }
+                            }
+                            SettingsRow {
+                                label: @tr("settings.wallpaper.scale");
+                                detail: @tr("settings.wallpaper.scale.description");
+                                height: 54px;
+                                Slider {
+                                    width: 150px;
+                                    y: (parent.height - self.height) / 2;
+                                    minimum: 50;
+                                    maximum: 200;
+                                    step: 5;
+                                    value: Theme.wp-scale * 100;
+                                    property <float> model-pct: Theme.wp-scale * 100;
+                                    changed model-pct => { self.value = self.model-pct; }
+                                    accessible-label: @tr("settings.wallpaper.scale");
+                                    changed(v) => { root.wallpaper-scale-changed(v / 100); }
                                 }
                             }
                             SettingsRow {
@@ -537,9 +577,12 @@ export component SettingsLayer inherits ModalLayer {
                                 DialogButton {
                                     label: @tr("settings.wallpaper.reset_button");
                                     y: (parent.height - self.height) / 2;
-                                    enabled: Theme.wp-custom;
-                                    opacity: Theme.wp-custom ? 1.0 : 0.4;
-                                    clicked => { root.wallpaper-reset(); }
+                                    enabled: Theme.wp-custom || Theme.wp-scale != 1.0;
+                                    opacity: Theme.wp-custom || Theme.wp-scale != 1.0 ? 1.0 : 0.4;
+                                    clicked => {
+                                        root.wallpaper-reset();
+                                        root.wallpaper-scale-changed(1.0);
+                                    }
                                 }
                             }
                         }

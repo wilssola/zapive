@@ -31,17 +31,10 @@ impl Bridge {
         }
     }
 
-    // Chat wallpaper: both colors are #RRGGBB; an empty pair means "use the
-    // theme defaults".
     pub(super) fn handle_wallpaper_colors(&mut self, bg: slint::Color, fg: slint::Color) {
-        let (bg_hex, fg_hex) = (color_hex(bg), color_hex(fg));
+        let (bg_hex, fg_hex) = (color_hex(bg), wallpaper_fg_encode(fg));
         self.ui.set_wallpaper_bg(bg);
-        self.ui.set_wallpaper_fg(slint::Color::from_argb_u8(
-            DOODLE_ALPHA,
-            fg.red(),
-            fg.green(),
-            fg.blue(),
-        ));
+        self.ui.set_wallpaper_fg(fg);
         self.ui.set_wallpaper_custom(true);
         if let Some(vault) = &self.vault {
             vault.setting_set("chat_wallpaper_bg", &bg_hex);
@@ -49,13 +42,66 @@ impl Bridge {
         }
     }
 
+    pub(super) fn handle_wallpaper_scale_reset(&mut self) {
+        self.ui.set_wallpaper_scale(1.0);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("chat_wallpaper_scale", "1.0");
+        }
+    }
+
+    pub(super) fn handle_wallpaper_scale(&mut self, scale: f32) {
+        if !scale.is_finite() {
+            return;
+        }
+        let scale = scale.clamp(0.5, 2.0);
+        self.ui.set_wallpaper_scale(scale);
+        if let Some(vault) = &self.vault {
+            vault.setting_set("chat_wallpaper_scale", &scale.to_string());
+        }
+    }
+
+    pub(super) fn load_graphics_choice(&mut self, choice: crate::gfx::GfxChoice) {
+        let compiled = crate::gfx::Compiled::from_build();
+        let choices = crate::gfx::available_choices(&compiled);
+        let choice = crate::gfx::effective_choice(choice, &compiled);
+        let index = choices
+            .iter()
+            .position(|candidate| *candidate == choice)
+            .unwrap_or(0);
+        self.ui.set_graphics_index(index as i32);
+    }
+
+    pub(super) fn handle_graphics_choice(&mut self, index: i32) {
+        let compiled = crate::gfx::Compiled::from_build();
+        let choices = crate::gfx::available_choices(&compiled);
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        let Some(choice) = choices.get(index).copied() else {
+            return;
+        };
+        let dir = crate::paths::data_dir();
+        let saved = crate::gfx::effective_choice(crate::gfx::read_choice(&dir), &compiled);
+        if choice != saved
+            && let Err(error) = crate::gfx::save_choice(&dir, choice)
+        {
+            log::warn!("[gfx] failed to save renderer choice: {error}");
+            self.load_graphics_choice(saved);
+            return;
+        }
+        self.ui.set_graphics_index(index as i32);
+        self.ui
+            .set_graphics_restart_needed(crate::gfx::restart_needed(choice, &compiled));
+    }
+
     // A hex typed in settings: only a valid #RRGGBB changes anything.
     pub(super) fn wallpaper_hex_entered(&mut self, fg: bool, hex: &str) {
         let Some((r, g, b)) = parse_hex_color(hex) else {
             return;
         };
-        let typed = slint::Color::from_rgb_u8(r, g, b);
         let (bg, doodle) = (self.ui.get_wallpaper_bg(), self.ui.get_wallpaper_fg());
+        let typed =
+            slint::Color::from_argb_u8(if fg { doodle.alpha() } else { bg.alpha() }, r, g, b);
         if fg {
             self.handle_wallpaper_colors(bg, typed);
         } else {
@@ -65,6 +111,7 @@ impl Bridge {
 
     pub(super) fn reset_wallpaper(&mut self) {
         self.ui.set_wallpaper_custom(false);
+        self.handle_wallpaper_scale_reset();
         if let Some(vault) = &self.vault {
             vault.setting_set("chat_wallpaper_bg", "");
             vault.setting_set("chat_wallpaper_fg", "");
@@ -79,17 +126,19 @@ impl Bridge {
         let fg = vault
             .setting_get("chat_wallpaper_fg")
             .as_deref()
-            .and_then(parse_hex_color);
+            .and_then(wallpaper_fg_decode);
+        let scale = vault
+            .setting_get("chat_wallpaper_scale")
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite())
+            .map(|value| value.clamp(0.5, 2.0))
+            .unwrap_or(1.0);
+        self.ui.set_wallpaper_scale(scale);
         match (bg, fg) {
             (Some(bg), Some(fg)) => {
                 self.ui
                     .set_wallpaper_bg(slint::Color::from_rgb_u8(bg.0, bg.1, bg.2));
-                self.ui.set_wallpaper_fg(slint::Color::from_argb_u8(
-                    DOODLE_ALPHA,
-                    fg.0,
-                    fg.1,
-                    fg.2,
-                ));
+                self.ui.set_wallpaper_fg(fg);
                 self.ui.set_wallpaper_custom(true);
             }
             _ => self.ui.set_wallpaper_custom(false),
@@ -186,8 +235,6 @@ impl Bridge {
     }
 }
 
-// The doodle pattern is always drawn at this alpha so it stays subtle,
-// whatever opacity a color picker hands back (only #RRGGBB is stored).
 const DOODLE_ALPHA: u8 = 0x14;
 
 // "#RRGGBB" (case-insensitive) -> bytes; anything else is rejected.
@@ -207,6 +254,24 @@ pub(super) fn color_hex(color: slint::Color) -> String {
         color.green(),
         color.blue()
     )
+}
+
+pub(super) fn wallpaper_fg_encode(color: slint::Color) -> String {
+    format!("{}{:02X}", color_hex(color), color.alpha())
+}
+
+pub(super) fn wallpaper_fg_decode(text: &str) -> Option<slint::Color> {
+    let text = text.trim();
+    if text.len() == 9 {
+        let rgb = parse_hex_color(&text[..7])?;
+        if !text[7..].bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let alpha = u8::from_str_radix(&text[7..9], 16).ok()?;
+        return Some(slint::Color::from_argb_u8(alpha, rgb.0, rgb.1, rgb.2));
+    }
+    let (r, g, b) = parse_hex_color(text)?;
+    Some(slint::Color::from_argb_u8(DOODLE_ALPHA, r, g, b))
 }
 
 #[cfg(test)]
@@ -230,6 +295,47 @@ mod wallpaper_tests {
         ] {
             assert_eq!(parse_hex_color(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn wallpaper_intensity_slider_value_reaches_the_displayed_doodle_alpha() {
+        for pct in [0u8, 8, 20, 40] {
+            let alpha = (f32::from(pct) * 255.0 / 100.0).round() as u8;
+            let requested = slint::Color::from_argb_u8(alpha, 0x12, 0xAB, 0xEF);
+            let shown = wallpaper_fg_decode(&wallpaper_fg_encode(requested)).unwrap();
+            assert_eq!(shown.alpha(), alpha, "slider {pct}% was overridden");
+            assert_eq!(
+                (shown.red(), shown.green(), shown.blue()),
+                (0x12, 0xAB, 0xEF)
+            );
+        }
+    }
+
+    #[test]
+    fn wallpaper_intensity_survives_save_and_load() {
+        for alpha in [0u8, 20, 51, 102] {
+            let color = slint::Color::from_argb_u8(alpha, 0x12, 0xAB, 0xEF);
+            let stored = wallpaper_fg_encode(color);
+            let loaded = wallpaper_fg_decode(&stored)
+                .unwrap_or_else(|| panic!("stored value {stored:?} did not load back"));
+            assert_eq!(loaded.alpha(), alpha, "stored as {stored:?}");
+            assert_eq!(
+                (loaded.red(), loaded.green(), loaded.blue()),
+                (0x12, 0xAB, 0xEF)
+            );
+        }
+    }
+
+    #[test]
+    fn wallpaper_color_saved_before_intensity_existed_still_loads_with_the_default_alpha() {
+        let loaded = wallpaper_fg_decode("#12ABEF").expect("legacy #RRGGBB value");
+        assert_eq!(loaded.alpha(), DOODLE_ALPHA);
+        assert_eq!(
+            (loaded.red(), loaded.green(), loaded.blue()),
+            (0x12, 0xAB, 0xEF)
+        );
+        assert!(wallpaper_fg_decode("").is_none());
+        assert!(wallpaper_fg_decode("#12ABEF99X").is_none());
     }
 
     #[test]

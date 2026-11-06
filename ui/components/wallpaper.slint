@@ -7,9 +7,14 @@ import { Theme } from "theme.slint";
 export component Wallpaper inherits Rectangle {
     in property <color> bg: Theme.wallpaper-bg;
     in property <color> fg: Theme.wallpaper-fg;
+    in property <float> tile-scale: Theme.wp-scale;
+    property <float> safe-scale: Math.max(0.5, Math.min(2.0, root.tile-scale));
+    property <length> tile: Math.round(512 * root.safe-scale) * 1px;
+    property <int> cols: Math.ceil(root.width / root.tile);
+    property <int> rows: Math.ceil(root.height / root.tile);
     background: root.bg;
     clip: true;
-    Image {
+    if root.safe-scale == 1.0: Image {
         x: 0px;
         y: 0px;
         width: parent.width;
@@ -18,5 +23,16 @@ export component Wallpaper inherits Rectangle {
         horizontal-tiling: repeat;
         vertical-tiling: repeat;
         colorize: root.fg;
+    }
+    if root.safe-scale != 1.0: Rectangle {
+        for i in root.cols * root.rows: Image {
+            x: Math.mod(i, root.cols) * root.tile;
+            y: Math.floor(i / root.cols) * root.tile;
+            width: root.tile;
+            height: root.tile;
+            image-fit: fill;
+            source: @image-url("../wallpaper-tile.png");
+            colorize: root.fg;
+        }
     }
 }

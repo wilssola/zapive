@@ -2332,6 +2332,38 @@ msgstr "Zoom {0}, redefinir"
 msgid "accessibility.ink_color"
 msgstr "Cor da caneta {0}"
 
+msgid "settings.graphics.renderer"
+msgstr "Renderizador gráfico"
+
+msgid "settings.graphics.renderer.description"
+msgstr "Como o Zapive desenha a janela. Vale a partir do próximo início."
+
+msgid "settings.graphics.restart"
+msgstr "Reinicie o Zapive para aplicar o novo renderizador."
+
+msgid "settings.graphics.active"
+msgstr "Selecionado: {0}"
+
+msgid "settings.graphics.auto"
+msgstr "Automático"
+
+msgid "settings.graphics.wgpu"
+msgstr "WGPU"
+
+msgid "settings.graphics.skia"
+msgstr "Skia"
+
+msgid "settings.graphics.opengl"
+msgstr "OpenGL"
+
+msgid "settings.graphics.software"
+msgstr "Software"
+
+msgid "settings.wallpaper.scale"
+msgstr "Escala do fundo"
+
+msgid "settings.wallpaper.scale.description"
+msgstr "Tamanho do padrão do fundo, de 50% a 200%."
 msgid "chat.row_menu.pin"
 msgstr "Fixar conversa"
 

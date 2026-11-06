@@ -285,6 +285,14 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         oneshots: Vec::new(),
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
+    apply_now(|b| b.load_graphics_choice(crate::gfx::read_choice(&crate::paths::data_dir())));
+    let graphics_choices = crate::gfx::available_choices(&crate::gfx::Compiled::from_build());
+    ui.set_graphics_labels(ModelRc::new(VecModel::from(
+        graphics_choices
+            .iter()
+            .map(|choice| SharedString::from(t(crate::gfx::label_key(*choice))))
+            .collect::<Vec<_>>(),
+    )));
     // Update checks start here, not at boot: the banner must also reach
     // the lock and login screens.
     apply_now(|b| b.once(10_000, |b| b.update_tick()));
@@ -375,6 +383,8 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(move |b| b.decline_silenced_call(&id));
     });
     ui.on_wallpaper_reset(|| defer(|b| b.reset_wallpaper()));
+    ui.on_wallpaper_scale_changed(|scale| defer(move |b| b.handle_wallpaper_scale(scale)));
+    ui.on_graphics_renderer_changed(|index| defer(move |b| b.handle_graphics_choice(index)));
     ui.on_wallpaper_hex_entered(|fg, hex| {
         let hex = hex.to_string();
         defer(move |b| b.wallpaper_hex_entered(fg, &hex));
