@@ -204,6 +204,10 @@ fn finish_marker_write(
     synced
 }
 
+pub fn should_clear_on_exit(marked: bool, panicking: bool) -> bool {
+    marked && !panicking
+}
+
 pub fn finish_start(dir: &Path) {
     let _ = std::fs::remove_file(marker_path(dir));
 }
@@ -283,6 +287,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exit_clears_only_an_existing_marker_without_a_panic() {
+        assert!(should_clear_on_exit(true, false));
+        assert!(!should_clear_on_exit(false, false));
+        assert!(!should_clear_on_exit(true, true));
+        assert!(!should_clear_on_exit(false, true));
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("zapive-gfx-{}-{name}", std::process::id()));

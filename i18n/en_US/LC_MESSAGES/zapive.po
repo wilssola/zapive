@@ -2340,7 +2340,7 @@ msgid "settings.graphics.restart"
 msgstr "Restart Zapive to apply the new renderer."
 
 msgid "settings.graphics.active"
-msgstr "In use: {0}"
+msgstr "Selected: {0}"
 
 msgid "settings.graphics.auto"
 msgstr "Automatic"

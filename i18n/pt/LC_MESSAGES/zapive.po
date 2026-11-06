@@ -2342,7 +2342,7 @@ msgid "settings.graphics.restart"
 msgstr "Reinicie o Zapive para aplicar o novo renderizador."
 
 msgid "settings.graphics.active"
-msgstr "Em uso: {0}"
+msgstr "Selecionado: {0}"
 
 msgid "settings.graphics.auto"
 msgstr "Automático"
