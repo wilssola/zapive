@@ -180,6 +180,8 @@ pub struct Bridge {
     // History sync progress, for the banner and its dialog.
     sync_batches: u32,
     sync_messages: usize,
+    // The page shown while the first history is downloaded.
+    initial_sync: history::InitialSync,
     // Multi-select mode over the open conversation.
     select_mode: bool,
     selected: Vec<String>,

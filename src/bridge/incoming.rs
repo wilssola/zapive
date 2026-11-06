@@ -100,6 +100,7 @@ impl Bridge {
         }
         let mut added = 0usize;
         let mut added_to_current = false;
+        let mut added_kinds: Vec<MessageKind> = Vec::new();
         for web in &chunk.messages {
             if let Some(stored) = crate::wa_map::from_history(&mut self.store, web) {
                 let jid = stored.jid.clone();
@@ -109,8 +110,10 @@ impl Bridge {
                 if let Some(vault) = &self.vault {
                     self.store.hydrate_id(vault, &jid, &stored.id);
                 }
+                let kind = stored.kind;
                 if self.store.add_message(stored) {
                     added += 1;
+                    added_kinds.push(kind);
                     if Some(&jid) == self.current_jid.as_ref() {
                         added_to_current = true;
                     }
@@ -132,6 +135,7 @@ impl Bridge {
         self.scroll_up_fetch = false;
         self.schedule_refresh_chats();
         self.finish_loading();
+        self.note_initial_chunk(&chunk, added, &added_kinds);
         if chunk.on_demand || self.history_pending {
             self.sync_batches += 1;
         }

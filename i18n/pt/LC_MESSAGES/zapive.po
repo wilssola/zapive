@@ -2325,3 +2325,51 @@ msgstr "Fixar conversa"
 
 msgid "chat.row_menu.unpin"
 msgstr "Desafixar conversa"
+
+msgid "sync.screen.title"
+msgstr "Inicializando suas conversas"
+
+msgid "sync.screen.subtitle"
+msgstr "Baixando e organizando suas mensagens de forma segura."
+
+msgid "sync.screen.waiting_title"
+msgstr "Conectando ao seu celular"
+
+msgid "sync.screen.waiting_detail"
+msgstr "Aguardando as primeiras mensagens chegarem…"
+
+msgid "sync.screen.card_title"
+msgstr "Carregando suas conversas"
+
+msgid "sync.screen.card_detail"
+msgstr "Sincronizando mensagens, mídias e arquivos…"
+
+msgid "sync.screen.finishing_title"
+msgstr "Quase pronto"
+
+msgid "sync.screen.finishing_detail"
+msgstr "Organizando suas conversas…"
+
+msgid "sync.screen.messages"
+msgstr "mensagens"
+
+msgid "sync.screen.chats"
+msgstr "conversas"
+
+msgid "sync.screen.media"
+msgstr "mídias"
+
+msgid "sync.screen.files"
+msgstr "arquivos"
+
+msgid "sync.screen.elapsed"
+msgstr "Tempo decorrido"
+
+msgid "sync.screen.encrypted"
+msgstr "Protegida com criptografia de ponta a ponta"
+
+msgid "sync.screen.disconnect"
+msgstr "Desconectar"
+
+msgid "sync.screen.keep_open"
+msgstr "Não feche esta janela. Suas mensagens estão sendo baixadas."

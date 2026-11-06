@@ -3,7 +3,121 @@ use super::*;
 
 pub(super) const MAX_HISTORY_BATCHES: u32 = 20;
 
+// No first chunk at all for this long: stop waiting and show the app.
+const INITIAL_SYNC_FIRST_CHUNK_MS: u64 = 120_000;
+// Silence after the last chunk that counts as "the phone is done".
+const INITIAL_SYNC_QUIET_MS: u64 = 25_000;
+
+// What the first-sync page shows: only the first history of a fresh
+// pairing counts, never on-demand backfill.
+#[derive(Default)]
+pub(super) struct InitialSync {
+    active: bool,
+    started: bool,
+    percent: u32,
+    messages: usize,
+    media: usize,
+    files: usize,
+    // Bumped on every chunk so stale timeouts do nothing.
+    generation: u32,
+}
+
+// 12430 -> "12,430" / "12.430", following the app language.
+fn grouped(n: usize) -> String {
+    let sep = match crate::i18n::current_locale() {
+        crate::i18n::Locale::Pt => '.',
+        crate::i18n::Locale::En => ',',
+    };
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(sep);
+        }
+        out.push(c);
+    }
+    out
+}
+
 impl Bridge {
+    // ---- first-sync page ----
+
+    pub(super) fn begin_initial_sync(&mut self) {
+        if self.initial_sync.active {
+            return;
+        }
+        self.initial_sync = InitialSync {
+            active: true,
+            ..Default::default()
+        };
+        self.render_initial_sync();
+        self.ui.set_sync_screen_open(true);
+        self.arm_initial_sync_timeout(INITIAL_SYNC_FIRST_CHUNK_MS);
+    }
+
+    pub(super) fn end_initial_sync(&mut self) {
+        self.initial_sync.active = false;
+        self.initial_sync.generation += 1;
+        self.ui.set_sync_screen_open(false);
+    }
+
+    fn arm_initial_sync_timeout(&mut self, ms: u64) {
+        let generation = self.initial_sync.generation;
+        self.once(ms, move |b| {
+            if b.initial_sync.active && b.initial_sync.generation == generation {
+                println!("[history] first sync page closed after silence");
+                b.end_initial_sync();
+            }
+        });
+    }
+
+    // Folds one history chunk into the page; `kinds` are the kinds of the
+    // messages that were actually added.
+    pub(super) fn note_initial_chunk(
+        &mut self,
+        chunk: &HistoryChunk,
+        added: usize,
+        kinds: &[MessageKind],
+    ) {
+        if !self.initial_sync.active || chunk.on_demand {
+            return;
+        }
+        let state = &mut self.initial_sync;
+        state.started = true;
+        state.generation += 1;
+        state.messages += added;
+        for kind in kinds {
+            match kind {
+                MessageKind::Image | MessageKind::Video | MessageKind::Audio => state.media += 1,
+                MessageKind::Doc => state.files += 1,
+                _ => {}
+            }
+        }
+        if let Some(p) = chunk.progress {
+            state.percent = state.percent.max(p.min(100));
+        }
+        let done = state.percent >= 100;
+        self.render_initial_sync();
+        if done {
+            self.arm_initial_sync_timeout(1_500);
+        } else {
+            self.arm_initial_sync_timeout(INITIAL_SYNC_QUIET_MS);
+        }
+    }
+
+    fn render_initial_sync(&mut self) {
+        let s = &self.initial_sync;
+        let name = self.account_entry().map(|a| a.name).unwrap_or_default();
+        self.ui.set_sync_screen_account(name.into());
+        self.ui.set_sync_screen_started(s.started);
+        self.ui.set_sync_screen_percent(s.percent as i32);
+        self.ui.set_sync_screen_messages(grouped(s.messages).into());
+        self.ui
+            .set_sync_screen_chats(grouped(self.store.chats.len()).into());
+        self.ui.set_sync_screen_media(grouped(s.media).into());
+        self.ui.set_sync_screen_files(grouped(s.files).into());
+    }
+
     // ---- history backfill ----
 
     pub(super) fn set_pending(&mut self, pending: bool) {

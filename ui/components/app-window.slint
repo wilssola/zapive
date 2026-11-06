@@ -29,6 +29,7 @@ import { Wallpaper } from "wallpaper.slint";
 import { ShortcutsLayer } from "shortcuts-dialog.slint";
 import { StarredLayer } from "starred-panel.slint";
 import { Splash } from "splash.slint";
+import { SyncScreen } from "sync-screen.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
@@ -82,6 +83,15 @@ export component AppWindow inherits Window {
     changed wallpaper-custom => { Theme.wp-custom = self.wallpaper-custom; }
     // True until the first chat list is ready; shows the splash.
     in-out property <bool> app-loading: true;
+    // First-sync page: shown while the initial history is downloaded.
+    in-out property <bool> sync-screen-open: false;
+    in-out property <int> sync-screen-percent: 0;
+    in-out property <bool> sync-screen-started: false;
+    in-out property <string> sync-screen-account: "";
+    in-out property <string> sync-screen-messages: "0";
+    in-out property <string> sync-screen-chats: "0";
+    in-out property <string> sync-screen-media: "0";
+    in-out property <string> sync-screen-files: "0";
     callback privacy-blur-changed(string, bool);
     // Glass only while the OS backdrop is live and the window has focus;
     // an unfocused backdrop turns grey, so fall back to the opaque theme.
@@ -5003,6 +5013,21 @@ export component AppWindow inherits Window {
         message-dialog-text <=> root.message-dialog-text;
         message-dialog-id: root.message-dialog-id;
         win-width: root.width;
+    }
+
+    // ---------- First-sync page (under the confirm dialog) ----------
+    SyncScreen {
+        width: 100%;
+        height: 100%;
+        open: root.sync-screen-open && root.screen == "main";
+        percent: root.sync-screen-percent;
+        started: root.sync-screen-started;
+        account: root.sync-screen-account;
+        messages: root.sync-screen-messages;
+        chats: root.sync-screen-chats;
+        media: root.sync-screen-media;
+        files: root.sync-screen-files;
+        disconnect => { root.logout(); }
     }
 
     // ---------- Confirm dialog ----------

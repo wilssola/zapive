@@ -193,6 +193,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         pending_forward: Vec::new(),
         sync_batches: 0,
         sync_messages: 0,
+        initial_sync: Default::default(),
         select_mode: false,
         selected: Vec::new(),
         mention_at: None,
