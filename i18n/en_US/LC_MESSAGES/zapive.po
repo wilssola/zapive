@@ -2317,3 +2317,36 @@ msgstr "Zoom {0}, reset"
 
 msgid "accessibility.ink_color"
 msgstr "Pen color {0}"
+
+msgid "settings.graphics.renderer"
+msgstr "Graphics renderer"
+
+msgid "settings.graphics.renderer.description"
+msgstr "How Zapive draws its window. Applies on the next start."
+
+msgid "settings.graphics.restart"
+msgstr "Restart Zapive to apply the new renderer."
+
+msgid "settings.graphics.active"
+msgstr "In use: {0}"
+
+msgid "settings.graphics.auto"
+msgstr "Automatic"
+
+msgid "settings.graphics.wgpu"
+msgstr "WGPU"
+
+msgid "settings.graphics.skia"
+msgstr "Skia"
+
+msgid "settings.graphics.opengl"
+msgstr "OpenGL"
+
+msgid "settings.graphics.software"
+msgstr "Software"
+
+msgid "settings.wallpaper.scale"
+msgstr "Background scale"
+
+msgid "settings.wallpaper.scale.description"
+msgstr "Size of the doodle pattern, 50% to 200%."
