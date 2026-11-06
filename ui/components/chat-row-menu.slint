@@ -1,0 +1,111 @@
+import { ModalLayer } from "modal.slint";
+import { MenuRow } from "rows/menu.slint";
+import { Theme } from "theme.slint";
+
+// Right-click menu of a conversation-list row. It works on `jid`, which is
+// not necessarily the open chat. `action` is one of: info, pin, mute (arg =
+// hours; 0 unmutes, -1 for good), archive, favorite, unread, delete.
+export component ChatRowMenuLayer inherits ModalLayer {
+    in-out property <bool> row-menu-open;
+    in-out property <string> row-menu-sub;
+    in property <string> row-menu-jid;
+    in property <length> row-menu-x;
+    in property <length> row-menu-y;
+    in property <bool> pinned;
+    in property <bool> muted;
+    in property <bool> archived;
+    in property <bool> favorite;
+    in property <bool> unread;
+    in property <length> win-width;
+    in property <length> win-height;
+    callback act(string, string, int);
+
+    if root.mounted: Rectangle {
+        x: max(8px, min(root.row-menu-x, root.win-width - self.width - 8px));
+        y: max(8px, min(root.row-menu-y, root.win-height - self.height - 8px)) + (1 - root.progress) * 4px;
+        opacity: root.progress;
+        width: 250px;
+        height: row-menu-col.preferred-height + 12px;
+        border-radius: 12px;
+        background: Theme.panel;
+        backdrop-blur: 0px;
+        border-width: 1px;
+        border-color: Theme.glass ? Theme.glass-rim : (Theme.dark ? #ffffff18 : Theme.border);
+        drop-shadow-blur: 24px;
+        drop-shadow-color: Theme.glass-shadow;
+        TouchArea { }
+
+        row-menu-col := VerticalLayout {
+            padding: 6px;
+            spacing: 1px;
+            if root.row-menu-sub == "": VerticalLayout {
+                spacing: 1px;
+                MenuRow {
+                    height: 36px;
+                    icon: @image-url("../icons/info-circle.svg");
+                    label: @tr("info.panel.contact_title");
+                    clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "info", 0); }
+                }
+                MenuRow {
+                    height: 36px;
+                    icon: @image-url("../icons/pin.svg");
+                    label: root.pinned ? @tr("chat.row_menu.unpin") : @tr("chat.row_menu.pin");
+                    clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "pin", 0); }
+                }
+                MenuRow {
+                    height: 36px;
+                    icon: root.muted ? @image-url("../icons/bell.svg") : @image-url("../icons/bell-off.svg");
+                    label: root.muted ? @tr("info.action.unmute") : @tr("info.action.mute");
+                    submenu: !root.muted;
+                    clicked => {
+                        if (root.muted) {
+                            root.row-menu-open = false;
+                            root.act(root.row-menu-jid, "mute", 0);
+                        } else {
+                            root.row-menu-sub = "mute";
+                        }
+                    }
+                }
+                MenuRow {
+                    height: 36px;
+                    icon: @image-url("../icons/archive.svg");
+                    label: root.archived ? @tr("info.action.unarchive") : @tr("info.action.archive");
+                    clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "archive", 0); }
+                }
+                MenuRow {
+                    height: 36px;
+                    icon: root.favorite ? @image-url("../icons/heart-filled.svg") : @image-url("../icons/heart.svg");
+                    label: root.favorite ? @tr("chat.menu.favorite_remove") : @tr("chat.menu.favorite_add");
+                    clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "favorite", 0); }
+                }
+                if !root.unread: MenuRow {
+                    height: 36px;
+                    icon: @image-url("../icons/eye.svg");
+                    label: @tr("message.menu.mark_unread");
+                    clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "unread", 0); }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                MenuRow {
+                    height: 36px;
+                    icon: @image-url("../icons/trash.svg");
+                    label: @tr("chat.menu.delete");
+                    tint: #f05d4d;
+                    clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "delete", 0); }
+                }
+            }
+            if root.row-menu-sub == "mute": VerticalLayout {
+                spacing: 1px;
+                MenuRow {
+                    height: 36px;
+                    icon: @image-url("../icons/arrow-left.svg");
+                    label: @tr("info.action.mute");
+                    clicked => { root.row-menu-sub = ""; }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                MenuRow { height: 36px; icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_8h"); clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "mute", 8); } }
+                MenuRow { height: 36px; icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_1w"); clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "mute", 168); } }
+                MenuRow { height: 36px; icon: @image-url("../icons/bell-off.svg"); label: @tr("chat.mute.duration_always"); clicked => { root.row-menu-open = false; root.act(root.row-menu-jid, "mute", -1); } }
+            }
+        }
+    }
+}

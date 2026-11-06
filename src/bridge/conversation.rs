@@ -6,6 +6,14 @@ use super::*;
 // leaves the bottom-right corner free for the floating time/ticks.
 pub(super) const META_PAD: &str = "\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}";
 
+// Room the time cluster takes at the end of a bubble's text, as no-break
+// spaces. A pinned mark or the "edited" tag lengthens the label, so they get
+// more; keep the tiers in step with `meta-pad` in app-window.slint.
+pub(super) fn meta_pad(m: &StoredMessage) -> String {
+    let extra = if m.edited { 12 } else { 0 } + if m.pinned_until > now_secs() { 3 } else { 0 };
+    META_PAD.to_string() + &"\u{00a0}".repeat(extra)
+}
+
 impl Bridge {
     // ---- conversation ----
 
@@ -355,8 +363,9 @@ impl Bridge {
         }
         let resolve = self.mention_resolver(m);
         let md = format!(
-            "{}{META_PAD}",
-            crate::markup::bubble_markdown(body, &resolve)
+            "{}{pad}",
+            crate::markup::bubble_markdown(body, &resolve),
+            pad = meta_pad(m)
         );
         match slint::StyledText::from_markdown(&md) {
             Ok(styled) => {
@@ -375,7 +384,7 @@ impl Bridge {
                     .collect();
                 // The overlay text must end with the same run as the styled
                 // text above, or the glyphs drift apart.
-                plain.text.push_str(META_PAD);
+                plain.text.push_str(&meta_pad(m));
                 (styled, true, plain.text, links)
             }
             Err(_) => none(),

@@ -8,13 +8,14 @@ import { FilterChip } from "filter-chip.slint";
 import { GreenLink } from "green-link.slint";
 import { ForwardLayer, MemberPickLayer, NewListLayer, ShareLayer } from "group-dialogs.slint";
 import { HomeScreen } from "home-screen.slint";
-import { IconButton } from "icon-button.slint";
+import { IconButton, TipBubble } from "icon-button.slint";
 import { ImagePreview } from "image-preview.slint";
 import { InfoLayer } from "info-panel.slint";
 import { LinkHover } from "link-hover.slint";
 import { LightboxLayer, VideoLayer } from "media-viewers.slint";
 import { ConfirmLayer, DetailsLayer, MessageDialogLayer, ReactionsLayer } from "message-dialogs.slint";
 import { MessageMenuLayer } from "message-menu.slint";
+import { ChatRowMenuLayer } from "chat-row-menu.slint";
 import { BubbleMeta, MediaPlaceholder, Ticks, TypingBubbles } from "message-parts.slint";
 import { ModalLayer } from "modal.slint";
 import { MentionPicker } from "mention-picker.slint";
@@ -28,6 +29,7 @@ import { Wallpaper } from "wallpaper.slint";
 import { ShortcutsLayer } from "shortcuts-dialog.slint";
 import { StarredLayer } from "starred-panel.slint";
 import { Splash } from "splash.slint";
+import { SyncScreen } from "sync-screen.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
@@ -81,6 +83,16 @@ export component AppWindow inherits Window {
     changed wallpaper-custom => { Theme.wp-custom = self.wallpaper-custom; }
     // True until the first chat list is ready; shows the splash.
     in-out property <bool> app-loading: true;
+    // First-sync page: shown while the initial history is downloaded.
+    in-out property <bool> sync-screen-open: false;
+    in-out property <int> sync-screen-percent: 0;
+    in-out property <bool> sync-screen-started: false;
+    in-out property <bool> sync-screen-catchup: false;
+    in-out property <string> sync-screen-account: "";
+    in-out property <string> sync-screen-messages: "0";
+    in-out property <string> sync-screen-chats: "0";
+    in-out property <string> sync-screen-media: "0";
+    in-out property <string> sync-screen-files: "0";
     callback privacy-blur-changed(string, bool);
     // Glass only while the OS backdrop is live and the window has focus;
     // an unfocused backdrop turns grey, so fall back to the opaque theme.
@@ -240,6 +252,12 @@ export component AppWindow inherits Window {
     in-out property <bool> rec-active: false;
     in-out property <string> rec-elapsed: "0:00";
     in-out property <bool> rec-view-once: false;
+    in-out property <bool> rec-paused: false;
+    in-out property <bool> rec-previewing: false;
+    // Waveform bars (0..1), how many hold audio, and where the playhead is.
+    in-out property <[float]> rec-levels;
+    in-out property <int> rec-filled: 0;
+    in-out property <int> rec-head: 0;
     callback jump-latest();
     // Contact / group info
     in-out property <bool> info-open: false;
@@ -262,6 +280,9 @@ export component AppWindow inherits Window {
     callback rec-start();
     callback rec-stop();
     callback rec-cancel();
+    callback rec-pause();
+    callback rec-resume();
+    callback rec-preview();
     callback emoji-pick(string);
     callback sticker-send(string);
     callback picker-opened();
@@ -296,6 +317,7 @@ export component AppWindow inherits Window {
     callback delete-message(string);
     callback message-action(string, string);
     callback submit-edit(string, string);
+    callback edit-newline(string, int, int) -> string;
     in-out property <bool> details-open;
     in-out property <string> details-id;
     in-out property <string> details-text;
@@ -325,11 +347,41 @@ export component AppWindow inherits Window {
         if (px < left || px >= left + chat-list.width || py < top || py >= top + chat-list.height) {
             return "";
         }
-        let row = ((py - top - chat-list.viewport-y) / 56px).floor();
+        let row = ((py - top - chat-list.content-y) / 56px).floor();
         if (row < 0 || row >= root.chats.length) { return ""; }
         return root.chats[row].jid;
     }
+    // Right-click menu of a conversation-list row (opened from Rust via
+    // `open-message-menu`, which routes the click to the row or the message).
+    in-out property <bool> row-menu-open: false;
+    // "" | "mute"
+    in-out property <string> row-menu-sub: "";
+    in-out property <string> row-menu-jid: "";
+    in-out property <length> row-menu-x;
+    in-out property <length> row-menu-y;
+    in-out property <bool> row-menu-pinned;
+    in-out property <bool> row-menu-muted;
+    in-out property <bool> row-menu-archived;
+    in-out property <bool> row-menu-favorite;
+    in-out property <bool> row-menu-unread;
+    // Rust fills the flags above for this chat and opens the menu.
+    callback row-menu-request(string);
+    callback row-menu-action(string, string, int);
     public function open-message-menu(x: float, y: float) -> bool {
+        let row-jid = root.chat-at(x, y);
+        if (row-jid != "") {
+            if (root.screen != "main" || root.message-menu-open || root.message-dialog-open || root.details-open
+                || root.confirm-open || root.forward-open || root.share-open || root.preview-open
+                || root.lightbox-open || root.video-open || root.pdf-open || root.sv-open
+                || root.alert-open || root.member-pick-open || root.reactions-open
+                || root.chat-menu-open || root.account-menu-open || root.shortcuts-open) {
+                return false;
+            }
+            root.row-menu-x = x * 1px;
+            root.row-menu-y = y * 1px;
+            root.row-menu-request(row-jid);
+            return true;
+        }
         if (root.screen != "main" || !root.chat-open || !root.conv-ready || root.select-mode
             || root.message-menu-open || root.message-dialog-open || root.details-open || root.confirm-open
             || root.settings-open || root.forward-open || root.share-open || root.preview-open
@@ -555,7 +607,7 @@ export component AppWindow inherits Window {
     in-out property <bool> pdf-installing: false;
     out property <float> pdf-view-w: pdf-flick.width / 1px;
     out property <float> pdf-view-h: pdf-flick.height / 1px;
-    out property <float> pdf-scroll: -pdf-flick.viewport-y / 1px;
+    out property <float> pdf-scroll: -pdf-flick.content-y / 1px;
     callback pdf-close();
     callback pdf-scrolled(float);
     callback pdf-zoom(int);
@@ -565,7 +617,7 @@ export component AppWindow inherits Window {
     callback pdf-save-as();
     callback pdf-install-engine();
     public function pdf-set-scroll(y: float) {
-        pdf-flick.viewport-y = -y * 1px;
+        pdf-flick.content-y = -y * 1px;
     }
 
     // Status viewer: video updates
@@ -598,13 +650,13 @@ export component AppWindow inherits Window {
         message-input.focus();
     }
     public function scroll-conversation-end() {
-        msg-list.viewport-y = min(0px, msg-list.height - msg-list.viewport-height);
+        msg-list.content-y = min(0px, msg-list.height - msg-list.content-height);
     }
     public function scroll-conversation-top() {
-        msg-list.viewport-y = 0;
+        msg-list.content-y = 0;
     }
     public function set-conversation-scroll(y: length) {
-        msg-list.viewport-y = y;
+        msg-list.content-y = y;
     }
 
     // Settings
@@ -1125,6 +1177,7 @@ export component AppWindow inherits Window {
                 else if (root.lightbox-open) { root.lightbox-open = false; }
                 else if (root.pdf-open) { root.pdf-close(); }
                 else if (root.message-menu-open) { root.message-menu-open = false; }
+                else if (root.row-menu-open) { root.row-menu-open = false; }
                 else if (root.details-open) { root.details-open = false; }
                 else if (root.message-dialog-open) { root.message-dialog-open = false; }
                 else if (root.confirm-open) { root.confirm-open = false; }
@@ -1614,9 +1667,20 @@ export component AppWindow inherits Window {
                 }
 
                 // Filter chips scroll sideways once the lists add up.
-                Flickable {
-                    height: root.sidebar-view == "chats" ? 40px : 0;
-                    visible: root.sidebar-view == "chats";
+                // The mouse wheel scrolls them too (vertical wheel -> sideways).
+                TouchArea {
+                  height: root.sidebar-view == "chats" ? 40px : 0;
+                  visible: root.sidebar-view == "chats";
+                  scroll-event(event) => {
+                    if (chips.preferred-width <= chips-flick.width) { return reject; }
+                    // Touchpads already send horizontal deltas; the Flickable handles those.
+                    if (event.delta-x != 0px || event.delta-y == 0px) { return reject; }
+                    chips-flick.content-x = max(
+                        chips-flick.width - chips.preferred-width,
+                        min(0px, chips-flick.content-x + event.delta-y));
+                    return accept;
+                  }
+                  chips-flick := Flickable {
                     content-width: chips.preferred-width;
                     content-height: self.height;
                     interactive: chips.preferred-width > self.width;
@@ -1660,6 +1724,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                  }
                 }
 
                 if root.sidebar-view == "chats" && root.search-hits.length == 0: Rectangle {
@@ -2173,17 +2238,17 @@ export component AppWindow inherits Window {
                     changed typing-space => {
                         typing-restick.running = root.conv-ready && root.stick-bottom;
                     }
-                    changed viewport-height => {
-                        root.conv-viewport-h = self.viewport-height;
+                    changed content-height => {
+                        root.conv-viewport-h = self.content-height;
                     }
-                    changed viewport-y => {
-                        root.conv-scroll = self.viewport-y;
+                    changed content-y => {
+                        root.conv-scroll = self.content-y;
                         root.stick-bottom =
-                            self.viewport-y <= self.height - self.viewport-height + 60px;
-                        if (self.viewport-y < -120px && root.conv-ready) {
+                            self.content-y <= self.height - self.content-height + 60px;
+                        if (self.content-y < -120px && root.conv-ready) {
                             root.scroll-armed = true;
                         }
-                        if (self.viewport-y >= -4px && self.viewport-height > self.height
+                        if (self.content-y >= -4px && self.content-height > self.height
                             && root.scroll-armed) {
                             root.load-older();
                         }
@@ -2231,7 +2296,7 @@ export component AppWindow inherits Window {
                         // coordinates; the ListView re-anchors every
                         // visible row on each scroll step, so the check
                         // rides on y as well as on the visible offset.
-                        property <length> vis-y: self.y + msg-list.viewport-y;
+                        property <length> vis-y: self.y + msg-list.content-y;
                         changed vis-y => {
                             if (self.vis-y <= contact-header.height + 6px && self.vis-y + self.height > contact-header.height + 6px) {
                                 root.day-at-top(msg.dayFull);
@@ -2366,6 +2431,13 @@ export component AppWindow inherits Window {
                         // Whether the time/ticks float on the last text line (text paths only).
                         property <bool> has-translation: root.can-translate(msg)
                             && (msg.translationText != "" || msg.translationBusy || msg.translationError != "");
+                        // Spaces reserving room for the time cluster; a longer label
+                        // (pinned mark, edited) needs more. Keep in step with
+                        // `meta_pad` in conversation.rs, which pads the styled text.
+                        property <string> meta-pad: msg.time.character-count > 11 ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}"
+                            : msg.time.character-count > 8 ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}"
+                            : msg.time.character-count > 5 ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}"
+                            : "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}";
                         property <bool> meta-inline:
                             msg.cardKind == "" && (msg.hasStyled || msg.kind == "text"
                                 || ((msg.kind == "image" || msg.kind == "video") && msg.text != ""))
@@ -3425,7 +3497,7 @@ export component AppWindow inherits Window {
                                     plain-text := TextInput {
                                         accessible-role: none;
                                         text: (msg.deleted ? "🚫 " + msg.text : msg.text)
-                                            + (msg-row.meta-inline ? "\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}\u{A0}" : "");
+                                            + (msg-row.meta-inline ? msg-row.meta-pad : "");
                                         animate opacity { duration: 120ms; easing: ease-out; }
                                         read-only: true;
                                         single-line: false;
@@ -4072,29 +4144,63 @@ export component AppWindow inherits Window {
                         // Recording bar (replaces the composer while capturing)
                         HorizontalBox {
                             visible: root.rec-active;
-                            padding-top: 8px;
-                            padding-bottom: 8px;
-                            padding-left: 12px;
-                            padding-right: 12px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            padding-left: 8px;
+                            padding-right: 8px;
                             spacing: 10px;
                             IconButton {
                                 label: @tr("accessibility.discard_recording");
+                                tip: @tr("accessibility.discard_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.tile;
                                 icon: @image-url("../icons/trash.svg");
                                 clicked => { root.rec-cancel(); }
                             }
                             Rectangle {
                                 width: 10px;
-                                height: 10px;
-                                border-radius: 5px;
-                                background: Theme.danger-solid;
-                                y: 26px;
+                                Rectangle {
+                                    width: 10px;
+                                    height: 10px;
+                                    border-radius: 5px;
+                                    y: (parent.height - self.height) / 2;
+                                    background: root.rec-paused ? Theme.text-dim : Theme.danger-solid;
+                                }
                             }
                             Text {
                                 text: root.rec-elapsed;
                                 color: Theme.text;
-                                font-size: 15px;
+                                font-size: 18px;
                                 vertical-alignment: center;
+                                horizontal-stretch: 0;
+                                min-width: 56px;
+                            }
+                            // Live waveform: green up to the playhead, dim after it.
+                            Rectangle {
                                 horizontal-stretch: 1;
+                                min-width: 60px;
+                                clip: true;
+                                property <length> pitch: min(7px, self.width / max(1, root.rec-levels.length));
+                                property <length> x0: (self.width - self.pitch * root.rec-levels.length) / 2;
+                                for level[i] in root.rec-levels: Rectangle {
+                                    x: parent.x0 + i * parent.pitch;
+                                    width: max(2px, parent.pitch * 0.55);
+                                    height: i < root.rec-filled ? max(4px, level * (parent.height - 10px)) : 4px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: self.width / 2;
+                                    background: i < root.rec-head ? Theme.accent-text : Theme.text-dim.with-alpha(0.35);
+                                }
+                                Rectangle {
+                                    x: parent.x0 + root.rec-head * parent.pitch - 1px;
+                                    y: 4px;
+                                    width: 2px;
+                                    height: parent.height - 8px;
+                                    border-radius: 1px;
+                                    background: Theme.text;
+                                    visible: root.rec-head > 0;
+                                }
                             }
                             vo-touch := TouchArea {
                                 accessible-role: switch;
@@ -4109,9 +4215,9 @@ export component AppWindow inherits Window {
                                 Rectangle {
                                     width: parent.width;
                                     height: parent.height;
-                                    border-radius: 8px;
+                                    border-radius: 20px;
                                     background: root.rec-view-once ? Theme.chip-active-bg
-                                        : vo-touch.has-hover ? Theme.hover : transparent;
+                                        : vo-touch.has-hover ? Theme.hover : Theme.tile;
                                     Image {
                                         source: @image-url("../icons/eye.svg");
                                         colorize: root.rec-view-once ? Theme.accent : Theme.icon;
@@ -4128,11 +4234,49 @@ export component AppWindow inherits Window {
                                     shown: vo-key.has-focus;
                                     width: parent.width;
                                     height: parent.height;
-                                    border-radius: 8px;
+                                    border-radius: 20px;
+                                }
+                                Tooltip {
+                                    TipBubble { text: @tr("accessibility.view_once"); }
+                                }
+                            }
+                            // Listen to the paused recording before sending it.
+                            if root.rec-paused: IconButton {
+                                label: root.rec-previewing ? @tr("accessibility.stop_preview") : @tr("accessibility.preview_recording");
+                                tip: root.rec-previewing ? @tr("accessibility.stop_preview") : @tr("accessibility.preview_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.tile;
+                                icon: root.rec-previewing ? @image-url("../icons/player-stop.svg") : @image-url("../icons/player-play.svg");
+                                clicked => { root.rec-preview(); }
+                            }
+                            // Pause keeps what was said; resume goes on from there.
+                            IconButton {
+                                label: root.rec-paused ? @tr("accessibility.resume_recording") : @tr("accessibility.pause_recording");
+                                tip: root.rec-paused ? @tr("accessibility.resume_recording") : @tr("accessibility.pause_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.tile;
+                                icon: root.rec-paused ? @image-url("../icons/microphone.svg") : @image-url("../icons/player-pause.svg");
+                                clicked => {
+                                    if (root.rec-paused) {
+                                        root.rec-resume();
+                                    } else {
+                                        root.rec-pause();
+                                    }
                                 }
                             }
                             IconButton {
                                 label: @tr("accessibility.send_recording");
+                                tip: @tr("accessibility.send_recording");
+                                width: 40px;
+                                height: 40px;
+                                radius: 20px;
+                                background: Theme.send;
+                                hover-background: Theme.send.brighter(0.2);
+                                tint: #ffffff;
                                 icon: @image-url("../icons/send-2.svg");
                                 clicked => { root.rec-stop(); }
                             }
@@ -4209,11 +4353,11 @@ export component AppWindow inherits Window {
                                         }
                                         cursor-position-changed(pos) => {
                                             root.composer-cursor(self.cursor-position-byte-offset, self.anchor-position-byte-offset);
-                                            if (pos.y < -composer-scroll.viewport-y) {
-                                                composer-scroll.viewport-y = -pos.y;
+                                            if (pos.y < -composer-scroll.content-y) {
+                                                composer-scroll.content-y = -pos.y;
                                             } else if (pos.y + self.font-size * 1.3
-                                                    > -composer-scroll.viewport-y + composer-scroll.height) {
-                                                composer-scroll.viewport-y =
+                                                    > -composer-scroll.content-y + composer-scroll.height) {
+                                                composer-scroll.content-y =
                                                     composer-scroll.height - pos.y - self.font-size * 1.3;
                                             }
                                         }
@@ -4238,7 +4382,7 @@ export component AppWindow inherits Window {
                                                     root.mention-pick(root.mention-index);
                                                 } else {
                                                     root.send-message(self.text);
-                                                    composer-scroll.viewport-y = 0;
+                                                    composer-scroll.content-y = 0;
                                                 }
                                                 return accept;
                                             }
@@ -4345,28 +4489,35 @@ export component AppWindow inherits Window {
                                     vertical-alignment: center;
                                 }
                             }
-                            IconButton {
+                            if message-input.text == "": IconButton {
                                 label: @tr("accessibility.record_voice");
+                                tip: @tr("accessibility.record_voice");
                                 width: 32px;
                                 height: 32px;
                                 icon-size: 20px;
+                                radius: 10px;
+                                background: transparent;
+                                hover-background: Theme.send;
+                                hover-tint: #ffffff;
                                 icon: @image-url("../icons/microphone.svg");
                                 y: parent.height - self.height - 8px;
                                 clicked => { root.rec-start(); }
                             }
-                            IconButton {
+                            if message-input.text != "": IconButton {
                                 label: @tr("accessibility.send");
+                                tip: @tr("accessibility.send");
                                 width: 40px;
                                 height: 32px;
                                 icon-size: 20px;
                                 radius: 10px;
                                 background: Theme.send;
+                                hover-background: Theme.send.brighter(0.2);
                                 tint: #ffffff;
                                 icon: @image-url("../icons/send-2.svg");
                                 y: parent.height - self.height - 8px;
                                 clicked => {
                                     root.send-message(message-input.text);
-                                    composer-scroll.viewport-y = 0;
+                                    composer-scroll.content-y = 0;
                                 }
                             }
                         }
@@ -4914,6 +5065,26 @@ export component AppWindow inherits Window {
         win-height: root.height;
     }
 
+    row-menu-layer := ChatRowMenuLayer {
+        open: root.row-menu-open;
+        scrim: transparent;
+        dismiss => { root.row-menu-open = false; }
+
+        row-menu-open <=> root.row-menu-open;
+        row-menu-sub <=> root.row-menu-sub;
+        row-menu-jid: root.row-menu-jid;
+        row-menu-x: root.row-menu-x;
+        row-menu-y: root.row-menu-y;
+        pinned: root.row-menu-pinned;
+        muted: root.row-menu-muted;
+        archived: root.row-menu-archived;
+        favorite: root.row-menu-favorite;
+        unread: root.row-menu-unread;
+        win-width: root.width;
+        win-height: root.height;
+        act(a0, a1, a2) => { root.row-menu-action(a0, a1, a2); }
+    }
+
     details-layer := DetailsLayer {
         open: root.details-open;
         scrim: Theme.scrim;
@@ -4933,12 +5104,29 @@ export component AppWindow inherits Window {
         dismiss => { root.message-dialog-open = false; }
 
         submit-edit(a0, a1) => { root.submit-edit(a0, a1); }
+        edit-newline(a0, a1, a2) => { return root.edit-newline(a0, a1, a2); }
         message-dialog-open <=> root.message-dialog-open;
         message-dialog-edit: root.message-dialog-edit;
         message-dialog-title: root.message-dialog-title;
         message-dialog-text <=> root.message-dialog-text;
         message-dialog-id: root.message-dialog-id;
         win-width: root.width;
+    }
+
+    // ---------- First-sync page (under the confirm dialog) ----------
+    SyncScreen {
+        width: 100%;
+        height: 100%;
+        open: root.sync-screen-open && root.screen == "main";
+        percent: root.sync-screen-percent;
+        started: root.sync-screen-started;
+        catchup: root.sync-screen-catchup;
+        account: root.sync-screen-account;
+        messages: root.sync-screen-messages;
+        chats: root.sync-screen-chats;
+        media: root.sync-screen-media;
+        files: root.sync-screen-files;
+        disconnect => { root.logout(); }
     }
 
     // ---------- Confirm dialog ----------
@@ -5060,14 +5248,6 @@ export component AppWindow inherits Window {
         current-only: root.starred-current-only;
         open-starred-item(a0, a1) => { root.open-starred-item(a0, a1); }
     }
-    shortcuts-layer := ShortcutsLayer {
-        open: root.shortcuts-open;
-        scrim: Theme.scrim;
-        dismiss => { root.shortcuts-open = false; }
-        shortcuts-open <=> root.shortcuts-open;
-        is-macos: root.is-macos;
-    }
-
     // ---------- Forward picker ----------
     forward-layer := ForwardLayer {
         open: root.forward-open;
@@ -5205,6 +5385,15 @@ export component AppWindow inherits Window {
         win-width: root.width;
     }
 
+    // Declared after Settings so it stacks above it (opened from Settings > General).
+    shortcuts-layer := ShortcutsLayer {
+        open: root.shortcuts-open;
+        scrim: Theme.scrim;
+        dismiss => { root.shortcuts-open = false; }
+        shortcuts-open <=> root.shortcuts-open;
+        is-macos: root.is-macos;
+    }
+
     // ---------- PDF viewer ----------
     // Kept in the tree (hidden) so the Flickable's geometry is always
     // readable by the host; the pages are laid out by the host.
@@ -5319,10 +5508,10 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     content-height: max(self.height, root.pdf-total-h * 1px);
                     content-width: max(self.width, root.pdf-total-w * 1px);
-                    changed viewport-y => { root.pdf-scrolled(-self.viewport-y / 1px); }
+                    changed content-y => { root.pdf-scrolled(-self.content-y / 1px); }
                     changed width => { if (root.pdf-open) { root.pdf-view-resized(); } }
                     for p in root.pdf-pages: Rectangle {
-                        x: (pdf-flick.viewport-width - p.w * 1px) / 2;
+                        x: (pdf-flick.content-width - p.w * 1px) / 2;
                         y: p.y * 1px;
                         width: p.w * 1px;
                         height: p.h * 1px;

@@ -1,0 +1,319 @@
+import { Theme } from "theme.slint";
+
+// One figure of the sync card: icon, count and caption.
+component SyncStat inherits Rectangle {
+    in property <image> icon;
+    in property <string> value;
+    in property <string> label;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 10px;
+        Image {
+            source: root.icon;
+            colorize: Theme.icon;
+            width: 22px;
+            height: 22px;
+            y: (parent.height - self.height) / 2;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.value;
+                color: Theme.text;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            Text {
+                text: root.label;
+                color: Theme.text-dim;
+                font-size: 12px;
+            }
+        }
+    }
+}
+
+// Full-window page shown while the first history is downloaded after a
+// pairing. It swallows input; the only way out is to disconnect.
+export component SyncScreen inherits Rectangle {
+    in property <bool> open: false;
+    // 0..100, as reported by the phone.
+    in property <int> percent: 0;
+    // False until the first chunk lands (the phone is still preparing it).
+    in property <bool> started: false;
+    // Catching up after time away: no percentage, a moving bar instead.
+    in property <bool> catchup: false;
+    in property <string> account;
+    in property <string> messages;
+    in property <string> chats;
+    in property <string> media;
+    in property <string> files;
+    callback disconnect();
+
+    property <int> seconds: 0;
+    changed open => {
+        if (root.open) {
+            root.seconds = 0;
+        }
+    }
+    // Only ticks while the page is up, so an idle window never redraws.
+    Timer {
+        running: root.open;
+        interval: 1s;
+        triggered => { root.seconds += 1; }
+    }
+    property <string> elapsed: (Math.floor(root.seconds / 60) < 10 ? "0" : "")
+        + Math.floor(root.seconds / 60) + ":"
+        + (Math.mod(root.seconds, 60) < 10 ? "0" : "") + Math.mod(root.seconds, 60);
+
+    visible: root.open;
+    background: Theme.dark ? #04120f : Theme.bg;
+    clip: true;
+    // Soft green washes in the corners, as in the reference.
+    Rectangle {
+        x: parent.width * 0.55;
+        y: -parent.height * 0.35;
+        width: parent.width * 0.7;
+        height: parent.height * 0.7;
+        background: @radial-gradient(circle, #1fd68a40 0%, #1fd68a00 70%);
+    }
+    Rectangle {
+        x: -parent.width * 0.25;
+        y: parent.height * 0.6;
+        width: parent.width * 0.8;
+        height: parent.height * 0.7;
+        background: @radial-gradient(circle, #1fd68a38 0%, #1fd68a00 70%);
+    }
+    TouchArea { }
+
+    VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        spacing: 0px;
+        // Header: mark, name and account.
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 72px;
+                height: 72px;
+                border-radius: 20px;
+                clip: true;
+                border-width: 1px;
+                border-color: Theme.glass-rim-soft;
+                Image {
+                    source: @image-url("../zapive.png");
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: contain;
+                    accessible-role: none;
+                }
+            }
+        }
+        Text {
+            text: "Zapive";
+            color: Theme.text;
+            font-size: 28px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+        if root.account != "": Text {
+            text: root.account;
+            color: Theme.accent-text;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 28px; }
+        Text {
+            text: root.catchup ? @tr("sync.screen.catchup_title") : @tr("sync.screen.title");
+            color: Theme.text;
+            font-size: 24px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 8px; }
+        Text {
+            text: root.catchup ? @tr("sync.screen.catchup_subtitle") : @tr("sync.screen.subtitle");
+            color: Theme.text-dim;
+            font-size: 15px;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 26px; }
+        // Progress card.
+        HorizontalLayout {
+            alignment: center;
+            card := Rectangle {
+                preferred-width: 560px;
+                max-width: 560px;
+                height: 218px;
+                border-radius: 20px;
+                background: Theme.dark ? #ffffff0d : Theme.panel;
+                border-width: 1px;
+                border-color: Theme.dark ? #39d99b44 : Theme.border;
+                VerticalLayout {
+                    padding: 22px;
+                    spacing: 16px;
+                    HorizontalLayout {
+                        spacing: 16px;
+                        Rectangle {
+                            width: 54px;
+                            height: 54px;
+                            border-radius: 14px;
+                            background: Theme.dark ? #1fd68a22 : Theme.chip-active-bg;
+                            Image {
+                                source: @image-url("../icons/download.svg");
+                                colorize: Theme.accent-text;
+                                width: 28px;
+                                height: 28px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                accessible-role: none;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            Text {
+                                text: !root.started ? @tr("sync.screen.waiting_title")
+                                    : root.percent >= 100 ? @tr("sync.screen.finishing_title")
+                                    : @tr("sync.screen.card_title");
+                                color: Theme.text;
+                                font-size: 16px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: !root.started ? @tr("sync.screen.waiting_detail")
+                                    : root.percent >= 100 ? @tr("sync.screen.finishing_detail")
+                                    : @tr("sync.screen.card_detail");
+                                color: Theme.text-dim;
+                                font-size: 13px;
+                                overflow: elide;
+                            }
+                        }
+                        if !root.catchup: Text {
+                            text: root.percent + "%";
+                            color: Theme.accent-text;
+                            font-size: 24px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                    // Bar.
+                    Rectangle {
+                        height: 8px;
+                        border-radius: 4px;
+                        background: Theme.dark ? #ffffff14 : Theme.well;
+                        Rectangle {
+                            x: root.catchup && Math.mod(root.seconds, 2) == 1 ? parent.width * 0.65 : 0px;
+                            width: root.catchup ? parent.width * 0.35 : parent.width * clamp(root.percent, 0, 100) / 100;
+                            animate x { duration: 1s; easing: ease-in-out; }
+                            height: parent.height;
+                            border-radius: parent.border-radius;
+                            background: Theme.accent-text;
+                            animate width { duration: 400ms; easing: ease-out; }
+                        }
+                    }
+                    // Counters.
+                    HorizontalLayout {
+                        height: 44px;
+                        SyncStat {
+                            icon: @image-url("../icons/message-circle.svg");
+                            value: root.messages;
+                            label: @tr("sync.screen.messages");
+                        }
+                        Rectangle { width: 1px; background: Theme.border; }
+                        SyncStat {
+                            icon: @image-url("../icons/users.svg");
+                            value: root.chats;
+                            label: @tr("sync.screen.chats");
+                        }
+                        Rectangle { width: 1px; background: Theme.border; }
+                        SyncStat {
+                            icon: @image-url("../icons/photo.svg");
+                            value: root.media;
+                            label: @tr("sync.screen.media");
+                        }
+                        Rectangle { width: 1px; background: Theme.border; }
+                        SyncStat {
+                            icon: @image-url("../icons/file-text.svg");
+                            value: root.files;
+                            label: @tr("sync.screen.files");
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle { height: 18px; }
+        // Elapsed time and encryption note.
+        Text {
+            text: @tr("sync.screen.elapsed") + " " + root.elapsed;
+            color: Theme.text-dim;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            Image {
+                source: @image-url("../icons/lock.svg");
+                colorize: Theme.accent-text;
+                width: 16px;
+                height: 16px;
+                y: (parent.height - self.height) / 2;
+                accessible-role: none;
+            }
+            Text {
+                text: @tr("sync.screen.encrypted");
+                color: Theme.text-dim;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { height: 36px; }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 150px;
+                height: 40px;
+                border-radius: 20px;
+                background: ta.has-hover ? Theme.hover : transparent;
+                border-width: 1px;
+                border-color: Theme.dark ? #39d99b44 : Theme.border;
+                accessible-role: button;
+                accessible-label: @tr("sync.screen.disconnect");
+                accessible-action-default => { root.disconnect(); }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    Image {
+                        source: @image-url("../icons/logout.svg");
+                        colorize: Theme.text;
+                        width: 18px;
+                        height: 18px;
+                        y: (parent.height - self.height) / 2;
+                        accessible-role: none;
+                    }
+                    Text {
+                        text: @tr("sync.screen.disconnect");
+                        color: Theme.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.disconnect(); }
+                }
+            }
+        }
+        Rectangle { height: 12px; }
+        Text {
+            text: @tr("sync.screen.keep_open");
+            color: Theme.text-dim;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}

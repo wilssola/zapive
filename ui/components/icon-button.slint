@@ -1,13 +1,38 @@
 import { Theme } from "theme.slint";
 import { KeyFocus, FocusRing } from "a11y.slint";
 
+// Small bubble shown by `Tooltip` on hover.
+export component TipBubble inherits Rectangle {
+    in property <string> text;
+    width: min(320px, tip-text.preferred-width + 20px);
+    height: tip-text.preferred-height + 12px;
+    background: Theme.header;
+    border-color: Theme.border;
+    border-width: 1px;
+    border-radius: 6px;
+    tip-text := Text {
+        x: 10px;
+        y: 6px;
+        width: parent.width - 20px;
+        text: root.text;
+        color: Theme.text;
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+}
+
 export component IconButton inherits TouchArea {
+    // Hover tooltip; empty = none.
+    in property <string> tip;
     in property <image> icon;
     in property <bool> active: false;
     in property <length> icon-size: 22px;
     in property <color> tint: Theme.icon;
     in property <brush> background: transparent;
     in property <brush> active-background: Theme.selected;
+    // Shown while hovered; the icon follows `hover-tint`.
+    in property <brush> hover-background: Theme.hover;
+    in property <color> hover-tint: root.tint;
     in property <length> radius: 8px;
     in property <int> badge-count: 0;
     in property <bool> badge-dot: false;
@@ -28,12 +53,13 @@ export component IconButton inherits TouchArea {
         width: parent.width;
         height: parent.height;
         border-radius: root.radius;
-        background: root.active ? root.active-background : root.has-hover ? Theme.hover : root.background;
+        background: root.active ? root.active-background : root.has-hover ? root.hover-background : root.background;
         opacity: root.pressed ? 0.82 : 1;
-        animate background, opacity { duration: Theme.motion-fast; easing: ease-out; }
+        animate background, opacity { duration: Theme.motion-normal; easing: ease-in-out; }
         Image {
             source: root.icon;
-            colorize: root.tint;
+            colorize: root.has-hover ? root.hover-tint : root.tint;
+            animate colorize { duration: Theme.motion-normal; easing: ease-in-out; }
             width: root.icon-size;
             height: root.icon-size;
             x: (parent.width - self.width) / 2;
@@ -63,5 +89,8 @@ export component IconButton inherits TouchArea {
         height: parent.height;
         border-radius: root.radius;
         shown: key-focus.has-focus;
+    }
+    if root.tip != "": Tooltip {
+        TipBubble { text: root.tip; }
     }
 }

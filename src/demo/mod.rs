@@ -20,7 +20,7 @@ use std::time::Duration;
 use crate::{AppWindow, i18n};
 
 const DEFAULT_SIZE: (u32, u32) = (1440, 900);
-const SHOTS: [(&str, &str, &str, &str); 14] = [
+const SHOTS: [(&str, &str, &str, &str); 15] = [
     ("chat-dark-glass.png", "chat", "dark", "glass"),
     ("chat-light-glass.png", "chat", "light", "glass"),
     ("chat-dark-opaque.png", "chat", "dark", "opaque"),
@@ -29,6 +29,7 @@ const SHOTS: [(&str, &str, &str, &str); 14] = [
     ("info-panel.png", "info", "dark", "glass"),
     ("login.png", "login", "dark", "glass"),
     ("splash.png", "splash", "dark", "glass"),
+    ("sync.png", "sync", "dark", "glass"),
     ("poll.png", "poll", "dark", "glass"),
     ("starred.png", "starred", "dark", "glass"),
     ("shortcuts.png", "shortcuts", "dark", "glass"),
@@ -44,6 +45,7 @@ enum Page {
     Info,
     Login,
     Splash,
+    Sync,
     Poll,
     Starred,
     Shortcuts,
@@ -88,6 +90,7 @@ fn parse() -> Result<Options, String> {
         Some("info") => Page::Info,
         Some("login") => Page::Login,
         Some("splash") => Page::Splash,
+        Some("sync") => Page::Sync,
         Some("poll") => Page::Poll,
         Some("starred") => Page::Starred,
         Some("shortcuts") => Page::Shortcuts,
@@ -96,7 +99,7 @@ fn parse() -> Result<Options, String> {
         Some("poll-composer") => Page::PollComposer,
         Some(other) => {
             return Err(format!(
-                "unknown --demo-page `{other}` (chat|settings|info|login|splash|poll|starred|shortcuts|reactions|drop|poll-composer)"
+                "unknown --demo-page `{other}` (chat|settings|info|login|splash|sync|poll|starred|shortcuts|reactions|drop|poll-composer)"
             ));
         }
     };
@@ -367,6 +370,16 @@ fn configure(ui: &AppWindow, options: &Options) {
         }
         Page::Info => ui.set_info_open(true),
         Page::Splash => {}
+        Page::Sync => {
+            ui.set_sync_screen_open(true);
+            ui.set_sync_screen_started(true);
+            ui.set_sync_screen_percent(48);
+            ui.set_sync_screen_account("Demo account".into());
+            ui.set_sync_screen_messages("12,430".into());
+            ui.set_sync_screen_chats("87".into());
+            ui.set_sync_screen_media("356".into());
+            ui.set_sync_screen_files("82".into());
+        }
         Page::Poll => {}
         Page::Starred => ui.set_starred_open(true),
         Page::Shortcuts => ui.set_shortcuts_open(true),

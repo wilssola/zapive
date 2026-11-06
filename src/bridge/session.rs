@@ -74,11 +74,18 @@ impl Bridge {
         self.refresh_labels();
         self.refresh_chats();
         // Nothing to wait for on the login screen or when the stored chat
-        // list is already on screen; a fresh pairing keeps the splash until
-        // the first sync chunk or the safety timeout.
-        if !registered || !self.store.chats.is_empty() {
-            self.finish_loading();
+        // list is already on screen. A paired account with nothing stored
+        // (first run, or closed mid-sync) shows the sync page instead.
+        let away = self.away_secs();
+        if registered && self.store.chats.is_empty() {
+            self.begin_initial_sync();
+        } else if registered {
+            self.begin_catchup_if_away(away);
         }
+        if registered {
+            self.start_activity_tracking();
+        }
+        self.finish_loading();
         self.refresh_statuses();
         self.refresh_calls();
         // Chats stored before the search index existed get indexed from
@@ -198,7 +205,12 @@ impl Bridge {
             println!("[store] a different number paired; dropping the kept conversations");
             self.wipe_conversations();
         }
+        // A fresh pairing with nothing kept: the first history is on its way.
+        if !self.registered && self.store.chats.is_empty() {
+            self.begin_initial_sync();
+        }
         self.registered = true;
+        self.catchup_connected();
         self.store.set_self(&[pn, lid]);
         // A LID-primary session may carry no phone jid at all; our own
         // rows (voice notes, search hits) still need an identity.
@@ -230,6 +242,8 @@ impl Bridge {
     // loop in the status line.
     pub fn on_fatal(&mut self, kind: &str) {
         self.finish_loading();
+        // The alert must be reachable; the page would hide it.
+        self.end_initial_sync();
         let conflict = kind == "conflict";
         self.ui.set_alert_title(
             t(if conflict {
@@ -260,6 +274,7 @@ impl Bridge {
 
     pub fn on_logged_out(&mut self) {
         self.finish_loading();
+        self.end_initial_sync();
         self.registered = false;
         self.ui.set_pairing_mode(false);
         self.ui.set_pairing_code("".into());
@@ -372,6 +387,7 @@ impl Bridge {
         self.history_pending = false;
         self.sync_batches = 0;
         self.sync_messages = 0;
+        self.end_initial_sync();
         self.requested_channels.clear();
         self.pending_forward.clear();
         self.clear_notification_sensitive_state();

@@ -174,6 +174,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         anim_order: std::collections::VecDeque::new(),
         anim_bytes: 0,
         anim_timer: slint::Timer::default(),
+        activity_timer: slint::Timer::default(),
         avatar_order: std::collections::VecDeque::new(),
         window_idle: false,
         idle_since: None,
@@ -186,13 +187,14 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         waves: HashMap::new(),
         recorder: None,
         rec_timer: slint::Timer::default(),
-        rec_started: None,
+        rec_preview: None,
         reactions_model,
         forward_model,
         react_pick_for: None,
         pending_forward: Vec::new(),
         sync_batches: 0,
         sync_messages: 0,
+        initial_sync: Default::default(),
         select_mode: false,
         selected: Vec::new(),
         mention_at: None,
@@ -600,6 +602,26 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
             }
         });
     });
+    // Ctrl+Enter in the edit dialog: Slint's TextInput ignores Ctrl-modified
+    // keys, so the newline is spliced in here, replacing any selection.
+    ui.on_edit_newline(|text, a, b| {
+        let (lo, hi) = (a.min(b).max(0) as usize, a.max(b).max(0) as usize);
+        let text = text.as_str();
+        let clamp = |i: usize| {
+            (0..=i.min(text.len()))
+                .rev()
+                .find(|&i| text.is_char_boundary(i))
+                .unwrap_or(0)
+        };
+        let (lo, hi) = (clamp(lo), clamp(hi));
+        format!(
+            "{}
+{}",
+            &text[..lo],
+            &text[hi..]
+        )
+        .into()
+    });
     ui.on_cancel_reply(|| defer(|b| b.clear_reply()));
     ui.on_open_starred(|current_only| defer(move |b| b.open_starred(current_only)));
     ui.on_open_starred_item(|jid, id| {
@@ -863,6 +885,9 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_rec_start(|| defer(|b| b.start_recording()));
     ui.on_rec_stop(|| defer(|b| b.stop_recording(true)));
     ui.on_rec_cancel(|| defer(|b| b.stop_recording(false)));
+    ui.on_rec_pause(|| defer(|b| b.pause_recording()));
+    ui.on_rec_resume(|| defer(|b| b.resume_recording()));
+    ui.on_rec_preview(|| defer(|b| b.toggle_rec_preview()));
     ui.on_play_audio(|path| {
         // Documents (and, until phase 4, audio files) open with whatever
         // the OS associates; the handler needs a decrypted copy.
@@ -1081,6 +1106,15 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_select_forward(|| defer(|b| b.request_forward_selected()));
     ui.on_select_star(|| defer(|b| b.star_selected()));
     ui.on_select_delete(|| defer(|b| b.confirm_delete_selected()));
+    // Right-click menu on a conversation-list row.
+    ui.on_row_menu_request(|jid| {
+        let jid = jid.to_string();
+        defer(move |b| b.open_row_menu(&jid));
+    });
+    ui.on_row_menu_action(|jid, action, arg| {
+        let (jid, action) = (jid.to_string(), action.to_string());
+        defer(move |b| b.row_menu_action(&jid, &action, arg));
+    });
     // Chat menu.
     ui.on_menu_add_member(|| defer(|b| b.open_member_picker()));
     ui.on_menu_search(|| defer(|b| b.open_chat_search()));

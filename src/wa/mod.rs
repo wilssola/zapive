@@ -385,6 +385,10 @@ pub enum Cmd {
         jid: String,
         archived: bool,
     },
+    PinChat {
+        jid: String,
+        pinned: bool,
+    },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.
@@ -403,6 +407,8 @@ pub struct HistChat {
 
 pub struct HistoryChunk {
     pub on_demand: bool,
+    // 0..=100 as reported by the phone for the initial sync.
+    pub progress: Option<u32>,
     pub chats: Vec<HistChat>,
     pub messages: Vec<wa::WebMessageInfo>,
     pub pushnames: Vec<(String, String)>,

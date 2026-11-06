@@ -277,21 +277,27 @@ impl Bridge {
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
+        let next = self.toggle_archive_chat(&jid);
+        self.ui.set_info_archived(next);
+    }
+
+    // Flips the archive flag of any chat and returns the new state.
+    pub(super) fn toggle_archive_chat(&mut self, jid: &str) -> bool {
         let next = !self
             .store
             .chats
-            .get(&jid)
+            .get(jid)
             .map(|c| c.archived)
             .unwrap_or(false);
-        if let Some(meta) = self.store.chats.get_mut(&jid) {
+        if let Some(meta) = self.store.chats.get_mut(jid) {
             meta.archived = next;
         }
-        self.ui.set_info_archived(next);
         self.wa.send(Cmd::Archive {
-            jid,
+            jid: jid.to_string(),
             archived: next,
         });
         self.schedule_refresh_chats();
+        next
     }
 
     pub(super) fn clear_current_chat(&mut self) {
@@ -593,6 +599,11 @@ impl Bridge {
             return;
         };
         self.ui.set_chat_menu_open(false);
+        self.mute_chat(&jid, hours);
+    }
+
+    pub(super) fn mute_chat(&mut self, jid: &str, hours: i32) {
+        let jid = jid.to_string();
         let muted = match hours {
             0 => 0,
             h if h < 0 => -1,
@@ -643,6 +654,11 @@ impl Bridge {
             return;
         };
         self.ui.set_chat_menu_open(false);
+        self.toggle_favorite_for(&jid);
+    }
+
+    pub(super) fn toggle_favorite_for(&mut self, jid: &str) {
+        let jid = jid.to_string();
         let next = !self
             .store
             .chats
