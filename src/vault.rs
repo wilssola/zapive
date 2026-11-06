@@ -441,7 +441,7 @@ impl Vault {
         // Dropping the write beats panicking: callers race the PIN unlock
         // (the WhatsApp client connects while the vault is still locked).
         let Some(encoded) = self.key.with(|key| key.map(|key| encrypt_str(v, key))) else {
-            eprintln!("[vault] write to {k} dropped: vault is locked");
+            eprintln!("[vault] write dropped: vault is locked");
             return;
         };
         let _ = self.conn.execute(
@@ -785,7 +785,8 @@ fn note_skipped(label: &str, why: &str) {
         .map(|mut s| s.insert(label.to_string()))
         .unwrap_or(false)
     {
-        eprintln!("[vault] skipping undecryptable row {label}: {why}");
+        let kind = label.split(':').next().unwrap_or("row");
+        eprintln!("[vault] skipping an undecryptable {kind} row: {why}");
     }
 }
 
