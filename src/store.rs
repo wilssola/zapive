@@ -1250,7 +1250,13 @@ impl Store {
         if self.messages_for(&jid).iter().any(|m| m.id == id) {
             return true;
         }
-        if self.flush_history(vault).is_err() {
+        // A message that is not in RAM was either never seen or already
+        // flushed, so the vault is current unless a clear or a merge is
+        // still queued. Flushing on every call turned a history sync into
+        // one transaction plus one index rewrite per message.
+        if (!self.deleted_jids.is_empty() || !self.pending_merges.is_empty())
+            && self.flush_history(vault).is_err()
+        {
             return false;
         }
         let Ok(Some(message)) = vault.history_id(&jid, id) else {
@@ -2150,6 +2156,51 @@ mod tests {
         );
         message.kind = MessageKind::Text;
         message
+    }
+
+    #[test]
+    fn history_chunk_ingest_writes_once_per_save_not_per_message() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_history_chunk_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        let started = std::time::Instant::now();
+        for n in 0..300 {
+            let stored = history_message("chat", n);
+            store.hydrate_id(&vault, "chat", &stored.id);
+            assert!(store.add_message(stored));
+        }
+        let ingest = started.elapsed();
+        let persisted = vault.history_page("chat", None, 1000).unwrap().len();
+        eprintln!(
+            "[bench] 300 messages ingested in {ingest:?}, {persisted} rows persisted before save"
+        );
+        assert_eq!(
+            persisted, 0,
+            "ingesting a history chunk must not commit to the vault per message"
+        );
+        store.save_checked(&vault).unwrap();
+        assert_eq!(vault.history_page("chat", None, 1000).unwrap().len(), 300);
+        drop(vault);
+        crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn hydrate_id_still_flushes_when_a_clear_is_queued() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_hydrate_clear_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        store.add_message(history_message("chat", 1));
+        store.save_checked(&vault).unwrap();
+        store.clear_messages("chat");
+        assert!(!store.hydrate_id(&vault, "chat", "00001"));
+        drop(vault);
+        crate::paths::remove_db(&path);
     }
 
     #[test]
