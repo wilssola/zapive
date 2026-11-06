@@ -203,8 +203,7 @@ impl Bridge {
             1 => {
                 let list = ids(self);
                 println!(
-                    "[selftest] on the new account: id {:?}, {} account(s), {} chat(s), screen {}",
-                    self.account,
+                    "[selftest] on the new account: {} account(s), {} chat(s), screen {}",
                     list.len(),
                     self.store.chats.len(),
                     self.ui.get_screen()
@@ -223,8 +222,7 @@ impl Bridge {
             2 => {
                 let list = ids(self);
                 println!(
-                    "[selftest] back on the first: id {:?}, {} account(s), {} chat(s)",
-                    self.account,
+                    "[selftest] back on the first: {} account(s), {} chat(s)",
                     list.len(),
                     self.store.chats.len()
                 );

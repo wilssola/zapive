@@ -582,8 +582,11 @@ mod receipt_tests {
         assert_eq!(tag.len(), 6);
         assert_eq!(tag, chat_tag(jid));
         assert_ne!(tag, chat_tag("120363000000000002@g.us"));
-        assert_ne!(salted_tag(&[1; 16], jid), salted_tag(&[2; 16], jid));
-        assert_eq!(salted_tag(&[1; 16], jid), salted_tag(&[1; 16], jid));
+        let first: [u8; 16] = rand::random();
+        let mut second: [u8; 16] = rand::random();
+        second[0] = !first[0];
+        assert_ne!(salted_tag(&first, jid), salted_tag(&second, jid));
+        assert_eq!(salted_tag(&first, jid), salted_tag(&first, jid));
         assert_eq!(delay_secs(1_000, 940), 60);
     }
 
