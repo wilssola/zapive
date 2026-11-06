@@ -33,10 +33,7 @@ impl Bridge {
                 if let Some(meta) = self.store.chats.get_mut(&jid) {
                     meta.pinned = if next { now_secs().max(1) } else { 0 };
                 }
-                self.wa.send(Cmd::PinChat {
-                    jid,
-                    pinned: next,
-                });
+                self.wa.send(Cmd::PinChat { jid, pinned: next });
                 self.schedule_refresh_chats();
             }
             "mute" => self.mute_chat(&jid, arg),

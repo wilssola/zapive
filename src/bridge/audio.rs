@@ -250,8 +250,7 @@ impl Bridge {
     }
 
     fn set_rec_levels(&self, levels: Vec<f32>, filled: usize, head: usize) {
-        self.ui
-            .set_rec_levels(ModelRc::new(VecModel::from(levels)));
+        self.ui.set_rec_levels(ModelRc::new(VecModel::from(levels)));
         self.ui.set_rec_filled(filled as i32);
         self.ui.set_rec_head(head as i32);
     }

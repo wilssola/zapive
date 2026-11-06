@@ -733,9 +733,6 @@ msgstr "Save changes"
 msgid "message.dialog.counter"
 msgstr "{0}/4,096"
 
-msgid "message.dialog.save"
-msgstr "Save"
-
 msgid "message.confirm.cancel"
 msgstr "Cancel"
 

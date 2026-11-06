@@ -733,9 +733,6 @@ msgstr "Salvar alterações"
 msgid "message.dialog.counter"
 msgstr "{0}/4.096"
 
-msgid "message.dialog.save"
-msgstr "Salvar"
-
 msgid "message.confirm.cancel"
 msgstr "Cancelar"
 
