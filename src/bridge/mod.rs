@@ -11,7 +11,9 @@ use crate::store::{
     now_secs, preview_body, reaction_summary, ticks_for,
 };
 use crate::vault::Vault;
-use crate::wa::{Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService};
+use crate::wa::{
+    AttachmentKind, Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService,
+};
 use crate::{
     AccountItem, AppWindow, CallItem, CallWindow, ChatItem, DetailRow, LabelItem, LinkSpan,
     MemberItem, MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem,

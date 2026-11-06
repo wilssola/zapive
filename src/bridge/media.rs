@@ -383,10 +383,7 @@ impl Bridge {
                     })
             });
             if let Some(bytes) = bytes.filter(|bytes| !bytes.is_empty()) {
-                self.wa.send(Cmd::DecodePreview {
-                    id: m.id.clone(),
-                    bytes,
-                });
+                crate::jobs::decode_preview(m.id.clone(), bytes);
             }
         }
         let voice = m.raw.as_ref().is_some_and(|raw| {
@@ -477,21 +474,12 @@ impl Bridge {
                     });
                 } else if !inline.is_empty() {
                     self.media_inflight.insert(m.id.clone());
-                    self.wa.send(Cmd::DecodeThumb {
-                        id: m.id.clone(),
-                        bytes: inline,
-                        link: true,
-                    });
+                    crate::jobs::decode_thumb(m.id.clone(), inline, true);
                 } else {
                     let url = message_link(m);
                     if !url.is_empty() {
                         self.media_inflight.insert(m.id.clone());
-                        self.wa.send(Cmd::LinkPreview {
-                            jid: m.jid.clone(),
-                            id: m.id.clone(),
-                            text: m.text.clone(),
-                            url,
-                        });
+                        crate::jobs::link_preview(m.jid.clone(), m.id.clone(), m.text.clone(), url);
                     }
                 }
                 return;
@@ -538,11 +526,7 @@ impl Bridge {
                     .and_then(|v| v.jpeg_thumbnail.as_ref())
                     .filter(|t| !t.is_empty())
                 {
-                    self.wa.send(Cmd::DecodeThumb {
-                        id: m.id.clone(),
-                        bytes: thumb.to_vec(),
-                        link: false,
-                    });
+                    crate::jobs::decode_thumb(m.id.clone(), thumb.to_vec(), false);
                 }
                 self.wa.send(Cmd::Media {
                     id: m.id.clone(),
@@ -639,10 +623,7 @@ impl Bridge {
             .map(|m| m.kind == MessageKind::Audio)
             .unwrap_or(false);
         if is_audio && !self.waves.contains_key(id) {
-            self.wa.send(Cmd::Waveform {
-                id: id.to_string(),
-                path: path.to_path_buf(),
-            });
+            crate::jobs::waveform(id.to_string(), path.to_path_buf());
         }
         // A video status waiting on its clip gets the poster frame now.
         if let Some((items, idx)) = &self.viewer

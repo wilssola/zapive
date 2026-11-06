@@ -107,12 +107,7 @@ impl Bridge {
             self.audio = None;
             return;
         };
-        self.wa.send(Cmd::AudioDecode {
-            id,
-            plain,
-            rate_idx,
-            rate,
-        });
+        crate::jobs::audio_decode(id, plain, rate_idx, rate);
     }
 
     pub fn on_audio_ready(&mut self, id: &str, rate_idx: usize, buffer: crate::audio::AudioBuffer) {

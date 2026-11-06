@@ -420,15 +420,16 @@ impl Bridge {
         match kind {
             // WhatsApp-style confirmation: caption field before sending.
             "image" => self.start_preview(path),
-            "audio" => self.wa.send(Cmd::SendAudioFile {
+            other => self.wa.send(Cmd::SendFile {
                 jid,
                 origin: Some(path.to_string_lossy().into_owned()),
                 path,
-            }),
-            _ => self.wa.send(Cmd::SendDocument {
-                jid,
-                origin: Some(path.to_string_lossy().into_owned()),
-                path,
+                kind: if other == "audio" {
+                    AttachmentKind::Audio
+                } else {
+                    AttachmentKind::Document
+                },
+                caption: None,
             }),
         }
     }
@@ -562,10 +563,11 @@ impl Bridge {
             return;
         };
         let caption = caption.trim();
-        self.wa.send(Cmd::SendImage {
+        self.wa.send(Cmd::SendFile {
             jid,
             origin,
             path,
+            kind: AttachmentKind::Image,
             caption: (!caption.is_empty()).then(|| caption.to_string()),
         });
         self.next_staged();

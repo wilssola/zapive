@@ -472,13 +472,13 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             b.update_manual = true;
             b.ui.set_settings_status(t("update.checking").into());
-            b.wa.send(Cmd::CheckUpdate);
+            crate::jobs::check_update();
         });
     });
     ui.on_update_apply(|| {
         defer(|b| {
             b.ui.set_update_state(2);
-            b.wa.send(Cmd::ApplyUpdate);
+            crate::jobs::apply_update();
         });
     });
     ui.on_update_restart(|| {
@@ -744,7 +744,13 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
                 if let Some(path) = picked {
                     ui_apply(move |b| {
                         if let Some(jid) = b.current_jid.clone() {
-                            b.wa.send(Cmd::SendSticker { jid, path });
+                            b.wa.send(Cmd::SendFile {
+                                jid,
+                                path,
+                                kind: AttachmentKind::Sticker,
+                                origin: None,
+                                caption: None,
+                            });
                         }
                     });
                 }
@@ -755,7 +761,7 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let query = query.to_string();
         defer(move |b| {
             b.ui.set_gif_hint("".into());
-            b.wa.send(Cmd::GifSearch(query));
+            crate::jobs::gif_search(query);
         });
     });
     ui.on_gif_send(|id| {
@@ -899,7 +905,7 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         defer(|b| {
             b.ui.set_pdf_installing(true);
             b.ui.set_pdf_status(t("pdf.installing").into());
-            b.wa.send(Cmd::PdfEngineInstall);
+            crate::jobs::pdf_engine_install();
         });
     });
     // Status viewer: play a video update in the player.
