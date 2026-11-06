@@ -80,8 +80,7 @@ impl KeyHandle {
             let Some(key) = key else {
                 return plain.to_vec();
             };
-            let mut iv = [0u8; 12];
-            rand::rng().fill_bytes(&mut iv);
+            let iv: [u8; 12] = rand::random();
             let cipher = Aes256Gcm::new(key.into());
             // aes-gcm appends the tag; the file format keeps it before the
             // ciphertext, matching the Node build.
@@ -277,8 +276,7 @@ impl Vault {
     }
 
     fn persist_wrapped_dk(&mut self, pin: &str) {
-        let mut salt = [0u8; 16];
-        rand::rng().fill_bytes(&mut salt);
+        let salt: [u8; 16] = rand::random();
         let kek = derive_kek(pin, &salt);
         let sealed = self
             .key
@@ -747,8 +745,7 @@ fn decode_key(b64: &str) -> Result<Key, String> {
 
 // String rows: e:<iv b64>:<tag b64>:<ct b64>, AES-256-GCM, 12-byte IV.
 fn encrypt_str(plain: &str, key: &[u8; 32]) -> String {
-    let mut iv = [0u8; 12];
-    rand::rng().fill_bytes(&mut iv);
+    let iv: [u8; 12] = rand::random();
     let cipher = Aes256Gcm::new(key.into());
     let mut sealed = cipher
         .encrypt(Nonce::from_slice(&iv), Payload::from(plain.as_bytes()))
@@ -1021,7 +1018,7 @@ mod tests {
         v.conn
             .execute(
                 "INSERT INTO history(account,jid,id,timestamp,payload) VALUES('','chat','b',2,?1)",
-                [encrypt_str("{}", &[9u8; 32])],
+                [encrypt_str("{}", &rand::random::<[u8; 32]>())],
             )
             .unwrap();
         let page = v.history_page("chat", None, 100).unwrap();
@@ -1045,7 +1042,7 @@ mod tests {
         v.conn
             .execute(
                 "INSERT INTO kv(k,v) VALUES('store:msgs:old', ?1)",
-                [encrypt_str("[]", &[9u8; 32])],
+                [encrypt_str("[]", &rand::random::<[u8; 32]>())],
             )
             .unwrap();
         v.history_commit(
@@ -1081,7 +1078,7 @@ mod tests {
         v.conn
             .execute(
                 "INSERT INTO history(account,jid,id,timestamp,payload) VALUES('','old','bad',2,?1)",
-                [encrypt_str("{}", &[9u8; 32])],
+                [encrypt_str("{}", &rand::random::<[u8; 32]>())],
             )
             .unwrap();
         v.history_commit(&[], &[], &[], &[("old".into(), "new".into())])
