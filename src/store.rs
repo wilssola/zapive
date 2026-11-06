@@ -815,18 +815,28 @@ impl Store {
     }
 
     pub fn chat_name(&self, jid: &str) -> String {
-        if let Some(contact) = self.contacts.get(jid) {
-            return clean_text(contact);
+        // Names are stored under the canonical jid; rows written before an
+        // alias was learned may still sit under the raw one.
+        let canon = self.canon(jid);
+        let keys = [canon, jid];
+        for key in keys {
+            if let Some(contact) = self.contacts.get(key) {
+                return clean_text(contact);
+            }
         }
-        if let Some(meta) = self.chats.get(jid)
-            && !meta.name.is_empty()
-        {
-            return clean_text(&meta.name);
+        for key in keys {
+            if let Some(meta) = self.chats.get(key)
+                && !meta.name.is_empty()
+            {
+                return clean_text(&meta.name);
+            }
         }
-        if let Some(push) = self.push_names.get(jid) {
-            return clean_text(push);
+        for key in keys {
+            if let Some(push) = self.push_names.get(key) {
+                return clean_text(push);
+            }
         }
-        display_id(jid)
+        display_id(canon)
     }
 
     // Turns "@5511999999999" into "@Name" wherever we know who it is, so
@@ -922,7 +932,7 @@ impl Store {
     }
 
     pub fn upsert_contact(&mut self, jid: &str, name: Option<&str>, notify: Option<&str>) {
-        let jid = normalize_jid(jid);
+        let jid = self.canon_owned(&normalize_jid(jid));
         if jid.is_empty() {
             return;
         }
@@ -937,6 +947,7 @@ impl Store {
     // A jid counts as saved when the address book knows it, or when the
     // phone gave its DM a name (which it only does for saved contacts).
     pub fn is_saved(&self, jid: &str) -> bool {
+        let jid = self.canon(jid);
         if self.saved_contacts.contains(jid) {
             return true;
         }
@@ -981,10 +992,11 @@ impl Store {
 
     // Group subjects / contact names discovered outside the chat events.
     pub fn set_name(&mut self, jid: &str, name: &str) {
-        if let Some(existing) = self.chats.get_mut(jid) {
+        let jid = self.canon_owned(jid);
+        if let Some(existing) = self.chats.get_mut(&jid) {
             existing.name = name.to_string();
         } else {
-            self.contacts.insert(jid.to_string(), name.to_string());
+            self.contacts.insert(jid, name.to_string());
         }
     }
 
@@ -2201,6 +2213,33 @@ mod tests {
         assert!(!store.hydrate_id(&vault, "chat", "00001"));
         drop(vault);
         crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn contact_name_for_a_lid_shows_under_its_phone_number_alias() {
+        let mut store = Store::default();
+        store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
+        store.upsert_contact("111@lid", Some("Ana"), None);
+        assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Ana");
+    }
+
+    #[test]
+    fn contact_name_is_found_through_the_raw_lid_and_saved_state_follows() {
+        let mut store = Store::default();
+        store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
+        store.upsert_contact("111@lid", Some("Ana"), None);
+        assert_eq!(store.chat_name("111@lid"), "Ana");
+        assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Ana");
+        assert!(store.is_saved("111@lid"));
+    }
+
+    #[test]
+    fn set_name_for_a_lid_lands_on_the_phone_number_chat() {
+        let mut store = Store::default();
+        store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
+        store.set_name("111@lid", "Bia");
+        assert_eq!(store.chat_name("111@lid"), "Bia");
+        assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Bia");
     }
 
     #[test]
