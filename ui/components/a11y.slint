@@ -1,4 +1,260 @@
 import { Theme } from "theme.slint";
+import { ListView as StandardListView } from "std-widgets.slint";
+
+export { ListView as AccessibleList }
+
+component ListView inherits StandardListView {
+    in property <int> row-count;
+    in property <length> fixed-row-height;
+    in-out property <int> active-index: 0;
+    in-out property <string> active-id;
+    in-out property <bool> controls-active;
+    public function return-to-row() {
+        root.controls-active = false;
+        root.request-row(root.active-index);
+    }
+    in-out property <int> pending-index: -1;
+    out property <int> focus-pass;
+    private property <int> scan-first: 2147483647;
+    private property <int> scan-last: -1;
+    out property <bool> seeking;
+    out property <int> probe-pass;
+    accessible-role: list;
+    accessible-item-count: root.row-count;
+
+    public function request-row(index: int) {
+        if (root.row-count == 0) { return; }
+        root.pending-index = max(0, min(root.row-count - 1, index));
+        if (root.pending-index == 0) {
+            root.content-y = 0px;
+        } else if (root.pending-index == root.row-count - 1) {
+            root.content-y = min(0px, root.visible-height - root.content-height);
+        } else if (root.fixed-row-height > 0px) {
+            root.content-y = min(0px, max(root.visible-height - root.content-height,
+                -root.pending-index * root.fixed-row-height));
+        }
+        root.seeking = true;
+    }
+
+    public function report-row(index: int, top: length, row-height: length) {
+        if (index < 0) {
+            root.cancel-focus();
+            return;
+        }
+        root.scan-first = min(root.scan-first, index);
+        root.scan-last = max(root.scan-last, index);
+        if (root.pending-index != index || row-height <= 0px) { return; }
+        if (top < 0px) {
+            root.content-y = min(0px, root.content-y - top);
+            return;
+        } else if (top + row-height > root.visible-height && row-height <= root.visible-height) {
+            root.content-y -= top + row-height - root.visible-height;
+            return;
+        }
+        root.active-index = index;
+        root.focus-pass += 1;
+    }
+
+    public function row-focused(index: int, id: string) {
+        root.active-index = index;
+        root.controls-active = false;
+        root.active-id = id;
+        root.pending-index = -1;
+        root.seeking = false;
+    }
+
+    changed row-count => {
+        root.active-index = max(0, min(root.row-count - 1, root.active-index));
+        if (root.pending-index >= root.row-count) {
+            root.pending-index = root.row-count - 1;
+        }
+    }
+
+    public function cancel-focus() {
+        root.pending-index = -1;
+        root.seeking = false;
+        root.controls-active = false;
+    }
+
+    public function seek-step() {
+        if (root.pending-index < 0) {
+            root.seeking = false;
+            return;
+        }
+        if (root.scan-last >= 0) {
+            if (root.pending-index < root.scan-first) {
+                root.content-y = min(0px, root.content-y + max(1px, root.visible-height * 0.1));
+            } else if (root.pending-index > root.scan-last) {
+                root.content-y = max(min(0px, root.visible-height - root.content-height),
+                    root.content-y - max(1px, root.visible-height * 0.1));
+            }
+        }
+        root.scan-first = 2147483647;
+        root.scan-last = -1;
+        root.probe-pass += 1;
+    }
+}
+
+export component AccessibleListItem inherits Rectangle {
+    in property <int> row-index;
+    in property <int> row-count;
+    in property <int> active-index;
+    in property <int> pending-index;
+    in property <int> focus-pass;
+    in property <int> probe-pass;
+    changed probe-pass => { geometry-ready.running = true; }
+    in property <string> row-id;
+    in property <string> active-id;
+    in property <length> scroll-y;
+    in property <bool> has-controls;
+    in-out property <bool> controls-mode: false;
+    out property <bool> row-has-focus: row-focus.has-focus;
+    callback navigate(int);
+    callback focused(int, string);
+    callback geometry(int, length, length);
+    callback activate;
+    callback first-up;
+    callback enter-controls;
+    callback controls-changed(bool);
+    changed controls-mode => { root.controls-changed(root.controls-mode); }
+    callback leave-list(bool);
+    accessible-role: list-item;
+    accessible-item-index: root.row-index;
+    accessible-item-count: root.row-count;
+    forward-focus: row-focus;
+
+    public function report-geometry() {
+        root.geometry(root.row-index, root.y + root.scroll-y, root.height);
+    }
+
+    changed focus-pass => {
+        if (root.pending-index == root.row-index) {
+            root.controls-mode = false;
+            row-focus.focus();
+            if (row-focus.has-focus) { root.focused(root.row-index, root.row-id); }
+        }
+    }
+    changed row-index => {
+        if (row-focus.has-focus && root.active-id != "" && root.active-id == root.row-id) {
+            root.focused(root.row-index, root.row-id);
+        }
+    }
+    changed row-id => { root.controls-mode = false; }
+
+    row-focus := FocusScope {
+        width: 0px;
+        focus-on-click: false;
+        focus-on-tab-navigation: root.row-index == root.active-index;
+        focus-gained => {
+            root.controls-mode = false;
+            root.focused(root.row-index, root.row-id);
+        }
+        focus-lost(reason) => {
+            if (reason != FocusReason.tab-navigation) { focus-left.running = true; }
+        }
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) { return reject; }
+            if (event.text == Key.UpArrow) {
+                if (root.row-index == 0) { root.first-up(); }
+                else { root.navigate(root.row-index - 1); }
+            } else if (event.text == Key.DownArrow) {
+                root.navigate(root.row-index + 1);
+            } else if (event.text == Key.Home) {
+                root.navigate(0);
+            } else if (event.text == Key.End) {
+                root.navigate(root.row-count - 1);
+            } else if (event.text == Key.Return || event.text == Key.Space) {
+                root.activate();
+            } else if (event.text == Key.F2 && root.has-controls) {
+                root.controls-mode = true;
+                controls-ready.running = true;
+            } else if (event.text == Key.Tab) {
+                root.geometry(-1, 0px, 0px);
+                root.leave-list(event.modifiers.shift);
+            } else { return reject; }
+            accept
+        }
+    }
+    geometry-ready := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.report-geometry();
+        }
+    }
+    focus-left := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            if (!row-focus.has-focus && !root.controls-mode) { root.geometry(-1, 0px, 0px); }
+        }
+    }
+    controls-ready := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            if (root.controls-mode) { root.enter-controls(); }
+        }
+    }
+    private property <bool> entering-controls;
+    public function focus-controls() {
+        root.entering-controls = true;
+        begin-controls.focus();
+        root.entering-controls = false;
+    }
+    controls := FocusScope {
+        focus-on-tab-navigation: false;
+        focus-on-click: false;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape && root.controls-mode) {
+                root.controls-mode = false;
+                row-focus.focus();
+                return accept;
+            }
+            if (event.text == Key.Tab && !root.controls-mode) {
+                root.leave-list(event.modifiers.shift);
+                return accept;
+            }
+            reject
+        }
+        begin-controls := FocusScope {
+            width: 0px;
+            focus-on-click: false;
+            focus-gained => {
+                if (root.entering-controls) { return; }
+                if (root.controls-mode) {
+                    root.controls-mode = false;
+                    root.leave-list(true);
+                } else {
+                    root.navigate(root.active-index);
+                }
+            }
+        }
+        @children
+        end-controls := FocusScope {
+            width: 0px;
+            focus-on-click: false;
+            focus-gained => {
+                if (root.controls-mode) {
+                    root.controls-mode = false;
+                    root.leave-list(false);
+                } else {
+                    root.navigate(root.active-index);
+                }
+            }
+        }
+    }
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-width: root.row-has-focus ? 2px : 0px;
+        border-color: Theme.accent;
+        background: transparent;
+    }
+}
 
 // Keyboard reach for TouchArea-based controls: a zero-width FocusScope that
 // joins the Tab order, fires `activate` on Space/Enter and reports focus so

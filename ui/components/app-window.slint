@@ -39,7 +39,7 @@ import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
 import { HitRow } from "rows/hit.slint";
 import { MemberRow } from "rows/member.slint";
-import { KeyFocus, FocusRing } from "a11y.slint";
+import { KeyFocus, FocusRing, AccessibleList, AccessibleListItem } from "a11y.slint";
 
 export component AppWindow inherits Window {
     title: "Zapive";
@@ -658,6 +658,29 @@ export component AppWindow inherits Window {
         message-input.set-selection-offsets(cursor, cursor);
         message-input.focus();
     }
+    out property <length> message-visible-height: msg-list.visible-height;
+    private property <string> focused-message-id;
+    public function snapshot-message-focus() -> string {
+        if (root.focused-message-id == "") { return ""; }
+        let id = root.focused-message-id;
+        message-focus-anchor.focus();
+        return id;
+    }
+    public function set-message-active(index: int, id: string) {
+        msg-list.cancel-focus();
+        msg-list.active-index = max(0, index);
+        msg-list.active-id = id;
+    }
+    public function initialize-message-focus(index: int, id: string) {
+        if (root.focused-message-id == "" && msg-list.pending-index < 0) {
+            root.set-message-active(index, id);
+        }
+    }
+    public function restore-message-focus(index: int, id: string) {
+        if (id == "" || !message-focus-anchor.has-focus) { return; }
+        root.set-message-active(index, id);
+        msg-list.request-row(index);
+    }
     public function scroll-conversation-end() {
         msg-list.content-y = min(0px, msg-list.height - msg-list.content-height);
     }
@@ -1179,6 +1202,12 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
+                if (root.chat-open && msg-list.controls-active && !root.message-menu-open
+                    && !root.lightbox-open && !root.video-open && !root.pdf-open
+                    && !root.forward-open && !root.message-dialog-open) {
+                    msg-list.return-to-row();
+                    return accept;
+                }
                 if (root.shortcuts-open) { root.shortcuts-open = false; }
                 else if (root.poll-composer-open) { root.poll-composer-open = false; }
                 else if (root.whats-new-open) { root.whats-new-open = false; }
@@ -1226,6 +1255,15 @@ export component AppWindow inherits Window {
             reject
         }
 
+    list-navigation := Timer {
+        interval: 16ms;
+        running: chat-list.seeking || msg-list.seeking;
+        triggered => {
+            if (chat-list.seeking) { chat-list.seek-step(); }
+            if (msg-list.seeking) { msg-list.seek-step(); }
+        }
+    }
+
     main-pane := HorizontalLayout {
         padding: 0;
         spacing: 0;
@@ -1239,7 +1277,7 @@ export component AppWindow inherits Window {
                 padding: 10px;
                 spacing: 8px;
                 alignment: start;
-                IconButton {
+                chats-navigation := IconButton {
                     label: @tr("navigation.chats");
                     icon: @image-url("../icons/message-circle.svg");
                     active-background: Theme.rail-active;
@@ -1308,7 +1346,7 @@ export component AppWindow inherits Window {
                 padding-bottom: 0px;
                 spacing: 8px;
                 Rectangle { height: 1px; background: Theme.border; }
-                IconButton {
+                settings-navigation := IconButton {
                     label: @tr("navigation.settings");
                     icon: @image-url("../icons/settings.svg");
                     active: root.settings-open;
@@ -1393,21 +1431,41 @@ export component AppWindow inherits Window {
                     height: 72px;
                     vertical-alignment: center;
                 }
-                ListView {
-                    for st[i] in root.statuses: Rectangle {
+                Timer {
+                    interval: 16ms;
+                    running: status-list.seeking;
+                    triggered => { status-list.seek-step(); }
+                }
+                status-list := AccessibleList {
+                    row-count: root.statuses.length;
+                    fixed-row-height: 72px;
+                    accessible-label: @tr("navigation.status");
+                    for st[i] in root.statuses: AccessibleListItem {
+                        row-index: i;
+                        row-count: root.statuses.length;
+                        row-id: st.jid;
+                        active-index: status-list.active-index;
+                        active-id: status-list.active-id;
+                        pending-index: status-list.pending-index;
+                        focus-pass: status-list.focus-pass;
+                        probe-pass: status-list.probe-pass;
+                        scroll-y: status-list.content-y;
+                        navigate(index) => { status-list.request-row(index); }
+                        focused(index, id) => { status-list.row-focused(index, id); }
+                        geometry(index, top, row-height) => { status-list.report-row(index, top, row-height); }
+                        activate => { root.status-open(st.jid); }
+                        leave-list(backwards) => {
+                            if (backwards) { chats-navigation.focus(); }
+                            else { settings-navigation.focus(); }
+                        }
+                        accessible-label: st.name + ", " + st.time;
+                        accessible-action-default => { root.status-open(st.jid); }
                         height: 72px;
                         clip: true;
                         background: st-touch.has-hover ? Theme.hover : transparent;
                         st-touch := TouchArea {
-                            accessible-role: list-item;
-                            accessible-label: st.name + ", " + st.time;
-                            accessible-item-index: i;
-                            accessible-item-count: root.statuses.length;
-                            accessible-action-default => { root.status-open(st.jid); }
+                            accessible-role: none;
                             clicked => { root.status-open(st.jid); }
-                            st-key := KeyFocus {
-                                activate => { root.status-open(st.jid); }
-                            }
                         }
                         HorizontalLayout {
                             padding-left: 13px;
@@ -1485,19 +1543,44 @@ export component AppWindow inherits Window {
                     height: 72px;
                     vertical-alignment: center;
                 }
-                ListView {
-                    for call in root.calls: Rectangle {
+                Timer {
+                    interval: 16ms;
+                    running: call-list.seeking;
+                    triggered => { call-list.seek-step(); }
+                }
+                call-list := AccessibleList {
+                    row-count: root.calls.length;
+                    fixed-row-height: 68px;
+                    accessible-label: @tr("navigation.calls");
+                    for call[i] in root.calls: call-row := AccessibleListItem {
+                        row-index: i;
+                        row-count: root.calls.length;
+                        row-id: call.id;
+                        active-index: call-list.active-index;
+                        active-id: call-list.active-id;
+                        pending-index: call-list.pending-index;
+                        focus-pass: call-list.focus-pass;
+                        probe-pass: call-list.probe-pass;
+                        scroll-y: call-list.content-y;
+                        navigate(index) => { call-list.request-row(index); }
+                        focused(index, id) => { call-list.row-focused(index, id); }
+                        geometry(index, top, row-height) => { call-list.report-row(index, top, row-height); }
+                        activate => { root.open-dm(call.from); }
+                        has-controls: !call.group;
+                        enter-controls => { self.focus-controls(); }
+                        controls-changed(active) => { call-list.controls-active = active; }
+                        leave-list(backwards) => {
+                            if (backwards) { chats-navigation.focus(); }
+                            else { settings-navigation.focus(); }
+                        }
+                        accessible-label: call.name + ", " + call.detail + ", " + call.time;
+                        accessible-action-default => { root.open-dm(call.from); }
                         height: 68px;
                         clip: true;
                         background: call-touch.has-hover ? Theme.hover : transparent;
                         call-touch := TouchArea {
-                            accessible-role: list-item;
-                            accessible-label: call.name + ", " + call.detail + ", " + call.time;
-                            accessible-action-default => { root.open-dm(call.from); }
+                            accessible-role: none;
                             clicked => { root.open-dm(call.from); }
-                            call-key := KeyFocus {
-                                activate => { root.open-dm(call.from); }
-                            }
                         }
                         HorizontalLayout {
                             padding-left: 13px;
@@ -1543,13 +1626,38 @@ export component AppWindow inherits Window {
                                     horizontal-alignment: right;
                                 }
                                 // Redial, the way the phone's call log does.
-                                if !call.group: IconButton {
-                                    label: @tr("accessibility.call_back");
-                                    icon: @image-url("../icons/phone.svg");
-                                    icon-size: 18px;
+                                if !call.group: TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: @tr("accessibility.call_back");
+                                    accessible-action-default => { root.start-call(call.from); }
                                     width: 30px;
                                     height: 30px;
+                                    mouse-cursor: pointer;
                                     clicked => { root.start-call(call.from); }
+                                    redial-key := KeyFocus {
+                                        focus-on-tab-navigation: call-row.controls-mode && i == call-list.active-index;
+                                        activate => { root.start-call(call.from); }
+                                    }
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 8px;
+                                        background: parent.has-hover ? Theme.hover : transparent;
+                                        Image {
+                                            source: @image-url("../icons/phone.svg");
+                                            colorize: Theme.icon;
+                                            width: 18px;
+                                            height: 18px;
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                        }
+                                    }
+                                    FocusRing {
+                                        shown: redial-key.has-focus;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 8px;
+                                    }
                                 }
                             }
                         }
@@ -1794,9 +1902,30 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                chat-list := ListView {
+                chat-list := AccessibleList {
+                    row-count: root.chats.length;
+                    fixed-row-height: 56px;
+                    accessible-label: @tr("accessibility.conversations");
                     vertical-stretch: root.search-hits.length > 0 ? 1 : 3;
-                    for chat[i] in root.chats: Rectangle {
+                    for chat[i] in root.chats: chat-row := AccessibleListItem {
+                        row-index: i;
+                        row-count: root.chats.length;
+                        row-id: chat.jid;
+                        active-index: chat-list.active-index;
+                        active-id: chat-list.active-id;
+                        pending-index: chat-list.pending-index;
+                        focus-pass: chat-list.focus-pass;
+                        scroll-y: chat-list.content-y;
+                        navigate(index) => { chat-list.request-row(index); }
+                        focused(index, id) => { chat-list.row-focused(index, id); }
+                        geometry(index, top, row-height) => { chat-list.report-row(index, top, row-height); }
+                        probe-pass: chat-list.probe-pass;
+                        activate => { root.open-chat(chat.jid); }
+                        leave-list(backwards) => {
+                            if (backwards) { search-box.focus(); }
+                            else if (root.chat-open && root.messages.length > 0) { msg-list.request-row(msg-list.active-index); }
+                            else { search-box.focus(); }
+                        }
                         height: 56px;
                         clip: true;
                         accessible-role: list-item;
@@ -1808,9 +1937,6 @@ export component AppWindow inherits Window {
                         accessible-item-index: i;
                         accessible-item-count: root.chats.length;
                         accessible-action-default => { root.open-chat(chat.jid); }
-                        chat-key := KeyFocus {
-                            activate => { root.open-chat(chat.jid); }
-                        }
                         // Files dragged from the desktop over this row.
                         if root.drop-target-jid == chat.jid: Rectangle {
                             x: 4px;
@@ -1842,7 +1968,7 @@ export component AppWindow inherits Window {
                             width: parent.width - 8px;
                             height: parent.height - 2px;
                             border-radius: 10px;
-                            shown: chat-key.has-focus;
+                            shown: chat-row.row-has-focus;
                         }
                         touch := TouchArea {
                             accessible-role: none;
@@ -2004,11 +2130,97 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                if root.search-hits.length > 0: ListView {
+                if root.search-hits.length > 0: Rectangle {
                     vertical-stretch: 2;
-                    for hit in root.search-hits: HitRow {
-                        hit: hit;
-                        clicked => { root.open-hit(hit.jid, hit.id); }
+                    Timer {
+                        interval: 16ms;
+                        running: hit-list.seeking;
+                        triggered => { hit-list.seek-step(); }
+                    }
+                    hit-list := AccessibleList {
+                        width: parent.width;
+                        height: parent.height;
+                        row-count: root.search-hits.length;
+                        fixed-row-height: 68px;
+                        accessible-label: @tr("chat.search.messages_heading");
+                        for hit[i] in root.search-hits: AccessibleListItem {
+                            row-index: i;
+                            row-count: root.search-hits.length;
+                            row-id: hit.jid + ":" + hit.id;
+                            active-index: hit-list.active-index;
+                            active-id: hit-list.active-id;
+                            pending-index: hit-list.pending-index;
+                            focus-pass: hit-list.focus-pass;
+                            probe-pass: hit-list.probe-pass;
+                            scroll-y: hit-list.content-y;
+                            navigate(index) => { hit-list.request-row(index); }
+                            focused(index, id) => { hit-list.row-focused(index, id); }
+                            geometry(index, top, row-height) => { hit-list.report-row(index, top, row-height); }
+                            activate => { root.open-hit(hit.jid, hit.id); }
+                            leave-list(backwards) => {
+                            if (backwards) { chats-navigation.focus(); }
+                            else { settings-navigation.focus(); }
+                        }
+                            accessible-label: hit.name + ", " + hit.snippet + ", " + hit.time;
+                            accessible-action-default => { root.open-hit(hit.jid, hit.id); }
+                            height: 68px;
+                            background: hit-touch.has-hover ? Theme.hover : transparent;
+                            hit-touch := TouchArea {
+                                accessible-role: none;
+                                mouse-cursor: pointer;
+                                clicked => { root.open-hit(hit.jid, hit.id); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 13px;
+                                padding-right: 15px;
+                                spacing: 13px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Avatar {
+                                        width: 40px;
+                                        height: 40px;
+                                        src: hit.avatar;
+                                        has-image: hit.hasAvatar;
+                                        initial: hit.initial;
+                                        color-idx: hit.colorIdx;
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Text {
+                                            text: hit.name;
+                                            color: Theme.text;
+                                            font-size: 14px;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Text {
+                                            text: hit.time;
+                                            color: Theme.text-dim;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Text {
+                                        text: hit.sender != "" ? hit.sender + ": " + hit.snippet : hit.snippet;
+                                        color: Theme.text-dim;
+                                        font-size: 13px;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                x: 66px;
+                                y: parent.height - 1px;
+                                width: parent.width - 66px;
+                                height: 1px;
+                                background: Theme.border;
+                            }
+                        }
                     }
                 }
             }
@@ -2218,7 +2430,22 @@ export component AppWindow inherits Window {
                         extra: root.typing-extra;
                         privacy-blurred: root.blur-photos;
                     }
-                msg-list := ListView {
+                message-focus-anchor := FocusScope {
+                    width: 0px;
+                    height: 0px;
+                    focus-on-tab-navigation: false;
+                    focus-on-click: false;
+                }
+                msg-list := AccessibleList {
+                    row-count: root.messages.length;
+                    accessible-label: @tr("accessibility.messages");
+                    property <string> conversation-id: root.selected-jid;
+                    changed conversation-id => {
+                        self.active-id = "";
+                        self.active-index = max(0, root.messages.length - 1);
+                        self.pending-index = -1;
+                        root.focused-message-id = "";
+                    }
                     width: parent.width;
                     height: parent.height;
                     opacity: root.demo-hover ? 1.0 : root.conv-ready ? 1.0 : 0.0;
@@ -2252,7 +2479,35 @@ export component AppWindow inherits Window {
                             root.conv-scrolled();
                         }
                     }
-                    for msg[i] in root.messages: msg-row := Rectangle {
+                    for msg[i] in root.messages: msg-row := AccessibleListItem {
+                        row-index: i;
+                        row-count: root.messages.length;
+                        row-id: msg.id;
+                        active-index: msg-list.active-index;
+                        active-id: msg-list.active-id;
+                        pending-index: msg-list.pending-index;
+                        focus-pass: msg-list.focus-pass;
+                        scroll-y: msg-list.content-y;
+                        has-controls: true;
+                        accessible-description: @tr("accessibility.message_navigation", msg.reactions);
+                        navigate(index) => { msg-list.request-row(index); }
+                        focused(index, id) => { msg-list.row-focused(index, id); }
+                        changed row-has-focus => {
+                            if (self.row-has-focus) {
+                                root.focused-message-id = self.row-id;
+                            } else if (root.focused-message-id == self.row-id) {
+                                root.focused-message-id = "";
+                            }
+                        }
+                        geometry(index, top, row-height) => { msg-list.report-row(index, top, row-height); }
+                        probe-pass: msg-list.probe-pass;
+                        first-up => { root.load-older(); }
+                        enter-controls => { self.focus-controls(); }
+                        controls-changed(active) => { msg-list.controls-active = active; }
+                        leave-list(backwards) => {
+                            if (backwards) { chat-list.request-row(chat-list.active-index); }
+                            else { message-input.focus(); }
+                        }
                         accessible-role: list-item;
                         accessible-label: msg.kind == "system" ? msg.text
                             : msg.deleted ? @tr("message.deleted_by_sender")
@@ -2267,7 +2522,6 @@ export component AppWindow inherits Window {
                                     + (msg.text != "" && msg.kind != "audio" ? " " + msg.text : "")
                                     + (msg.cardBody != "" ? " " + msg.cardBody : ""),
                                 msg.time);
-                        accessible-description: msg.reactions;
                         accessible-item-index: i;
                         accessible-item-count: root.messages.length;
                         property <int> menu-request: root.message-menu-request;
@@ -3669,7 +3923,7 @@ export component AppWindow inherits Window {
                             && root.pointer-y < self.absolute-position.y + bubble.y + max(bubble.height, 36px) + 6px
                             && root.pointer-x >= self.absolute-position.x
                             && root.pointer-x < self.absolute-position.x + self.width;
-                        property <bool> show-actions: (msg-row.pointer-in || row-hover.has-hover || root.react-bar-id == msg.id)
+                        property <bool> show-actions: (msg-row.pointer-in || row-hover.has-hover || root.react-bar-id == msg.id || msg-row.controls-mode)
                             && !root.select-mode && msg.kind != "system" && !msg.deleted;
                         if msg-row.show-actions: Rectangle {
                             width: actions-row.preferred-width + 8px;

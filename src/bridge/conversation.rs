@@ -190,6 +190,7 @@ impl Bridge {
             .map(|(i, m)| self.to_row(m, if i > 0 { list.get(i - 1) } else { None }))
             .collect();
         self.messages_model.set_vec(rows);
+        self.initialize_message_focus(false);
         self.ui.set_chat_open(true);
         self.ui.invoke_focus_composer();
         self.ui.set_conv_ready(false);
@@ -209,12 +210,23 @@ impl Bridge {
         };
         // Anchor across a few layout passes while hidden, then reveal.
         for delay in [0u64, 40, 90] {
-            self.once(delay, move |b| match saved {
-                Some(y) if y <= 0.0 => b.ui.invoke_set_conversation_scroll(y),
-                _ => b.ui.invoke_scroll_conversation_end(),
+            let jid = jid.to_string();
+            self.once(delay, move |b| {
+                if b.ui.get_selected_jid() != jid {
+                    return;
+                }
+                match saved {
+                    Some(y) if y <= 0.0 => b.ui.invoke_set_conversation_scroll(y),
+                    _ => b.ui.invoke_scroll_conversation_end(),
+                }
             });
         }
+        let selected_jid = jid.to_string();
         self.once(120, move |b| {
+            if b.ui.get_selected_jid() != selected_jid {
+                return;
+            }
+            b.initialize_message_focus(true);
             b.ui.set_conv_ready(true);
             // Clear anything the transition re-armed while the list still
             // held the previous chat's offset.
@@ -245,6 +257,7 @@ impl Bridge {
     }
 
     pub(super) fn rebuild_conversation(&mut self, jid: &str) {
+        let focused_id = self.ui.invoke_snapshot_message_focus();
         let list = self.store.messages_for(jid);
         let rows: Vec<MessageItem> = list
             .iter()
@@ -253,6 +266,43 @@ impl Bridge {
             .collect();
         self.messages_model.set_vec(rows);
         self.apply_cached_stickers(jid);
+        let jid = jid.to_string();
+        self.once(40, move |b| {
+            if b.ui.get_selected_jid() != jid {
+                return;
+            }
+            b.restore_message_focus(focused_id.as_str());
+        });
+    }
+
+    fn initialize_message_focus(&self, visible: bool) {
+        let ids: Vec<_> = (0..self.messages_model.row_count())
+            .filter_map(|i| self.messages_model.row_data(i))
+            .map(|row| row.id.to_string())
+            .collect();
+        let index = initial_message_index(
+            &ids,
+            &self.row_geom,
+            self.geom_epoch,
+            self.ui.get_message_visible_height(),
+            visible,
+        );
+        if let Some(index) = index {
+            self.ui
+                .invoke_initialize_message_focus(index as i32, ids[index].as_str().into());
+        }
+    }
+
+    fn restore_message_focus(&self, id: &str) {
+        if let Some(index) = message_focus_index(
+            (0..self.messages_model.row_count())
+                .filter_map(|i| self.messages_model.row_data(i))
+                .map(|row| row.id.to_string()),
+            id,
+        ) {
+            self.ui
+                .invoke_restore_message_focus(index as i32, id.into());
+        }
     }
 
     // Inserts freshly fetched history above the current rows and shifts
@@ -266,6 +316,7 @@ impl Bridge {
             return;
         };
 
+        let focused_id = self.ui.invoke_snapshot_message_focus();
         let before_y = self.ui.get_conv_scroll();
         let before_h = self.ui.get_conv_viewport_h();
         self.ui.set_conv_ready(false);
@@ -285,9 +336,13 @@ impl Bridge {
 
         let jid_owned = jid.to_string();
         self.once(40, move |b| {
+            if b.ui.get_selected_jid() != jid_owned {
+                return;
+            }
             let added = b.ui.get_conv_viewport_h() - before_h;
             b.ui.invoke_set_conversation_scroll(before_y - added);
             b.ui.set_conv_ready(true);
+            b.restore_message_focus(focused_id.as_str());
             b.load_media_for_chat(&jid_owned);
             b.queue_row_avatars(&jid_owned);
         });
@@ -822,6 +877,32 @@ pub(super) fn plan_row(list: &[StoredMessage], shown: &[String], id: &str) -> Ro
     }
 }
 
+fn message_focus_index(ids: impl IntoIterator<Item = String>, focused_id: &str) -> Option<usize> {
+    if focused_id.is_empty() {
+        return None;
+    }
+    ids.into_iter().position(|id| id == focused_id)
+}
+
+fn initial_message_index(
+    ids: &[String],
+    geometry: &HashMap<String, (f32, f32, u32)>,
+    epoch: u32,
+    height: f32,
+    visible: bool,
+) -> Option<usize> {
+    if visible {
+        let first_visible = ids.iter().enumerate().filter_map(|(index, id)| {
+            let &(y, h, row_epoch) = geometry.get(id)?;
+            (row_epoch == epoch && h > 0.0 && y < height && y + h > 0.0).then_some((index, y))
+        });
+        if let Some((index, _)) = first_visible.min_by(|a, b| a.1.total_cmp(&b.1)) {
+            return Some(index);
+        }
+    }
+    ids.len().checked_sub(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -830,6 +911,41 @@ mod tests {
         let mut m = crate::wa_map::system_message("a@s.whatsapp.net", id, ts, "x".to_string());
         m.kind = MessageKind::Text;
         m
+    }
+
+    #[test]
+    fn message_focus_tracks_identity_across_prepend_and_reset() {
+        let ids = ["older", "first", "focused", "last"].map(String::from);
+        assert_eq!(message_focus_index(ids.clone(), "focused"), Some(2));
+        assert_eq!(message_focus_index(ids, ""), None);
+        assert_eq!(message_focus_index(["other".to_string()], "focused"), None);
+        assert_eq!(
+            message_focus_index(["focused".to_string(), "last".to_string()], "focused"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn initial_focus_prefers_saved_visible_rows_without_seeking() {
+        let ids = ["old", "visible", "recent"].map(String::from);
+        let geometry = HashMap::from([
+            ("old".to_string(), (-100.0, 30.0, 4)),
+            ("visible".to_string(), (-10.0, 40.0, 4)),
+            ("recent".to_string(), (30.0, 40.0, 4)),
+        ]);
+        assert_eq!(
+            initial_message_index(&ids, &geometry, 4, 100.0, true),
+            Some(1)
+        );
+        assert_eq!(
+            initial_message_index(&ids, &geometry, 4, 100.0, false),
+            Some(2)
+        );
+        assert_eq!(
+            initial_message_index(&ids, &geometry, 5, 100.0, true),
+            Some(2)
+        );
+        assert_eq!(initial_message_index(&[], &geometry, 4, 100.0, true), None);
     }
 
     #[test]

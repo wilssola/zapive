@@ -6,6 +6,15 @@ msgstr ""
 
 # Keys are msgid = semantic id (no msgctxt). Plurals: msgid "<id>.one" / msgid_plural "<id>.other".
 
+msgid "accessibility.conversations"
+msgstr "Conversas"
+
+msgid "accessibility.messages"
+msgstr "Mensagens"
+
+msgid "accessibility.message_navigation"
+msgstr "{0}. Use as setas para cima e para baixo para navegar pelas mensagens. Pressione F2 e depois Tab para explorar os controles; Escape retorna à mensagem."
+
 msgid "logout.title"
 msgstr "Sair desta conta?"
 
