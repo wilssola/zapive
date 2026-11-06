@@ -36,6 +36,7 @@ mod util;
 use calls::*;
 use executor::*;
 use pump::*;
+pub use pump::{chat_tag, delay_secs};
 use session::*;
 use util::*;
 
@@ -385,6 +386,10 @@ pub enum Cmd {
         jid: String,
         archived: bool,
     },
+    PinChat {
+        jid: String,
+        pinned: bool,
+    },
     // Internal: wipe the session store and restart with a fresh QR.
     ResetSession,
     // Internal: too many failures — stop retrying and tell the user.
@@ -398,11 +403,14 @@ pub struct HistChat {
     pub timestamp: i64,
     pub unread: Option<u32>,
     pub pinned: Option<i64>,
+    pub muted: Option<i64>,
     pub archived: Option<bool>,
 }
 
 pub struct HistoryChunk {
     pub on_demand: bool,
+    // 0..=100 as reported by the phone for the initial sync.
+    pub progress: Option<u32>,
     pub chats: Vec<HistChat>,
     pub messages: Vec<wa::WebMessageInfo>,
     pub pushnames: Vec<(String, String)>,
@@ -459,3 +467,13 @@ impl WaService {
 }
 
 // ---- call plumbing ----
+
+#[cfg(test)]
+impl WaService {
+    // A service whose commands go nowhere; lets bridge tests build a Bridge
+    // without a network session.
+    pub(crate) fn detached() -> Self {
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        Self { cmd_tx }
+    }
+}

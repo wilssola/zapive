@@ -21,6 +21,88 @@ pub(super) fn group_typing_status(names: &[String], overflow: bool) -> String {
     )
 }
 
+#[derive(Default)]
+pub(super) struct BatchSummary {
+    pub count: usize,
+    pub max_delay: i64,
+    pub group: bool,
+    pub offline: bool,
+    pub tag: String,
+}
+
+impl BatchSummary {
+    pub(super) fn add(
+        &mut self,
+        delay: i64,
+        group: bool,
+        offline: bool,
+        tag: impl FnOnce() -> String,
+    ) {
+        if self.count == 0 || delay > self.max_delay {
+            self.max_delay = delay;
+            self.tag = tag();
+        }
+        self.count += 1;
+        self.group |= group;
+        self.offline |= offline;
+    }
+
+    pub(super) fn level(&self) -> log::Level {
+        if self.offline || self.max_delay > 30 {
+            log::Level::Info
+        } else {
+            log::Level::Debug
+        }
+    }
+}
+
+pub(super) type TypingMap = HashMap<String, HashMap<String, (u64, String)>>;
+
+pub(super) fn drop_typing(
+    typing: &mut TypingMap,
+    chat: &str,
+    sender: &str,
+    generation: Option<u64>,
+    canon: impl Fn(&str) -> String,
+) -> bool {
+    let (chat, sender) = (canon(chat), canon(sender));
+    let mut removed = false;
+    typing.retain(|key, members| {
+        if canon(key) != chat {
+            return true;
+        }
+        members.retain(|member, (token, _)| {
+            let hit = canon(member) == sender && generation.is_none_or(|g| g == *token);
+            removed |= hit;
+            !hit
+        });
+        !members.is_empty()
+    });
+    removed
+}
+
+pub(super) fn canonicalize_typing(typing: &mut TypingMap, canon: impl Fn(&str) -> String) -> bool {
+    let stale = typing.iter().any(|(chat, members)| {
+        canon(chat) != *chat || members.keys().any(|member| canon(member) != *member)
+    });
+    if !stale {
+        return false;
+    }
+    for (chat, members) in std::mem::take(typing) {
+        let merged = typing.entry(canon(&chat)).or_default();
+        for (member, value) in members {
+            let member = canon(&member);
+            if merged
+                .get(&member)
+                .is_none_or(|(token, _)| *token < value.0)
+            {
+                merged.insert(member, value);
+            }
+        }
+    }
+    true
+}
+
 pub(super) fn typing_participants(members: &HashMap<String, (u64, String)>) -> (Vec<String>, i32) {
     let mut participants: Vec<_> = members.keys().cloned().collect();
     participants.sort();
@@ -97,9 +179,13 @@ impl Bridge {
                 c.pinned,
                 c.archived,
             );
+            if let Some(muted) = c.muted {
+                self.store.set_muted(&c.jid, muted);
+            }
         }
         let mut added = 0usize;
         let mut added_to_current = false;
+        let mut added_kinds: Vec<MessageKind> = Vec::new();
         for web in &chunk.messages {
             if let Some(stored) = crate::wa_map::from_history(&mut self.store, web) {
                 let jid = stored.jid.clone();
@@ -109,8 +195,10 @@ impl Bridge {
                 if let Some(vault) = &self.vault {
                     self.store.hydrate_id(vault, &jid, &stored.id);
                 }
+                let kind = stored.kind;
                 if self.store.add_message(stored) {
                     added += 1;
+                    added_kinds.push(kind);
                     if Some(&jid) == self.current_jid.as_ref() {
                         added_to_current = true;
                     }
@@ -132,6 +220,7 @@ impl Bridge {
         self.scroll_up_fetch = false;
         self.schedule_refresh_chats();
         self.finish_loading();
+        self.note_initial_chunk(&chunk, added, &added_kinds);
         if chunk.on_demand || self.history_pending {
             self.sync_batches += 1;
         }
@@ -164,7 +253,40 @@ impl Bridge {
         }
     }
 
+    fn log_batch(&self, batch: &MessageBatch) {
+        let now = now_secs();
+        let mut summary = BatchSummary::default();
+        for inbound in batch.iter() {
+            let info = &inbound.info;
+            let chat = info.source.chat.to_non_ad_string();
+            if chat == "status@broadcast" {
+                continue;
+            }
+            summary.add(
+                crate::wa::delay_secs(now, info.timestamp.timestamp()),
+                info.source.is_group,
+                info.is_offline,
+                || crate::wa::chat_tag(&chat),
+            );
+        }
+        if summary.count == 0 {
+            return;
+        }
+        log::log!(
+            summary.level(),
+            "[wa] messages count={} max_delay={}s group={} offline={} origin={:?} chat={}",
+            summary.count,
+            summary.max_delay,
+            summary.group,
+            summary.offline,
+            batch.origin,
+            summary.tag
+        );
+    }
+
     pub fn on_messages(&mut self, batch: &MessageBatch) {
+        self.log_batch(batch);
+        self.note_catchup_messages(batch);
         for inbound in batch.iter() {
             let info = &inbound.info;
             let chat = info.source.chat.to_non_ad_string();
@@ -466,17 +588,22 @@ impl Bridge {
         self.update_typing_status();
         self.schedule_refresh_chats();
         self.once(25_000, move |b| {
-            if b.chat_typing
-                .get(&jid)
-                .and_then(|members| members.get(&sender))
-                .is_some_and(|(token, _)| *token == generation)
-            {
-                b.clear_participant_typing(&jid, &sender);
+            if b.remove_typing(&jid, &sender, Some(generation)) {
+                b.schedule_refresh_chats();
+                b.update_typing_status();
             }
         });
     }
 
+    pub(super) fn canonicalize_typing_keys(&mut self) -> bool {
+        let store = &self.store;
+        canonicalize_typing(&mut self.chat_typing, |jid| {
+            store.canon_owned(&normalize_jid(jid))
+        })
+    }
+
     pub(super) fn update_typing_status(&mut self) {
+        self.canonicalize_typing_keys();
         let text = if let Some(jid) = self.current_jid.as_ref().filter(|jid| is_group(jid)) {
             let typing = self.chat_typing.get(jid);
             if let Some(members) = typing.filter(|members| !members.is_empty()) {
@@ -540,18 +667,20 @@ impl Bridge {
     }
 
     pub(super) fn clear_participant_typing(&mut self, jid: &str, sender: &str) {
-        let sender = self.store.canon_owned(&normalize_jid(sender));
-        if let Some(members) = self.chat_typing.get_mut(jid) {
-            members.remove(&sender);
-            if members.is_empty() {
-                self.chat_typing.remove(jid);
-            }
-        }
+        self.remove_typing(jid, sender, None);
         self.schedule_refresh_chats();
         self.update_typing_status();
     }
 
+    fn remove_typing(&mut self, jid: &str, sender: &str, generation: Option<u64>) -> bool {
+        let store = &self.store;
+        drop_typing(&mut self.chat_typing, jid, sender, generation, |j| {
+            store.canon_owned(&normalize_jid(j))
+        })
+    }
+
     pub(super) fn clear_chat_typing(&mut self, jid: &str) {
+        self.canonicalize_typing_keys();
         if self.chat_typing.remove(jid).is_some() {
             self.schedule_refresh_chats();
         }
@@ -564,6 +693,7 @@ impl Bridge {
             self.peer_online = available;
         }
         if !available {
+            self.canonicalize_typing_keys();
             let groups: Vec<_> = self
                 .chat_typing
                 .iter()
@@ -697,5 +827,62 @@ mod tests {
         assert_eq!(members.len(), 2);
         members.remove("a");
         assert_eq!(typing_participants(&members).0, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn typing_entry_keyed_by_a_later_aliased_id_still_clears() {
+        let group = "120363000000000000@g.us";
+        let lid = "100000000000001@lid";
+        let phone = "5511999999999@s.whatsapp.net";
+        let mut store = crate::store::Store::default();
+        let mut typing: TypingMap = HashMap::from([(
+            group.to_string(),
+            HashMap::from([(lid.to_string(), (7, String::new()))]),
+        )]);
+        assert!(store.learn_alias(lid, phone));
+        let canon = |j: &str| store.canon_owned(&normalize_jid(j));
+        assert!(drop_typing(&mut typing, group, lid, Some(7), canon));
+        assert!(typing.is_empty(), "a stale typing entry never expires");
+    }
+
+    #[test]
+    fn typing_keys_follow_an_alias_learned_after_they_were_stored() {
+        let group = "120363000000000000@g.us";
+        let lid = "100000000000001@lid";
+        let phone = "5511999999999@s.whatsapp.net";
+        let mut store = crate::store::Store::default();
+        let mut typing: TypingMap = HashMap::from([(
+            lid.to_string(),
+            HashMap::from([(lid.to_string(), (7, "typing".to_string()))]),
+        )]);
+        typing.insert(
+            group.to_string(),
+            HashMap::from([(lid.to_string(), (8, "typing".to_string()))]),
+        );
+        assert!(store.learn_alias(lid, phone));
+        let canon = |j: &str| store.canon_owned(&normalize_jid(j));
+        assert!(canonicalize_typing(&mut typing, canon));
+        assert!(typing.contains_key(phone), "chat key still the old alias");
+        assert!(typing[phone].contains_key(phone));
+        assert!(typing[group].contains_key(phone));
+        assert!(!typing.contains_key(lid));
+    }
+
+    #[test]
+    fn batch_summary_logs_at_info_only_for_offline_or_late_batches() {
+        let mut live = BatchSummary::default();
+        live.add(2, true, false, || "aaaaaa".to_string());
+        live.add(5, false, false, || "bbbbbb".to_string());
+        assert_eq!((live.count, live.max_delay, live.group), (2, 5, true));
+        assert_eq!(live.tag, "bbbbbb");
+        assert_eq!(live.level(), log::Level::Debug);
+
+        let mut late = BatchSummary::default();
+        late.add(31, false, false, || "cccccc".to_string());
+        assert_eq!(late.level(), log::Level::Info);
+
+        let mut offline = BatchSummary::default();
+        offline.add(0, false, true, || "dddddd".to_string());
+        assert_eq!(offline.level(), log::Level::Info);
     }
 }

@@ -145,6 +145,7 @@ impl Bridge {
     // In-place diff: only changed rows are rewritten, which is what keeps
     // the ListView's scroll position stable.
     pub(super) fn refresh_chats(&mut self) {
+        self.canonicalize_typing_keys();
         let (chats, channels, communities) = self.store.sidebar_unread_counts();
         self.ui.set_chats_unread_count(chats);
         self.ui.set_channels_unread_count(channels);

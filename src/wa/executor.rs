@@ -61,6 +61,7 @@ pub(super) async fn executor(
             | Cmd::AvatarLarge { .. }
             | Cmd::SubscribePresence { .. }) => profile::run(&ctx, cmd).await,
             cmd @ (Cmd::Archive { .. }
+            | Cmd::PinChat { .. }
             | Cmd::Mute { .. }
             | Cmd::Unmute { .. }
             | Cmd::SetEphemeral { .. }
@@ -129,7 +130,7 @@ pub(super) async fn executor(
                 let opened = match build_session(cmd_tx.clone(), &account).await {
                     Ok(next) => Ok(next),
                     Err(e) => {
-                        eprintln!("[wa] cannot open account {account:?}: {e}");
+                        eprintln!("[wa] cannot open the selected account: {e}");
                         build_session(cmd_tx.clone(), &previous).await
                     }
                 };

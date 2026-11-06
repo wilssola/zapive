@@ -418,11 +418,91 @@ impl Player {
 
 // ---- recording (cpal capture; libopus encodes the voice note) ----
 
+// Bars shown by the recording bar's waveform.
+pub const REC_BARS: usize = 64;
+// One level bar per this much captured audio.
+const LEVEL_WINDOW_MS: usize = 50;
+
+// Peak level per 50 ms of captured audio, for the live waveform.
+struct LevelMeter {
+    bucket: usize,
+    peak: f32,
+    seen: usize,
+    bars: Vec<f32>,
+}
+
+impl LevelMeter {
+    fn new(rate: u32, channels: usize) -> Self {
+        LevelMeter {
+            bucket: (rate as usize * LEVEL_WINDOW_MS / 1000 * channels).max(1),
+            peak: 0.0,
+            seen: 0,
+            bars: Vec::new(),
+        }
+    }
+
+    // Speech peaks well below full scale; lift it so the bars read.
+    fn scale(peak: f32) -> f32 {
+        (peak * 3.0).min(1.0)
+    }
+
+    fn push(&mut self, data: &[f32]) {
+        for sample in data {
+            self.peak = self.peak.max(sample.abs());
+            self.seen += 1;
+            if self.seen >= self.bucket {
+                self.bars.push(Self::scale(self.peak));
+                self.peak = 0.0;
+                self.seen = 0;
+            }
+        }
+    }
+
+    // The latest `n` bars (zero padded at the end) and how many are real.
+    fn recent(&self, n: usize) -> (Vec<f32>, usize) {
+        let start = self.bars.len().saturating_sub(n);
+        let mut out: Vec<f32> = self.bars[start..].to_vec();
+        let filled = out.len();
+        out.resize(n, 0.0);
+        (out, filled)
+    }
+
+    // The whole recording squeezed into `n` bars (the peak of each span).
+    fn overview(&self, n: usize) -> Vec<f32> {
+        let len = self.bars.len();
+        if len == 0 || n == 0 {
+            return vec![0.0; n];
+        }
+        (0..n)
+            .map(|i| {
+                let lo = (i * len / n).min(len - 1);
+                let hi = ((i + 1) * len / n).max(lo + 1).min(len);
+                self.bars[lo..hi].iter().copied().fold(0.0, f32::max)
+            })
+            .collect()
+    }
+}
+
+struct RecShared {
+    samples: Vec<f32>,
+    meter: LevelMeter,
+}
+
 pub struct Recorder {
     _stream: cpal::Stream,
-    samples: Arc<std::sync::Mutex<Vec<f32>>>,
+    shared: Arc<std::sync::Mutex<RecShared>>,
+    paused: Arc<AtomicBool>,
     rate: u32,
     channels: usize,
+}
+
+fn to_mono(raw: Vec<f32>, channels: usize) -> Vec<f32> {
+    if channels <= 1 {
+        return raw;
+    }
+    raw.chunks(channels)
+        .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32)
+        .collect()
 }
 
 impl Recorder {
@@ -432,14 +512,25 @@ impl Recorder {
         let config = device.default_input_config().ok()?;
         let rate = config.sample_rate();
         let channels = config.channels() as usize;
-        let samples = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sink = samples.clone();
+        let shared = Arc::new(std::sync::Mutex::new(RecShared {
+            samples: Vec::new(),
+            meter: LevelMeter::new(rate, channels),
+        }));
+        let paused = Arc::new(AtomicBool::new(false));
+        let sink = shared.clone();
+        let gate = paused.clone();
         let stream = device
             .build_input_stream(
                 config.config(),
                 move |data: &[f32], _| {
-                    if let Ok(mut buf) = sink.lock() {
-                        buf.extend_from_slice(data);
+                    // A paused recording keeps the stream open but drops
+                    // what the microphone hears.
+                    if gate.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if let Ok(mut shared) = sink.lock() {
+                        shared.samples.extend_from_slice(data);
+                        shared.meter.push(data);
                     }
                 },
                 |e| eprintln!("[audio] input stream error: {e}"),
@@ -449,24 +540,74 @@ impl Recorder {
         stream.play().ok()?;
         Some(Recorder {
             _stream: stream,
-            samples,
+            shared,
+            paused,
             rate,
             channels,
         })
     }
 
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    // Seconds captured so far (pauses excluded).
+    pub fn elapsed_secs(&self) -> f64 {
+        let frames = self
+            .shared
+            .lock()
+            .map(|s| s.samples.len() / self.channels.max(1))
+            .unwrap_or(0);
+        frames as f64 / self.rate.max(1) as f64
+    }
+
+    pub fn recent_levels(&self, n: usize) -> (Vec<f32>, usize) {
+        self.shared
+            .lock()
+            .map(|s| s.meter.recent(n))
+            .unwrap_or_else(|_| (vec![0.0; n], 0))
+    }
+
+    pub fn overview_levels(&self, n: usize) -> Vec<f32> {
+        self.shared
+            .lock()
+            .map(|s| s.meter.overview(n))
+            .unwrap_or_else(|_| vec![0.0; n])
+    }
+
+    // What was captured so far, without ending the recording: mono samples
+    // at the device rate.
+    pub fn snapshot(&self) -> (Vec<f32>, u32) {
+        let raw = self
+            .shared
+            .lock()
+            .map(|s| s.samples.clone())
+            .unwrap_or_default();
+        (to_mono(raw, self.channels), self.rate)
+    }
+
     // Mono samples at the device rate.
     pub fn stop(self) -> (Vec<f32>, u32) {
-        let raw = self.samples.lock().map(|b| b.clone()).unwrap_or_default();
-        if self.channels <= 1 {
-            return (raw, self.rate);
-        }
-        let mono: Vec<f32> = raw
-            .chunks(self.channels)
-            .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32)
-            .collect();
-        (mono, self.rate)
+        self.snapshot()
     }
+}
+
+// A recording as a playable buffer, for listening before sending.
+pub fn recording_buffer(samples: &[f32], in_rate: u32) -> Option<AudioBuffer> {
+    if samples.is_empty() {
+        return None;
+    }
+    Some(AudioBuffer {
+        samples: Arc::new(resample(samples, in_rate, OUT_RATE)),
+    })
 }
 
 // Encodes captured samples as WhatsApp's voice-note format
@@ -563,5 +704,63 @@ mod duration_tests {
         std::fs::remove_file(&path).unwrap();
         assert_eq!(duration, Some(1));
         assert_eq!(super::probe_duration(&path), None);
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::LevelMeter;
+
+    // 1 kHz mono: 50 samples per 50 ms bar.
+    fn meter() -> LevelMeter {
+        LevelMeter::new(1_000, 1)
+    }
+
+    #[test]
+    fn each_window_becomes_one_scaled_bar() {
+        let mut m = meter();
+        m.push(&[0.1; 50]);
+        m.push(&[0.5; 50]);
+        assert_eq!(m.bars.len(), 2);
+        assert!((m.bars[0] - 0.3).abs() < 1e-6);
+        // Louder than full scale after the lift is capped at 1.
+        assert_eq!(m.bars[1], 1.0);
+    }
+
+    #[test]
+    fn a_partial_window_carries_over_between_pushes() {
+        let mut m = meter();
+        m.push(&[0.1; 30]);
+        assert!(m.bars.is_empty());
+        m.push(&[0.2; 20]);
+        assert_eq!(m.bars.len(), 1);
+        assert!((m.bars[0] - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn recent_pads_and_reports_how_many_are_real() {
+        let mut m = meter();
+        m.push(&[0.1; 100]);
+        let (bars, filled) = m.recent(4);
+        assert_eq!((bars.len(), filled), (4, 2));
+        assert_eq!(bars[2], 0.0);
+        // Longer than the window: only the newest bars remain.
+        m.push(&[0.2; 50 * 5]);
+        let (bars, filled) = m.recent(3);
+        assert_eq!((bars.len(), filled), (3, 3));
+        assert!(bars.iter().all(|b| (*b - 0.6).abs() < 1e-6));
+    }
+
+    #[test]
+    fn overview_keeps_the_peak_of_each_span() {
+        let mut m = meter();
+        for level in [0.1f32, 0.1, 0.3, 0.1] {
+            m.push(&[level; 50]);
+        }
+        let view = m.overview(2);
+        assert_eq!(view.len(), 2);
+        assert!((view[0] - 0.3).abs() < 1e-6);
+        assert!((view[1] - 0.9).abs() < 1e-6);
+        assert_eq!(meter().overview(3), vec![0.0; 3]);
     }
 }

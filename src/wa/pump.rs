@@ -41,6 +41,7 @@ impl EventHandler for Pump {
                 ui_apply(|b| b.on_status(&t("status.connecting")));
             }
             Event::Connected(_) => {
+                log::info!("[wa] connected ts={}", crate::store::now_secs());
                 self.failures.store(0, Ordering::Relaxed);
                 self.stopped.store(false, Ordering::Relaxed);
                 let pn = self
@@ -77,9 +78,48 @@ impl EventHandler for Pump {
                 }
             }
             Event::Disconnected(d) => {
+                log::info!(
+                    "[wa] disconnected ts={} kind={} clean={}",
+                    crate::store::now_secs(),
+                    disconnect_kind(&d.reason),
+                    d.reason.is_clean_shutdown()
+                );
                 if !d.reason.is_clean_shutdown() && !self.stopped.load(Ordering::Relaxed) {
                     self.count_failure();
                 }
+            }
+            Event::UndecryptableMessage(u) => {
+                log::info!(
+                    "[wa] undecryptable ts={} msg_ts={} group={} unavailable={} chat={}",
+                    crate::store::now_secs(),
+                    u.info.timestamp.timestamp(),
+                    u.info.source.is_group,
+                    u.is_unavailable,
+                    chat_tag(&u.info.source.chat.to_non_ad_string())
+                );
+            }
+            Event::OfflineSyncPreview(p) => {
+                log::info!(
+                    "[wa] offline preview ts={} total={} messages={}",
+                    crate::store::now_secs(),
+                    p.total,
+                    p.messages
+                );
+            }
+            Event::OfflineSyncCompleted(c) => {
+                log::info!(
+                    "[wa] offline completed ts={} count={}",
+                    crate::store::now_secs(),
+                    c.count
+                );
+            }
+            Event::OfflineSyncInterrupted(i) => {
+                log::info!(
+                    "[wa] offline interrupted ts={} total={} delivered={}",
+                    crate::store::now_secs(),
+                    i.total,
+                    i.delivered
+                );
             }
             Event::Messages(_) => {
                 let event = event.clone();
@@ -154,6 +194,7 @@ impl EventHandler for Pump {
                         || hs.sync_type == wa::history_sync::HistorySyncType::OnDemand;
                     let mut chunk = HistoryChunk {
                         on_demand,
+                        progress: hs.progress,
                         chats: Vec::new(),
                         messages: Vec::new(),
                         pushnames: Vec::new(),
@@ -169,6 +210,7 @@ impl EventHandler for Pump {
                             timestamp: conv.conversation_timestamp.unwrap_or(0) as i64,
                             unread: conv.unread_count,
                             pinned: history_pin(conv.pinned),
+                            muted: history_mute(conv.mute_end_time),
                             archived: conv.archived,
                         });
                         for hm in &conv.messages {
@@ -427,6 +469,64 @@ pub(super) fn history_pin(pinned: Option<u32>) -> Option<i64> {
     pinned.filter(|p| *p > 0).map(i64::from)
 }
 
+fn tag_salt() -> &'static [u8; 16] {
+    static SALT: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+    SALT.get_or_init(|| {
+        use rand::RngCore as _;
+        let mut salt = [0u8; 16];
+        rand::rng().fill_bytes(&mut salt);
+        salt
+    })
+}
+
+pub(super) fn salted_tag(salt: &[u8; 16], chat: &str) -> String {
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(salt);
+    hasher.update(chat.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .take(3)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+pub fn chat_tag(chat: &str) -> String {
+    salted_tag(tag_salt(), chat)
+}
+
+pub fn delay_secs(now: i64, message_ts: i64) -> i64 {
+    now.saturating_sub(message_ts)
+}
+
+pub(super) fn disconnect_kind(reason: &whatsapp_rust::wacore::net::DisconnectReason) -> String {
+    use whatsapp_rust::wacore::net::DisconnectReason as R;
+    match reason {
+        R::ServerClose { code, .. } => format!("server_close:{}", code.unwrap_or(0)),
+        R::StreamEnded => "stream_ended".into(),
+        R::ReadError(_) => "read_error".into(),
+        R::Unknown => "unknown".into(),
+    }
+}
+
+const MUTE_FOREVER_HORIZON_SECS: i64 = 100 * 365 * 24 * 3600;
+const MUTE_MILLIS_THRESHOLD: u64 = 100_000_000_000;
+
+pub(super) fn history_mute(mute_end_time: Option<u64>) -> Option<i64> {
+    let until = mute_end_time.filter(|until| *until > 0)?;
+    let until = if until > MUTE_MILLIS_THRESHOLD {
+        until / 1000
+    } else {
+        until
+    };
+    let horizon = crate::store::now_secs().saturating_add(MUTE_FOREVER_HORIZON_SECS);
+    Some(match i64::try_from(until) {
+        Ok(until) if until <= horizon => until,
+        _ => -1,
+    })
+}
+
 impl Pump {
     fn count_failure(&self) {
         let n = self.failures.fetch_add(1, Ordering::Relaxed) + 1;
@@ -473,6 +573,37 @@ mod receipt_tests {
         );
         assert!(store.chats[jid].pinned > 0);
         assert_eq!(store.sorted_chats()[0].jid, jid);
+    }
+
+    #[test]
+    fn diagnostic_chat_tag_is_short_stable_and_hides_the_jid() {
+        let jid = "120363000000000001@g.us";
+        let tag = chat_tag(jid);
+        assert_eq!(tag.len(), 6);
+        assert_eq!(tag, chat_tag(jid));
+        assert_ne!(tag, chat_tag("120363000000000002@g.us"));
+        let first: [u8; 16] = rand::random();
+        let mut second: [u8; 16] = rand::random();
+        second[0] = !first[0];
+        assert_ne!(salted_tag(&first, jid), salted_tag(&second, jid));
+        assert_eq!(salted_tag(&first, jid), salted_tag(&first, jid));
+        assert_eq!(delay_secs(1_000, 940), 60);
+    }
+
+    #[test]
+    fn history_sync_carries_the_previous_mute() {
+        assert_eq!(history_mute(None), None);
+        assert_eq!(history_mute(Some(0)), None);
+        assert_eq!(history_mute(Some(4_102_444_800)), Some(4_102_444_800));
+        assert_eq!(history_mute(Some(u64::MAX)), Some(-1));
+        assert_eq!(history_mute(Some(i64::MAX as u64 + 1)), Some(-1));
+        assert_eq!(history_mute(Some(40_000_000_000)), Some(-1));
+        let in_an_hour = crate::store::now_secs() + 3600;
+        assert_eq!(
+            history_mute(Some(in_an_hour as u64 * 1000)),
+            Some(in_an_hour),
+            "a millisecond expiry must stay finite"
+        );
     }
 
     #[test]

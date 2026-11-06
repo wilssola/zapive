@@ -277,21 +277,27 @@ impl Bridge {
         let Some(jid) = self.current_jid.clone() else {
             return;
         };
+        let next = self.toggle_archive_chat(&jid);
+        self.ui.set_info_archived(next);
+    }
+
+    // Flips the archive flag of any chat and returns the new state.
+    pub(super) fn toggle_archive_chat(&mut self, jid: &str) -> bool {
         let next = !self
             .store
             .chats
-            .get(&jid)
+            .get(jid)
             .map(|c| c.archived)
             .unwrap_or(false);
-        if let Some(meta) = self.store.chats.get_mut(&jid) {
+        if let Some(meta) = self.store.chats.get_mut(jid) {
             meta.archived = next;
         }
-        self.ui.set_info_archived(next);
         self.wa.send(Cmd::Archive {
-            jid,
+            jid: jid.to_string(),
             archived: next,
         });
         self.schedule_refresh_chats();
+        next
     }
 
     pub(super) fn clear_current_chat(&mut self) {
@@ -578,9 +584,7 @@ impl Bridge {
 
     pub fn on_mute(&mut self, jid: &str, muted: i64) {
         let jid = self.store.canon_owned(&normalize_jid(jid));
-        if let Some(meta) = self.store.chats.get_mut(&jid) {
-            meta.muted = muted;
-        }
+        self.store.set_muted(&jid, muted);
         if Some(&jid) == self.current_jid.as_ref() {
             self.apply_chat_settings_ui();
         }
@@ -593,6 +597,11 @@ impl Bridge {
             return;
         };
         self.ui.set_chat_menu_open(false);
+        self.mute_chat(&jid, hours);
+    }
+
+    pub(super) fn mute_chat(&mut self, jid: &str, hours: i32) {
+        let jid = jid.to_string();
         let muted = match hours {
             0 => 0,
             h if h < 0 => -1,
@@ -643,6 +652,11 @@ impl Bridge {
             return;
         };
         self.ui.set_chat_menu_open(false);
+        self.toggle_favorite_for(&jid);
+    }
+
+    pub(super) fn toggle_favorite_for(&mut self, jid: &str) {
+        let jid = jid.to_string();
         let next = !self
             .store
             .chats
@@ -887,5 +901,31 @@ impl Bridge {
             self.ui
                 .set_info_members(ta("info.members", &[&count.to_string()]).into());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn mute_for_a_chat_not_yet_in_the_store_is_kept() {
+        const GROUP: &str = "120363000000000003@g.us";
+        super::ui_thread::run(|done| {
+            let ui = AppWindow::new().expect("create Slint component");
+            wiring::install(&ui, WaService::detached());
+            let kept = Cell::new(false);
+            apply_now(|b| {
+                b.on_mute(GROUP, -1);
+                kept.set(b.store.chats.get(GROUP).is_some_and(|meta| meta.is_muted()));
+            });
+            drop(ui);
+            done(if kept.get() {
+                Ok(())
+            } else {
+                Err("mute for an unknown chat was dropped".to_string())
+            });
+        });
     }
 }

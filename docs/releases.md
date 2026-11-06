@@ -10,19 +10,19 @@ page explains how they are applied.
 
 [Conventional Commits](https://www.conventionalcommits.org):
 `type(scope): description`. The type and scope are in English and
-lower-case. The description is in Portuguese, preferably in the
-infinitive, with no final period.
+lower-case. Write a specific imperative description in English, with no
+final period.
 
 ```text
-feat(updates): exibir novidades antes de baixar a atualização
-fix(messages): preservar o texto quando o envio falhar
-feat(storage)!: alterar o formato do histórico local
+feat(updates): show release notes before download
+fix(messages): preserve unsent text
+feat(storage)!: change the local history format
 ```
 
 - **Atomic commits:** one logical change each, including its translations
   and tests, and each one must compile.
 - **Clear descriptions:** the title, without its prefix, becomes the
-  changelog line. Avoid vague titles such as "ajustes".
+  changelog line. Avoid vague titles such as "misc fixes".
 - **Body:** optional, for motivation and limits. For `feat`, `fix`,
   `perf` and `security`, its **first paragraph** appears in the notes as a
   sub-item (up to 400 characters), so write it for end users.
@@ -42,7 +42,7 @@ feat(storage)!: alterar o formato do histórico local
 | any type with `!` | **Alterações importantes** (breaking changes, each with "Migração:", the migration) | **major** |
 | unknown type / non-conventional | Outras alterações (other changes) | patch |
 
-The section names are shown as the generator writes them, in Portuguese.
+The section names above reflect the current generator's Portuguese output. Changing commit language does not change the generator or rewrite historical release notes; changing generated headings requires a separate generator and localization decision.
 
 Don't label a feature as `chore` to hide it. Don't bump versions or create
 `chore(release)` commits by hand: the pipeline does that.

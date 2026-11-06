@@ -718,8 +718,20 @@ msgid "message.menu.delete"
 msgstr "Apagar"
 
 
-msgid "message.dialog.save"
-msgstr "Salvar"
+msgid "message.dialog.edit_title"
+msgstr "Editar mensagem"
+
+msgid "message.dialog.edit_subtitle"
+msgstr "Você pode editar esta mensagem após o envio."
+
+msgid "message.dialog.cancel"
+msgstr "Cancelar"
+
+msgid "message.dialog.save_changes"
+msgstr "Salvar alterações"
+
+msgid "message.dialog.counter"
+msgstr "{0}/4.096"
 
 msgid "message.confirm.cancel"
 msgstr "Cancelar"
@@ -2352,3 +2364,74 @@ msgstr "Escala do fundo"
 
 msgid "settings.wallpaper.scale.description"
 msgstr "Tamanho do padrão do fundo, de 50% a 200%."
+msgid "chat.row_menu.pin"
+msgstr "Fixar conversa"
+
+msgid "chat.row_menu.unpin"
+msgstr "Desafixar conversa"
+
+msgid "sync.screen.title"
+msgstr "Inicializando suas conversas"
+
+msgid "sync.screen.subtitle"
+msgstr "Baixando e organizando suas mensagens de forma segura."
+
+msgid "sync.screen.waiting_title"
+msgstr "Conectando ao seu celular"
+
+msgid "sync.screen.waiting_detail"
+msgstr "Aguardando as primeiras mensagens chegarem…"
+
+msgid "sync.screen.card_title"
+msgstr "Carregando suas conversas"
+
+msgid "sync.screen.card_detail"
+msgstr "Sincronizando mensagens, mídias e arquivos…"
+
+msgid "sync.screen.finishing_title"
+msgstr "Quase pronto"
+
+msgid "sync.screen.finishing_detail"
+msgstr "Organizando suas conversas…"
+
+msgid "sync.screen.messages"
+msgstr "mensagens"
+
+msgid "sync.screen.chats"
+msgstr "conversas"
+
+msgid "sync.screen.media"
+msgstr "mídias"
+
+msgid "sync.screen.files"
+msgstr "arquivos"
+
+msgid "sync.screen.elapsed"
+msgstr "Tempo decorrido"
+
+msgid "sync.screen.encrypted"
+msgstr "Protegida com criptografia de ponta a ponta"
+
+msgid "sync.screen.disconnect"
+msgstr "Desconectar"
+
+msgid "sync.screen.keep_open"
+msgstr "Não feche esta janela. Suas mensagens estão sendo baixadas."
+
+msgid "sync.screen.catchup_title"
+msgstr "Atualizando suas mensagens"
+
+msgid "sync.screen.catchup_subtitle"
+msgstr "Buscando o que chegou enquanto você estava fora."
+
+msgid "accessibility.pause_recording"
+msgstr "Pausar gravação"
+
+msgid "accessibility.resume_recording"
+msgstr "Continuar gravando"
+
+msgid "accessibility.preview_recording"
+msgstr "Ouvir gravação"
+
+msgid "accessibility.stop_preview"
+msgstr "Parar de ouvir"

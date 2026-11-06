@@ -57,7 +57,7 @@ Every visible string goes through i18n with semantic ids, in `i18n/en_US/LC_MESS
 
 The full convention is in [AGENTS.md](AGENTS.md). In short:
 
-- Conventional Commits: `type(scope): description`. The **type** and **scope** are in lower-case English. The **description is written in Portuguese**, preferably in the infinitive and with no final period (for example `fix(messages): preservar o texto quando o envio falhar`).
+- Conventional Commits: `type(scope): description`. The **type** and **scope** are in lower-case English. Write the **description in English**, using a specific imperative phrase with no final period (for example `fix(messages): preserve unsent text`).
 - `feat`, `fix`, `perf`, `refactor` and `security` appear in the changelog. `chore`, `ci`, `build`, `test`, `docs` and `style` are left out of the notes.
 - Make one commit per logical change, keep each one compilable, and include its implementation, translations and tests.
 - For breaking changes, put `!` in the title and a `BREAKING CHANGE: ...` paragraph in the body that explains the migration.

@@ -265,12 +265,8 @@ export component SettingsLayer inherits ModalLayer {
                                 detail: @tr("settings.shortcuts.description");
                                 icon: @image-url("../icons/settings.svg");
                                 height: 54px;
-                                shortcuts-touch := TouchArea {
-                                    mouse-cursor: pointer;
-                                    accessible-role: button;
-                                    accessible-label: @tr("settings.shortcuts.title");
-                                    clicked => { root.show-shortcuts(); }
-                                }
+                                clickable: true;
+                                clicked => { root.show-shortcuts(); }
                                 Image {
                                     source: @image-url("../icons/chevron-right.svg");
                                     colorize: Theme.icon;
