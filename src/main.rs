@@ -106,15 +106,9 @@ fn main() {
     let language = app_vault
         .setting_get("language")
         .unwrap_or_else(|| "system".into());
-    let system_pt = sys_locale::get_locale()
-        .map(|l| l.to_lowercase().starts_with("pt"))
-        .unwrap_or(false);
-    let use_pt = language == "pt" || (language == "system" && system_pt);
-    i18n::set_locale(if use_pt {
-        i18n::Locale::Pt
-    } else {
-        i18n::Locale::En
-    });
+    let locale = i18n::resolve_locale(&language, sys_locale::get_locale().as_deref());
+    i18n::set_locale(locale);
+    let use_pt = locale == i18n::Locale::Pt;
     let rt = RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             // Two was enough for messaging, but a call adds the relay
