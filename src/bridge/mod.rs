@@ -32,6 +32,8 @@ mod accounts;
 mod audio;
 mod calls;
 mod chat_info;
+#[cfg(test)]
+mod chat_list_tests;
 mod chat_row_menu;
 mod chats;
 mod composer;
@@ -57,8 +59,6 @@ mod stickers;
 mod translation;
 mod updates;
 mod wiring;
-#[cfg(test)]
-mod chat_list_tests;
 
 use self::audio::*;
 use self::calls::*;
