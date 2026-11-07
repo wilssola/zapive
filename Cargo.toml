@@ -82,7 +82,7 @@ chrono = "0.4"
 regex = "1"
 url = "2"
 arboard = "3"
-kamadak-exif = "0.5"
+kamadak-exif = "0.6"
 ureq = "3"
 cpal = "0.18"
 # Camera capture for video calls: MSMF/AVFoundation/V4L2 behind one API.
