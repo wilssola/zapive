@@ -40,6 +40,20 @@ pub fn current_locale() -> Locale {
     }
 }
 
+// The language chosen in settings always wins over the OS locale; only the
+// explicit "system" choice follows it.
+pub fn resolve_locale(saved: &str, system: Option<&str>) -> Locale {
+    match saved {
+        "pt" => Locale::Pt,
+        "en" => Locale::En,
+        "system" => {
+            let portuguese = system.is_some_and(|tag| tag.to_lowercase().starts_with("pt"));
+            if portuguese { Locale::Pt } else { Locale::En }
+        }
+        _ => Locale::En,
+    }
+}
+
 pub fn t(id: &str) -> String {
     ta(id, &[])
 }
@@ -571,6 +585,19 @@ mod tests {
             drop(ui);
             done(result.and(restored));
         });
+    }
+
+    #[test]
+    fn selected_language_overrides_the_os_locale() {
+        // Regression for issue #54: on an English OS, Portuguese in settings
+        // must win.
+        assert_eq!(resolve_locale("pt", Some("en-US")), Locale::Pt);
+        assert_eq!(resolve_locale("en", Some("pt-BR")), Locale::En);
+        // Only the explicit "system" choice follows the OS, case-insensitively.
+        assert_eq!(resolve_locale("system", Some("pt-BR")), Locale::Pt);
+        assert_eq!(resolve_locale("system", Some("PT-br")), Locale::Pt);
+        assert_eq!(resolve_locale("system", Some("en-US")), Locale::En);
+        assert_eq!(resolve_locale("system", None), Locale::En);
     }
 
     #[test]
