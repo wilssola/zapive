@@ -14,6 +14,10 @@ contain those strings.
 Flatpak lives in `flatpak/` and is prepared but unpublished; see
 `flatpak/README.md`.
 
+To put an AppImage in a Linux desktop's app menu for the current user
+(no root), run `linux/install-desktop.sh Zapive-<version>-x86_64.AppImage`;
+`--uninstall` removes the launcher and keeps the conversations.
+
 ## Windows signing
 
 ```pwsh
