@@ -39,6 +39,7 @@ fn hist_chat(jid: &str, name: Option<&str>, timestamp: i64) -> HistChat {
         timestamp,
         unread: None,
         pinned: None,
+        muted: None,
         archived: None,
     }
 }
@@ -72,6 +73,7 @@ fn apply_chunk(store: &mut Store, chunk: &HistoryChunk) -> usize {
 fn chunk(chats: Vec<HistChat>, messages: Vec<wa::WebMessageInfo>) -> HistoryChunk {
     HistoryChunk {
         on_demand: false,
+        progress: None,
         chats,
         messages,
         pushnames: Vec::new(),
