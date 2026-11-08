@@ -418,6 +418,7 @@ fn main() {
         arm_marker_clear();
         ui.run().expect("event loop failed");
     }
+    bridge::shutdown_sessions();
     wa.send(wa::Cmd::Shutdown);
     // The lock goes first, or the relaunched instance sees this one still
     // running and exits.

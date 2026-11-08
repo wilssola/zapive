@@ -371,6 +371,9 @@ msgstr "notify.play"
 msgid "notify.from_one"
 msgstr "{0} new messages from {1}"
 
+msgid "notify.account_title"
+msgstr "{0} · {1}"
+
 msgid "notify.app_name"
 msgstr "Zapive"
 
@@ -674,9 +677,6 @@ msgstr "Up to 5 accounts"
 
 msgid "account.menu.logout"
 msgstr "Log out"
-
-msgid "account.switching.progress"
-msgstr "Switching accounts..."
 
 msgid "message.menu.reply"
 msgstr "Reply"
@@ -1385,6 +1385,9 @@ msgstr "Unsupported message — view on your phone"
 
 msgid "call.incoming_voice"
 msgstr "Incoming voice call"
+
+msgid "call.incoming_on_account"
+msgstr "Incoming call on {0}"
 
 msgid "call.incoming_video"
 msgstr "Incoming video call"
@@ -2287,6 +2290,15 @@ msgstr[1] "{n} unread messages"
 
 msgid "accessibility.account_menu"
 msgstr "Account {0}, switch accounts"
+
+msgid "accessibility.switch_account"
+msgstr "Switch to {0}"
+
+msgid "accessibility.switch_account_unread"
+msgstr "Switch to {0}, {1} unread"
+
+msgid "accessibility.account_unread"
+msgstr "{0} unread"
 
 msgid "accessibility.open_voice_message"
 msgstr "Open voice message from {0}"

@@ -259,7 +259,7 @@ impl Bridge {
     }
 
     pub(super) fn translation_language(&mut self, kind: &str, value: &str) {
-        if self.vault.is_none() || self.switching {
+        if self.vault.is_none() || self.headless {
             return;
         }
         if !matches!(
@@ -319,13 +319,13 @@ impl Bridge {
     pub(super) fn run_translation_action(&mut self, action: &str, model: Option<(&str, &str)>) {
         log::info!("[translation] requested action={action}");
         if self.vault.is_none()
-            || self.switching
+            || self.headless
             || (self.ui.get_translation_busy() && !matches!(action, "stop" | "cancel"))
         {
             log::warn!(
-                "[translation] action ignored: unlocked={} switching={} busy={}",
+                "[translation] action ignored: unlocked={} background={} busy={}",
                 self.vault.is_some(),
-                self.switching,
+                self.headless,
                 self.ui.get_translation_busy()
             );
             return;
@@ -380,7 +380,7 @@ impl Bridge {
                 if b.translation_gen != generation
                     || b.epoch != epoch
                     || b.account != account
-                    || b.switching
+                    || b.headless
                     || !b.ui.get_translation_installing()
                 {
                     return;
@@ -403,7 +403,7 @@ impl Bridge {
                 if b.translation_gen != generation
                     || b.epoch != epoch
                     || b.account != account
-                    || b.switching
+                    || b.headless
                 {
                     return;
                 }
@@ -565,7 +565,7 @@ impl Bridge {
     }
 
     pub(super) fn request_translation(&mut self, jid: &str, id: &str, automatic: bool) {
-        if self.vault.is_none() || self.switching || self.ui.get_translation_busy() {
+        if self.vault.is_none() || self.headless || self.ui.get_translation_busy() {
             return;
         }
         let Some(m) = self
@@ -656,7 +656,7 @@ impl Bridge {
         let account = self.account.clone();
         let result = self.translation.request(serde_json::json!({"op":"translate", "source":source, "target":target, "text":original}), move |result| {
             ui_apply(move |b| {
-                if generation != b.translation_gen || epoch != b.epoch || account != b.account || b.switching { return; }
+                if generation != b.translation_gen || epoch != b.epoch || account != b.account || b.headless { return; }
                 let valid = b.store.messages_for(&key.0).iter().any(|m| m.id == key.1 && m.text == original && translation_eligible(m));
                 if !valid { b.translation_cache.remove(&key); return; }
                 let Some(entry) = b.translation_cache.get_mut(&key) else { return; };

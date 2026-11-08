@@ -132,6 +132,12 @@ impl Bridge {
     }
 
     pub(super) fn schedule_refresh_chats(&mut self) {
+        // A background account has no list on screen; what matters is
+        // that its changes reach the vault.
+        if self.headless {
+            self.schedule_save();
+            return;
+        }
         if self.refresh_queued {
             return;
         }

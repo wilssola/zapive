@@ -474,12 +474,18 @@ impl Bridge {
                     });
                 } else if !inline.is_empty() {
                     self.media_inflight.insert(m.id.clone());
-                    crate::jobs::decode_thumb(m.id.clone(), inline, true);
+                    crate::jobs::decode_thumb(self.epoch, m.id.clone(), inline, true);
                 } else {
                     let url = message_link(m);
                     if !url.is_empty() {
                         self.media_inflight.insert(m.id.clone());
-                        crate::jobs::link_preview(m.jid.clone(), m.id.clone(), m.text.clone(), url);
+                        crate::jobs::link_preview(
+                            self.epoch,
+                            m.jid.clone(),
+                            m.id.clone(),
+                            m.text.clone(),
+                            url,
+                        );
                     }
                 }
                 return;
@@ -526,7 +532,7 @@ impl Bridge {
                     .and_then(|v| v.jpeg_thumbnail.as_ref())
                     .filter(|t| !t.is_empty())
                 {
-                    crate::jobs::decode_thumb(m.id.clone(), thumb.to_vec(), false);
+                    crate::jobs::decode_thumb(self.epoch, m.id.clone(), thumb.to_vec(), false);
                 }
                 self.wa.send(Cmd::Media {
                     id: m.id.clone(),

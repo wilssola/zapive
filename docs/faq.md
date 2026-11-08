@@ -53,7 +53,8 @@ as you.
 Yes, one-to-one voice and video calls. Group calls aren't supported yet.
 
 ### Can I use several numbers?
-Yes, up to five accounts, one connected at a time.
+Yes, up to five accounts, all connected at the same time. Switch between
+them from the left rail; each shows its unread chats.
 
 ### Can I vote in polls or create them?
 Yes. Create a poll from the attach menu, vote by clicking an option, and

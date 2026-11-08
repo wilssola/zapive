@@ -35,7 +35,8 @@ The server starts once the vault is open and only runs while Zapive does.
 While the PIN lock screen is up, tools answer with an error asking you to
 unlock. The on/off switch and the port are saved for the installation;
 the token is stored encrypted in the vault, one per account (switching
-accounts restarts the server with that account's token).
+accounts restarts the server with that account's token). Tools always act
+on the account on screen, even though the other accounts stay connected.
 
 ## Tools
 

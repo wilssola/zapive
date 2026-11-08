@@ -51,9 +51,11 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 match client.edit_message(chat, id.clone(), message.clone()).await {
                     Ok(_) => {
                         let timestamp = crate::store::now_secs();
-                        ui_apply(move |b| b.on_message_edit(&jid, &id, &message, timestamp));
+                        wa_apply_at(epoch, move |b| {
+                            b.on_message_edit(&jid, &id, &message, timestamp)
+                        });
                     }
-                    Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    Err(e) => wa_apply_at(epoch, move |b| b.message_action_failed(&e.to_string())),
                 }
             });
         }
@@ -81,7 +83,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     client.unpin_message(chat, key).await
                 };
                 match result {
-                    Ok(_) => ui_apply(move |b| {
+                    Ok(_) => wa_apply_at(epoch, move |b| {
                         b.on_message_pin(
                             &jid,
                             &id,
@@ -92,7 +94,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                             },
                         )
                     }),
-                    Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    Err(e) => wa_apply_at(epoch, move |b| b.message_action_failed(&e.to_string())),
                 }
             });
         }
@@ -105,8 +107,8 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     .mark_chat_as_read(&chat, false, None)
                     .await
                 {
-                    Ok(_) => ui_apply(move |b| b.on_mark_read(&jid, false)),
-                    Err(e) => ui_apply(move |b| b.message_action_failed(&e.to_string())),
+                    Ok(_) => wa_apply_at(epoch, move |b| b.on_mark_read(&jid, false)),
+                    Err(e) => wa_apply_at(epoch, move |b| b.message_action_failed(&e.to_string())),
                 }
             });
         }
@@ -168,7 +170,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 };
                 use whatsapp_rust::proto_helpers::MessageExt as _;
                 let message = message.get_base_message().prepare_for_forward();
-                crate::bridge::wa_apply_at(epoch, move |b| {
+                wa_apply_at(epoch, move |b| {
                     b.enqueue_prepared(&jid, message, None);
                 });
             });
@@ -220,7 +222,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 in_rate,
                 view_once,
             };
-            crate::bridge::wa_apply_at(epoch, move |b| {
+            wa_apply_at(epoch, move |b| {
                 b.stage_attachment(preparation);
             });
         }
@@ -240,7 +242,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         .map_err(|e| e.to_string()),
                     None => Err("Invalid destination JID".into()),
                 };
-                crate::bridge::wa_apply_at(epoch, move |b| b.on_outbox_result(&jid, &id, result));
+                wa_apply_at(epoch, move |b| b.on_outbox_result(&jid, &id, result));
             });
         }
         _ => unreachable!("not a messaging command"),

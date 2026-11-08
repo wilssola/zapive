@@ -114,7 +114,12 @@ pub struct Bridge {
     account: String,
     epoch: u64,
     registered: bool,
-    switching: bool,
+    // The other linked accounts, connected and taking events; see
+    // accounts::AccountState and Bridge::run_headless.
+    background: Vec<accounts::AccountState>,
+    // Set while a background account's event runs against the bridge.
+    headless: bool,
+    accounts_refresh_queued: bool,
     // Set by the logout dialog: the conversations go with the session.
     // A logout that came from the phone leaves them alone.
     wipe_on_logout: bool,
@@ -317,36 +322,49 @@ pub fn ui_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
 // still locked behind the PIN screen, but the store isn't loaded yet —
 // processing an event then would build on empty state and a later save
 // would clobber the vault. Park them and let boot replay in order.
+// Work for the account on screen, whichever that is when it lands.
 pub fn wa_apply(f: impl FnOnce(&mut Bridge) + Send + 'static) {
-    wa_apply_at(
-        crate::wa::SESSION_EPOCH.load(std::sync::atomic::Ordering::SeqCst),
-        f,
-    );
+    let _ = slint::invoke_from_event_loop(move || {
+        apply_now(move |b| {
+            let epoch = b.epoch;
+            b.apply_at(epoch, Box::new(f));
+        })
+    });
 }
 
-// `epoch` is the session the work came from. The bridge holds one
-// account's conversations at a time, so anything produced under another
-// epoch than the one it has loaded is for a store that is not here.
+// `epoch` is the service the work came from. Every linked account has
+// its own; the work runs against that account's conversations, on screen
+// or in the background, and is dropped once the account is gone.
 pub fn wa_apply_at(epoch: u64, f: impl FnOnce(&mut Bridge) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || {
-        BRIDGE.with(|cell| {
-            if let Some(bridge) = cell.borrow_mut().as_mut() {
-                if bridge.epoch != epoch {
-                    return;
-                }
-                if bridge.vault.as_ref().is_none_or(|v| v.locked()) {
-                    // ~10k events covers hours on the lock screen; past
-                    // that, keep the newest.
-                    if bridge.locked_backlog.len() >= 10_000 {
-                        drop(bridge.locked_backlog.remove(0));
-                    }
-                    bridge.locked_backlog.push(Box::new(f));
-                } else {
-                    f(bridge);
-                }
-            }
-        });
+        apply_now(move |b| b.apply_at(epoch, Box::new(f)));
     });
+}
+
+// Sends every account's client its goodbye; called once the event loop
+// has ended.
+pub fn shutdown_sessions() {
+    apply_now(|b| b.shutdown_sessions());
+}
+
+impl Bridge {
+    fn apply_at(&mut self, epoch: u64, f: LockedEvent) {
+        let known = self.epoch == epoch || self.background.iter().any(|s| s.epoch == epoch);
+        if !known {
+            return;
+        }
+        if self.vault.as_ref().is_none_or(|v| v.locked()) {
+            // ~10k events covers hours on the lock screen; past that,
+            // keep the newest.
+            if self.locked_backlog.len() >= 10_000 {
+                drop(self.locked_backlog.remove(0));
+            }
+            self.locked_backlog
+                .push(Box::new(move |b: &mut Bridge| b.apply_at(epoch, f)));
+            return;
+        }
+        self.run_for_epoch(epoch, f);
+    }
 }
 
 pub(super) fn apply_now(f: impl FnOnce(&mut Bridge)) {
@@ -377,6 +395,13 @@ impl Bridge {
     // ---- helpers ----
 
     pub(super) fn once(&mut self, ms: u64, f: impl FnOnce(&mut Bridge) + 'static) {
+        // Scheduled by a background account: it fires for that account.
+        let f: LockedEvent = if self.headless {
+            let epoch = self.epoch;
+            Box::new(move |b: &mut Bridge| b.run_for_epoch(epoch, f))
+        } else {
+            Box::new(f)
+        };
         let timer = slint::Timer::default();
         let cell = RefCell::new(Some(f));
         timer.start(

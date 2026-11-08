@@ -973,6 +973,8 @@ pub fn populate(ui: &AppWindow, en: bool, group: bool) {
         avatar: art::avatar(5),
         hasAvatar: true,
         active: true,
+        unread: 0,
+        online: true,
     };
     ui.set_my_account(me.clone());
     ui.set_accounts(model(vec![me]));

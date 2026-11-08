@@ -24,7 +24,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     Ok((sent, secret)) => {
                         let id = sent.message_id.clone();
                         let message = (*sent.message).clone();
-                        crate::bridge::wa_apply_at(epoch, move |b| {
+                        wa_apply_at(epoch, move |b| {
                             b.on_poll_created(&jid, &id, message, &secret)
                         });
                     }
@@ -62,7 +62,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                             .iter()
                             .map(|hash| hash.iter().map(|byte| format!("{byte:02x}")).collect())
                             .collect();
-                        crate::bridge::wa_apply_at(epoch, move |b| {
+                        wa_apply_at(epoch, move |b| {
                             b.on_poll_vote(&jid, &poll_id, &voter, picked, timestamp_ms)
                         });
                     }
@@ -88,9 +88,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     .vote(chat, &id, &creator_jid, &secret, &options)
                     .await
                 {
-                    Ok(_) => crate::bridge::wa_apply_at(epoch, move |b| {
-                        b.on_poll_vote_sent(&jid, &id, &options)
-                    }),
+                    Ok(_) => wa_apply_at(epoch, move |b| b.on_poll_vote_sent(&jid, &id, &options)),
                     Err(e) => action_failed(epoch, format!("[wa] poll vote failed: {e}")),
                 }
             });

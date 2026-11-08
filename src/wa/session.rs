@@ -33,6 +33,7 @@ pub(super) fn device_identity() -> whatsapp_rust::wacore::store::DevicePropsOver
 pub(super) async fn build_session(
     cmd_tx: mpsc::UnboundedSender<Cmd>,
     account: &str,
+    epoch: u64,
 ) -> Result<Session, Box<dyn std::error::Error + Send + Sync>> {
     let db_url = wa_session_path(account).to_string_lossy().into_owned();
     let store = SqliteStore::new(&db_url).await?;
@@ -46,7 +47,7 @@ pub(super) async fn build_session(
         .subscribe_handler(Arc::new(Pump {
             client: Arc::downgrade(&client),
             cmd_tx,
-            epoch: SESSION_EPOCH.load(Ordering::SeqCst),
+            epoch,
             rt: tokio::runtime::Handle::current(),
             failures: AtomicU32::new(0),
             stopped: AtomicBool::new(false),

@@ -680,6 +680,22 @@ impl Bridge {
             return;
         }
         self.record_call_new(id, from, "offer", video, group, ts);
+        // A call can only be taken on the account on screen. One for a
+        // background account gets a banner naming it and rings on the
+        // phone; the log row settles when the call ends.
+        if self.headless {
+            if self.notifications {
+                let jid = self.store.canon_owned(&normalize_jid(from));
+                let name = self.store.chat_name(&jid);
+                let account = self.account_label();
+                crate::platform::toast(
+                    &name,
+                    &ta("call.incoming_on_account", &[&account]),
+                    crate::platform::ToastPayload::default(),
+                );
+            }
+            return;
+        }
         // Already on a call: turn this one down rather than take the
         // screen away from the call in progress.
         if self.call.as_ref().is_some_and(|call| call.state != "ended") {
@@ -746,7 +762,7 @@ impl Bridge {
         }
     }
 
-    // RAM only, per account: switching accounts clears it.
+    // RAM only; it never outlives the run.
     pub(super) fn remember_dismissed(&mut self, jid: &str) {
         self.call_dismissed.insert(jid.to_string(), now_secs());
     }

@@ -211,12 +211,9 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
         Cmd::PrepareAttachment(preparation) => {
             let client = ctx.client.clone();
             tokio::spawn(async move {
-                if SESSION_EPOCH.load(Ordering::SeqCst) != epoch {
-                    return;
-                }
                 let id = preparation.id.clone();
                 let result = prepare_attachment(&client, preparation).await;
-                crate::bridge::wa_apply_at(epoch, move |b| {
+                wa_apply_at(epoch, move |b| {
                     b.on_attachment_prepared(&id, result);
                 });
             });
@@ -236,7 +233,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 // neither side sees it as forwarded.
                 let mut message = (*message).clone();
                 message.set_context_info(wa::ContextInfo::default());
-                crate::bridge::wa_apply_at(epoch, move |b| {
+                wa_apply_at(epoch, move |b| {
                     b.enqueue_prepared(&jid, message, None);
                 });
             });
@@ -271,7 +268,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     in_rate: 0,
                     view_once: false,
                 };
-                crate::bridge::wa_apply_at(epoch, move |b| {
+                wa_apply_at(epoch, move |b| {
                     b.stage_attachment(preparation);
                 });
             });
@@ -289,7 +286,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 in_rate: 0,
                 view_once: false,
             };
-            crate::bridge::wa_apply_at(epoch, move |b| {
+            wa_apply_at(epoch, move |b| {
                 b.stage_attachment(preparation);
             });
         }

@@ -1,9 +1,10 @@
 // The WhatsApp side of the app. Owns the whatsapp-rust client on the
 // tokio runtime; the UI talks to it through the Cmd channel, and events
-// flow back through bridge::ui_apply. Mirrors src/whatsapp.ts on master.
-// wa_apply parks events while the vault is still PIN-locked (the client
-// connects before unlock) and replays them at boot.
-use crate::bridge::wa_apply as ui_apply;
+// flow back through bridge::wa_apply_at. Mirrors src/whatsapp.ts on master.
+// One WaService per linked account, each with its own client and epoch;
+// wa_apply_at parks events while the vault is still PIN-locked (the
+// client connects before unlock) and replays them at boot.
+use crate::bridge::wa_apply_at;
 use crate::i18n::t;
 use crate::paths::wa_session_path;
 use std::sync::Arc;
@@ -44,12 +45,12 @@ use util::*;
 // user gets the "offline" modal instead.
 const MAX_FAILURES: u32 = 5;
 
-// Which session the UI is showing. Switching accounts swaps the client
-// under a bridge that holds one account's conversations at a time, and
-// an event of the account just left must never land in the store of the
-// one just opened. Everything headed for the bridge is stamped with the
-// epoch it was produced under and dropped if the epoch has moved on.
-pub static SESSION_EPOCH: AtomicU64 = AtomicU64::new(0);
+// Hands out one epoch per WaService. Every linked account keeps its own
+// client connected, and an event must land in the store of the account
+// whose client produced it: everything headed for the bridge is stamped
+// with its service's epoch, which the bridge maps back to an account
+// (dropping it once that account is gone).
+static NEXT_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 // What a reply quotes: enough to build the context info.
 #[derive(Debug)]
@@ -99,7 +100,7 @@ pub fn build_text(
 
 pub(super) fn action_failed(epoch: u64, error: impl Into<String>) {
     let error = error.into();
-    crate::bridge::wa_apply_at(epoch, move |b| b.message_action_failed(&error));
+    wa_apply_at(epoch, move |b| b.message_action_failed(&error));
 }
 
 // What to do with a media file once cached.
@@ -146,11 +147,8 @@ pub enum Cmd {
     // From the fatal modal's button: reconnect after conflict/offline.
     Resume,
     Logout,
-    // Closes the running session and opens another account's. Answered
-    // with Bridge::on_account_ready once the new client exists; nothing
-    // connects until the bridge has that account's store loaded and
-    // sends Start.
-    SwitchAccount(String),
+    // Disconnects and ends this service: its account was removed, or it
+    // was left before it ever paired.
     Shutdown,
     // `mentions` are the jids named as @user in the body; `mention_all`
     // carries the group subject when the body tags @all/@everyone.
@@ -447,23 +445,31 @@ pub struct GroupChange {
 #[derive(Clone)]
 pub struct WaService {
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    epoch: u64,
 }
 
 impl WaService {
-    // Builds the client (blocking briefly on the runtime to open the
-    // store) and reports whether a paired session already exists.
+    // Builds one account's client (blocking briefly on the runtime to
+    // open the store) and reports whether a paired session already
+    // exists. Nothing connects until the bridge sends Start.
     pub fn start(rt: &tokio::runtime::Runtime, account: &str) -> Result<(Self, bool), String> {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let epoch = NEXT_EPOCH.fetch_add(1, Ordering::SeqCst);
         let session = rt
-            .block_on(build_session(cmd_tx.clone(), account))
+            .block_on(build_session(cmd_tx.clone(), account, epoch))
             .map_err(|e| e.to_string())?;
         let registered = session.client.pn().is_some();
-        rt.spawn(executor(session, cmd_rx, cmd_tx.clone()));
-        Ok((Self { cmd_tx }, registered))
+        rt.spawn(executor(session, cmd_rx, cmd_tx.clone(), epoch));
+        Ok((Self { cmd_tx, epoch }, registered))
     }
 
     pub fn send(&self, cmd: Cmd) {
         let _ = self.cmd_tx.send(cmd);
+    }
+
+    // The stamp on everything this service sends to the bridge.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 }
 
@@ -474,7 +480,12 @@ impl WaService {
     // A service whose commands go nowhere; lets bridge tests build a Bridge
     // without a network session.
     pub(crate) fn detached() -> Self {
+        Self::detached_at(0)
+    }
+
+    // The same, standing in for one of several accounts.
+    pub(crate) fn detached_at(epoch: u64) -> Self {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
-        Self { cmd_tx }
+        Self { cmd_tx, epoch }
     }
 }

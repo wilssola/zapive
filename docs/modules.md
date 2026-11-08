@@ -5,7 +5,7 @@ Use this map to locate an existing implementation before adding a module. A path
 | Module | Current responsibility |
 | --- | --- |
 | `src/main.rs`, `src/paths.rs` | Startup, runtime and event loop; OS data/cache paths and per-account names. |
-| `src/bridge/` | UI-thread state and Slint window wiring. `wiring.rs` registers callbacks; `session.rs` handles account boot/pairing; `incoming.rs` processes WhatsApp events; `conversation.rs` owns rows and warm conversations; `settings.rs` handles settings. Other files are organized by action area (media, calls, translation, notifications, etc.). |
+| `src/bridge/` | UI-thread state and Slint window wiring. `wiring.rs` registers callbacks; `session.rs` handles account boot/pairing; `accounts.rs` owns the switcher, per-account state and headless background accounts; `incoming.rs` processes WhatsApp events; `conversation.rs` owns rows and warm conversations; `settings.rs` handles settings. Other files are organized by action area (media, calls, translation, notifications, etc.). |
 | `src/wa/mod.rs` | WhatsApp client lifecycle, `Cmd` and `WaService` sender. |
 | `src/wa/executor.rs`, `src/wa/pump.rs` | Command dispatch and protocol event handling. |
 | `src/wa/session.rs`, `src/wa/messaging.rs`, `src/wa/media.rs`, `src/wa/attachments.rs`, `src/wa/chats.rs`, `src/wa/groups.rs`, `src/wa/calls.rs`, `src/wa/polls.rs`, `src/wa/profile.rs`, `src/wa/util.rs` | Protocol-side behavior split by area; these are currently private submodules of `wa`. |

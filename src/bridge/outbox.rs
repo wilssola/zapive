@@ -205,7 +205,7 @@ impl Bridge {
 
     pub(super) fn dispatch_outbox(&mut self) {
         use crate::outbox::State;
-        if !self.outbox_connected || self.switching {
+        if !self.outbox_connected {
             return;
         }
         if self

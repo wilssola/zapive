@@ -4,7 +4,7 @@ use super::*;
 // What every command handler may need from the loop.
 pub(super) struct Ctx {
     pub(super) client: Arc<Client>,
-    // The epoch the command was received under; see SESSION_EPOCH.
+    // The epoch of this account's service; see NEXT_EPOCH.
     pub(super) epoch: u64,
     pub(super) media_key: crate::vault::KeyHandle,
     pub(super) media_sem: Arc<tokio::sync::Semaphore>,
@@ -15,12 +15,12 @@ pub(super) async fn executor(
     mut session: Session,
     mut cmd_rx: mpsc::UnboundedReceiver<Cmd>,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    epoch: u64,
 ) {
     let mut media_key = crate::vault::KeyHandle::default();
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
     while let Some(cmd) = cmd_rx.recv().await {
-        let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
         // Built per command, not kept across them: a Ctx that outlives the
         // command would hold the client of a session that was just replaced
         // (logout, account switch) and keep its database open.
@@ -99,11 +99,11 @@ pub(super) async fn executor(
                     match client.pair_with_code(options).await {
                         Ok(code) => {
                             let pretty = format_pair_code(&code);
-                            ui_apply(move |b| b.on_pairing_code(&pretty));
+                            wa_apply_at(epoch, move |b| b.on_pairing_code(&pretty));
                         }
                         Err(e) => {
                             eprintln!("[wa] pair code request failed: {e}");
-                            ui_apply(|b| b.on_pairing_failed());
+                            wa_apply_at(epoch, |b| b.on_pairing_failed());
                         }
                     }
                 });
@@ -115,49 +115,7 @@ pub(super) async fn executor(
             }
             Cmd::HaltRetries => {
                 session.client.disconnect().await;
-                ui_apply(|b| b.on_fatal("offline"));
-            }
-            Cmd::SwitchAccount(account) => {
-                // A call cannot follow the user to another account.
-                if let Some(live) = take_live() {
-                    let _ = session
-                        .client
-                        .voip()
-                        .terminate(&live.id, &live.peer, &live.creator)
-                        .await;
-                    live.handle.hangup_local().await;
-                }
-                session.client.disconnect().await;
-                let previous = session.account.clone();
-                drop(ctx);
-                drop(session);
-                SESSION_EPOCH.fetch_add(1, Ordering::SeqCst);
-                let opened = match build_session(cmd_tx.clone(), &account).await {
-                    Ok(next) => Ok(next),
-                    Err(e) => {
-                        eprintln!("[wa] cannot open the selected account: {e}");
-                        build_session(cmd_tx.clone(), &previous).await
-                    }
-                };
-                match opened {
-                    Ok(next) => {
-                        session = next;
-                        let account = session.account.clone();
-                        let registered = session.client.pn().is_some();
-                        let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
-                        // Not through the epoch-stamped path on purpose:
-                        // this is the message that opens the new epoch.
-                        crate::bridge::ui_apply(move |b| {
-                            b.on_account_ready(&account, registered, epoch)
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("[wa] session rebuild failed: {e}");
-                        let msg = t("status.connect_failed");
-                        crate::bridge::ui_apply(move |b| b.on_status(&msg));
-                        return;
-                    }
-                }
+                wa_apply_at(epoch, |b| b.on_fatal("offline"));
             }
             Cmd::ResetSession => {
                 session.client.disconnect().await;
@@ -170,17 +128,17 @@ pub(super) async fn executor(
                     // and asks for another reset instead of showing a QR.
                     eprintln!("[wa] could not remove the logged-out session");
                 }
-                match build_session(cmd_tx.clone(), &account).await {
+                match build_session(cmd_tx.clone(), &account, epoch).await {
                     Ok(next) => {
                         session = next;
-                        ui_apply(|b| b.on_logged_out());
+                        wa_apply_at(epoch, |b| b.on_logged_out());
                         let client = session.client.clone();
                         tokio::spawn(async move { client.run().await });
                     }
                     Err(e) => {
                         eprintln!("[wa] session rebuild failed: {e}");
                         let msg = t("status.connect_failed");
-                        ui_apply(move |b| b.on_status(&msg));
+                        wa_apply_at(epoch, move |b| b.on_status(&msg));
                         return;
                     }
                 }

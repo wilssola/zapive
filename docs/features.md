@@ -228,8 +228,17 @@ each feature. Anything not listed here is in
 
 ## Accounts
 
-- Up to **five** WhatsApp accounts, switched from the avatar at the bottom
-  of the left rail. One is connected at a time.
+- Up to **five** WhatsApp accounts, **all connected at the same time**.
+  Messages, notifications and history keep arriving for every account,
+  whichever one is on screen.
+- Switching is instant: click another account's avatar in the left rail
+  (it shows that account's unread chats), or open the switcher from your
+  own avatar at the bottom. A dot on your avatar means another account
+  has unread messages.
+- With more than one account, banners name the account they belong to;
+  clicking one switches to that account and opens the chat.
+- Calls can be answered only on the account on screen. A call to another
+  account shows a banner naming it and keeps ringing on the phone.
 - Each account has its own session (`wa-<id>.db`) and search index; all
   share the one encrypted vault.
 - **Log out** offers to keep the conversations. Removing an account

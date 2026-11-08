@@ -22,7 +22,7 @@ pub(super) struct Pump {
     // its session database open) alive for the rest of the process.
     pub(super) client: std::sync::Weak<Client>,
     pub(super) cmd_tx: mpsc::UnboundedSender<Cmd>,
-    // The epoch this client was built under; see SESSION_EPOCH.
+    // The epoch of the service this client belongs to; see NEXT_EPOCH.
     pub(super) epoch: u64,
     pub(super) rt: tokio::runtime::Handle,
     pub(super) failures: AtomicU32,
@@ -31,17 +31,13 @@ pub(super) struct Pump {
 
 impl EventHandler for Pump {
     fn handle_event(&self, event: Arc<Event>) {
-        // A client that was switched away from may still be draining.
-        if self.epoch != SESSION_EPOCH.load(Ordering::SeqCst) {
-            return;
-        }
         match &*event {
             Event::PairingQrCode(qr) => {
                 let code = qr.code.clone();
-                ui_apply(move |b| b.on_qr(&code));
+                wa_apply_at(self.epoch, move |b| b.on_qr(&code));
             }
             Event::PairSuccess(_) => {
-                ui_apply(|b| b.on_status(&t("status.connecting")));
+                wa_apply_at(self.epoch, |b| b.on_status(&t("status.connecting")));
             }
             Event::Connected(_) => {
                 log::info!("[wa] connected ts={}", crate::store::now_secs());
@@ -60,17 +56,17 @@ impl EventHandler for Pump {
                     .unwrap_or_default();
                 // What the account switcher calls this account.
                 let name = client.push_name();
-                ui_apply(move |b| b.on_open(&pn, &lid, &name));
+                wa_apply_at(self.epoch, move |b| b.on_open(&pn, &lid, &name));
             }
             Event::StreamReplaced(_) => {
                 // WhatsApp keeps one desktop session per account: the
                 // library already stopped reconnecting; ask the user.
                 self.stopped.store(true, Ordering::Relaxed);
-                ui_apply(|b| b.on_fatal("conflict"));
+                wa_apply_at(self.epoch, |b| b.on_fatal("conflict"));
             }
             Event::LoggedOut(_) => {
                 self.stopped.store(true, Ordering::Relaxed);
-                ui_apply(|b| b.on_status(&t("status.session_ended")));
+                wa_apply_at(self.epoch, |b| b.on_status(&t("status.session_ended")));
                 let _ = self.cmd_tx.send(Cmd::ResetSession);
             }
             Event::ConnectFailure(f) => {
@@ -127,7 +123,7 @@ impl EventHandler for Pump {
             }
             Event::Messages(_) => {
                 let event = event.clone();
-                ui_apply(move |b| {
+                wa_apply_at(self.epoch, move |b| {
                     if let Event::Messages(batch) = &*event {
                         b.on_messages(batch);
                     }
@@ -136,7 +132,7 @@ impl EventHandler for Pump {
             Event::ServerAck(ack) if ack.class.as_deref() == Some("message") => {
                 let id = ack.id.clone();
                 let error = ack.error.clone();
-                crate::bridge::wa_apply_at(self.epoch, move |b| b.on_outbox_ack(&id, error));
+                wa_apply_at(self.epoch, move |b| b.on_outbox_ack(&id, error));
             }
             Event::Receipt(receipt) => {
                 match receipt.r#type {
@@ -152,7 +148,7 @@ impl EventHandler for Pump {
                         let chat = receipt.source.chat.to_non_ad_string();
                         let ids: Vec<String> =
                             receipt.message_ids.iter().map(|i| i.to_string()).collect();
-                        ui_apply(move |b| b.on_read_elsewhere(&chat, &ids));
+                        wa_apply_at(self.epoch, move |b| b.on_read_elsewhere(&chat, &ids));
                         return;
                     }
                     _ => {}
@@ -170,7 +166,7 @@ impl EventHandler for Pump {
                     .sender_alt
                     .as_ref()
                     .map(|jid| jid.to_non_ad_string());
-                ui_apply(move |b| {
+                wa_apply_at(self.epoch, move |b| {
                     b.on_receipt(
                         &chat,
                         &ids,
@@ -228,11 +224,10 @@ impl EventHandler for Pump {
                             chunk.pushnames.push((id, name));
                         }
                     }
-                    // Decoding takes long enough for an account switch
-                    // to slip in, so the chunk carries the epoch of the
-                    // client it came from, not of whoever is current by
-                    // the time it is ready.
-                    crate::bridge::wa_apply_at(epoch, move |b| b.on_history_chunk(chunk));
+                    // The chunk carries the epoch of the client it came
+                    // from, so it lands in that account's store whichever
+                    // account is on screen by the time it is ready.
+                    wa_apply_at(epoch, move |b| b.on_history_chunk(chunk));
                 });
             }
             // Every <call> stanza arrives as IncomingCall, not just the
@@ -250,7 +245,7 @@ impl EventHandler for Pump {
                         // brace, since ringing for one is the worst
                         // possible outcome.
                         if call.offline {
-                            ui_apply(move |b| b.on_call_missed(&id, &from, ts));
+                            wa_apply_at(self.epoch, move |b| b.on_call_missed(&id, &from, ts));
                             return;
                         }
                         let video = *is_video
@@ -260,19 +255,21 @@ impl EventHandler for Pump {
                         // callKey and the relay live on it), so park it
                         // until the user picks up or it goes stale.
                         stash_offer(&id, (**call).clone());
-                        ui_apply(move |b| b.on_incoming_call(&id, &from, video, group, ts));
+                        wa_apply_at(self.epoch, move |b| {
+                            b.on_incoming_call(&id, &from, video, group, ts)
+                        });
                     }
                     CallAction::Accept { .. } => {
-                        ui_apply(move |b| b.on_call_status(&id, "accept"));
+                        wa_apply_at(self.epoch, move |b| b.on_call_status(&id, "accept"));
                     }
                     // A reason means one of the peer's devices bowed out
                     // (`busy`), not that the person declined: the rest of
                     // their devices keep ringing, so the call is still on.
                     CallAction::Reject { reason: None, .. } => {
-                        ui_apply(move |b| b.on_call_status(&id, "reject"));
+                        wa_apply_at(self.epoch, move |b| b.on_call_status(&id, "reject"));
                     }
                     CallAction::Terminate { .. } => {
-                        ui_apply(move |b| b.on_call_status(&id, "terminate"));
+                        wa_apply_at(self.epoch, move |b| b.on_call_status(&id, "terminate"));
                     }
                     _ => {}
                 }
@@ -281,7 +278,7 @@ impl EventHandler for Pump {
                 let id = missed.call_id.clone();
                 let from = missed.from.to_non_ad_string();
                 let ts = missed.timestamp.timestamp();
-                ui_apply(move |b| b.on_call_missed(&id, &from, ts));
+                wa_apply_at(self.epoch, move |b| b.on_call_missed(&id, &from, ts));
             }
             // Another of our devices picked the call up (or turned it
             // down); either way this one stops ringing.
@@ -292,41 +289,45 @@ impl EventHandler for Pump {
                     // Accepted, and whatever outcome the server adds next.
                     _ => "accept",
                 };
-                ui_apply(move |b| b.on_call_status(&id, status));
+                wa_apply_at(self.epoch, move |b| b.on_call_status(&id, status));
             }
             Event::ChatPresence(update) => {
                 let chat = update.source.chat.to_non_ad_string();
                 let sender = update.source.sender.to_non_ad_string();
                 let state = format!("{:?}", update.state);
                 let media = format!("{:?}", update.media);
-                ui_apply(move |b| b.on_chat_presence(&chat, &sender, &state, &media));
+                wa_apply_at(self.epoch, move |b| {
+                    b.on_chat_presence(&chat, &sender, &state, &media)
+                });
             }
             Event::Presence(update) => {
                 let from = update.from.to_non_ad_string();
                 let available = !update.unavailable;
-                ui_apply(move |b| b.on_presence(&from, available));
+                wa_apply_at(self.epoch, move |b| b.on_presence(&from, available));
             }
             Event::PinUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let pinned = u.action.pinned.unwrap_or(false);
                 let stamp = pin_stamp(pinned, u.timestamp.timestamp());
-                ui_apply(move |b| b.on_chat_flag(&jid, Some(stamp), None));
+                wa_apply_at(self.epoch, move |b| b.on_chat_flag(&jid, Some(stamp), None));
             }
             Event::ArchiveUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let archived = u.action.archived.unwrap_or(false);
-                ui_apply(move |b| b.on_chat_flag(&jid, None, Some(archived)));
+                wa_apply_at(self.epoch, move |b| {
+                    b.on_chat_flag(&jid, None, Some(archived))
+                });
             }
             Event::StarUpdate(u) => {
                 let jid = u.chat_jid.to_non_ad_string();
                 let id = u.message_id.clone();
                 let starred = u.action.starred.unwrap_or(false);
-                ui_apply(move |b| b.on_star(&jid, &id, starred));
+                wa_apply_at(self.epoch, move |b| b.on_star(&jid, &id, starred));
             }
             Event::MarkChatAsReadUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let read = u.action.read.unwrap_or(true);
-                ui_apply(move |b| b.on_mark_read(&jid, read));
+                wa_apply_at(self.epoch, move |b| b.on_mark_read(&jid, read));
             }
             Event::MuteUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
@@ -340,21 +341,21 @@ impl EventHandler for Pump {
                 } else {
                     until / 1000
                 };
-                ui_apply(move |b| b.on_mute(&jid, muted));
+                wa_apply_at(self.epoch, move |b| b.on_mute(&jid, muted));
             }
             Event::ClearChatUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let cutoff = u.action.message_range.as_option().and_then(|r| {
                     range_cutoff(r.last_message_timestamp, r.last_system_message_timestamp)
                 });
-                ui_apply(move |b| b.on_chat_cleared(&jid, false, cutoff));
+                wa_apply_at(self.epoch, move |b| b.on_chat_cleared(&jid, false, cutoff));
             }
             Event::DeleteChatUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
                 let cutoff = u.action.message_range.as_option().and_then(|r| {
                     range_cutoff(r.last_message_timestamp, r.last_system_message_timestamp)
                 });
-                ui_apply(move |b| b.on_chat_cleared(&jid, true, cutoff));
+                wa_apply_at(self.epoch, move |b| b.on_chat_cleared(&jid, true, cutoff));
             }
             Event::LabelEditUpdate(u) => {
                 let id = u.label_id.clone();
@@ -363,13 +364,15 @@ impl EventHandler for Pump {
                 let order = u.action.order_index.unwrap_or(0);
                 let deleted = u.action.deleted.unwrap_or(false);
                 let list_type = u.action.r#type.map(|kind| kind as i32);
-                ui_apply(move |b| b.on_label(&id, &name, color, order, deleted, list_type));
+                wa_apply_at(self.epoch, move |b| {
+                    b.on_label(&id, &name, color, order, deleted, list_type)
+                });
             }
             Event::LabelAssociationUpdate(u) => {
                 let id = u.label_id.clone();
                 let jid = u.chat_jid.to_non_ad_string();
                 let on = u.action.labeled.unwrap_or(false);
-                ui_apply(move |b| b.on_label_chat(&id, &jid, on));
+                wa_apply_at(self.epoch, move |b| b.on_label_chat(&id, &jid, on));
             }
             Event::GroupUpdate(u) => {
                 use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction as A;
@@ -440,7 +443,7 @@ impl EventHandler for Pump {
                     A::Invite { .. } => change.kind = "invite",
                     _ => return,
                 }
-                ui_apply(move |b| b.on_group_update(change));
+                wa_apply_at(self.epoch, move |b| b.on_group_update(change));
             }
             Event::ContactUpdate(u) => {
                 let jid = u.jid.to_non_ad_string();
@@ -451,7 +454,7 @@ impl EventHandler for Pump {
                     .or_else(|| u.action.first_name.clone())
                     .unwrap_or_default();
                 if !name.is_empty() {
-                    ui_apply(move |b| b.on_contact(&jid, &name));
+                    wa_apply_at(self.epoch, move |b| b.on_contact(&jid, &name));
                 }
             }
             _ => {}
@@ -544,7 +547,7 @@ impl Pump {
             self.stopped.store(true, Ordering::Relaxed);
             let _ = self.cmd_tx.send(Cmd::HaltRetries);
         } else {
-            ui_apply(|b| b.on_status(&t("status.reconnecting")));
+            wa_apply_at(self.epoch, |b| b.on_status(&t("status.reconnecting")));
         }
     }
 }

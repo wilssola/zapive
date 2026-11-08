@@ -8,6 +8,8 @@ pub(super) const NOTIFICATION_REPLY_MAX_BYTES: usize = 4096;
 
 #[derive(Clone)]
 pub(super) struct NotificationToken {
+    // The linked account the chat belongs to.
+    pub(super) account: String,
     pub(super) jid: String,
     pub(super) msg_id: String,
     pub(super) expires: SystemTime,
@@ -133,11 +135,11 @@ impl Bridge {
                 let Some(token) = self.register_notification_token(&jid, &message.id) else {
                     return;
                 };
-                let toast_title = if self.notify_previews {
+                let toast_title = self.with_account_label(if self.notify_previews {
                     title.clone()
                 } else {
                     t("notify.app_name")
-                };
+                });
                 let mut payload = crate::platform::ToastPayload {
                     token: Some(token.clone()),
                     reply: true,
@@ -260,8 +262,30 @@ impl Bridge {
                     }
                     payload.token = self.register_notification_token(&jid, &last);
                 }
-                crate::platform::toast(&t("notify.app_name"), &text, payload);
+                let title = self.with_account_label(t("notify.app_name"));
+                crate::platform::toast(&title, &text, payload);
             }
+        }
+    }
+
+    // With more than one account linked, a banner says whose it is.
+    fn with_account_label(&self, title: String) -> String {
+        let several = self.vault.as_ref().is_some_and(|v| v.accounts().len() > 1);
+        if several {
+            ta("notify.account_title", &[&title, &self.account_label()])
+        } else {
+            title
+        }
+    }
+
+    // A toast of a background account brings that account on screen
+    // before its chat is looked up.
+    fn follow_token_account(&mut self, token: &str) {
+        let Some(account) = self.notify_tokens.get(token).map(|t| t.account.clone()) else {
+            return;
+        };
+        if account != self.account {
+            self.switch_account(&account);
         }
     }
 
@@ -291,6 +315,7 @@ impl Bridge {
         self.notify_tokens.insert(
             token.clone(),
             NotificationToken {
+                account: self.account.clone(),
                 jid: jid.to_string(),
                 msg_id: msg_id.to_string(),
                 expires: SystemTime::now() + NOTIFICATION_TOKEN_TTL,
@@ -355,6 +380,7 @@ impl Bridge {
 
     pub fn on_notification_activated(&mut self, token: &str) {
         self.raise_main_window();
+        self.follow_token_account(token);
         let Some(item) = self.take_notification_token(token) else {
             return;
         };
@@ -363,6 +389,7 @@ impl Bridge {
     }
 
     pub fn on_notification_play(&mut self, token: &str) {
+        self.follow_token_account(token);
         let Some(item) = self.take_notification_token(token) else {
             return;
         };
@@ -382,6 +409,17 @@ impl Bridge {
 
     #[cfg_attr(not(windows), allow(dead_code))] // only the Windows toast has a reply box
     pub fn on_notification_reply(&mut self, token: &str, text: &str) {
+        // Answered from the banner: sent from that account's own client,
+        // without taking the screen away from the one being read.
+        if let Some(account) = self.notify_tokens.get(token).map(|t| t.account.clone())
+            && account != self.account
+        {
+            if let Some(epoch) = self.epoch_of(&account) {
+                let (token, text) = (token.to_string(), text.to_string());
+                self.run_headless(epoch, move |b| b.on_notification_reply(&token, &text));
+            }
+            return;
+        }
         let Some(item) = self.take_notification_token(token) else {
             return;
         };

@@ -84,9 +84,10 @@ Open **Settings** (gear in the left rail):
 
 ## More accounts
 
-Zapive keeps up to **five** WhatsApp accounts. Add one from the avatar at
-the bottom of the left rail. Only one is connected at a time; the others
-catch up when you switch to them.
+Zapive keeps up to **five** WhatsApp accounts, all connected at once. Add
+one from the avatar at the bottom of the left rail and scan its QR code.
+The other accounts appear as small avatars in the rail with their unread
+count; click one to switch instantly.
 
 ## Logging out
 

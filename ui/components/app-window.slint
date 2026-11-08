@@ -749,14 +749,15 @@ export component AppWindow inherits Window {
     callback save-pin(string, string);
     callback remove-pin(string);
     callback logout();
-    // Accounts (up to five, one loaded at a time).
+    // Accounts (up to five, all connected, one on screen).
     in property <[AccountItem]> accounts;
-    // The loaded one, for the rail.
+    // The one on screen, for the rail.
     in property <AccountItem> my-account;
     in property <int> account-count: 1;
+    // Chats with unread messages across the accounts not on screen.
+    in property <int> other-accounts-unread: 0;
     in property <bool> can-add-account: true;
     in-out property <bool> account-menu-open: false;
-    in property <bool> account-switching: false;
     // The login screen: conversations a past session left on disk, and
     // the number they belong to.
     in property <bool> kept-conversations: false;
@@ -1131,7 +1132,6 @@ export component AppWindow inherits Window {
                         visible: !acc.active;
                         height: acc.active ? 0 : 52px;
                         account: acc;
-                        enabled: !root.account-switching;
                         clicked => { root.switch-account(acc.id); }
                         remove => { root.remove-account(acc.id); }
                     }
@@ -1356,6 +1356,56 @@ export component AppWindow inherits Window {
                         root.settings-opened();
                     }
                 }
+                // The other accounts, one click away; each shows its unread.
+                for acc in root.accounts: TouchArea {
+                    visible: !acc.active;
+                    height: acc.active ? 0 : 32px;
+                    accessible-role: button;
+                    accessible-label: acc.unread > 0
+                        ? @tr("accessibility.switch_account_unread", acc.name, acc.unread)
+                        : @tr("accessibility.switch_account", acc.name);
+                    accessible-action-default => { root.switch-account(acc.id); }
+                    mouse-cursor: pointer;
+                    clicked => { root.switch-account(acc.id); }
+                    Avatar {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 26px;
+                        height: 26px;
+                        opacity: parent.has-hover ? 1 : 0.75;
+                        src: acc.avatar;
+                        has-image: acc.hasAvatar;
+                        initial: acc.initial;
+                        color-idx: acc.colorIdx;
+                    }
+                    if acc.unread > 0: Rectangle {
+                        x: parent.width / 2 + 4px;
+                        y: 0px;
+                        width: max(16px, other-label.preferred-width + 6px);
+                        height: 16px;
+                        border-radius: self.height / 2;
+                        border-width: 2px;
+                        border-color: Theme.badge-cut;
+                        background: Theme.accent;
+                        other-label := Text {
+                            text: acc.unread > 99 ? "99+" : acc.unread;
+                            color: #ffffff;
+                            font-size: 9px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    other-key := KeyFocus {
+                        activate => { root.switch-account(acc.id); }
+                    }
+                    FocusRing {
+                        shown: other-key.has-focus;
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: 8px;
+                    }
+                }
                 // Whose conversations these are; opens the switcher.
                 TouchArea {
                     accessible-role: button;
@@ -1373,6 +1423,17 @@ export component AppWindow inherits Window {
                         has-image: root.my-account.hasAvatar;
                         initial: root.my-account.initial;
                         color-idx: root.my-account.colorIdx;
+                    }
+                    // Something is waiting in another account.
+                    if root.other-accounts-unread > 0: Rectangle {
+                        x: parent.width / 2 + 8px;
+                        y: 2px;
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        border-width: 2px;
+                        border-color: Theme.badge-cut;
+                        background: Theme.accent;
                     }
                     account-key := KeyFocus {
                         activate => { root.account-menu-open = !root.account-menu-open; }
@@ -5263,22 +5324,6 @@ export component AppWindow inherits Window {
         switch-account(a0) => { root.switch-account(a0); }
         add-account() => { root.add-account(); }
         remove-account(a0) => { root.remove-account(a0); }
-    }
-
-    // Swapping sessions takes a moment; nothing underneath belongs to
-    // either account while it lasts.
-    if root.account-switching: Rectangle {
-        background: Theme.bg;
-        TouchArea { }
-        Text {
-            text: @tr("account.switching.progress");
-            color: Theme.text-dim;
-            font-size: 15px;
-            width: parent.width;
-            height: parent.height;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
     }
 
     message-menu-layer := MessageMenuLayer {

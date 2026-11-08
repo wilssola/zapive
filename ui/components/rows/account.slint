@@ -3,15 +3,17 @@ import { Avatar } from "../avatar.slint";
 import { Theme } from "../theme.slint";
 import { KeyFocus, FocusRing } from "../a11y.slint";
 
-// One account in the switcher: the loaded one carries a check, the
-// others a button that removes them from this computer.
+// One account in the switcher: the one on screen carries a check, the
+// others their unread count and a button that removes them from this
+// computer.
 export component AccountRow inherits TouchArea {
     in property <AccountItem> account;
     callback remove();
     mouse-cursor: pointer;
     height: 52px;
     accessible-role: button;
-    accessible-label: root.account.detail != "" ? root.account.name + ", " + root.account.detail : root.account.name;
+    accessible-label: (root.account.detail != "" ? root.account.name + ", " + root.account.detail : root.account.name)
+        + (!root.account.active && root.account.unread > 0 ? ", " + @tr("accessibility.account_unread", root.account.unread) : "");
     accessible-checkable: true;
     accessible-checked: root.account.active;
     accessible-action-default => { root.clicked(); }
@@ -53,6 +55,23 @@ export component AccountRow inherits TouchArea {
                 color: Theme.text-dim;
                 font-size: 11px;
                 overflow: elide;
+            }
+        }
+        if !root.account.active && root.account.unread > 0: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: max(20px, unread-label.preferred-width + 8px);
+                height: 20px;
+                border-radius: 10px;
+                background: Theme.accent;
+                unread-label := Text {
+                    text: root.account.unread > 99 ? "99+" : root.account.unread;
+                    color: #ffffff;
+                    font-size: 11px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
         }
         Rectangle { width: 24px; }

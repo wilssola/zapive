@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
+    let epoch = ctx.epoch;
     match cmd {
         Cmd::Media {
             id,
@@ -17,17 +18,17 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     crate::media::ensure_cached(&client, &key, &id, &mimetype, &message, &sem)
                         .await
                 else {
-                    ui_apply(move |b| b.on_media_missing(&id));
+                    wa_apply_at(epoch, move |b| b.on_media_missing(&id));
                     return;
                 };
                 match want {
-                    MediaWant::File => ui_apply(move |b| b.on_media_file(&id, &path)),
+                    MediaWant::File => wa_apply_at(epoch, move |b| b.on_media_file(&id, &path)),
                     MediaWant::Video => {
                         // Playable the moment the file is here; the
                         // poster follows when it is decoded.
                         {
                             let (id, path) = (id.clone(), path.clone());
-                            ui_apply(move |b| b.on_media_file(&id, &path));
+                            wa_apply_at(epoch, move |b| b.on_media_file(&id, &path));
                         }
                         let poster = tokio::task::spawn_blocking(move || {
                             crate::media::temp_plain(&key, &path)
@@ -37,7 +38,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         .ok()
                         .flatten();
                         if let Some(img) = poster {
-                            ui_apply(move |b| b.on_video_poster(&id, img));
+                            wa_apply_at(epoch, move |b| b.on_video_poster(&id, img));
                         }
                     }
                     MediaWant::Image => {
@@ -46,15 +47,17 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         let decoded = crate::media::read_cached(&key, &path)
                             .and_then(|d| crate::media::decode_bytes(&d, crate::media::BUBBLE_PX));
                         match decoded {
-                            Some(img) => ui_apply(move |b| b.on_media_image(&id, &path, img)),
-                            None => ui_apply(move |b| b.on_media_missing(&id)),
+                            Some(img) => {
+                                wa_apply_at(epoch, move |b| b.on_media_image(&id, &path, img))
+                            }
+                            None => wa_apply_at(epoch, move |b| b.on_media_missing(&id)),
                         }
                     }
                     MediaWant::Sticker => {
                         let frames = crate::media::read_cached(&key, &path)
                             .map(|d| crate::media::sticker_frames(&d, 180, 24))
                             .unwrap_or_default();
-                        ui_apply(move |b| b.on_media_sticker(&id, &path, frames));
+                        wa_apply_at(epoch, move |b| b.on_media_sticker(&id, &path, frames));
                     }
                     MediaWant::Gif => {
                         let frames = tokio::task::spawn_blocking(move || {
@@ -67,10 +70,12 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         .flatten();
                         match frames {
                             Some((path, frames)) if !frames.is_empty() => {
-                                ui_apply(move |b| b.on_media_gif(&id, &path, frames));
+                                wa_apply_at(epoch, move |b| b.on_media_gif(&id, &path, frames));
                             }
-                            Some((path, _)) => ui_apply(move |b| b.on_media_file(&id, &path)),
-                            None => ui_apply(move |b| b.on_media_missing(&id)),
+                            Some((path, _)) => {
+                                wa_apply_at(epoch, move |b| b.on_media_file(&id, &path))
+                            }
+                            None => wa_apply_at(epoch, move |b| b.on_media_missing(&id)),
                         }
                     }
                 }
@@ -84,7 +89,6 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
             enc_sha256,
             fallback,
         } => {
-            let epoch = ctx.epoch;
             let client = ctx.client.clone();
             let key = ctx.media_key.clone();
             let sem = ctx.media_sem.clone();
@@ -137,10 +141,8 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 .ok()
                 .flatten();
                 match img {
-                    Some(img) => {
-                        crate::bridge::wa_apply_at(epoch, move |b| b.on_thumb(&id, true, img))
-                    }
-                    None => crate::bridge::wa_apply_at(epoch, move |b| b.on_media_missing(&id)),
+                    Some(img) => wa_apply_at(epoch, move |b| b.on_thumb(&id, true, img)),
+                    None => wa_apply_at(epoch, move |b| b.on_media_missing(&id)),
                 }
             });
         }

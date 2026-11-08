@@ -125,9 +125,6 @@ impl Bridge {
         if !self.registered {
             return Err("Zapive is not logged in to WhatsApp. Link a phone first.".into());
         }
-        if self.switching {
-            return Err("Zapive is switching accounts. Try again in a moment.".into());
-        }
         match call {
             Call::ListChats {
                 query,

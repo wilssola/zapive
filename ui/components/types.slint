@@ -135,6 +135,10 @@ export struct AccountItem {
     avatar: image,
     hasAvatar: bool,
     active: bool,
+    // Chats with unread messages (0 for the account on screen).
+    unread: int,
+    // Its client is connected (on screen or in the background).
+    online: bool,
 }
 
 // One installed local translation model.

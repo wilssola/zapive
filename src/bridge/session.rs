@@ -10,6 +10,7 @@ impl Bridge {
         crate::media::migrate_cache();
         // main opened this account's session and pointed the vault at it.
         self.account = vault.account();
+        self.epoch = self.wa.epoch();
         self.registered = registered;
         let known: Vec<String> = vault.accounts().into_iter().map(|a| a.id).collect();
         crate::paths::sweep_accounts(&known);
@@ -99,6 +100,8 @@ impl Bridge {
         for f in std::mem::take(&mut self.locked_backlog) {
             f(self);
         }
+        // The other paired accounts connect too; they need the open vault.
+        self.start_background_sessions();
     }
 
     pub(super) fn handle_unlock(&mut self, pin: &str) {
@@ -360,8 +363,7 @@ impl Bridge {
     }
 
     // Empties everything derived from one account's store. The store on
-    // disk is untouched: this is also how the bridge lets go of an
-    // account it is switching away from.
+    // disk is untouched.
     pub(super) fn clear_store_state(&mut self) {
         self.reset_translation();
         self.clear_notification_sensitive_state();

@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
+    let epoch = ctx.epoch;
     match cmd {
         Cmd::FetchChannel(jid) => {
             let client = ctx.client.clone();
@@ -24,7 +25,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                             .flatten(),
                             None => None,
                         };
-                        ui_apply(move |b| b.on_channel_meta(&jid, &name, avatar));
+                        wa_apply_at(epoch, move |b| b.on_channel_meta(&jid, &name, avatar));
                     }
                     Err(e) => eprintln!("[wa] channel metadata failed for {jid}: {e}"),
                 }
@@ -44,7 +45,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                                 .size
                                 .map(|s| s as usize)
                                 .unwrap_or(meta.participants.len());
-                            ui_apply(move |b| b.on_chat_info(&jid, "", &desc, members));
+                            wa_apply_at(epoch, move |b| b.on_chat_info(&jid, "", &desc, members));
                         }
                         Err(e) => eprintln!("[wa] group info failed: {e}"),
                     }
@@ -59,7 +60,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                                 .get(&target)
                                 .and_then(|info| info.status.clone())
                                 .unwrap_or_default();
-                            ui_apply(move |b| b.on_chat_info(&jid, &about, "", 0));
+                            wa_apply_at(epoch, move |b| b.on_chat_info(&jid, &about, "", 0));
                         }
                         Err(e) => eprintln!("[wa] user info failed: {e}"),
                     }
@@ -100,7 +101,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 };
                 if let Some((img, fresh)) = hit {
                     let jid2 = jid.clone();
-                    ui_apply(move |b| b.on_avatar(&jid2, img, true));
+                    wa_apply_at(epoch, move |b| b.on_avatar(&jid2, img, true));
                     if fresh {
                         return;
                     }
@@ -126,17 +127,19 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         .ok()
                         .flatten();
                         match img {
-                            Some(img) => ui_apply(move |b| b.on_avatar(&jid, Some(img), true)),
+                            Some(img) => {
+                                wa_apply_at(epoch, move |b| b.on_avatar(&jid, Some(img), true))
+                            }
                             // The URL fetch failed: transient, retryable.
-                            None => ui_apply(move |b| b.on_avatar(&jid, None, false)),
+                            None => wa_apply_at(epoch, move |b| b.on_avatar(&jid, None, false)),
                         }
                     }
                     // Confirmed: this jid has no picture (or hides it).
                     Ok(None) => {
                         let _ = std::fs::write(&path, []);
-                        ui_apply(move |b| b.on_avatar(&jid, None, true));
+                        wa_apply_at(epoch, move |b| b.on_avatar(&jid, None, true));
                     }
-                    Err(_) => ui_apply(move |b| b.on_avatar(&jid, None, false)),
+                    Err(_) => wa_apply_at(epoch, move |b| b.on_avatar(&jid, None, false)),
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             });
@@ -153,7 +156,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 .ok()
                 .flatten();
                 if let Some(img) = frame {
-                    ui_apply(move |b| b.on_status_poster(&id, img));
+                    wa_apply_at(epoch, move |b| b.on_status_poster(&id, img));
                 }
             });
         }
@@ -174,7 +177,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     .flatten()
                 };
                 if let Some(img) = cached {
-                    ui_apply(move |b| b.on_avatar_large(&jid, img));
+                    wa_apply_at(epoch, move |b| b.on_avatar_large(&jid, img));
                     return;
                 }
                 let Some(target) = parse_jid(&jid) else {
@@ -194,7 +197,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 .ok()
                 .flatten();
                 if let Some(img) = img {
-                    ui_apply(move |b| b.on_avatar_large(&jid, img));
+                    wa_apply_at(epoch, move |b| b.on_avatar_large(&jid, img));
                 }
             });
         }

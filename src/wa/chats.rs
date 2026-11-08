@@ -235,7 +235,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 use whatsapp_rust::waproto::buffa::{Message as _, MessageField};
                 let Some(to) = parse_jid(&group) else {
                     action_failed(epoch, "Invalid destination JID");
-                    crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(false));
+                    wa_apply_at(epoch, |b| b.on_share_result(false));
                     return;
                 };
                 let count = messages.len() as i64;
@@ -260,7 +260,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     Ok(u) => u,
                     Err(e) => {
                         action_failed(epoch, format!("[wa] history bundle upload failed: {e}"));
-                        crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(false));
+                        wa_apply_at(epoch, |b| b.on_share_result(false));
                         return;
                     }
                 };
@@ -286,10 +286,10 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     ..Default::default()
                 };
                 match client.send_message(to, message).await {
-                    Ok(_) => crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(true)),
+                    Ok(_) => wa_apply_at(epoch, |b| b.on_share_result(true)),
                     Err(e) => {
                         action_failed(epoch, format!("[wa] history bundle send failed: {e}"));
-                        crate::bridge::wa_apply_at(epoch, |b| b.on_share_result(false));
+                        wa_apply_at(epoch, |b| b.on_share_result(false));
                     }
                 }
             });
@@ -307,7 +307,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     .fetch_message_history(&chat, &oldest_id, from_me, ts_ms, 50)
                     .await
                     .is_ok();
-                ui_apply(move |b| b.on_history_requested(ok));
+                wa_apply_at(epoch, move |b| b.on_history_requested(ok));
             });
         }
         _ => unreachable!("not a chats command"),

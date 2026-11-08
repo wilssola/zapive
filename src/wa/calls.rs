@@ -154,7 +154,7 @@ pub(super) async fn run_call(
     }
     if has_video {
         let id = id.clone();
-        ui_apply(move |b| b.on_call_video(&id, true));
+        crate::bridge::ui_apply(move |b| b.on_call_video(&id, true));
     }
     // The event stream is a single shared queue; drain it so the engine
     // never stalls on a full channel, and surface the terminal ones.
@@ -187,7 +187,7 @@ pub(super) async fn run_call(
                 CallEvent::RelayAllocated => {
                     allocated.store(true, Ordering::SeqCst);
                     let id = watched.clone();
-                    ui_apply(move |b| b.on_call_media_ready(&id));
+                    crate::bridge::ui_apply(move |b| b.on_call_media_ready(&id));
                 }
                 CallEvent::RelayAllocateFailed(code) => {
                     log::warn!("[call] relay refused the allocate ({code})");
@@ -220,13 +220,13 @@ pub(super) async fn run_call(
                             call.upgrade = upgrade_token;
                         }
                         let id = watched.clone();
-                        ui_apply(move |b| b.on_call_video_requested(&id));
+                        crate::bridge::ui_apply(move |b| b.on_call_video_requested(&id));
                     } else if state.is_inactive_for_call_mode() {
                         let id = watched.clone();
-                        ui_apply(move |b| b.on_call_peer_video(&id, false));
+                        crate::bridge::ui_apply(move |b| b.on_call_peer_video(&id, false));
                     } else {
                         let id = watched.clone();
-                        ui_apply(move |b| b.on_call_peer_video(&id, true));
+                        crate::bridge::ui_apply(move |b| b.on_call_peer_video(&id, true));
                     }
                 }
                 // Our own encoder has to produce an IDR: the peer asked
@@ -285,7 +285,7 @@ pub(super) async fn run_call(
     // waits for the peer's <accept> stanza.
     if !outgoing {
         let id = id.clone();
-        ui_apply(move |b| b.on_call_status(&id, "accept"));
+        crate::bridge::ui_apply(move |b| b.on_call_status(&id, "accept"));
     }
     handle.wait_ended().await;
     drop(audio);
@@ -301,14 +301,14 @@ pub(super) async fn run_call(
         log::info!("[call] {id} ended without the media plane coming up");
     }
     let ended = id.clone();
-    ui_apply(move |b| b.on_call_status(&ended, "terminate"));
+    crate::bridge::ui_apply(move |b| b.on_call_status(&ended, "terminate"));
 }
 
 // Both call paths fail the same way: tell the user, and make sure the
 // call screen does not sit there pretending to connect.
 pub(super) fn fail_call(reason: &str) {
     let reason = reason.to_string();
-    ui_apply(move |b| b.on_call_failed(&reason));
+    crate::bridge::ui_apply(move |b| b.on_call_failed(&reason));
 }
 
 pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
@@ -405,7 +405,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         // only learns it now.
                         let id = handle.call_id().to_string();
                         log::info!("[wa] offer sent for call {id}; waiting for the relay");
-                        ui_apply(move |b| b.on_outgoing_call(&id));
+                        crate::bridge::ui_apply(move |b| b.on_outgoing_call(&id));
                         run_call(handle, audio, vision.map(|(c, _)| c), true).await;
                     }
                     Err(e) => {
@@ -455,7 +455,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         call.camera = None;
                         call.upgrade = None;
                     }
-                    ui_apply(move |b| b.on_call_video(&id, false));
+                    crate::bridge::ui_apply(move |b| b.on_call_video(&id, false));
                     return;
                 }
                 let Some((camera, sink)) = open_video() else {
@@ -486,7 +486,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 {
                     call.camera = Some(camera);
                 }
-                ui_apply(move |b| b.on_call_video(&id, true));
+                crate::bridge::ui_apply(move |b| b.on_call_video(&id, true));
             });
         }
         Cmd::SetCallMuted(muted) => {

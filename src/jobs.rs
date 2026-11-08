@@ -1,8 +1,6 @@
 // Background work that only borrows the shared runtime, not the WhatsApp
 // session: decoding, link previews, GIF search, updates, PDF engine.
 use crate::bridge::wa_apply as ui_apply;
-use crate::wa::SESSION_EPOCH;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 // The vault key for the encrypted media cache; set at boot, empty before.
@@ -42,9 +40,8 @@ pub fn decode_preview(id: String, bytes: Vec<u8>) {
     });
 }
 
-pub fn link_preview(jid: String, id: String, text: String, url: String) {
-    // Read now, as the executor did on receipt; see wa::SESSION_EPOCH.
-    let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
+// `epoch` is the service of the account the message belongs to.
+pub fn link_preview(epoch: u64, jid: String, id: String, text: String, url: String) {
     let Some(rt) = crate::RT.get().map(|rt| rt.handle()) else {
         return;
     };
@@ -56,9 +53,6 @@ pub fn link_preview(jid: String, id: String, text: String, url: String) {
         let preview = if let Ok(Ok(permit)) = permit {
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                if SESSION_EPOCH.load(Ordering::SeqCst) != epoch {
-                    return None;
-                }
                 cache.lock().ok()?.get(&url, epoch)
             })
             .await
@@ -72,9 +66,7 @@ pub fn link_preview(jid: String, id: String, text: String, url: String) {
 }
 
 // Decodes an embedded thumbnail (link previews, video posters).
-pub fn decode_thumb(id: String, bytes: Vec<u8>, link: bool) {
-    // Read now, as the executor did on receipt; see wa::SESSION_EPOCH.
-    let epoch = SESSION_EPOCH.load(Ordering::SeqCst);
+pub fn decode_thumb(epoch: u64, id: String, bytes: Vec<u8>, link: bool) {
     let Some(rt) = crate::RT.get().map(|rt| rt.handle()) else {
         return;
     };

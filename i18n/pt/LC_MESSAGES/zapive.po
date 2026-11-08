@@ -371,6 +371,9 @@ msgstr "Play"
 msgid "notify.from_one"
 msgstr "{0} novas mensagens de {1}"
 
+msgid "notify.account_title"
+msgstr "{0} · {1}"
+
 msgid "notify.app_name"
 msgstr "Zapive"
 
@@ -674,9 +677,6 @@ msgstr "Limite de 5 contas"
 
 msgid "account.menu.logout"
 msgstr "Sair"
-
-msgid "account.switching.progress"
-msgstr "Trocando de conta..."
 
 msgid "message.menu.reply"
 msgstr "Responder"
@@ -1385,6 +1385,9 @@ msgstr "Mensagem não suportada — consulte no celular"
 
 msgid "call.incoming_voice"
 msgstr "Chamada de voz recebida"
+
+msgid "call.incoming_on_account"
+msgstr "Chamada recebida em {0}"
 
 msgid "call.incoming_video"
 msgstr "Chamada de vídeo recebida"
@@ -2289,6 +2292,15 @@ msgstr[1] "{n} mensagens não lidas"
 
 msgid "accessibility.account_menu"
 msgstr "Conta {0}, trocar de conta"
+
+msgid "accessibility.switch_account"
+msgstr "Mudar para {0}"
+
+msgid "accessibility.switch_account_unread"
+msgstr "Mudar para {0}, não lidas: {1}"
+
+msgid "accessibility.account_unread"
+msgstr "não lidas: {0}"
 
 msgid "accessibility.open_voice_message"
 msgstr "Abrir mensagem de voz de {0}"

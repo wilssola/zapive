@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
+    let epoch = ctx.epoch;
     match cmd {
         Cmd::FetchGroupMeta(jid) => {
             let client = ctx.client.clone();
@@ -42,7 +43,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                                 .unwrap_or(0),
                             members,
                         };
-                        ui_apply(move |b| b.on_group_meta(snap));
+                        wa_apply_at(epoch, move |b| b.on_group_meta(snap));
                     }
                     Err(e) => eprintln!("[wa] group metadata failed for {jid}: {e}"),
                 }
@@ -55,7 +56,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     return;
                 };
                 match client.groups().leave(target).await {
-                    Ok(()) => ui_apply(move |b| b.on_group_left(&jid)),
+                    Ok(()) => wa_apply_at(epoch, move |b| b.on_group_left(&jid)),
                     Err(e) => eprintln!("[wa] leave group failed: {e}"),
                 }
             });
@@ -75,7 +76,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                             .filter(|r| r.error.is_some())
                             .map(|r| r.jid.to_non_ad_string())
                             .collect();
-                        ui_apply(move |b| b.on_members_added(&jid, &failed));
+                        wa_apply_at(epoch, move |b| b.on_members_added(&jid, &failed));
                     }
                     Err(e) => eprintln!("[wa] add members failed: {e}"),
                 }
@@ -107,7 +108,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                         None
                     }
                 };
-                ui_apply(move |b| b.on_common_groups(&jid, groups));
+                wa_apply_at(epoch, move |b| b.on_common_groups(&jid, groups));
             });
         }
         Cmd::FetchGroups => {
@@ -126,7 +127,7 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                                 )
                             })
                             .collect();
-                        ui_apply(move |b| b.on_groups(&list));
+                        wa_apply_at(epoch, move |b| b.on_groups(&list));
                     }
                     Err(e) => eprintln!("[wa] fetch groups failed: {e}"),
                 }
