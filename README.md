@@ -27,6 +27,64 @@ translation.
 > by WhatsApp or Meta. Unofficial clients may break WhatsApp's terms of
 > service; if account safety matters to you, use a secondary number.
 
+## About this fork: several WhatsApp accounts at once
+
+This is a fork of [wilssola/zapive](https://github.com/wilssola/zapive).
+Upstream keeps up to five accounts but connects **one at a time**. This
+fork keeps **every linked account connected simultaneously**:
+
+- Messages, history and notifications keep arriving for all accounts,
+  whichever one is on screen.
+- The other accounts sit as small avatars in the left rail with their
+  unread count; one click switches instantly, without reconnecting.
+- A dot on your own avatar means another account has unread messages.
+- With more than one account, notifications name the account; clicking
+  one switches to it and opens the chat.
+- Calls can be answered only on the account on screen; a call to another
+  account shows a notification and keeps ringing on the phone.
+
+How it works is described in
+[docs/architecture.md](docs/architecture.md#accounts).
+
+### Install on Ubuntu (AppImage)
+
+1. Get `Zapive-<version>-x86_64.AppImage` and `install-desktop.sh`. If you
+   built them on a server reachable as `ovh-prod`, run this on your own
+   computer:
+
+   ```sh
+   scp -r ovh-prod:~/zapive-app ~/
+   ```
+
+2. Install the run-time packages and add Zapive to the app menu (no root
+   needed for the second line):
+
+   ```sh
+   sudo apt install libfuse2t64 libsecret-tools   # Ubuntu 22.04: libfuse2
+   bash ~/zapive-app/install-desktop.sh ~/zapive-app/Zapive-*-x86_64.AppImage
+   ```
+
+3. Press the Super key, type **Zapive** and open it. Scan the QR code with
+   your first phone, then **avatar (bottom left) → Add account** for each
+   other number.
+
+Decline the in-app update prompt: it downloads the upstream release,
+which connects only one account at a time. Remove the launcher with
+`bash ~/zapive-app/install-desktop.sh --uninstall` (conversations are
+kept).
+
+### Build it yourself
+
+```sh
+sudo apt install libasound2-dev libgtk-3-dev libxdo-dev cmake build-essential
+curl https://sh.rustup.rs -sSf | sh            # Rust, once
+cargo build --release --locked
+mkdir -p build && bash packaging/linux/make-appimage.sh 0.32.1-multiaccount
+bash packaging/linux/install-desktop.sh dist/Zapive-0.32.1-multiaccount-x86_64.AppImage
+```
+
+See [docs/building.md](docs/building.md) for other platforms and checks.
+
 ## Highlights
 
 - **Offline translation on your machine.** Messages are translated by
