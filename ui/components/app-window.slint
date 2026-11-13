@@ -3919,97 +3919,63 @@ export component AppWindow inherits Window {
                                 clicked => { root.message-action(msg.id, "translation-copy"); }
                             }
                         }
-                        // Hover actions like WhatsApp Web: one small pill
-                        // beside the bubble (react, forward, translate, menu).
-                        // Shown while the pointer is anywhere on the row's
-                        // line, so moving onto the pill never hides it.
-                        // The pointer is over this row (bubble line, full width).
                         property <bool> pointer-in: root.pointer-y >= self.absolute-position.y + bubble.y - 6px
                             && root.pointer-y < self.absolute-position.y + bubble.y + max(bubble.height, 36px) + 6px
                             && root.pointer-x >= self.absolute-position.x
                             && root.pointer-x < self.absolute-position.x + self.width;
+                        property <bool> pointer-near-bubble: msg-row.pointer-in
+                            && root.pointer-x >= self.absolute-position.x + bubble.x - 8px
+                            && root.pointer-x < self.absolute-position.x + bubble.x + bubble.width + 8px;
                         property <bool> show-actions: (msg-row.pointer-in || row-hover.has-hover || root.react-bar-id == msg.id || msg-row.controls-mode)
                             && !root.select-mode && msg.kind != "system" && !msg.deleted;
-                        if msg-row.show-actions: Rectangle {
-                            width: actions-row.preferred-width + 8px;
+                        property <length> reaction-button-x: msg.fromMe
+                            ? max(0px, bubble.x - 40px)
+                            : min(msg-row.width - 32px, bubble.x + bubble.width + 8px);
+                        property <length> reaction-button-y: bubble.y + max(0px, (min(bubble.height, 80px) - 32px) / 2);
+                        if msg-row.show-actions: IconButton {
+                            label: @tr("message.menu.react");
+                            icon: @image-url("../icons/mood-smile.svg");
+                            icon-size: 18px;
+                            width: 32px;
                             height: 32px;
-                            y: bubble.y + max(0px, (min(bubble.height, 80px) - self.height) / 2);
-                            x: msg.fromMe
-                                ? max(0px, bubble.x - self.width - 6px)
-                                : bubble.x + bubble.width + 6px;
-                            border-radius: 16px;
+                            radius: 16px;
                             background: Theme.panel;
-                            border-width: Theme.glass ? 1px : 0px;
-                            border-color: Theme.glass-rim;
-                            actions-row := HorizontalLayout {
-                                padding-left: 4px;
-                                padding-right: 4px;
-                                padding-top: 2px;
-                                padding-bottom: 2px;
-                                spacing: 2px;
-                                IconButton {
-                                    label: @tr("message.menu.react");
-                                    icon: @image-url("../icons/mood-smile.svg");
-                                    icon-size: 17px;
-                                    width: 28px;
-                                    height: 28px;
-                                    radius: 14px;
-                                    accessible-role: button;
-                                    clicked => {
-                                        root.react-bar-id =
-                                            root.react-bar-id == msg.id ? "" : msg.id;
-                                    }
-                                }
-                                IconButton {
-                                    label: @tr("message.menu.forward");
-                                    icon: @image-url("../icons/corner-up-right.svg");
-                                    icon-size: 17px;
-                                    width: 28px;
-                                    height: 28px;
-                                    radius: 14px;
-                                    accessible-role: button;
-                                    clicked => { root.request-forward(msg.id); }
-                                }
-                                if root.can-translate(msg) && !msg-row.has-translation: IconButton {
-                                    label: @tr("chat.message.translate");
-                                    icon: @image-url("../icons/translate.svg");
-                                    icon-size: 17px;
-                                    width: 28px;
-                                    height: 28px;
-                                    radius: 14px;
-                                    accessible-role: button;
-                                    accessible-label: @tr("chat.message.translate");
-                                    enabled: !msg.translationBusy;
-                                    active: msg.translationText != "";
-                                    clicked => { root.message-action(msg.id, "translate"); }
-                                }
-                                menu-button := IconButton {
-                                    label: @tr("accessibility.message_options");
-                                    icon: @image-url("../icons/chevron-down.svg");
-                                    icon-size: 17px;
-                                    width: 28px;
-                                    height: 28px;
-                                    radius: 14px;
-                                    accessible-role: button;
-                                    clicked => {
-                                        root.menu-message = msg;
-                                        root.message-menu-x = self.absolute-position.x;
-                                        root.message-menu-y = self.absolute-position.y + self.height;
-                                        root.message-menu-open = true;
-                                    }
-                                }
+                            hover-background: Theme.menu-hover;
+                            y: msg-row.reaction-button-y;
+                            x: msg-row.reaction-button-x;
+                            clicked => {
+                                root.react-bar-id = root.react-bar-id == msg.id ? "" : msg.id;
+                            }
+                        }
+                        if msg-row.show-actions && (msg-row.pointer-near-bubble || msg-row.controls-mode
+                            || (root.message-menu-open && root.menu-message.id == msg.id)): IconButton {
+                            label: @tr("accessibility.message_options");
+                            icon: @image-url("../icons/chevron-down.svg");
+                            icon-size: 18px;
+                            width: 28px;
+                            height: 28px;
+                            radius: 8px;
+                            x: bubble.x + max(0px, bubble.width - self.width - 4px);
+                            y: bubble.y + 4px;
+                            background: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
+                            hover-background: Theme.menu-hover;
+                            clicked => {
+                                root.react-bar-id = "";
+                                root.menu-message = msg;
+                                root.message-menu-x = self.absolute-position.x;
+                                root.message-menu-y = self.absolute-position.y + self.height;
+                                root.message-menu-open = true;
                             }
                         }
 
                         // Quick reactions, the same set WhatsApp offers.
                         if root.react-bar-id == msg.id: Rectangle {
-                            y: max(0px, bubble.y - 34px);
-                            x: msg.fromMe
-                                ? max(4px, bubble.x + bubble.width - self.width)
-                                : bubble.x;
-                            width: 214px;
-                            height: 38px;
-                            border-radius: 19px;
+                            y: msg-row.reaction-button-y - self.height - 8px;
+                            x: max(4px, min(msg-row.width - self.width - 4px,
+                                msg-row.reaction-button-x + 16px - self.width / 2));
+                            width: 252px;
+                            height: 44px;
+                            border-radius: 22px;
                             background: Theme.panel;
                             backdrop-blur: 0px;
                             border-width: Theme.glass ? 1px : 0px;
@@ -4021,9 +3987,12 @@ export component AppWindow inherits Window {
                             drop-shadow-blur: 8px;
                             drop-shadow-color: Theme.glass-shadow;
                             HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                spacing: 2px;
+                                x: 8px;
+                                y: 6px;
+                                width: parent.width - 16px;
+                                height: 32px;
+                                padding: 0px;
+                                spacing: 4px;
                                 for e in ["\u{1f44d}", "\u{2764}\u{fe0f}", "\u{1f602}",
                                           "\u{1f62e}", "\u{1f622}", "\u{1f64f}"]:
                                     Rectangle {
@@ -4057,7 +4026,10 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 Rectangle {
-                                    width: 26px;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 16px;
+                                    background: plus-touch.has-hover ? Theme.menu-hover : Theme.tile;
                                     plus-touch := TouchArea {
                                         accessible-role: button;
                                         accessible-label: @tr("accessibility.more_reactions");
@@ -4082,6 +4054,8 @@ export component AppWindow inherits Window {
                                         colorize: Theme.text-dim;
                                         width: 16px;
                                         height: 16px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
                                     }
                                 }
                             }
