@@ -729,7 +729,7 @@ impl Bridge {
         self.forward_generation = self.forward_generation.wrapping_add(1);
         self.forward_model.set_vec(Vec::new());
         self.ui.set_forward_selected(ModelRc::default());
-        self.ui.set_forward_filter("all".into());
+        self.ui.set_forward_filter("recent".into());
         self.ui.set_forward_preview_text("".into());
         self.ui.set_forward_preview_has_image(false);
         self.ui.set_forward_preview_image(empty_image());

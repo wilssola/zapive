@@ -246,7 +246,7 @@ export component ForwardLayer inherits ModalLayer {
     in-out property <bool> forward-open;
     in property <[ForwardRecipient]> forward-rows;
     in property <[ChatItem]> forward-selected;
-    in-out property <string> forward-filter: "all";
+    in-out property <string> forward-filter: "recent";
     in property <string> forward-preview-text;
     in property <image> forward-preview-image;
     in property <bool> forward-preview-has-image;
@@ -381,10 +381,10 @@ export component ForwardLayer inherits ModalLayer {
                 height: 36px;
                 spacing: 8px;
                 for filter in [
+                    { key: "recent", label: @tr("message.forward.filter_recent"), icon: @image-url("../icons/clock-pause.svg") },
                     { key: "all", label: @tr("chat.filter.all"), icon: @image-url("../icons/list-details.svg") },
                     { key: "contacts", label: @tr("message.forward.filter_contacts"), icon: @image-url("../icons/users.svg") },
-                    { key: "groups", label: @tr("chat.filter.groups"), icon: @image-url("../icons/users-group.svg") },
-                    { key: "recent", label: @tr("message.forward.filter_recent"), icon: @image-url("../icons/clock-pause.svg") }
+                    { key: "groups", label: @tr("chat.filter.groups"), icon: @image-url("../icons/users-group.svg") }
                 ]: TouchArea {
                     width: filter-content.preferred-width;
                     height: 36px;
