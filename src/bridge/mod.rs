@@ -15,8 +15,8 @@ use crate::wa::{
     AttachmentKind, Cmd, GroupChange, GroupSnapshot, HistoryChunk, MediaWant, QuoteRef, WaService,
 };
 use crate::{
-    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, DetailRow, LabelItem, LinkSpan,
-    MemberItem, MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem,
+    AccountItem, AppWindow, CallItem, CallWindow, ChatItem, DetailRow, ForwardRecipient, LabelItem,
+    LinkSpan, MemberItem, MessageItem, PdfPage, PinnedItem, ReactionItem, ReactionTab, ReleaseItem,
     SearchHit, StarredItem, StickerCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -178,7 +178,12 @@ pub struct Bridge {
     rec_preview: Option<(crate::audio::Player, f64)>,
     // Message actions and outgoing media.
     reactions_model: Rc<VecModel<ReactionItem>>,
-    forward_model: Rc<VecModel<ChatItem>>,
+    forward_model: Rc<VecModel<ForwardRecipient>>,
+    forward_selected: Vec<String>,
+    forward_query: String,
+    forward_outgoing: Option<HashMap<String, i64>>,
+    forward_history_pending: bool,
+    forward_generation: u64,
     react_pick_for: Option<String>,
     // (chat, message id) pairs waiting for a destination.
     pending_forward: Vec<(String, String)>,

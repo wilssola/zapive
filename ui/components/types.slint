@@ -40,6 +40,12 @@ export struct ChatItem {
     silenced-call: bool,
 }
 
+export struct ForwardRecipient {
+    chat: ChatItem,
+    selected: bool,
+    favorite: bool,
+}
+
 // A message found by search, in the sidebar (name = chat) or inside the
 // open conversation (name = author).
 export struct SearchHit {

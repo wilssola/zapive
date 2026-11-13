@@ -76,7 +76,7 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     let chats_model = Rc::new(VecModel::<ChatItem>::default());
     let messages_model = Rc::new(VecModel::<MessageItem>::default());
     let reactions_model = Rc::new(VecModel::<ReactionItem>::default());
-    let forward_model = Rc::new(VecModel::<ChatItem>::default());
+    let forward_model = Rc::new(VecModel::<ForwardRecipient>::default());
     let status_model = Rc::new(VecModel::<ChatItem>::default());
     let calls_model = Rc::new(VecModel::<CallItem>::default());
     let info_media_model = Rc::new(VecModel::<ModelRc<StickerCell>>::default());
@@ -190,6 +190,11 @@ pub fn install(ui: &AppWindow, wa: WaService) {
         rec_preview: None,
         reactions_model,
         forward_model,
+        forward_selected: Vec::new(),
+        forward_query: String::new(),
+        forward_outgoing: None,
+        forward_history_pending: false,
+        forward_generation: 0,
         react_pick_for: None,
         pending_forward: Vec::new(),
         sync_batches: 0,
@@ -724,11 +729,17 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     });
     ui.on_forward_search(|query| {
         let query = query.to_string();
-        defer(move |b| b.fill_forward_rows(&query));
+        defer(move |b| b.handle_forward_search(&query));
     });
     ui.on_forward_to(|jid| {
         let jid = jid.to_string();
         defer(move |b| b.handle_forward_to(&jid));
+    });
+    ui.on_forward_clear(|| defer(|b| b.handle_forward_clear()));
+    ui.on_forward_confirm(|| defer(|b| b.handle_forward_confirm()));
+    ui.on_forward_filter_changed(|filter| {
+        let filter = filter.to_string();
+        defer(move |b| b.handle_forward_filter_changed(&filter));
     });
     ui.on_attach_image(|| defer(|b| b.handle_attach("image")));
     ui.on_attach_audio(|| defer(|b| b.handle_attach("audio")));

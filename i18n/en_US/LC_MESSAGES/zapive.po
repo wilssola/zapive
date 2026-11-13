@@ -765,10 +765,31 @@ msgid "common.action.close"
 msgstr "Close"
 
 msgid "message.forward.title"
-msgstr "Forward message to"
+msgstr "Forward message"
 
 msgid "message.forward.search_placeholder"
-msgstr "Search name or number"
+msgstr "Search contact, group or number..."
+
+msgid "message.forward.subtitle"
+msgstr "Select one or more recipients to forward this message."
+
+msgid "message.forward.filter_contacts"
+msgstr "Contacts"
+
+msgid "message.forward.filter_recent"
+msgstr "Recent"
+
+msgid "message.forward.selected_count"
+msgstr "{0} selected"
+
+msgid "message.forward.clear"
+msgstr "Clear"
+
+msgid "message.forward.confirm"
+msgstr "Forward ({0})"
+
+msgid "message.forward.empty"
+msgstr "No recipients found"
 
 msgid "settings.title"
 msgstr "Settings"

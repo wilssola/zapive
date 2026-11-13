@@ -176,8 +176,8 @@ impl Bridge {
             return;
         }
         let count = ids.len();
+        self.reset_forward_picker();
         self.pending_forward = ids.iter().map(|id| (jid.clone(), id.clone())).collect();
-        self.fill_forward_rows("");
         let preview = if count == 1 {
             self.find_message(&ids[0])
                 .map(preview_body)

@@ -705,8 +705,8 @@ impl Bridge {
         };
         let preview = preview_body(m);
         let image = self.decoded.get(id).map(|(img, _, _)| img.clone());
+        self.reset_forward_picker();
         self.pending_forward = vec![(jid, id.to_string())];
-        self.fill_forward_rows("");
         // Show what is being forwarded, like WhatsApp's bottom bar.
         self.ui.set_forward_preview_text(preview.into());
         self.ui.set_forward_preview_has_image(image.is_some());
@@ -715,32 +715,165 @@ impl Bridge {
         self.ui.set_forward_open(true);
     }
 
-    // Chats offered when forwarding, narrowed by the search box.
-    pub(super) fn fill_forward_rows(&mut self, query: &str) {
-        let q = query.trim().to_lowercase();
-        let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
-        let rows: Vec<ChatItem> = self
-            .store
-            .sorted_chats()
-            .into_iter()
-            .filter(|meta| !is_channel(&meta.jid))
-            .filter(|meta| {
-                if q.is_empty() {
-                    return true;
+    pub(super) fn reset_forward_picker(&mut self) {
+        self.wipe_forward_picker();
+        self.fill_forward_rows("");
+    }
+
+    pub(super) fn wipe_forward_picker(&mut self) {
+        self.pending_forward.clear();
+        self.forward_selected.clear();
+        self.forward_query.clear();
+        self.forward_outgoing = None;
+        self.forward_history_pending = false;
+        self.forward_generation = self.forward_generation.wrapping_add(1);
+        self.forward_model.set_vec(Vec::new());
+        self.ui.set_forward_selected(ModelRc::default());
+        self.ui.set_forward_filter("all".into());
+        self.ui.set_forward_preview_text("".into());
+        self.ui.set_forward_preview_has_image(false);
+        self.ui.set_forward_preview_image(empty_image());
+        self.ui.set_forward_open(false);
+    }
+
+    fn fill_forward_rows(&mut self, query: &str) {
+        self.forward_query = query.to_string();
+        let filter = self.ui.get_forward_filter();
+        if filter == "recent" {
+            self.load_forward_history();
+        }
+        let mut outgoing = self.forward_outgoing.clone().unwrap_or_default();
+        if filter == "recent" {
+            for (jid, messages) in &self.store.messages {
+                for message in messages
+                    .iter()
+                    .filter(|m| m.from_me && m.kind != MessageKind::System && m.status > 0)
+                {
+                    outgoing
+                        .entry(jid.clone())
+                        .and_modify(|timestamp| {
+                            *timestamp = (*timestamp).max(message.timestamp);
+                        })
+                        .or_insert(message.timestamp);
                 }
-                let name = self.store.chat_name(&meta.jid).to_lowercase();
-                name.contains(&q) || (!digits.is_empty() && meta.jid.contains(&digits))
-            })
-            .take(200)
+            }
+        }
+        let rows: Vec<ForwardRecipient> =
+            forward_candidates(&self.store, query, filter.as_str(), &outgoing)
+                .into_iter()
+                .map(|meta| ForwardRecipient {
+                    chat: self.to_chat_row(&meta.jid, &meta.preview, meta.timestamp, 0, false),
+                    selected: self.forward_selected.contains(&meta.jid),
+                    favorite: meta.favorite,
+                })
+                .collect();
+        self.forward_model.set_vec(rows);
+        let selected: Vec<ChatItem> = self
+            .forward_selected
+            .iter()
+            .filter_map(|jid| self.store.chats.get(jid))
             .map(|meta| self.to_chat_row(&meta.jid, &meta.preview, meta.timestamp, 0, false))
             .collect();
-        self.forward_model.set_vec(rows);
+        self.ui
+            .set_forward_selected(ModelRc::new(VecModel::from(selected)));
+    }
+
+    fn load_forward_history(&mut self) {
+        if self.forward_outgoing.is_some() || self.forward_history_pending {
+            return;
+        }
+        let Some(vault) = self.vault.as_ref().filter(|v| !v.locked()) else {
+            return;
+        };
+        let reader = vault.history_reader();
+        let jids: Vec<String> = self
+            .store
+            .chats
+            .keys()
+            .filter(|jid| jid.ends_with("@s.whatsapp.net") || jid.ends_with("@lid"))
+            .cloned()
+            .collect();
+        let generation = self.forward_generation;
+        let epoch = self.epoch;
+        let account = self.account.clone();
+        self.forward_history_pending = true;
+        std::thread::spawn(move || {
+            let result = reader().and_then(|vault| vault.history_latest_outgoing(&jids));
+            ui_apply(move |b| {
+                if b.forward_generation != generation
+                    || b.epoch != epoch
+                    || b.account != account
+                    || b.switching
+                    || b.vault.as_ref().is_none_or(|v| v.locked())
+                    || !b.ui.get_forward_open()
+                {
+                    return;
+                }
+                b.forward_history_pending = false;
+                if let Ok(outgoing) = result {
+                    b.forward_outgoing = Some(outgoing);
+                    b.fill_forward_rows(&b.forward_query.clone());
+                }
+            });
+        });
+    }
+
+    pub(super) fn handle_forward_search(&mut self, query: &str) {
+        if self.ui.get_forward_open() {
+            self.fill_forward_rows(query);
+        }
+    }
+
+    pub(super) fn handle_forward_filter_changed(&mut self, filter: &str) {
+        if !self.ui.get_forward_open() {
+            return;
+        }
+        let filter = match filter {
+            "contacts" | "groups" | "recent" => filter,
+            _ => "all",
+        };
+        self.ui.set_forward_filter(filter.into());
+        self.fill_forward_rows(&self.forward_query.clone());
     }
 
     pub(super) fn handle_forward_to(&mut self, target: &str) {
+        if !self.ui.get_forward_open() {
+            return;
+        }
+        let offered = self.forward_model.iter().any(|row| row.chat.jid == target);
+        if !offered && !self.forward_selected.iter().any(|jid| jid == target) {
+            return;
+        }
+        toggle_forward_recipient(&mut self.forward_selected, target);
+        self.fill_forward_rows(&self.forward_query.clone());
+    }
+
+    pub(super) fn handle_forward_clear(&mut self) {
+        if !self.ui.get_forward_open() {
+            return;
+        }
+        self.forward_selected.clear();
+        self.fill_forward_rows(&self.forward_query.clone());
+    }
+
+    pub(super) fn handle_forward_confirm(&mut self) {
+        if !self.ui.get_forward_open() || self.forward_selected.is_empty() {
+            return;
+        }
+        let targets: Vec<String> = self
+            .forward_selected
+            .iter()
+            .filter(|jid| {
+                self.store
+                    .chats
+                    .get(*jid)
+                    .is_some_and(|meta| !is_channel(jid) && meta.can_send())
+            })
+            .cloned()
+            .collect();
         let pending = std::mem::take(&mut self.pending_forward);
-        self.ui.set_forward_open(false);
-        if target.is_empty() {
+        self.wipe_forward_picker();
+        if targets.is_empty() {
             return;
         }
         for (source, id) in pending {
@@ -752,11 +885,175 @@ impl Bridge {
                 .find(|m| m.id == id)
                 .and_then(|m| m.raw.clone());
             if let Some(message) = raw {
-                self.wa.send(Cmd::Forward {
-                    jid: target.to_string(),
-                    message,
-                });
+                for target in &targets {
+                    self.wa.send(Cmd::Forward {
+                        jid: target.clone(),
+                        message: message.clone(),
+                    });
+                }
             }
         }
+    }
+}
+
+fn forward_candidates<'a>(
+    store: &'a Store,
+    query: &str,
+    filter: &str,
+    outgoing: &HashMap<String, i64>,
+) -> Vec<&'a crate::store::ChatMeta> {
+    let q = query.trim().to_lowercase();
+    let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
+    let recent = filter == "recent";
+    let mut chats = store.sorted_chats();
+    if recent {
+        chats.retain(|meta| {
+            (meta.jid.ends_with("@s.whatsapp.net") || meta.jid.ends_with("@lid"))
+                && outgoing.contains_key(&meta.jid)
+        });
+        chats.sort_by(|a, b| {
+            outgoing[&b.jid]
+                .cmp(&outgoing[&a.jid])
+                .then_with(|| a.jid.cmp(&b.jid))
+        });
+    }
+    chats
+        .into_iter()
+        .filter(|meta| !is_channel(&meta.jid))
+        .filter(|meta| match filter {
+            "contacts" => !is_group(&meta.jid),
+            "groups" => is_group(&meta.jid),
+            _ => true,
+        })
+        .take(if recent { 20 } else { usize::MAX })
+        .filter(|meta| {
+            q.is_empty()
+                || store.chat_name(&meta.jid).to_lowercase().contains(&q)
+                || (!digits.is_empty() && meta.jid.contains(&digits))
+        })
+        .take(200)
+        .collect()
+}
+
+fn toggle_forward_recipient(selected: &mut Vec<String>, target: &str) {
+    if let Some(index) = selected.iter().position(|jid| jid == target) {
+        selected.remove(index);
+    } else if !target.is_empty() {
+        selected.push(target.to_string());
+    }
+}
+
+#[cfg(test)]
+mod forward_tests {
+    use super::*;
+
+    fn forward_candidates<'a>(
+        store: &'a Store,
+        query: &str,
+        filter: &str,
+    ) -> Vec<&'a crate::store::ChatMeta> {
+        let outgoing = HashMap::from([
+            ("5500000000001@s.whatsapp.net".to_string(), 10),
+            ("5500000000002@s.whatsapp.net".to_string(), 20),
+            ("100@g.us".to_string(), 100),
+            ("100@newsletter".to_string(), 200),
+        ]);
+        super::forward_candidates(store, query, filter, &outgoing)
+    }
+
+    fn fixture() -> Store {
+        let mut store = Store::default();
+        for (jid, name, timestamp) in [
+            ("5500000000001@s.whatsapp.net", "Example Contact", 30),
+            ("5500000000002@s.whatsapp.net", "Other Contact", 0),
+            ("100@g.us", "Example Group", 20),
+            ("100@newsletter", "Example Channel", 40),
+        ] {
+            store.upsert_chat(jid, Some(name), timestamp, None, None, None);
+        }
+        store
+    }
+
+    #[test]
+    fn filters_exclude_channels_and_distinguish_contacts_groups_and_recent() {
+        let store = fixture();
+        assert_eq!(forward_candidates(&store, "", "all").len(), 3);
+        assert_eq!(forward_candidates(&store, "", "contacts").len(), 2);
+        let groups = forward_candidates(&store, "", "groups");
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].jid, "100@g.us");
+        let recent = forward_candidates(&store, "", "recent");
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].jid, "5500000000002@s.whatsapp.net");
+        assert_eq!(recent[1].jid, "5500000000001@s.whatsapp.net");
+    }
+
+    #[test]
+    fn search_preserves_case_insensitive_names_and_formatted_phone_matching() {
+        let store = fixture();
+        assert_eq!(forward_candidates(&store, " EXAMPLE ", "all").len(), 2);
+        let phone = forward_candidates(&store, "+55 (000) 0000-0001", "all");
+        assert_eq!(phone.len(), 1);
+        assert_eq!(phone[0].jid, "5500000000001@s.whatsapp.net");
+        assert!(forward_candidates(&store, "Channel", "all").is_empty());
+    }
+
+    #[test]
+    fn recent_is_limited_before_search_and_ignores_incoming_pins_and_drafts() {
+        let mut store = fixture();
+        let mut outgoing = HashMap::new();
+        for index in 0..25 {
+            let jid = format!("recent-{index}@s.whatsapp.net");
+            store.upsert_chat(
+                &jid,
+                Some("Recent Example"),
+                100 + index,
+                None,
+                Some(index),
+                None,
+            );
+            outgoing.insert(jid.clone(), 100 - index);
+            store.drafts.insert(
+                jid,
+                crate::store::Draft {
+                    text: "Example draft".into(),
+                    promoted: index as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        let expected: Vec<_> = (0..20)
+            .map(|index| format!("recent-{index}@s.whatsapp.net"))
+            .collect();
+        let actual: Vec<_> = super::forward_candidates(&store, "", "recent", &outgoing)
+            .into_iter()
+            .map(|meta| meta.jid.clone())
+            .collect();
+        assert_eq!(actual, expected);
+        assert!(super::forward_candidates(&store, "Other", "recent", &outgoing).is_empty());
+        assert!(
+            super::forward_candidates(&store, "Example Contact", "recent", &outgoing).is_empty()
+        );
+        assert!(super::forward_candidates(&store, "recent-24", "recent", &outgoing).is_empty());
+        assert_eq!(
+            super::forward_candidates(&store, "recent-0", "recent", &outgoing).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn selection_toggles_without_duplicates_and_survives_refiltering() {
+        let store = fixture();
+        let mut selected = Vec::new();
+        toggle_forward_recipient(&mut selected, "100@g.us");
+        toggle_forward_recipient(&mut selected, "5500000000001@s.whatsapp.net");
+        let _ = forward_candidates(&store, "Other", "contacts");
+        assert_eq!(selected.len(), 2);
+        toggle_forward_recipient(&mut selected, "100@g.us");
+        assert_eq!(selected, ["5500000000001@s.whatsapp.net"]);
+        toggle_forward_recipient(&mut selected, "");
+        assert_eq!(selected.len(), 1);
+        selected.clear();
+        assert!(selected.is_empty());
     }
 }

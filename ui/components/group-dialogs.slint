@@ -6,7 +6,7 @@ import { IconButton } from "icon-button.slint";
 import { ModalLayer } from "modal.slint";
 import { MemberRow } from "rows/member.slint";
 import { Theme } from "theme.slint";
-import { ChatItem, MemberItem } from "types.slint";
+import { ChatItem, ForwardRecipient, MemberItem } from "types.slint";
 
 export component ShareLayer inherits ModalLayer {
     in property <string> share-name;
@@ -244,63 +244,116 @@ export component MemberPickLayer inherits ModalLayer {
 
 export component ForwardLayer inherits ModalLayer {
     in-out property <bool> forward-open;
-    in property <[ChatItem]> forward-rows;
+    in property <[ForwardRecipient]> forward-rows;
+    in property <[ChatItem]> forward-selected;
+    in-out property <string> forward-filter: "all";
     in property <string> forward-preview-text;
     in property <image> forward-preview-image;
     in property <bool> forward-preview-has-image;
     callback forward-search(string);
     callback forward-to(string);
+    callback forward-clear();
+    callback forward-confirm();
+    callback forward-filter-changed(string);
 
     if root.mounted: Rectangle {
+        search-focus := Timer {
+            interval: 20ms;
+            triggered => {
+                self.running = false;
+                if (root.forward-open) { fwd-search.focus(); }
+            }
+        }
         opacity: root.progress;
         transform-scale: 0.96 + 0.04 * root.progress;
-        width: 420px;
-        height: 540px;
+        width: min(720px, root.width - 32px);
+        height: min(760px, root.height - 32px);
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.panel;
         backdrop-blur: 0px;
-        border-width: Theme.glass ? 1px : 0px;
-        border-color: Theme.glass-rim;
+        border-width: 1px;
+        border-color: Theme.glass ? Theme.glass-rim : Theme.border;
+        border-radius: 24px;
         if Theme.glass: Rectangle {
             border-radius: parent.border-radius;
             background: Theme.glass-sheen;
         }
-        border-radius: 20px;
         TouchArea { }
-        VerticalBox {
-            padding: 18px;
-            spacing: 10px;
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
             HorizontalLayout {
-                Text {
-                    text: @tr("message.forward.title");
-                    color: Theme.text;
-                    font-size: 17px;
-                    font-weight: 700;
-                    horizontal-stretch: 1;
-                    vertical-alignment: center;
+                height: 64px;
+                spacing: 16px;
+                Rectangle {
+                    width: 52px;
+                    Rectangle {
+                        width: 52px;
+                        height: 52px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 26px;
+                        background: Theme.chip-active-bg;
+                        Image {
+                            source: @image-url("../icons/corner-up-right.svg");
+                            colorize: Theme.accent-text;
+                            width: 26px;
+                            height: 26px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
                 }
-                IconButton {
-                    label: @tr("common.action.close");
-                    icon: @image-url("../icons/x.svg");
-                    clicked => { root.forward-open = false; }
+                VerticalLayout {
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: @tr("message.forward.title");
+                        color: Theme.text;
+                        font-size: 23px;
+                        font-weight: 700;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: @tr("message.forward.subtitle");
+                        color: Theme.text-dim;
+                        font-size: 13px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    width: 40px;
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        label: @tr("common.action.close");
+                        icon: @image-url("../icons/x.svg");
+                        radius: 20px;
+                        clicked => { root.forward-open = false; }
+                    }
                 }
             }
             Rectangle {
-                height: 38px;
-                border-radius: 19px;
-                background: Theme.pill;
+                height: 48px;
+                border-radius: 14px;
+                background: Theme.field;
+                border-width: fwd-search.has-focus ? 2px : 1px;
+                border-color: fwd-search.has-focus ? Theme.accent : Theme.field-border;
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
-                    spacing: 10px;
-                    VerticalLayout {
-                        alignment: center;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 20px;
                         Image {
                             source: @image-url("../icons/search.svg");
                             colorize: Theme.text-dim;
-                            width: 16px;
-                            height: 16px;
+                            width: 20px;
+                            height: 20px;
+                            y: (parent.height - self.height) / 2;
                         }
                     }
                     fwd-search := TextInput {
@@ -317,81 +370,283 @@ export component ForwardLayer inherits ModalLayer {
                     text: @tr("message.forward.search_placeholder");
                     color: Theme.text-dim;
                     font-size: 14px;
-                    x: 40px;
+                    x: 48px;
+                    width: parent.width - 64px;
                     vertical-alignment: center;
+                    overflow: elide;
                     height: parent.height;
                 }
             }
-            ListView {
-                for chat[i] in root.forward-rows: Rectangle {
-                    height: 56px;
-                    background: fwd-touch.has-hover ? Theme.hover : transparent;
-                    border-radius: 8px;
-                    fwd-touch := TouchArea {
-                        accessible-role: list-item;
-                        accessible-label: chat.name;
-                        accessible-item-index: i;
-                        accessible-item-count: root.forward-rows.length;
-                        accessible-action-default => { root.forward-to(chat.jid); }
-                        clicked => { root.forward-to(chat.jid); }
-                        fwd-key := KeyFocus {
-                            activate => { root.forward-to(chat.jid); }
-                        }
-                        FocusRing {
-                            shown: fwd-key.has-focus;
-                            width: parent.width;
-                            height: parent.height;
-                            border-radius: 8px;
+            HorizontalLayout {
+                height: 36px;
+                spacing: 8px;
+                for filter in [
+                    { key: "all", label: @tr("chat.filter.all"), icon: @image-url("../icons/list-details.svg") },
+                    { key: "contacts", label: @tr("message.forward.filter_contacts"), icon: @image-url("../icons/users.svg") },
+                    { key: "groups", label: @tr("chat.filter.groups"), icon: @image-url("../icons/users-group.svg") },
+                    { key: "recent", label: @tr("message.forward.filter_recent"), icon: @image-url("../icons/clock-pause.svg") }
+                ]: TouchArea {
+                    width: filter-content.preferred-width;
+                    height: 36px;
+                    mouse-cursor: pointer;
+                    accessible-role: tab;
+                    accessible-label: filter.label;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: root.forward-filter == filter.key;
+                    accessible-action-default => { self.clicked(); }
+                    forward-focus: filter-key;
+                    clicked => {
+                        root.forward-filter = filter.key;
+                        root.forward-filter-changed(filter.key);
+                    }
+                    filter-key := KeyFocus {
+                        activate => {
+                            root.forward-filter = filter.key;
+                            root.forward-filter-changed(filter.key);
                         }
                     }
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        spacing: 10px;
-                        VerticalLayout {
-                            alignment: center;
-                            Avatar {
-                                width: 40px;
-                                height: 40px;
-                                src: chat.avatar;
-                                has-image: chat.hasAvatar;
-                                initial: chat.initial;
-                                color-idx: chat.colorIdx;
+                    Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: 18px;
+                        background: root.forward-filter == filter.key ? Theme.chip-active-bg
+                            : parent.has-hover ? Theme.selected : Theme.chip-bg;
+                        border-width: 1px;
+                        border-color: root.forward-filter == filter.key ? Theme.chip-active-border
+                            : Theme.glass ? Theme.glass-rim-soft : Theme.border;
+                        filter-content := HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 6px;
+                            Rectangle {
+                                width: 16px;
+                                Image {
+                                    width: 16px;
+                                    height: 16px;
+                                    y: (parent.height - self.height) / 2;
+                                    source: filter.icon;
+                                    colorize: root.forward-filter == filter.key ? Theme.accent-text : Theme.text-dim;
+                                }
+                            }
+                            Text {
+                                text: filter.label;
+                                color: root.forward-filter == filter.key ? Theme.accent-text : Theme.text-dim;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
                             }
                         }
-                        Text {
-                            text: chat.name;
-                            color: Theme.text;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
+                    }
+                    FocusRing {
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: 18px;
+                        shown: filter-key.has-focus;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    accessible-role: list;
+                    accessible-label: @tr("message.forward.title");
+                    accessible-item-count: root.forward-rows.length;
+                    for recipient[i] in root.forward-rows: Rectangle {
+                        height: 68px;
+                        border-radius: 12px;
+                        background: recipient.selected ? Theme.chat-active : fwd-touch.has-hover ? Theme.selected : transparent;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 16px;
+                            spacing: 14px;
+                            Rectangle {
+                                width: 22px;
+                                Rectangle {
+                                    width: 22px;
+                                    height: 22px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 6px;
+                                    background: recipient.selected ? Theme.accent : transparent;
+                                    border-width: 1px;
+                                    border-color: recipient.selected ? Theme.accent : Theme.text-dim;
+                                    if recipient.selected: Image {
+                                        source: @image-url("../icons/check.svg");
+                                        colorize: white;
+                                        width: 16px;
+                                        height: 16px;
+                                        x: 3px;
+                                        y: 3px;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                width: 44px;
+                                Avatar {
+                                    width: 44px;
+                                    height: 44px;
+                                    y: (parent.height - self.height) / 2;
+                                    src: recipient.chat.avatar;
+                                    has-image: recipient.chat.hasAvatar;
+                                    initial: recipient.chat.initial;
+                                    color-idx: recipient.chat.colorIdx;
+                                }
+                            }
+                            Text {
+                                text: recipient.chat.name;
+                                color: Theme.text;
+                                font-size: 15px;
+                                font-weight: recipient.selected ? 600 : 400;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            if recipient.favorite: Rectangle {
+                                width: 18px;
+                                Image {
+                                    source: @image-url("../icons/star.svg");
+                                    colorize: Theme.warning;
+                                    width: 18px;
+                                    height: 18px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+                        fwd-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            accessible-role: list-item;
+                            accessible-label: recipient.chat.name;
+                            accessible-item-index: i;
+                            accessible-item-count: root.forward-rows.length;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: recipient.selected;
+                            accessible-checkable: true;
+                            accessible-checked: recipient.selected;
+                            accessible-action-default => { root.forward-to(recipient.chat.jid); }
+                            forward-focus: fwd-key;
+                            clicked => { root.forward-to(recipient.chat.jid); }
+                            fwd-key := KeyFocus {
+                                activate => { root.forward-to(recipient.chat.jid); }
+                            }
+                            FocusRing {
+                                shown: fwd-key.has-focus;
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 12px;
+                            }
+                        }
+                    }
+                }
+                if root.forward-rows.length == 0: Text {
+                    text: @tr("message.forward.empty");
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            if root.forward-preview-text != "": Rectangle {
+                height: 32px;
+                border-radius: 8px;
+                background: Theme.glass ? Theme.glass-fill-soft : Theme.well;
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    text: root.forward-preview-text;
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    wrap: no-wrap;
+                }
+            }
+            Rectangle {
+                height: 60px;
+                border-radius: 14px;
+                background: Theme.glass ? Theme.glass-fill-soft : Theme.tile;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    Text {
+                        text: @tr("message.forward.selected_count", root.forward-selected.length);
+                        color: Theme.text;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    for index in min(3, root.forward-selected.length): Rectangle {
+                        width: 32px;
+                        Avatar {
+                            width: 32px;
+                            height: 32px;
+                            y: (parent.height - self.height) / 2;
+                            src: root.forward-selected[index].avatar;
+                            has-image: root.forward-selected[index].hasAvatar;
+                            initial: root.forward-selected[index].initial;
+                            color-idx: root.forward-selected[index].colorIdx;
+                        }
+                    }
+                    if root.forward-selected.length > 3: Rectangle {
+                        width: 32px;
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 16px;
+                            background: Theme.selected;
+                            Text {
+                                text: "+" + (root.forward-selected.length - 3);
+                                color: Theme.text-dim;
+                                font-size: 11px;
+                                font-weight: 600;
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle {
+                        width: clear-button.width;
+                        clear-button := DialogButton {
+                            y: (parent.height - self.height) / 2;
+                            label: @tr("message.forward.clear");
+                            enabled: root.forward-selected.length > 0;
+                            opacity: self.enabled ? 1 : 0.45;
+                            clicked => { root.forward-clear(); }
                         }
                     }
                 }
             }
             Rectangle {
-                height: 56px;
-                border-radius: 8px;
-                background: Theme.pill;
-                HorizontalLayout {
-                    padding: 8px;
-                    spacing: 10px;
-                    if root.forward-preview-has-image: Image {
-                        source: root.forward-preview-image;
-                        width: 40px;
-                        height: 40px;
-                        image-fit: cover;
-                        y: (parent.height - self.height) / 2;
-                    }
-                    Text {
-                        text: root.forward-preview-text;
-                        color: Theme.text-dim;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                    }
+                height: 1px;
+                background: Theme.border;
+            }
+            HorizontalLayout {
+                height: 40px;
+                spacing: 12px;
+                Rectangle { horizontal-stretch: 1; }
+                DialogButton {
+                    label: @tr("accessibility.cancel");
+                    height: 40px;
+                    clicked => { root.forward-open = false; }
+                }
+                DialogButton {
+                    label: @tr("message.forward.confirm", root.forward-selected.length);
+                    primary: true;
+                    height: 40px;
+                    enabled: root.forward-selected.length > 0;
+                    opacity: self.enabled ? 1 : 0.45;
+                    clicked => { root.forward-confirm(); }
                 }
             }
         }

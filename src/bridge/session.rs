@@ -393,7 +393,7 @@ impl Bridge {
         self.sync_messages = 0;
         self.end_initial_sync();
         self.requested_channels.clear();
-        self.pending_forward.clear();
+        self.wipe_forward_picker();
         self.clear_notification_sensitive_state();
         self.audio_buffers.clear();
         self.waves.clear();

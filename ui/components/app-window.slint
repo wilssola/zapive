@@ -33,7 +33,7 @@ import { SyncScreen } from "sync-screen.slint";
 import { SpecialMessage } from "special-message.slint";
 import { SvLayer } from "status-viewer.slint";
 import { Theme } from "theme.slint";
-import { AccountItem, CallItem, ChatItem, ComposerMention, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, SilencedCall, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell, TranslationModelItem } from "types.slint";
+import { AccountItem, CallItem, ChatItem, ForwardRecipient, ComposerMention, DetailRow, EmojiRow, LabelItem, MemberItem, MessageItem, PdfPage, SilencedCall, PinnedItem, ReactionItem, ReactionTab, ReleaseItem, SearchHit, StarredItem, StickerCell, TranslationModelItem } from "types.slint";
 import { UpdateBanner } from "update-banner.slint";
 import { WhatsNewLayer } from "whats-new.slint";
 import { AccountRow } from "rows/account.slint";
@@ -483,12 +483,17 @@ export component AppWindow inherits Window {
 
     // Forward picker
     in-out property <bool> forward-open: false;
-    in-out property <[ChatItem]> forward-rows;
+    in-out property <[ForwardRecipient]> forward-rows;
+    in-out property <[ChatItem]> forward-selected;
+    in-out property <string> forward-filter: "all";
     in-out property <string> forward-preview-text;
     in-out property <image> forward-preview-image;
     in-out property <bool> forward-preview-has-image;
     callback forward-search(string);
     callback forward-to(string);
+    callback forward-clear();
+    callback forward-confirm();
+    callback forward-filter-changed(string);
 
     // Sync banner and its progress dialog
     in-out property <bool> sync-open: false;
@@ -5495,11 +5500,16 @@ export component AppWindow inherits Window {
 
         forward-open <=> root.forward-open;
         forward-rows: root.forward-rows;
+        forward-selected: root.forward-selected;
+        forward-filter <=> root.forward-filter;
         forward-preview-text: root.forward-preview-text;
         forward-preview-image: root.forward-preview-image;
         forward-preview-has-image: root.forward-preview-has-image;
         forward-search(a0) => { root.forward-search(a0); }
         forward-to(a0) => { root.forward-to(a0); }
+        forward-clear => { root.forward-clear(); }
+        forward-confirm => { root.forward-confirm(); }
+        forward-filter-changed(a0) => { root.forward-filter-changed(a0); }
     }
 
     // ---------- Settings ----------
