@@ -22,7 +22,7 @@ export component MenuRow inherits TouchArea {
         width: parent.width;
         height: parent.height;
         border-radius: 6px;
-        background: root.has-hover ? Theme.hover : transparent;
+        background: root.enabled && root.has-hover ? Theme.menu-hover : transparent;
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 12px;
