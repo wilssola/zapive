@@ -5652,10 +5652,14 @@ export component AppWindow inherits Window {
             Rectangle {
                 height: 56px;
                 background: Theme.header;
+                vertical-stretch: 0;
                 HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 6px;
+                    x: 12px;
+                    y: 8px;
+                    width: parent.width - 24px;
+                    height: 40px;
+                    padding: 0px;
+                    spacing: 8px;
                     IconButton {
                         label: @tr("common.action.close");
                         icon: @image-url("../icons/x.svg");
@@ -5668,9 +5672,13 @@ export component AppWindow inherits Window {
                         font-weight: 700;
                         vertical-alignment: center;
                         overflow: elide;
+                        wrap: no-wrap;
+                        min-width: 0px;
                         horizontal-stretch: 1;
                     }
                     if root.pdf-count > 0: HorizontalLayout {
+                        height: 40px;
+                        horizontal-stretch: 0;
                         spacing: 2px;
                         IconButton {
                             label: @tr("accessibility.previous_page");
@@ -5680,6 +5688,10 @@ export component AppWindow inherits Window {
                         }
                         Text {
                             text: root.pdf-page + " / " + root.pdf-count;
+                            min-width: 64px;
+                            horizontal-stretch: 0;
+                            horizontal-alignment: center;
+                            wrap: no-wrap;
                             color: Theme.text;
                             font-size: 13px;
                             vertical-alignment: center;
@@ -5691,8 +5703,19 @@ export component AppWindow inherits Window {
                             clicked => { root.pdf-goto(1); }
                         }
                     }
-                    Rectangle { width: 12px; }
+                    if root.pdf-count > 0: Rectangle {
+                        width: 1px;
+                        height: 40px;
+                        Rectangle {
+                            y: 8px;
+                            height: 24px;
+                            width: 1px;
+                            background: Theme.border;
+                        }
+                    }
                     if root.pdf-count > 0: HorizontalLayout {
+                        height: 40px;
+                        horizontal-stretch: 0;
                         spacing: 2px;
                         IconButton {
                             label: @tr("accessibility.zoom_out");
@@ -5704,8 +5727,14 @@ export component AppWindow inherits Window {
                             accessible-role: button;
                             accessible-label: @tr("accessibility.reset_zoom", root.pdf-zoom-label);
                             accessible-action-default => { root.pdf-zoom(0); }
-                            width: zoom-text.preferred-width + 16px;
+                            width: max(56px, zoom-text.preferred-width + 16px);
+                            height: 40px;
                             mouse-cursor: pointer;
+                            forward-focus: zoom-key;
+                            Rectangle {
+                                border-radius: 8px;
+                                background: zoom-touch.has-hover ? Theme.menu-hover : transparent;
+                            }
                             clicked => { root.pdf-zoom(0); }
                             zoom-text := Text {
                                 text: root.pdf-zoom-label;
@@ -5733,7 +5762,16 @@ export component AppWindow inherits Window {
                             clicked => { root.pdf-zoom(1); }
                         }
                     }
-                    Rectangle { width: 12px; }
+                    Rectangle {
+                        width: 1px;
+                        height: 40px;
+                        Rectangle {
+                            y: 8px;
+                            height: 24px;
+                            width: 1px;
+                            background: Theme.border;
+                        }
+                    }
                     IconButton {
                         label: @tr("file.action.save_as");
                         icon: @image-url("../icons/download.svg");

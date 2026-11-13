@@ -125,7 +125,11 @@ export component VideoLayer inherits ModalLayer {
                 background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
             }
             HorizontalLayout {
-                padding: 12px;
+                x: parent.width - self.width - 12px;
+                y: (parent.height - self.height) / 2;
+                width: root.video-is-clip ? 86px : 40px;
+                height: 40px;
+                padding: 0px;
                 spacing: 6px;
                 alignment: end;
                 if root.video-is-clip: IconButton {
@@ -274,12 +278,17 @@ export component LightboxLayer inherits ModalLayer {
             y: parent.height * 0.04;
             image-fit: contain;
         }
-        IconButton {
-            label: @tr("common.action.close");
-            icon: @image-url("../icons/x.svg");
-            x: parent.width - self.width - 16px;
-            y: 16px;
-            clicked => { root.lightbox-open = false; }
+        Rectangle {
+            height: 64px;
+            background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+            IconButton {
+                label: @tr("common.action.close");
+                icon: @image-url("../icons/x.svg");
+                tint: white;
+                x: parent.width - self.width - 12px;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.lightbox-open = false; }
+            }
         }
     }
 }

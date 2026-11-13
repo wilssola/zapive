@@ -25,14 +25,21 @@ export component SvLayer inherits ModalLayer {
         TouchArea { clicked => { root.status-next(); } }
         VerticalLayout {
             padding: 20px;
+            padding-top: 0px;
+            padding-left: 12px;
+            padding-right: 12px;
             spacing: 12px;
             HorizontalLayout {
+                height: 64px;
                 spacing: 10px;
                 Text {
                     text: root.sv-name;
                     color: white;
                     font-size: 16px;
                     font-weight: 700;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                    overflow: elide;
                     vertical-alignment: center;
                 }
                 Text {
@@ -40,12 +47,20 @@ export component SvLayer inherits ModalLayer {
                     color: #b0b8bd;
                     font-size: 13px;
                     vertical-alignment: center;
-                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    horizontal-stretch: 0;
+                    overflow: elide;
                 }
-                IconButton {
-                    label: @tr("common.action.close");
-                    icon: @image-url("../icons/x.svg");
-                    clicked => { root.status-close(); }
+                Rectangle {
+                    width: 40px;
+                    horizontal-stretch: 0;
+                    IconButton {
+                        label: @tr("common.action.close");
+                        icon: @image-url("../icons/x.svg");
+                        tint: white;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.status-close(); }
+                    }
                 }
             }
             Rectangle {

@@ -90,74 +90,88 @@ export component ImagePreview inherits Rectangle {
         padding: 16px;
         spacing: 12px;
         HorizontalLayout {
+            height: 48px;
             spacing: 8px;
-            IconButton {
-                label: @tr("accessibility.cancel");
-                icon: @image-url("../icons/x.svg");
-                clicked => { root.cancel(); }
+            Rectangle {
+                width: 40px;
+                horizontal-stretch: 0;
+                IconButton {
+                    label: @tr("accessibility.cancel");
+                    icon: @image-url("../icons/x.svg");
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.cancel(); }
+                }
             }
             Rectangle { horizontal-stretch: 1; }
             if root.count > 1: Rectangle {
                 width: counter.preferred-width + 24px;
-                height: 32px;
-                y: 7px;
-                border-radius: 16px;
-                background: Theme.glass ? Theme.glass-fill-soft : Theme.tile;
-                border-width: 1px;
-                border-color: Theme.glass ? Theme.glass-rim-soft : Theme.border;
-                counter := Text {
-                    text: @tr("image.review.counter", root.index + 1, root.count);
-                    color: Theme.text;
-                    font-size: 13px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                height: 48px;
+                horizontal-stretch: 0;
+                Rectangle {
+                    height: 32px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 16px;
+                    background: Theme.glass ? Theme.glass-fill-soft : Theme.tile;
+                    border-width: 1px;
+                    border-color: Theme.glass ? Theme.glass-rim-soft : Theme.border;
+                    counter := Text {
+                        text: @tr("image.review.counter", root.index + 1, root.count);
+                        color: Theme.text;
+                        font-size: 13px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
                 }
             }
             Rectangle { horizontal-stretch: 1; }
             Rectangle {
-                width: 190px;
-                height: 46px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: Theme.border;
-                background: Theme.dark ? #0b141a : #ffffff;
-                HorizontalLayout {
-                    padding: 4px;
-                    spacing: 8px;
-                    PreviewTool {
-                        label: @tr("image.edit.crop");
-                        glyph: "M 6 3 L 6 18 L 21 18 M 3 6 L 18 6 L 18 21";
-                        active: root.tool == "crop";
-                        enabled: !root.busy;
-                        clicked => {
-                            root.tool = root.tool == "crop" ? "" : "crop";
-                            root.selected = false;
+                width: 184px;
+                height: 48px;
+                horizontal-stretch: 0;
+                Rectangle {
+                    height: 46px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 16px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    background: Theme.dark ? #0b141a : #ffffff;
+                    HorizontalLayout {
+                        padding: 4px;
+                        spacing: 8px;
+                        PreviewTool {
+                            label: @tr("image.edit.crop");
+                            glyph: "M 6 3 L 6 18 L 21 18 M 3 6 L 18 6 L 18 21";
+                            active: root.tool == "crop";
+                            enabled: !root.busy;
+                            clicked => {
+                                root.tool = root.tool == "crop" ? "" : "crop";
+                                root.selected = false;
+                            }
                         }
-                    }
-                    PreviewTool {
-                        label: @tr("image.edit.add_text");
-                        glyph: "M 5 6 L 5 4 L 19 4 L 19 6 M 12 4 L 12 20 M 8 20 L 16 20";
-                        active: root.tool == "text";
-                        enabled: !root.busy;
-                        clicked => { root.tool = root.tool == "text" ? "" : "text"; annotation.focus(); }
-                    }
-                    PreviewTool {
-                        label: @tr("image.edit.pencil");
-                        glyph: "M 4 16 L 15 5 Q 17 3 19 5 Q 21 7 19 9 L 8 20 L 3 21 Z M 14 6 L 18 10 M 3 21 L 21 21";
-                        active: root.tool == "pencil";
-                        enabled: !root.busy;
-                        clicked => { root.tool = root.tool == "pencil" ? "" : "pencil"; }
-                    }
-                    PreviewTool {
-                        label: @tr("image.edit.reset");
-                        glyph: "M 9 5 L 4 10 L 9 15 M 4 10 L 15 10 Q 20 10 20 15 Q 20 20 15 20 L 11 20";
-                        enabled: !root.busy;
-                        clicked => { root.reset(); }
+                        PreviewTool {
+                            label: @tr("image.edit.add_text");
+                            glyph: "M 5 6 L 5 4 L 19 4 L 19 6 M 12 4 L 12 20 M 8 20 L 16 20";
+                            active: root.tool == "text";
+                            enabled: !root.busy;
+                            clicked => { root.tool = root.tool == "text" ? "" : "text"; annotation.focus(); }
+                        }
+                        PreviewTool {
+                            label: @tr("image.edit.pencil");
+                            glyph: "M 4 16 L 15 5 Q 17 3 19 5 Q 21 7 19 9 L 8 20 L 3 21 Z M 14 6 L 18 10 M 3 21 L 21 21";
+                            active: root.tool == "pencil";
+                            enabled: !root.busy;
+                            clicked => { root.tool = root.tool == "pencil" ? "" : "pencil"; }
+                        }
+                        PreviewTool {
+                            label: @tr("image.edit.reset");
+                            glyph: "M 9 5 L 4 10 L 9 15 M 4 10 L 15 10 Q 20 10 20 15 Q 20 20 15 20 L 11 20";
+                            enabled: !root.busy;
+                            clicked => { root.reset(); }
+                        }
                     }
                 }
             }
-            Rectangle { horizontal-stretch: 1; width: 40px; }
         }
         Rectangle {
             height: 40px;
