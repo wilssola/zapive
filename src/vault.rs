@@ -612,6 +612,88 @@ impl Vault {
         tx.commit().map_err(|e| e.to_string())
     }
 
+    pub fn history_reader(&self) -> impl FnOnce() -> Result<Self, String> + Send + 'static {
+        let path = self.conn.path().unwrap_or_default().to_string();
+        let key = self.key_handle();
+        let account = self.account();
+        move || {
+            let conn =
+                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|e| e.to_string())?;
+            Ok(Self {
+                conn,
+                key,
+                account: std::cell::RefCell::new(account),
+                failed_attempts: 0,
+                next_try_at: None,
+            })
+        }
+    }
+
+    pub fn history_latest_outgoing(
+        &self,
+        jids: &[String],
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        #[derive(serde::Deserialize)]
+        struct Outgoing {
+            from_me: bool,
+            kind: crate::store::MessageKind,
+            #[serde(default)]
+            status: u32,
+            timestamp: i64,
+        }
+        impl Outgoing {
+            fn sent(&self) -> bool {
+                self.from_me && self.kind != crate::store::MessageKind::System && self.status > 0
+            }
+        }
+        if self.locked() {
+            return Err("vault is locked".into());
+        }
+        let mut latest = std::collections::HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT payload FROM history WHERE account=?1 AND jid=?2 ORDER BY timestamp DESC,id DESC",
+        ).map_err(|e| e.to_string())?;
+        for jid in jids {
+            let rows = stmt
+                .query_map(params![self.account(), jid], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            let mut timestamp = None;
+            for row in rows {
+                let raw = row.map_err(|e| e.to_string())?;
+                if let Some(message) = self.open_row::<Outgoing>("history", &raw)?
+                    && message.sent()
+                {
+                    timestamp = Some(message.timestamp);
+                    break;
+                }
+            }
+            let raw: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT v FROM kv WHERE k=?1",
+                    [format!("{}store:msgs:{jid}", self.scope())],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            if let Some(raw) = raw
+                && let Some(messages) = self.open_row::<Vec<Outgoing>>("history", &raw)?
+            {
+                timestamp = messages
+                    .iter()
+                    .filter(|m| m.sent())
+                    .map(|m| m.timestamp)
+                    .chain(timestamp)
+                    .max();
+            }
+            if let Some(timestamp) = timestamp {
+                latest.insert(jid.clone(), timestamp);
+            }
+        }
+        Ok(latest)
+    }
+
     pub fn history_page(
         &self,
         jid: &str,
@@ -1015,6 +1097,88 @@ mod tests {
         // An id that is gone falls back to the first account.
         v.set_active_account("missing");
         assert_eq!(v.active_account(), "");
+    }
+
+    #[test]
+    fn latest_outgoing_reads_cold_and_legacy_history_on_a_worker() {
+        let t = temp_vault("latest_outgoing");
+        let v = &t.vault;
+        let jid = "example@s.whatsapp.net";
+        let legacy = "legacy@lid";
+        let incoming = "incoming@s.whatsapp.net";
+        let message = |jid: &str, id: &str, timestamp, from_me, status, kind| {
+            let mut message = crate::wa_map::system_message(jid, id, timestamp, "Example".into());
+            message.from_me = from_me;
+            message.status = status;
+            message.kind = kind;
+            message
+        };
+        use crate::store::MessageKind::{System, Text};
+        let mut messages = vec![
+            message(jid, "sent", 10, true, 1, Text),
+            message(jid, "older", 5, true, 2, Text),
+            message(jid, "pending", 500, true, 0, Text),
+            message(jid, "system", 600, true, 2, System),
+            message(incoming, "received", 700, false, 0, Text),
+        ];
+        for index in 20..320 {
+            messages.push(message(
+                jid,
+                &format!("incoming-{index}"),
+                index,
+                false,
+                0,
+                Text,
+            ));
+        }
+        v.history_commit(&messages, &[], &[], &[]).unwrap();
+        v.set_checked(
+            &format!("store:msgs:{legacy}"),
+            &serde_json::to_string(&vec![
+                message(legacy, "legacy-sent", 15, true, 2, Text),
+                message(legacy, "legacy-incoming", 800, false, 0, Text),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+        v.set_account("other");
+        v.history_commit(
+            &[message(jid, "other-account", 900, true, 2, Text)],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        v.set_account("");
+        let reader = v.history_reader();
+        let jids = vec![jid.to_string(), legacy.to_string(), incoming.to_string()];
+        let latest =
+            std::thread::spawn(move || reader().unwrap().history_latest_outgoing(&jids).unwrap())
+                .join()
+                .unwrap();
+        assert_eq!(latest.len(), 2);
+        assert_eq!(latest[jid], 10);
+        assert_eq!(latest[legacy], 15);
+        assert!(v.get(&format!("store:msgs:{legacy}")).is_some());
+        let mut reopened = Vault::open_at(&t.path.to_string_lossy()).unwrap();
+        reopened.open().unwrap();
+        assert_eq!(
+            reopened
+                .history_latest_outgoing(&[jid.into(), legacy.into()])
+                .unwrap(),
+            latest
+        );
+        let reader = v.history_reader();
+        reopened.lock();
+        assert!(reopened.history_latest_outgoing(&[jid.into()]).is_err());
+        let mut worker = reader().unwrap();
+        worker.lock();
+        assert!(
+            v.history_reader()()
+                .unwrap()
+                .history_latest_outgoing(&[jid.into()])
+                .is_err()
+        );
     }
 
     #[test]
