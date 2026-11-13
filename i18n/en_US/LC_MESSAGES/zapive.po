@@ -1299,6 +1299,9 @@ msgstr "{0} is typing..."
 msgid "presence.group_some"
 msgstr "{0} are typing..."
 
+msgid "presence.group_count"
+msgstr "{0} people are typing..."
+
 msgid "presence.group_many"
 msgstr "Several people are typing..."
 

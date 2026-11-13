@@ -1299,6 +1299,9 @@ msgstr "{0} está digitando..."
 msgid "presence.group_some"
 msgstr "{0} estão digitando..."
 
+msgid "presence.group_count"
+msgstr "{0} pessoas digitando..."
+
 msgid "presence.group_many"
 msgstr "Várias pessoas estão digitando..."
 

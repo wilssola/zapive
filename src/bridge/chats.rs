@@ -3,6 +3,24 @@ use super::*;
 
 pub(super) const SEARCH_LIMIT: usize = 60;
 
+fn sidebar_activity(
+    group: bool,
+    members: &HashMap<String, (u64, String)>,
+    name_for: impl FnOnce(&str) -> String,
+) -> Option<String> {
+    let (sender, (_, text)) = members.iter().max_by_key(|(_, (token, _))| token)?;
+    if !group || !crate::i18n::is_translation("presence.typing", text) {
+        return Some(text.clone());
+    }
+    Some(if members.len() == 1 {
+        let name = name_for(sender);
+        let first_name = name.split_whitespace().next().unwrap_or(&name);
+        ta("presence.group_one", &[first_name])
+    } else {
+        ta("presence.group_count", &[&members.len().to_string()])
+    })
+}
+
 // Whether a message has something to download or decode for its bubble.
 pub(super) fn chat_matches_archive(archived: bool, tab: &str, searching: bool) -> bool {
     if tab == "archived" {
@@ -26,17 +44,20 @@ impl Bridge {
         let name = self.store.chat_name(jid);
         let avatar = self.avatar_for(jid);
         let meta = self.store.chats.get(jid);
-        let activity = self
-            .chat_typing
-            .get(jid)
-            .and_then(|members| members.values().max_by_key(|(token, _)| token))
-            .map(|(_, text)| text.as_str());
+        let activity = self.chat_typing.get(jid).and_then(|members| {
+            sidebar_activity(is_group(jid), members, |sender| {
+                self.store.chat_name(sender)
+            })
+        });
         let draft = self.store.drafts.get(jid).filter(|draft| {
             self.current_jid.as_deref() != Some(jid) && !draft.text.trim().is_empty()
         });
         let draft_preview =
             draft.map(|draft| format!("{} {}", t("preview.draft"), clean_text(&draft.text)));
-        let preview = draft_preview.as_deref().or(activity).unwrap_or(preview);
+        let preview = draft_preview
+            .as_deref()
+            .or(activity.as_deref())
+            .unwrap_or(preview);
         let (preview, ticks, ticks_blue) = if let Some(body) = preview.strip_prefix("✓ ") {
             let (ticks, blue) = self
                 .store
@@ -415,6 +436,45 @@ impl Bridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_group_activity_uses_first_name_or_exact_count() {
+        let mut members = HashMap::new();
+        assert_eq!(sidebar_activity(true, &members, |_| unreachable!()), None);
+        members.insert("alex".into(), (1, t("presence.typing")));
+        assert_eq!(
+            sidebar_activity(true, &members, |_| "  Alex Morgan".into()),
+            Some(ta("presence.group_one", &["Alex"]))
+        );
+        for count in 2..=8 {
+            members.insert(format!("member{count}"), (count, t("presence.typing")));
+            assert_eq!(
+                sidebar_activity(true, &members, |_| unreachable!()),
+                Some(ta("presence.group_count", &[&count.to_string()]))
+            );
+        }
+        members.retain(|sender, _| sender == "alex");
+        assert_eq!(
+            sidebar_activity(true, &members, |_| "Alex Morgan".into()),
+            Some(ta("presence.group_one", &["Alex"]))
+        );
+    }
+
+    #[test]
+    fn sidebar_activity_preserves_direct_chat_and_recording_labels() {
+        for group in [false, true] {
+            for id in ["presence.typing", "presence.recording"] {
+                if group && id == "presence.typing" {
+                    continue;
+                }
+                let members = HashMap::from([("alex".into(), (1, t(id)))]);
+                assert_eq!(
+                    sidebar_activity(group, &members, |_| unreachable!()),
+                    Some(t(id))
+                );
+            }
+        }
+    }
 
     #[test]
     fn sidebar_search_includes_archived_chats_without_changing_archive_filter() {
