@@ -217,11 +217,12 @@ impl Bridge {
                     .and_then(|id| self.media_path.get(id))
                     .cloned();
                 self.close_video();
-                if let Some(cached) = cached
-                    && let Some(plain) =
-                        crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached))
-                {
-                    crate::platform::open_path(&plain.to_string_lossy());
+                if let Some(cached) = cached {
+                    crate::jobs::plain_copy(std::path::PathBuf::from(cached), None, |_, plain| {
+                        if let Some(plain) = plain {
+                            crate::platform::open_path(&plain.to_string_lossy());
+                        }
+                    });
                 }
             }
         }
@@ -284,18 +285,20 @@ impl Bridge {
         let Some(cached) = self.media_path.get(&id).map(std::path::PathBuf::from) else {
             return;
         };
-        let Some(plain) = crate::media::temp_plain(&self.media_key, &cached) else {
-            return;
-        };
-        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-        let name = format!("VID-{stamp}.mp4");
-        std::thread::spawn(move || {
-            let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
-            if let Some(target) = picked
-                && let Err(e) = std::fs::copy(&plain, &target)
-            {
-                eprintln!("[video] save failed: {e}");
-            }
+        crate::jobs::plain_copy(cached, None, |_, plain| {
+            let Some(plain) = plain else {
+                return;
+            };
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let name = format!("VID-{stamp}.mp4");
+            std::thread::spawn(move || {
+                let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+                if let Some(target) = picked
+                    && let Err(e) = std::fs::copy(&plain, &target)
+                {
+                    eprintln!("[video] save failed: {e}");
+                }
+            });
         });
     }
 }

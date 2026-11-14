@@ -4,18 +4,26 @@ use super::*;
 impl Bridge {
     // ---- documents and the PDF viewer ----
 
-    // The decrypted copy of a downloaded document, when it is here.
-    pub(super) fn plain_document(&self, id: &str) -> Option<(StoredMessage, std::path::PathBuf)> {
-        let m = self.find_message(id)?.clone();
-        let cached = std::path::PathBuf::from(self.media_path.get(id)?);
-        let plain = crate::media::temp_plain(&self.media_key, &cached)?;
-        // The temp copy carries the cache name; the real file name matters
-        // to whatever opens it, so it gets a sibling with that name.
-        let named = plain.with_file_name(sanitize_file_name(&m.text));
-        if !named.exists() {
-            let _ = std::fs::copy(&plain, &named);
-        }
-        Some((m, if named.exists() { named } else { plain }))
+    // Decrypts a downloaded document off the UI thread, then runs `done` with
+    // the message and its copy under the real file name. Nothing runs when
+    // the document is not here.
+    pub(super) fn plain_document(
+        &self,
+        id: &str,
+        done: impl FnOnce(&mut Bridge, StoredMessage, std::path::PathBuf) + Send + 'static,
+    ) {
+        let Some(m) = self.find_message(id).cloned() else {
+            return;
+        };
+        let Some(cached) = self.media_path.get(id).map(std::path::PathBuf::from) else {
+            return;
+        };
+        let name = sanitize_file_name(&m.text);
+        crate::jobs::plain_copy(cached, Some(name), move |b, path| {
+            if let Some(path) = path {
+                done(b, m, path);
+            }
+        });
     }
 
     pub(super) fn open_document(&mut self, id: &str) {
@@ -23,28 +31,27 @@ impl Bridge {
             self.request_manual_media(id);
             return;
         }
-        let Some((m, path)) = self.plain_document(id) else {
-            return;
-        };
-        if crate::pdf::is_pdf(&m.mimetype, &m.text) {
-            self.open_pdf(id, &m.text, path);
-        } else {
-            crate::platform::open_path(&path.to_string_lossy());
-        }
+        let id = id.to_string();
+        self.plain_document(&id.clone(), move |b, m, path| {
+            if crate::pdf::is_pdf(&m.mimetype, &m.text) {
+                b.open_pdf(&id, &m.text, path);
+            } else {
+                crate::platform::open_path(&path.to_string_lossy());
+            }
+        });
     }
 
     pub(super) fn save_document(&mut self, id: &str) {
-        let Some((m, path)) = self.plain_document(id) else {
-            return;
-        };
-        let name = sanitize_file_name(&m.text);
-        std::thread::spawn(move || {
-            let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
-            if let Some(target) = picked
-                && let Err(e) = std::fs::copy(&path, &target)
-            {
-                eprintln!("[doc] save failed: {e}");
-            }
+        self.plain_document(id, |_, m, path| {
+            let name = sanitize_file_name(&m.text);
+            std::thread::spawn(move || {
+                let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+                if let Some(target) = picked
+                    && let Err(e) = std::fs::copy(&path, &target)
+                {
+                    eprintln!("[doc] save failed: {e}");
+                }
+            });
         });
     }
 

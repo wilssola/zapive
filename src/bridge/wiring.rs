@@ -902,9 +902,8 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         // Documents (and, until phase 4, audio files) open with whatever
         // the OS associates; the handler needs a decrypted copy.
         let path = path.to_string();
-        defer(move |b| {
-            let cached = std::path::PathBuf::from(&path);
-            if let Some(plain) = crate::media::temp_plain(&b.media_key, &cached) {
+        crate::jobs::plain_copy(std::path::PathBuf::from(path), None, |_, plain| {
+            if let Some(plain) = plain {
                 crate::platform::open_path(&plain.to_string_lossy());
             }
         });
@@ -1011,21 +1010,21 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
             let Some(cached) = b.media_path.get(&id) else {
                 return;
             };
-            let Some(path) =
-                crate::media::temp_plain(&b.media_key, &std::path::PathBuf::from(cached))
-            else {
-                return;
-            };
-            std::thread::spawn(move || {
-                let Ok(image) = image::open(path) else { return };
-                let image = image.to_rgba8();
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    let _ = clipboard.set_image(arboard::ImageData {
-                        width: image.width() as usize,
-                        height: image.height() as usize,
-                        bytes: std::borrow::Cow::Owned(image.into_raw()),
-                    });
-                }
+            crate::jobs::plain_copy(std::path::PathBuf::from(cached), None, |_, path| {
+                let Some(path) = path else {
+                    return;
+                };
+                std::thread::spawn(move || {
+                    let Ok(image) = image::open(path) else { return };
+                    let image = image.to_rgba8();
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_image(arboard::ImageData {
+                            width: image.width() as usize,
+                            height: image.height() as usize,
+                            bytes: std::borrow::Cow::Owned(image.into_raw()),
+                        });
+                    }
+                });
             });
         });
     });

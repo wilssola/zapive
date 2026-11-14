@@ -451,6 +451,33 @@ pub fn read_cached(key: &KeyHandle, path: &PathBuf) -> Option<Vec<u8>> {
     key.decrypt_bytes(&data).ok()
 }
 
+// Decode and decrypt jobs run on the blocking pool (512 threads by default),
+// so a burst of media would fan out into hundreds of CPU-heavy threads. This
+// caps them; a permit is held only while the blocking work runs.
+const DECODE_CONCURRENCY: usize = 2;
+
+static DECODE_SEM: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| {
+        std::sync::Arc::new(tokio::sync::Semaphore::new(DECODE_CONCURRENCY))
+    });
+
+// Runs `work` on the blocking pool once a decode permit is free. None when the
+// work panics or the semaphore is closed.
+pub async fn bounded_blocking<T, F>(work: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Option<T> + Send + 'static,
+{
+    let permit = DECODE_SEM.clone().acquire_owned().await.ok()?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 // Decrypted copy for consumers that need a real file (FFmpeg, the OS
 // opener). Lives under .tmp, which is wiped at boot.
 pub fn temp_plain(key: &KeyHandle, path: &PathBuf) -> Option<PathBuf> {
@@ -1042,6 +1069,45 @@ mod tests {
         assert_eq!(image.get_pixel(0, 0), &image::Rgba([120, 120, 120, 255]));
         assert!(burn_preview_text(&mut image, "", 0.5, 0.5).is_none());
         assert!(burn_preview_text(&mut image, "text", f32::NAN, 0.5).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn bounded_blocking_never_exceeds_the_decode_limit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let running = std::sync::Arc::new(AtomicUsize::new(0));
+        let peak = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut jobs = Vec::new();
+        for n in 0..24usize {
+            let (running, peak) = (running.clone(), peak.clone());
+            jobs.push(tokio::spawn(async move {
+                bounded_blocking(move || {
+                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    running.fetch_sub(1, Ordering::SeqCst);
+                    Some(n)
+                })
+                .await
+            }));
+        }
+        let mut done = Vec::new();
+        for job in jobs {
+            done.push(job.await.unwrap().unwrap());
+        }
+        done.sort_unstable();
+        assert_eq!(done, (0..24).collect::<Vec<_>>());
+        let peak = peak.load(Ordering::SeqCst);
+        assert!(peak >= 1);
+        assert!(peak <= DECODE_CONCURRENCY, "peak {peak}");
+    }
+
+    #[tokio::test]
+    async fn bounded_blocking_survives_a_panicking_job_and_frees_its_permit() {
+        let failed: Option<u8> = bounded_blocking(|| panic!("decode blew up")).await;
+        assert!(failed.is_none());
+        for _ in 0..DECODE_CONCURRENCY * 2 {
+            assert_eq!(bounded_blocking(|| Some(7u8)).await, Some(7));
+        }
     }
 
     #[tokio::test]

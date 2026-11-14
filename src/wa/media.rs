@@ -29,13 +29,11 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                             let (id, path) = (id.clone(), path.clone());
                             ui_apply(move |b| b.on_media_file(&id, &path));
                         }
-                        let poster = tokio::task::spawn_blocking(move || {
+                        let poster = crate::media::bounded_blocking(move || {
                             crate::media::temp_plain(&key, &path)
                                 .and_then(|p| crate::video::poster(&p, crate::media::BUBBLE_PX))
                         })
-                        .await
-                        .ok()
-                        .flatten();
+                        .await;
                         if let Some(img) = poster {
                             ui_apply(move |b| b.on_video_poster(&id, img));
                         }
@@ -43,28 +41,39 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     MediaWant::Image => {
                         // Bubble size only; the lightbox asks for a
                         // full decode when it opens.
-                        let decoded = crate::media::read_cached(&key, &path)
-                            .and_then(|d| crate::media::decode_bytes(&d, crate::media::BUBBLE_PX));
+                        let decoded = {
+                            let (key, path) = (key.clone(), path.clone());
+                            crate::media::bounded_blocking(move || {
+                                crate::media::read_cached(&key, &path).and_then(|d| {
+                                    crate::media::decode_bytes(&d, crate::media::BUBBLE_PX)
+                                })
+                            })
+                            .await
+                        };
                         match decoded {
                             Some(img) => ui_apply(move |b| b.on_media_image(&id, &path, img)),
                             None => ui_apply(move |b| b.on_media_missing(&id)),
                         }
                     }
                     MediaWant::Sticker => {
-                        let frames = crate::media::read_cached(&key, &path)
-                            .map(|d| crate::media::sticker_frames(&d, 180, 24))
-                            .unwrap_or_default();
+                        let frames = {
+                            let (key, path) = (key.clone(), path.clone());
+                            crate::media::bounded_blocking(move || {
+                                crate::media::read_cached(&key, &path)
+                                    .map(|d| crate::media::sticker_frames(&d, 180, 24))
+                            })
+                            .await
+                            .unwrap_or_default()
+                        };
                         ui_apply(move |b| b.on_media_sticker(&id, &path, frames));
                     }
                     MediaWant::Gif => {
-                        let frames = tokio::task::spawn_blocking(move || {
+                        let frames = crate::media::bounded_blocking(move || {
                             crate::media::temp_plain(&key, &path)
                                 .map(|p| crate::video::frames(&p, 320, 15.0, 45))
                                 .map(|f| (path, f))
                         })
-                        .await
-                        .ok()
-                        .flatten();
+                        .await;
                         match frames {
                             Some((path, frames)) if !frames.is_empty() => {
                                 ui_apply(move |b| b.on_media_gif(&id, &path, frames));
@@ -92,10 +101,8 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                 let path = crate::media::link_thumb_path(&id);
                 let mut bytes = {
                     let (key, path) = (key.clone(), path.clone());
-                    tokio::task::spawn_blocking(move || crate::media::read_cached(&key, &path))
+                    crate::media::bounded_blocking(move || crate::media::read_cached(&key, &path))
                         .await
-                        .ok()
-                        .flatten()
                 };
                 if bytes.is_none() {
                     let params = whatsapp_rust::download::DownloadParams::encrypted(
@@ -130,12 +137,10 @@ pub(super) async fn run(ctx: &Ctx, cmd: Cmd) {
                     }
                 }
                 let data = bytes.unwrap_or(fallback);
-                let img = tokio::task::spawn_blocking(move || {
+                let img = crate::media::bounded_blocking(move || {
                     crate::media::decode_bytes(&data, crate::media::CARD_PX)
                 })
-                .await
-                .ok()
-                .flatten();
+                .await;
                 match img {
                     Some(img) => {
                         crate::bridge::wa_apply_at(epoch, move |b| b.on_thumb(&id, true, img))

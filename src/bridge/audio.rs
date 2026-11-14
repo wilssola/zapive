@@ -20,11 +20,6 @@ pub(super) const RATE_LABELS: [&str; 5] = ["1x", "1.5x", "2x", "2.5x", "3x"];
 impl Bridge {
     // ---- audio (player, mini player, recording) ----
 
-    pub(super) fn plain_audio_path(&self, id: &str) -> Option<std::path::PathBuf> {
-        let cached = std::path::PathBuf::from(self.media_path.get(id)?);
-        crate::media::temp_plain(&self.media_key, &cached)
-    }
-
     pub(super) fn toggle_audio(&mut self, id: &str) {
         if id.is_empty() {
             return;
@@ -103,11 +98,20 @@ impl Bridge {
             return;
         }
         a.pending_offset = Some(offset_secs);
-        let Some(plain) = self.plain_audio_path(&id) else {
+        let Some(cached) = self.media_path.get(&id).map(std::path::PathBuf::from) else {
             self.audio = None;
             return;
         };
-        crate::jobs::audio_decode(id, plain, rate_idx, rate);
+        // The decrypt runs off the UI thread; the decode starts when it lands.
+        crate::jobs::plain_copy(cached, None, move |b, plain| {
+            let still_wanted = b.audio.as_ref().is_some_and(|a| a.id == id);
+            match plain {
+                Some(plain) if still_wanted => crate::jobs::audio_decode(id, plain, rate_idx, rate),
+                Some(_) => {}
+                None if still_wanted => b.audio = None,
+                None => {}
+            }
+        });
     }
 
     pub fn on_audio_ready(&mut self, id: &str, rate_idx: usize, buffer: crate::audio::AudioBuffer) {
