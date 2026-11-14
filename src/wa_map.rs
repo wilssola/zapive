@@ -57,7 +57,15 @@ fn context_of(content: &wa::Message) -> Option<&wa::ContextInfo> {
         poll_creation_message_v2,
         poll_creation_message_v3,
         poll_creation_message_v5,
-        poll_creation_message_v6
+        poll_creation_message_v6,
+        buttons_message,
+        list_message,
+        template_message,
+        interactive_message,
+        buttons_response_message,
+        list_response_message,
+        template_button_reply_message,
+        interactive_response_message
     );
     None
 }
@@ -215,6 +223,307 @@ fn titled_card(kind: &'static str, title: &str, body: &str) -> SpecialCard<'stat
     }
 }
 
+// Only reply actions are admitted here: URL, call, payment and unknown flows
+// never become clickable actions. IDs remain opaque and are never cleaned.
+#[derive(Debug)]
+struct ReplyOption {
+    label: String,
+    id: String,
+    kind: &'static str,
+    index: u32,
+}
+
+fn reply_option(
+    options: &mut Vec<ReplyOption>,
+    label: &str,
+    id: &str,
+    kind: &'static str,
+    index: u32,
+) {
+    let label = card_text(label);
+    if options.len() < 256 && !label.is_empty() && !id.is_empty() && id.len() <= 4096 {
+        options.push(ReplyOption {
+            label,
+            id: id.into(),
+            kind,
+            index,
+        });
+    }
+}
+
+fn reply_card(content: &wa::Message) -> Option<(SpecialCard<'static>, Vec<ReplyOption>)> {
+    let mut card = SpecialCard {
+        kind: "reply-options",
+        title: t("card.reply_options"),
+        ..Default::default()
+    };
+    let mut options = Vec::new();
+    if let Some(m) = content.buttons_message.as_option() {
+        if let Some(wa::message::buttons_message::Header::Text(title)) = &m.header {
+            let title = card_text(title);
+            if !title.is_empty() {
+                card.title = title;
+            }
+        }
+        card.body = card_text(m.content_text.as_deref().unwrap_or(""));
+        card.detail = card_text(m.footer_text.as_deref().unwrap_or(""));
+        for b in m.buttons.iter().take(256) {
+            if b.r#type == Some(wa::message::buttons_message::button::Type::Response) {
+                reply_option(
+                    &mut options,
+                    b.button_text
+                        .as_option()
+                        .and_then(|v| v.display_text.as_deref())
+                        .unwrap_or(""),
+                    b.button_id.as_deref().unwrap_or(""),
+                    "buttons",
+                    0,
+                );
+            }
+        }
+    } else if let Some(m) = content.list_message.as_option() {
+        let title = card_text(m.title.as_deref().unwrap_or(""));
+        if !title.is_empty() {
+            card.title = title;
+        }
+        card.body = card_text(m.description.as_deref().unwrap_or(""));
+        card.detail = card_text(m.footer_text.as_deref().unwrap_or(""));
+        if m.list_type == Some(wa::message::list_message::ListType::SingleSelect) {
+            for row in m
+                .sections
+                .iter()
+                .take(256)
+                .flat_map(|s| s.rows.iter().take(256))
+                .take(256)
+            {
+                reply_option(
+                    &mut options,
+                    row.title.as_deref().unwrap_or(""),
+                    row.row_id.as_deref().unwrap_or(""),
+                    "list",
+                    0,
+                );
+            }
+        }
+    } else if let Some(m) = content.template_message.as_option() {
+        use wa::message::template_message::Format;
+        let template = m.hydrated_template.as_option().or(match &m.format {
+            Some(Format::HydratedFourRowTemplate(v)) => Some(v.as_ref()),
+            _ => None,
+        })?;
+        if let Some(
+            wa::message::template_message::hydrated_four_row_template::Title::HydratedTitleText(
+                title,
+            ),
+        ) = &template.title
+        {
+            let title = card_text(title);
+            if !title.is_empty() {
+                card.title = title;
+            }
+        }
+        card.body = card_text(template.hydrated_content_text.as_deref().unwrap_or(""));
+        card.detail = card_text(template.hydrated_footer_text.as_deref().unwrap_or(""));
+        for (i, b) in template.hydrated_buttons.iter().take(256).enumerate() {
+            if let Some(wa::hydrated_template_button::HydratedButton::QuickReplyButton(v)) =
+                &b.hydrated_button
+            {
+                reply_option(
+                    &mut options,
+                    v.display_text.as_deref().unwrap_or(""),
+                    v.id.as_deref().unwrap_or(""),
+                    "template",
+                    b.index.unwrap_or(i as u32 + 1),
+                );
+            }
+        }
+    } else if let Some(m) = content.interactive_message.as_option() {
+        use wa::message::interactive_message::InteractiveMessage;
+        let title = card_text(
+            m.header
+                .as_option()
+                .and_then(|v| v.title.as_deref())
+                .unwrap_or(""),
+        );
+        if !title.is_empty() {
+            card.title = title;
+        }
+        card.body = card_text(
+            m.body
+                .as_option()
+                .and_then(|v| v.text.as_deref())
+                .unwrap_or(""),
+        );
+        card.detail = card_text(
+            m.footer
+                .as_option()
+                .and_then(|v| v.text.as_deref())
+                .unwrap_or(""),
+        );
+        if let Some(InteractiveMessage::NativeFlowMessage(flow)) = &m.interactive_message {
+            for b in flow.buttons.iter().take(256) {
+                let raw = b.button_params_json.as_deref().unwrap_or("");
+                if raw.len() > 65536 {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+                    continue;
+                };
+                let text = |key: &str| v.get(key).and_then(|s| s.as_str()).unwrap_or("");
+                match b.name.as_deref() {
+                    Some("quick_reply") => reply_option(
+                        &mut options,
+                        text("display_text"),
+                        text("id"),
+                        "quick_reply",
+                        0,
+                    ),
+                    Some("single_select") => {
+                        if let Some(sections) = v.get("sections").and_then(|s| s.as_array()) {
+                            for row in sections
+                                .iter()
+                                .take(256)
+                                .filter_map(|s| s.get("rows").and_then(|r| r.as_array()))
+                                .flat_map(|r| r.iter().take(256))
+                                .take(256)
+                            {
+                                reply_option(
+                                    &mut options,
+                                    row.get("title").and_then(|s| s.as_str()).unwrap_or(""),
+                                    row.get("id").and_then(|s| s.as_str()).unwrap_or(""),
+                                    "single_select",
+                                    0,
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    } else {
+        let text = if let Some(m) = content.buttons_response_message.as_option() {
+            match &m.response {
+                Some(wa::message::buttons_response_message::Response::SelectedDisplayText(v)) => {
+                    v.as_str()
+                }
+                _ => m.selected_button_id.as_deref().unwrap_or(""),
+            }
+        } else if let Some(m) = content.list_response_message.as_option() {
+            m.title
+                .as_deref()
+                .or_else(|| {
+                    m.single_select_reply
+                        .as_option()
+                        .and_then(|r| r.selected_row_id.as_deref())
+                })
+                .unwrap_or("")
+        } else if let Some(m) = content.template_button_reply_message.as_option() {
+            m.selected_display_text
+                .as_deref()
+                .or(m.selected_id.as_deref())
+                .unwrap_or("")
+        } else {
+            let m = content.interactive_response_message.as_option()?;
+            m.body
+                .as_option()
+                .and_then(|b| b.text.as_deref())
+                .unwrap_or("")
+        };
+        card.kind = "reply-response";
+        card.title = t("card.reply_response");
+        card.body = card_text(text);
+    }
+    card.options = options.iter().map(|o| o.label.clone()).collect();
+    if card.kind == "reply-options" && options.is_empty() {
+        card.detail = t("card.reply_unavailable");
+    }
+    Some((card, options))
+}
+
+pub fn reply_response(message: &StoredMessage, index: usize) -> Option<wa::Message> {
+    if message.deleted || message.from_me || message.kind == MessageKind::System {
+        return None;
+    }
+    let raw = message.raw.as_deref()?;
+    let content = display_content(raw)?;
+    let (_, options) = reply_card(content)?;
+    let option = options.get(index)?;
+    let context = wa::ContextInfo {
+        stanza_id: Some(message.id.clone()),
+        participant: Some(message.sender_jid.clone()),
+        quoted_message: Some(content.clone()).into(),
+        ..Default::default()
+    };
+    let mut response = wa::Message::default();
+    match option.kind {
+        "buttons" => {
+            response.buttons_response_message = Some(wa::message::ButtonsResponseMessage {
+                selected_button_id: Some(option.id.clone()),
+                response: Some(
+                    wa::message::buttons_response_message::Response::SelectedDisplayText(
+                        option.label.clone(),
+                    ),
+                ),
+                r#type: Some(wa::message::buttons_response_message::Type::DisplayText),
+                context_info: Some(context).into(),
+            })
+            .into()
+        }
+        "list" => {
+            response.list_response_message = Some(wa::message::ListResponseMessage {
+                title: Some(option.label.clone()),
+                list_type: Some(wa::message::list_response_message::ListType::SingleSelect),
+                single_select_reply: Some(wa::message::list_response_message::SingleSelectReply {
+                    selected_row_id: Some(option.id.clone()),
+                })
+                .into(),
+                context_info: Some(context).into(),
+                ..Default::default()
+            })
+            .into()
+        }
+        "template" => {
+            response.template_button_reply_message = Some(wa::message::TemplateButtonReplyMessage {
+                selected_id: Some(option.id.clone()),
+                selected_display_text: Some(option.label.clone()),
+                selected_index: Some(option.index),
+                context_info: Some(context).into(),
+                ..Default::default()
+            })
+            .into()
+        }
+        "quick_reply" | "single_select" => {
+            use wa::message::interactive_response_message as ir;
+            let params = if option.kind == "quick_reply" {
+                serde_json::json!({"id": option.id, "display_text": option.label})
+            } else {
+                serde_json::json!({"id": option.id, "title": option.label})
+            };
+            response.interactive_response_message = Some(wa::message::InteractiveResponseMessage {
+                body: Some(ir::Body {
+                    text: Some(option.label.clone()),
+                    ..Default::default()
+                })
+                .into(),
+                context_info: Some(context).into(),
+                interactive_response_message: Some(
+                    ir::InteractiveResponseMessage::NativeFlowResponseMessage(Box::new(
+                        ir::NativeFlowResponseMessage {
+                            name: Some(option.kind.into()),
+                            params_json: Some(params.to_string()),
+                            version: Some(3),
+                        },
+                    )),
+                ),
+            })
+            .into();
+        }
+        _ => return None,
+    }
+    Some(response)
+}
+
 pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
     if message.deleted || message.kind == MessageKind::System {
         return SpecialCard::default();
@@ -231,6 +540,9 @@ pub fn special_card(message: &StoredMessage) -> SpecialCard<'_> {
     let Some(content) = display_content(raw) else {
         return titled_card("view-once", "card.view_once", "card.view_once_body");
     };
+    if let Some((card, _)) = reply_card(content) {
+        return card;
+    }
     if let Some(contact) = content.contact_message.as_option() {
         let (name, phones) = contact_parts(contact);
         return SpecialCard {
@@ -368,6 +680,16 @@ fn coordinate_detail(lat: Option<f64>, lon: Option<f64>, live: bool) -> String {
 }
 
 pub fn compatibility_card(content: &wa::Message) -> Option<String> {
+    if let Some((card, _)) = reply_card(content) {
+        return Some(
+            [card.title, card.body, card.detail]
+                .into_iter()
+                .chain(card.options)
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
     if let Some(contact) = content.contact_message.as_option() {
         return Some(contact_card(contact));
     }
@@ -1197,6 +1519,248 @@ mod tests {
             &HashMap::new(),
             5,
         )
+    }
+
+    fn invented_reply_messages() -> Vec<wa::Message> {
+        use wa::message::*;
+        vec![
+            wa::Message {
+                buttons_message: Some(ButtonsMessage {
+                    content_text: Some("Choose a delivery window".into()),
+                    buttons: vec![buttons_message::Button {
+                        button_id: Some("opaque: morning ".into()),
+                        button_text: Some(buttons_message::button::ButtonText {
+                            display_text: Some("Morning".into()),
+                        })
+                        .into(),
+                        r#type: Some(buttons_message::button::Type::Response),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })
+                .into(),
+                ..Default::default()
+            },
+            wa::Message {
+                list_message: Some(ListMessage {
+                    title: Some("Delivery".into()),
+                    list_type: Some(list_message::ListType::SingleSelect),
+                    sections: vec![list_message::Section {
+                        rows: vec![list_message::Row {
+                            title: Some("Morning".into()),
+                            row_id: Some("opaque: morning ".into()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })
+                .into(),
+                ..Default::default()
+            },
+            wa::Message {
+                template_message: Some(TemplateMessage {
+                    hydrated_template: Some(template_message::HydratedFourRowTemplate {
+                        hydrated_content_text: Some("Delivery".into()),
+                        hydrated_buttons: vec![wa::HydratedTemplateButton {
+                            index: Some(7),
+                            hydrated_button: Some(
+                                wa::hydrated_template_button::HydratedButton::QuickReplyButton(
+                                    Box::new(
+                                        wa::hydrated_template_button::HydratedQuickReplyButton {
+                                            display_text: Some("Morning".into()),
+                                            id: Some("opaque: morning ".into()),
+                                        },
+                                    ),
+                                ),
+                            ),
+                        }],
+                        ..Default::default()
+                    })
+                    .into(),
+                    ..Default::default()
+                })
+                .into(),
+                ..Default::default()
+            },
+            native_reply(
+                "quick_reply",
+                r#"{"display_text":"Morning","id":"opaque: morning "}"#,
+            ),
+            native_reply(
+                "single_select",
+                r#"{"sections":[{"rows":[{"title":"Morning","id":"opaque: morning "}]}]}"#,
+            ),
+        ]
+    }
+
+    fn native_reply(name: &str, params: &str) -> wa::Message {
+        use wa::message::interactive_message as im;
+        wa::Message {
+            interactive_message: Some(wa::message::InteractiveMessage {
+                interactive_message: Some(im::InteractiveMessage::NativeFlowMessage(Box::new(
+                    im::NativeFlowMessage {
+                        buttons: vec![im::native_flow_message::NativeFlowButton {
+                            name: Some(name.into()),
+                            button_params_json: Some(params.into()),
+                        }],
+                        ..Default::default()
+                    },
+                ))),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn reply_options_map_and_build_typed_responses() {
+        use whatsapp_rust::waproto::buffa::Message as _;
+        for (i, raw) in invented_reply_messages().into_iter().enumerate() {
+            let stored = map(raw).unwrap();
+            assert_eq!(special_card(&stored).options, ["Morning"]);
+            let response = reply_response(&stored, 0).unwrap();
+            assert!(response.conversation.is_none());
+            assert!(reply_response(&stored, 1).is_none());
+            let ctx = context_of(&response).unwrap();
+            assert_eq!(ctx.stanza_id.as_deref(), Some("m1"));
+            assert_eq!(ctx.participant.as_deref(), Some("123@s.whatsapp.net"));
+            assert!(ctx.quoted_message.is_set());
+            match i {
+                0 => assert_eq!(
+                    response
+                        .buttons_response_message
+                        .selected_button_id
+                        .as_deref(),
+                    Some("opaque: morning ")
+                ),
+                1 => assert_eq!(
+                    response
+                        .list_response_message
+                        .single_select_reply
+                        .selected_row_id
+                        .as_deref(),
+                    Some("opaque: morning ")
+                ),
+                2 => {
+                    assert_eq!(
+                        response
+                            .template_button_reply_message
+                            .selected_id
+                            .as_deref(),
+                        Some("opaque: morning ")
+                    );
+                    assert_eq!(
+                        response.template_button_reply_message.selected_index,
+                        Some(7)
+                    );
+                }
+                _ => {
+                    use wa::message::interactive_response_message::InteractiveResponseMessage;
+                    let Some(InteractiveResponseMessage::NativeFlowResponseMessage(flow)) =
+                        &response
+                            .interactive_response_message
+                            .interactive_response_message
+                    else {
+                        panic!("wrong response type")
+                    };
+                    assert_eq!(
+                        flow.name.as_deref(),
+                        Some(if i == 3 {
+                            "quick_reply"
+                        } else {
+                            "single_select"
+                        })
+                    );
+                    let params: serde_json::Value =
+                        serde_json::from_str(flow.params_json.as_deref().unwrap()).unwrap();
+                    assert_eq!(params["id"], "opaque: morning ");
+                }
+            }
+            let decoded = wa::Message::decode_from_slice(&response.encode_to_vec()).unwrap();
+            let echoed = map(decoded).unwrap();
+            assert_eq!(special_card(&echoed).kind, "reply-response");
+            assert_eq!(special_card(&echoed).body, "Morning");
+            let mut own = stored.clone();
+            own.from_me = true;
+            assert!(reply_response(&own, 0).is_none());
+            own.from_me = false;
+            own.deleted = true;
+            assert!(reply_response(&own, 0).is_none());
+        }
+    }
+
+    #[test]
+    fn hydrated_format_filters_external_actions_and_preserves_reply_index() {
+        use wa::hydrated_template_button::{HydratedButton, HydratedCallButton};
+        use wa::message::template_message::Format;
+        let mut raw = invented_reply_messages().remove(2);
+        let mut template = raw
+            .template_message
+            .hydrated_template
+            .as_option()
+            .unwrap()
+            .clone();
+        template.hydrated_buttons.insert(
+            0,
+            wa::HydratedTemplateButton {
+                hydrated_button: Some(HydratedButton::CallButton(Box::new(HydratedCallButton {
+                    display_text: Some("Call the fictional shop".into()),
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            },
+        );
+        raw.template_message = Some(wa::message::TemplateMessage {
+            format: Some(Format::HydratedFourRowTemplate(Box::new(template))),
+            ..Default::default()
+        })
+        .into();
+        let stored = map(raw).unwrap();
+        assert_eq!(special_card(&stored).options, ["Morning"]);
+        assert_eq!(
+            reply_response(&stored, 0)
+                .unwrap()
+                .template_button_reply_message
+                .selected_index,
+            Some(7)
+        );
+        assert!(reply_response(&stored, 1).is_none());
+    }
+
+    #[test]
+    fn reply_options_reject_unsafe_malformed_and_private_content() {
+        for (name, params) in [
+            ("cta_url", r#"{"display_text":"Open","id":"unsafe"}"#),
+            ("cta_call", "{}"),
+            ("quick_reply", "not json"),
+            ("quick_reply", r#"{"display_text":"Missing ID"}"#),
+            ("single_select", r#"{"sections":false}"#),
+        ] {
+            let stored = map(native_reply(name, params)).unwrap();
+            assert!(special_card(&stored).options.is_empty());
+            assert!(reply_response(&stored, 0).is_none());
+        }
+        for raw in invented_reply_messages() {
+            for version in 0..3 {
+                let wrapped = Some(wa::message::FutureProofMessage {
+                    message: Some(raw.clone()).into(),
+                })
+                .into();
+                let mut private = wa::Message::default();
+                match version {
+                    0 => private.view_once_message = wrapped,
+                    1 => private.view_once_message_v2 = wrapped,
+                    _ => private.view_once_message_v2_extension = wrapped,
+                }
+                let stored = map(private).unwrap();
+                assert_eq!(special_card(&stored).kind, "view-once");
+                assert!(reply_response(&stored, 0).is_none());
+            }
+        }
+        let oversized = native_reply("quick_reply", &" ".repeat(65537));
+        assert!(reply_response(&map(oversized).unwrap(), 0).is_none());
     }
 
     #[test]

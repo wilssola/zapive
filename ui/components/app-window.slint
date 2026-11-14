@@ -442,6 +442,7 @@ export component AppWindow inherits Window {
     callback open-poll-composer();
     callback create-poll(string, [string], bool);
     callback poll-vote(string, int);
+    callback select-reply-option(string, int);
 
     // ---------- Starred messages (F2) ----------
     in-out property <bool> starred-open: false;
@@ -3113,6 +3114,7 @@ export component AppWindow inherits Window {
                                     privacy-hidden: (root.blur-messages || (root.blur-names && msg.cardKind == "contact") || (root.blur-media && (msg.cardKind == "location" || msg.cardKind == "live-location"))) && !row-hover.has-hover;
                                     details => { root.message-action(msg.id, "details"); }
                                     vote(i) => { root.poll-vote(msg.id, i); }
+                                    reply(i) => { root.select-reply-option(msg.id, i); }
                                 }
 
                                 if msg.kind == "doc": VerticalLayout {

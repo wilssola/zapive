@@ -141,6 +141,26 @@ impl Bridge {
         self.store.mark_read_sent(jid, &[id.to_string()]);
     }
 
+    pub(super) fn select_reply_option(&mut self, id: &str, index: i32) {
+        if self.switching {
+            return;
+        }
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        let Some(m) = self.find_message(id) else {
+            return;
+        };
+        if self.current_jid.as_deref() != Some(m.jid.as_str()) || m.jid.ends_with("@newsletter") {
+            return;
+        }
+        let Some(response) = crate::wa_map::reply_response(m, index) else {
+            return;
+        };
+        let jid = m.jid.clone();
+        self.enqueue_prepared(&jid, response, None);
+    }
+
     pub(super) fn send_reaction(&mut self, id: &str, emoji: &str) {
         let Some(m) = self.find_message(id).cloned() else {
             return;

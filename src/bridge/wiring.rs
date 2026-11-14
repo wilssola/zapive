@@ -672,6 +672,10 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
         let options: Vec<String> = options.iter().map(|option| option.to_string()).collect();
         defer(move |b| b.create_poll(&question, &options, multi));
     });
+    ui.on_select_reply_option(|id, index| {
+        let id = id.to_string();
+        defer(move |b| b.select_reply_option(&id, index));
+    });
     ui.on_poll_vote(|id, index| {
         let id = id.to_string();
         defer(move |b| b.poll_vote(&id, index));

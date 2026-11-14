@@ -6,6 +6,15 @@ msgstr ""
 
 # Keys are msgid = semantic id (no msgctxt). Plurals: msgid "<id>.one" / msgid_plural "<id>.other".
 
+msgid "card.reply_options"
+msgstr "Reply options"
+
+msgid "card.reply_response"
+msgstr "Selected reply"
+
+msgid "card.reply_unavailable"
+msgstr "No supported reply options. Open this message on your phone."
+
 msgid "accessibility.conversations"
 msgstr "Conversations"
 

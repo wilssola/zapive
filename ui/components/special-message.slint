@@ -8,6 +8,8 @@ export component SpecialMessage inherits Rectangle {
     in property <bool> privacy-hidden;
     callback details();
     callback vote(int);
+    callback reply(int);
+    property <bool> can-reply: message.cardKind == "reply-options" && !message.fromMe && !privacy-hidden;
     property <int> expanded: -1;
     property <bool> interactive-poll: poll && message.poll-options.length > 0;
     property <bool> location: message.cardKind == "location" || message.cardKind == "live-location";
@@ -260,12 +262,31 @@ export component SpecialMessage inherits Rectangle {
                 }
             }
         }
-        for option in root.message.cardOptions: Rectangle {
+        for option[i] in root.message.cardOptions: Rectangle {
             visible: !root.interactive-poll;
             height: root.interactive-poll ? 0px : option-layout.preferred-height;
             border-width: 1px;
             border-color: root.message.fromMe
                 ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
+            reply-touch := TouchArea {
+                enabled: root.can-reply;
+                accessible-role: button;
+                accessible-label: option;
+                accessible-enabled: root.can-reply;
+                accessible-action-default => { root.reply(i); }
+                mouse-cursor: root.can-reply ? pointer : default;
+                clicked => { root.reply(i); }
+                reply-key := KeyFocus {
+                    enabled: root.can-reply;
+                    activate => { root.reply(i); }
+                }
+                FocusRing {
+                    shown: reply-key.has-focus;
+                    width: parent.width;
+                    height: parent.height;
+                    border-radius: 8px;
+                }
+            }
             option-layout := HorizontalLayout {
                 padding: 14px;
                 spacing: 14px;
