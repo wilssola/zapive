@@ -454,6 +454,13 @@ impl EventHandler for Pump {
                     ui_apply(move |b| b.on_contact(&jid, &name));
                 }
             }
+            Event::BusinessStatusUpdate(u) => {
+                let Some(name) = u.verified_name.clone().filter(|n| !n.trim().is_empty()) else {
+                    return;
+                };
+                let jid = u.jid.to_non_ad_string();
+                ui_apply(move |b| b.on_verified_name(&jid, &name));
+            }
             _ => {}
         }
     }

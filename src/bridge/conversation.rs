@@ -482,7 +482,8 @@ impl Bridge {
                             .filter(|c| !c.name.is_empty())
                             .map(|c| &c.name)
                     })
-                    .or_else(|| store.push_names.get(&canon));
+                    .or_else(|| store.push_names.get(&canon))
+                    .or_else(|| store.verified_names.get(&canon));
                 if let Some(name) = name {
                     return MentionTarget {
                         name: Some(clean_text(name)),

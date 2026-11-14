@@ -822,6 +822,11 @@ impl Bridge {
         self.update_typing_status();
         self.schedule_refresh_chats();
     }
+
+    pub fn on_verified_name(&mut self, jid: &str, name: &str) {
+        self.store.record_verified_name(&normalize_jid(jid), name);
+        self.schedule_refresh_chats();
+    }
 }
 
 #[cfg(test)]

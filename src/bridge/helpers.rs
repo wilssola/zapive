@@ -455,6 +455,7 @@ mod tests {
             id: "reply",
             from_me: false,
             push_name: "",
+            verified_name: None,
             timestamp: 1,
         };
         for source in ["source@g.us", "peer@s.whatsapp.net"] {
