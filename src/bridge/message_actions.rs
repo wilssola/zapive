@@ -605,25 +605,28 @@ impl Bridge {
                     self.request_manual_media(id);
                     return;
                 };
-                let Some(path) =
-                    crate::media::temp_plain(&self.media_key, &std::path::PathBuf::from(cached))
-                else {
-                    return;
-                };
-                let name = if m.kind == MessageKind::Doc {
-                    sanitize_file_name(&m.text)
-                } else {
-                    path.file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned()
-                };
-                std::thread::spawn(move || {
-                    if let Some(target) = rfd::FileDialog::new().set_file_name(&name).save_file()
-                        && let Err(e) = std::fs::copy(path, target)
-                    {
-                        ui_apply(move |b| b.message_action_failed(&e.to_string()));
-                    }
+                let is_doc = m.kind == MessageKind::Doc;
+                let doc_name = sanitize_file_name(&m.text);
+                crate::jobs::plain_copy(std::path::PathBuf::from(cached), None, move |_, path| {
+                    let Some(path) = path else {
+                        return;
+                    };
+                    let name = if is_doc {
+                        doc_name
+                    } else {
+                        path.file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned()
+                    };
+                    std::thread::spawn(move || {
+                        if let Some(target) =
+                            rfd::FileDialog::new().set_file_name(&name).save_file()
+                            && let Err(e) = std::fs::copy(path, target)
+                        {
+                            ui_apply(move |b| b.message_action_failed(&e.to_string()));
+                        }
+                    });
                 });
             }
             "pin" => self.wa.send(Cmd::PinMessage {

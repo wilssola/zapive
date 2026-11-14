@@ -27,7 +27,7 @@ pub fn decode_preview(id: String, bytes: Vec<u8>) {
         return;
     };
     rt.spawn(async move {
-        let img = tokio::task::spawn_blocking(move || {
+        let img = crate::media::bounded_blocking(move || {
             let image = image::load_from_memory(&bytes).ok()?.blur(8.0).to_rgba8();
             Some(crate::media::Decoded {
                 w: image.width(),
@@ -35,9 +35,7 @@ pub fn decode_preview(id: String, bytes: Vec<u8>) {
                 rgba: image.into_raw(),
             })
         })
-        .await
-        .ok()
-        .flatten();
+        .await;
         ui_apply(move |b| b.on_media_preview(&id, img));
     });
 }
@@ -79,12 +77,10 @@ pub fn decode_thumb(id: String, bytes: Vec<u8>, link: bool) {
         return;
     };
     rt.spawn(async move {
-        if let Some(img) = tokio::task::spawn_blocking(move || {
+        if let Some(img) = crate::media::bounded_blocking(move || {
             crate::media::decode_bytes(&bytes, crate::media::BUBBLE_PX)
         })
         .await
-        .ok()
-        .flatten()
         {
             crate::bridge::wa_apply_at(epoch, move |b| b.on_thumb(&id, link, img));
         } else if link {
@@ -151,12 +147,10 @@ pub fn zoom_frames(id: String, path: std::path::PathBuf) {
     };
     let key = media_key();
     rt.spawn(async move {
-        let frames = tokio::task::spawn_blocking(move || {
+        let frames = crate::media::bounded_blocking(move || {
             crate::media::temp_plain(&key, &path).map(|p| crate::video::frames(&p, 720, 15.0, 90))
         })
         .await
-        .ok()
-        .flatten()
         .unwrap_or_default();
         if !frames.is_empty() {
             ui_apply(move |b| b.on_zoom_frames(&id, frames));
@@ -188,6 +182,36 @@ pub fn apply_update() {
             .await
             .unwrap_or_else(|e| Err(e.to_string()));
         crate::bridge::ui_apply(move |b| b.on_update_applied(result));
+    });
+}
+
+// Decrypts a cached file into its temp copy off the UI thread, then runs
+// `done` on the UI thread with the path (None when it cannot be decrypted).
+// With `name`, the copy gets a sibling with that file name, which is what the
+// opener or the save dialog shows.
+pub fn plain_copy(
+    cached: std::path::PathBuf,
+    name: Option<String>,
+    done: impl FnOnce(&mut crate::bridge::Bridge, Option<std::path::PathBuf>) + Send + 'static,
+) {
+    let Some(rt) = crate::RT.get().map(|rt| rt.handle()) else {
+        return;
+    };
+    let key = media_key();
+    rt.spawn(async move {
+        let plain = crate::media::bounded_blocking(move || {
+            let plain = crate::media::temp_plain(&key, &cached)?;
+            let Some(name) = name else {
+                return Some(plain);
+            };
+            let named = plain.with_file_name(name);
+            if !named.exists() {
+                std::fs::copy(&plain, &named).ok()?;
+            }
+            Some(named)
+        })
+        .await;
+        ui_apply(move |b| done(b, plain));
     });
 }
 
@@ -247,13 +271,11 @@ pub fn decode_full(id: String, path: std::path::PathBuf) {
     };
     let key = media_key();
     rt.spawn(async move {
-        let img = tokio::task::spawn_blocking(move || {
+        let img = crate::media::bounded_blocking(move || {
             crate::media::read_cached(&key, &path)
                 .and_then(|d| crate::media::decode_bytes(&d, crate::media::FULL_PX))
         })
-        .await
-        .ok()
-        .flatten();
+        .await;
         if let Some(img) = img {
             ui_apply(move |b| b.on_full_image(&id, img));
         }

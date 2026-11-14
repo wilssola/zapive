@@ -463,24 +463,40 @@ impl Bridge {
         let epoch = self.epoch;
         self.preview_busy = true;
         self.ui.set_preview_busy(true);
-        std::thread::spawn(move || {
-            let image = std::fs::read(&path)
+        let shown = path.clone();
+        let finish = move |b: &mut Bridge, image: Option<crate::media::Decoded>| {
+            if b.preview_generation != generation
+                || b.epoch != epoch
+                || b.current_jid != b.preview_jid
+            {
+                return;
+            }
+            b.preview_busy = false;
+            b.ui.set_preview_busy(false);
+            if let Some(image) = image {
+                b.on_preview_ready(&shown, image);
+            }
+        };
+        let decode_path = path;
+        let decode = move || {
+            std::fs::read(&decode_path)
                 .ok()
-                .and_then(|bytes| crate::media::decode_bytes(&bytes, 1280));
-            ui_apply(move |b| {
-                if b.preview_generation != generation
-                    || b.epoch != epoch
-                    || b.current_jid != b.preview_jid
-                {
-                    return;
-                }
-                b.preview_busy = false;
-                b.ui.set_preview_busy(false);
-                if let Some(image) = image {
-                    b.on_preview_ready(&path, image);
-                }
-            });
-        });
+                .and_then(|bytes| crate::media::decode_bytes(&bytes, 1280))
+        };
+        match crate::RT.get() {
+            Some(rt) => {
+                rt.handle().spawn(async move {
+                    let image = crate::media::bounded_blocking(decode).await;
+                    ui_apply(move |b| finish(b, image));
+                });
+            }
+            None => {
+                std::thread::spawn(move || {
+                    let image = decode();
+                    ui_apply(move |b| finish(b, image));
+                });
+            }
+        }
     }
 
     pub fn on_preview_ready(&mut self, path: &std::path::Path, img: crate::media::Decoded) {
