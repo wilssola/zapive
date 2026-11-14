@@ -1,0 +1,17 @@
+# OSV-Scanner configuration for this lockfile. The scanner reads the config
+# that sits next to each Cargo.lock, so the root osv-scanner.toml does not
+# cover it. Keep these entries in sync with the root file.
+#
+# Both are "unmaintained crate" advisories with no known vulnerability and no
+# fixed release. This crate is a test harness that is never shipped, and both
+# come in through the pinned Slint revision.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0141"
+ignoreUntil = 2027-02-06
+reason = "bincode 2.0.1 unmaintained advisory; build-time only via slint-build/i-slint-compiler, in a test harness that is not shipped; no fixed release"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0441"
+ignoreUntil = 2027-02-06
+reason = "pin-utils 0.1.0 unmaintained advisory (repository archived); pulled by spin_on via slint-macros, in a test harness that is not shipped; no known vulnerability, no fixed release"
