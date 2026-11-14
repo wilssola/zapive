@@ -207,7 +207,7 @@ impl SearchIndex {
         self.reset_at(vault, &crate::paths::search_index_path(&vault.account()));
     }
 
-    fn open_at(&mut self, vault: &Vault, path: &Path) {
+    pub(crate) fn open_at(&mut self, vault: &Vault, path: &Path) {
         if self.db.is_some() {
             return;
         }
@@ -283,6 +283,41 @@ impl SearchIndex {
         let ok = insert_entry(&tx, &key, &index_key, jid, &entry);
         if ok.is_ok() {
             let _ = tx.commit();
+        }
+    }
+
+    // Indexes a page of messages in one transaction. Same rows as calling
+    // `add` per message, without a commit (and fsync) for each one.
+    pub fn add_all(&mut self, jid: &str, messages: &[StoredMessage]) {
+        let Some(index_key) = self.key.derive(INDEX_KEY_LABEL) else {
+            return;
+        };
+        let key = self.key.clone();
+        let entries: Vec<Entry> = messages.iter().filter_map(entry_of).collect();
+        if entries.is_empty() {
+            return;
+        }
+        let Some(db) = self.db.as_mut() else { return };
+        let tx = match db.transaction() {
+            Ok(tx) => tx,
+            Err(e) => {
+                eprintln!("[search] add_all {jid}: begin failed: {e}");
+                return;
+            }
+        };
+        let res = (|| -> rusqlite::Result<()> {
+            for e in &entries {
+                insert_entry(&tx, &key, &index_key, jid, e)?;
+            }
+            Ok(())
+        })();
+        match res {
+            Ok(()) => {
+                if let Err(e) = tx.commit() {
+                    eprintln!("[search] add_all {jid}: commit failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("[search] add_all {jid}: insert failed: {e}"),
         }
     }
 
@@ -618,6 +653,37 @@ mod tests {
         assert_eq!(t.index.search("replacement", None, 10).len(), 1);
         t.index.open_at(&t._vault, &t.search_path);
         assert_eq!(t.index.search("needle", None, 1000).len(), 649);
+    }
+
+    #[test]
+    fn add_all_indexes_the_page_like_per_message_adds() {
+        let page: Vec<StoredMessage> = (1..=50)
+            .map(|n| msg(&n.to_string(), n, &format!("reuniao numero {n}")))
+            .collect();
+        let mut batched = test_index();
+        batched.index.add_all("a@g.us", &page);
+        let mut single = test_index();
+        for m in &page {
+            single.index.add("a@g.us", m);
+        }
+        let ids = |t: &TestIndex| {
+            t.index
+                .search("reuniao", None, 1000)
+                .into_iter()
+                .map(|h| h.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&batched), ids(&single));
+        assert_eq!(ids(&batched).len(), 50);
+    }
+
+    #[test]
+    fn add_all_is_idempotent_for_already_indexed_messages() {
+        let mut t = test_index();
+        let page = vec![msg("1", 10, "reuniao"), msg("2", 20, "reuniao")];
+        t.index.add_all("a@g.us", &page);
+        t.index.add_all("a@g.us", &page);
+        assert_eq!(t.index.search("reuniao", None, 10).len(), 2);
     }
 
     #[test]
