@@ -221,19 +221,29 @@ fn capture(
     preview: impl Fn(Decoded),
     ready: std::sync::mpsc::Sender<bool>,
 ) {
-    let wanted =
-        RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
-            Resolution::new(CAPTURE_W, CAPTURE_H),
-            FrameFormat::NV12,
-            FPS,
-        )));
-    let mut camera = match nokhwa::Camera::new(index, wanted) {
-        Ok(camera) => camera,
-        Err(e) => {
-            log::error!("[camera] cannot open: {e}");
-            let _ = ready.send(false);
-            return;
+    // nokhwa's Closest never crosses frame formats, and Linux (V4L2) webcams
+    // usually offer only YUYV and MJPEG, so fall back through the formats
+    // to_rgb converts instead of failing on the first one.
+    let mut opened = None;
+    let mut last_error = None;
+    for format in [FrameFormat::NV12, FrameFormat::YUYV, FrameFormat::MJPEG] {
+        let wanted = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
+            CameraFormat::new(Resolution::new(CAPTURE_W, CAPTURE_H), format, FPS),
+        ));
+        match nokhwa::Camera::new(index.clone(), wanted) {
+            Ok(camera) => {
+                opened = Some(camera);
+                break;
+            }
+            Err(e) => last_error = Some(e),
         }
+    }
+    let Some(mut camera) = opened else {
+        if let Some(e) = last_error {
+            log::error!("[camera] cannot open: {e}");
+        }
+        let _ = ready.send(false);
+        return;
     };
     if let Err(e) = camera.open_stream() {
         log::error!("[camera] cannot start the stream: {e}");
