@@ -1,0 +1,8 @@
+# cargo-audit configuration. Keep each entry in sync with osv-scanner.toml.
+[advisories]
+ignore = [
+    # SQLite < 3.54.0 uninitialized-memory read via a crafted db + -wal pair
+    # (local only). The fix needs libsqlite3-sys >= 0.39, but
+    # whatsapp-rust-sqlite-storage pins ^0.38. Re-review by 2026-12-31.
+    "RUSTSEC-2026-0459",
+]
