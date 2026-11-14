@@ -68,7 +68,7 @@ hmac = "0.12"
 sha2 = "0.10"
 rand = "0.9"
 zeroize = "1"
-base64 = "0.22"
+base64 = "0.23"
 # whatsapp-rust reports through `log`; without a logger installed its
 # call diagnostics are dropped on the floor.
 log = "0.4"
