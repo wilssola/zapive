@@ -160,6 +160,7 @@ pub enum Cmd {
         message: Arc<wa::Message>,
     },
     PrepareAttachment(crate::outbox::Preparation),
+    SyncNewsletters,
     FetchHistory {
         jid: String,
         oldest_id: String,

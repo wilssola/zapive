@@ -166,6 +166,50 @@ impl Bridge {
         self.schedule_refresh_chats();
     }
 
+    pub fn on_newsletters(&mut self, channels: &[(String, String)]) {
+        for (jid, name) in channels {
+            self.store.upsert_chat(jid, Some(name), 0, None, None, None);
+            if !name.is_empty() {
+                self.store.set_name(jid, name);
+            }
+        }
+        self.schedule_refresh_chats();
+    }
+
+    pub fn on_newsletter_history(
+        &mut self,
+        jid: &str,
+        messages: Option<Vec<whatsapp_rust::waproto::whatsapp::WebMessageInfo>>,
+        requested: bool,
+    ) {
+        let mut added = false;
+        for web in messages.iter().flatten() {
+            if let Some(stored) = crate::wa_map::from_history(&mut self.store, web) {
+                if let Some(vault) = &self.vault {
+                    self.store.hydrate_id(vault, jid, &stored.id);
+                }
+                added |= self.store.add_message(stored);
+            }
+        }
+        if added && self.current_jid.as_deref() == Some(jid) {
+            if requested && self.scroll_up_fetch {
+                self.prepend_older_rows(jid);
+            } else {
+                self.rebuild_conversation(jid);
+                if self.ui.get_stick_bottom() {
+                    self.scroll_to_end();
+                }
+            }
+            self.load_media_for_chat(jid);
+            self.queue_row_avatars(jid);
+        }
+        if requested {
+            self.scroll_up_fetch = false;
+            self.set_pending(false);
+        }
+        self.schedule_refresh_chats();
+    }
+
     pub fn on_history_chunk(&mut self, chunk: HistoryChunk) {
         for (jid, name) in &chunk.pushnames {
             self.store.upsert_contact(jid, None, Some(name));

@@ -241,7 +241,15 @@ impl Bridge {
         self.sync_mini_player();
         // Thin conversation: ask the phone for this chat's older messages.
         let list = self.store.messages_for(jid);
-        if list.len() < 20
+        if is_channel(jid) && list.len() < 20 && !self.history_pending {
+            self.set_pending(true);
+            self.wa.send(Cmd::FetchHistory {
+                jid: jid.to_string(),
+                oldest_id: String::new(),
+                from_me: false,
+                ts_ms: 0,
+            });
+        } else if list.len() < 20
             && !self.history_pending
             && let Some(first) = list.first().filter(|m| m.raw.is_some())
         {

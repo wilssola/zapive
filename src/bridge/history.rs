@@ -265,7 +265,19 @@ impl Bridge {
                 self.store.hydrate(vault, &jid);
             }
         }
-        let Some(anchor) = self.store.oldest_message() else {
+        let Some(anchor) = self
+            .store
+            .oldest_message()
+            .filter(|m| !is_channel(&m.jid))
+            .or_else(|| {
+                self.store
+                    .messages
+                    .values()
+                    .flatten()
+                    .filter(|m| !is_channel(&m.jid) && m.timestamp > 0 && m.raw.is_some())
+                    .min_by_key(|m| m.timestamp)
+            })
+        else {
             // No message to anchor on yet (fresh pairing) — retry once
             // messages start flowing in.
             println!("[history] no anchor yet; retrying in 30s");
@@ -321,7 +333,7 @@ impl Bridge {
         let Some(first) = list.first().filter(|m| m.raw.is_some()) else {
             return;
         };
-        if list.len() < 5 {
+        if list.len() < 5 && !is_channel(&jid) {
             return;
         }
         let (id, from_me, ts) = (first.id.clone(), first.from_me, first.timestamp);

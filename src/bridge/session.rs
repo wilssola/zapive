@@ -210,6 +210,7 @@ impl Bridge {
             self.begin_initial_sync();
         }
         self.registered = true;
+        self.wa.send(Cmd::SyncNewsletters);
         self.catchup_connected();
         self.store.set_self(&[pn, lid]);
         // A LID-primary session may carry no phone jid at all; our own

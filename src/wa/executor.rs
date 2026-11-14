@@ -2,6 +2,7 @@
 use super::*;
 
 // What every command handler may need from the loop.
+#[derive(Clone)]
 pub(super) struct Ctx {
     pub(super) client: Arc<Client>,
     // The epoch the command was received under; see SESSION_EPOCH.
@@ -9,6 +10,7 @@ pub(super) struct Ctx {
     pub(super) media_key: crate::vault::KeyHandle,
     pub(super) media_sem: Arc<tokio::sync::Semaphore>,
     pub(super) avatar_sem: Arc<tokio::sync::Semaphore>,
+    pub(super) newsletters: Arc<tokio::sync::Mutex<chats::NewsletterHistory>>,
 }
 
 pub(super) async fn executor(
@@ -17,6 +19,7 @@ pub(super) async fn executor(
     cmd_tx: mpsc::UnboundedSender<Cmd>,
 ) {
     let mut media_key = crate::vault::KeyHandle::default();
+    let newsletters = Arc::new(tokio::sync::Mutex::new(chats::NewsletterHistory::default()));
     let media_sem = Arc::new(tokio::sync::Semaphore::new(3));
     let avatar_sem = Arc::new(tokio::sync::Semaphore::new(8));
     while let Some(cmd) = cmd_rx.recv().await {
@@ -30,6 +33,7 @@ pub(super) async fn executor(
             media_key: media_key.clone(),
             media_sem: media_sem.clone(),
             avatar_sem: avatar_sem.clone(),
+            newsletters: newsletters.clone(),
         };
         match cmd {
             cmd @ (Cmd::PrepareAttachment { .. }
@@ -64,7 +68,8 @@ pub(super) async fn executor(
             | Cmd::StatusPoster { .. }
             | Cmd::AvatarLarge { .. }
             | Cmd::SubscribePresence { .. }) => profile::run(&ctx, cmd).await,
-            cmd @ (Cmd::Archive { .. }
+            cmd @ (Cmd::SyncNewsletters
+            | Cmd::Archive { .. }
             | Cmd::PinChat { .. }
             | Cmd::Mute { .. }
             | Cmd::Unmute { .. }
