@@ -1035,7 +1035,6 @@ impl Store {
         list.push(stored);
         list.sort_by_key(|m| m.timestamp);
         self.dirty_jids.insert(jid.clone());
-        self.search.add(&jid, &preview_msg);
 
         let existing = self.chats.get(&jid);
         if existing.map(|e| timestamp >= e.timestamp).unwrap_or(true) {
@@ -1954,12 +1953,19 @@ impl Store {
         let clears: Vec<String> = self.deleted_jids.iter().cloned().collect();
         let removals: Vec<(String, String)> = self.pending_removals.iter().cloned().collect();
         vault.history_commit(&messages, &clears, &removals, &self.pending_merges)?;
-        for message in &messages {
+        let mut live_by_jid: HashMap<String, Vec<StoredMessage>> = HashMap::new();
+        for message in messages {
             if message.deleted {
                 self.search.remove(&message.jid, &message.id);
             } else {
-                self.search.add(&message.jid, message);
+                live_by_jid
+                    .entry(message.jid.clone())
+                    .or_default()
+                    .push(message);
             }
+        }
+        for (jid, live) in &live_by_jid {
+            self.search.add_all(jid, live);
         }
         for (from, into) in std::mem::take(&mut self.pending_merges) {
             self.search.remove_chat(&from);
@@ -2055,14 +2061,12 @@ impl Store {
             ) else {
                 return;
             };
-            for message in &page {
-                if !self
-                    .pending_removals
-                    .contains(&(jid.clone(), message.id.clone()))
-                {
-                    self.search.add(&jid, message);
-                }
-            }
+            let live: Vec<StoredMessage> = page
+                .iter()
+                .filter(|m| !self.pending_removals.contains(&(jid.clone(), m.id.clone())))
+                .cloned()
+                .collect();
+            self.search.add_all(&jid, &live);
             if page.len() < 100 {
                 break;
             }
@@ -2634,6 +2638,36 @@ mod tests {
             }
             crate::paths::remove_db(&path);
         }
+    }
+
+    #[test]
+    fn flush_history_indexes_each_live_message_once_per_chat() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_flush_index_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        let search_path =
+            std::env::temp_dir().join(format!("zapive_flush_search_{}.db", std::process::id()));
+        crate::paths::remove_db(&search_path);
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut store = Store::default();
+        store.search.open_at(&vault, &search_path);
+        let jid = "5511999990000@s.whatsapp.net";
+        let other = "5511999990001@s.whatsapp.net";
+        for n in 1..=40 {
+            let mut m = history_message(jid, n);
+            m.text = format!("reuniao {n}");
+            assert!(store.add_message(m));
+        }
+        assert!(store.add_message(history_message(other, 5)));
+        assert!(store.search.search("reuniao", None, 1000).is_empty());
+        store.save_checked(&vault).unwrap();
+        assert_eq!(store.search.search("reuniao", Some(jid), 1000).len(), 40);
+        assert_eq!(store.search.search("history", Some(other), 1000).len(), 1);
+        store.save_checked(&vault).unwrap();
+        assert_eq!(store.search.search("reuniao", Some(jid), 1000).len(), 40);
+        crate::paths::remove_db(&path);
+        crate::paths::remove_db(&search_path);
     }
 
     #[test]
