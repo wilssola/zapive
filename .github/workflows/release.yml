@@ -116,13 +116,25 @@ jobs:
           - os: windows-latest
             target: windows-x86_64
             bin: zapive.exe
-          - os: ubuntu-latest
+          # Linux builds inside an Ubuntu 22.04 container (glibc 2.35) on a
+          # current runner: a binary links against the glibc it was built
+          # with and only runs on that version or newer, so building on
+          # ubuntu-latest (glibc 2.43 on Ubuntu 26.04) produced AppImages
+          # and updater zips that refused to start on 22.04/24.04 LTS
+          # (issue #65). The container, unlike the ubuntu-22.04 runner
+          # label, is not scheduled for retirement. Pinned by digest like
+          # the actions; bump it deliberately, never to a newer release
+          # than the oldest distribution we want to run on.
+          - os: ubuntu-24.04
             target: linux-x86_64
             bin: zapive
+            container: ubuntu:22.04@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c
+            cache-key: glibc-2.35
           - os: macos-latest
             target: macos-aarch64
             bin: zapive
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     permissions:
       contents: read
     env:
@@ -141,14 +153,22 @@ jobs:
     steps:
       # The tag points at the version-bump commit the version job pushed,
       # so the build compiles exactly what the tag says.
+      # The bare Ubuntu container ships none of the tools the hosted runner
+      # image has: git and curl (checkout, Rust installer, appimagetool
+      # download), zip and zstd (updater payload, rust-cache), file
+      # (appimagetool refuses to run without it), nasm (OpenH264 falls back
+      # to slow C code without it), libclang-dev (bindgen) and the C/C++
+      # toolchain. The step runs as root, so no sudo.
+      - name: Desktop libraries (Linux)
+        if: runner.os == 'Linux'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git zip zstd file nasm pkg-config libclang-dev libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils cmake build-essential
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.version.outputs.tag }}
-      - name: Desktop libraries (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgtk-3-dev libxdo-dev desktop-file-utils cmake build-essential
       # Outside Windows ct2rs compiles CTranslate2 and SentencePiece from
       # source (SentencePiece also on Windows): CMake and a C++17 toolchain.
       - name: CMake (macOS)
@@ -163,7 +183,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: release
+          # rust-cache ignores its `key` input whenever `shared-key` is set,
+          # so the glibc baseline has to be part of the shared key itself:
+          # compiled C/C++ dependencies cached from another glibc would
+          # carry its symbol versions into the Linux binary. The runner OS
+          # and arch are appended by the action. Change cache-key together
+          # with the container.
+          shared-key: release${{ matrix.cache-key && format('-{0}', matrix.cache-key) || '' }}
       # Thin LTO over 16 codegen units builds several times faster than the
       # local fat-LTO/1-unit profile, for a slightly larger binary.
       - name: Build
@@ -172,6 +198,13 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: thin
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
         run: cargo build --release --locked
+
+      # Fails the release if the binary needs a newer glibc or libstdc++
+      # than Ubuntu 22.04 provides (the baseline of the Linux build
+      # container), which would stop it from starting on LTS distributions.
+      - name: Check glibc baseline (Linux)
+        if: runner.os == 'Linux'
+        run: bash packaging/linux/check-glibc.sh target/release/zapive
 
       # ---- Windows: sign, then wrap the exe in an installer that creates
       # ---- the Start Menu (and optional Desktop) shortcuts.

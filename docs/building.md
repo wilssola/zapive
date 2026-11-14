@@ -92,6 +92,27 @@ Done by `.github/workflows/release.yml` on every push to `master`; see
 | all | `zapive-<target>.zip` (`windows-x86_64`, `linux-x86_64`, `macos-aarch64`) | Payload for the in-app updater; the names are load-bearing |
 | Linux | Flatpak (`io.github.wilssola.Zapive`) | `packaging/flatpak/` and the manual `flatpak` workflow; prepared, not published |
 
+### Linux glibc baseline
+
+A Linux binary only runs on the glibc it was built against or newer, so the
+release build runs inside an `ubuntu:22.04` container (glibc 2.35) on the
+`ubuntu-24.04` runner. The AppImage and the `zapive-linux-x86_64.zip`
+updater payload therefore start on Ubuntu 22.04 and 24.04 LTS and anything
+newer. After building, `packaging/linux/check-glibc.sh target/release/zapive`
+fails the job if the binary needs a glibc above 2.35 or a libstdc++ above
+`GLIBCXX_3.4.30`. Raising the baseline means changing the container, the
+script defaults and this paragraph together, and change the matrix
+`cache-key` (it is part of the `rust-cache` `shared-key`, so objects
+compiled against another glibc are never restored).
+
+The bare container has none of the hosted runner's preinstalled tools, so the
+workflow's `apt` list is the Linux build dependency list: the libraries in the
+table above plus `git`, `curl`, `zip`, `zstd`, `file` and `nasm` (needed by the
+checkout, rust-cache and `appimagetool`, and to keep OpenH264 on its
+assembly path), `pkg-config`, `libclang-dev` (bindgen) and
+`desktop-file-utils`. `make-appimage.sh` runs `appimagetool` with
+`--appimage-extract-and-run`, so the container needs no FUSE.
+
 ## Disk space tip
 
 Debug builds use `debug = "line-tables-only"` because full debuginfo grew
