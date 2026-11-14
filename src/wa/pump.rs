@@ -43,6 +43,18 @@ impl EventHandler for Pump {
             Event::PairSuccess(_) => {
                 ui_apply(|b| b.on_status(&t("status.connecting")));
             }
+            Event::PairingCodeError(e) => {
+                eprintln!("[wa] pair code request failed: {}", e.error);
+                let key = pairing_code_error_key(e.rejection);
+                ui_apply(move |b| b.on_pairing_failed_with(key));
+            }
+            Event::PairingQrCodesExhausted(_) => {
+                ui_apply(|b| b.on_status(&t("pairing.qr_expired")));
+            }
+            Event::ClientOutdated(_) => {
+                eprintln!("[wa] client outdated, rejected by server");
+                ui_apply(|b| b.on_status(&t("pairing.outdated")));
+            }
             Event::Connected(_) => {
                 log::info!("[wa] connected ts={}", crate::store::now_secs());
                 self.failures.store(0, Ordering::Relaxed);
@@ -466,6 +478,20 @@ impl EventHandler for Pump {
     }
 }
 
+// The message id to show when a pair-code request is refused. A missing
+// rejection means the request never reached a verdict (local validation,
+// no connection, timeout), which the generic message already covers.
+pub(super) fn pairing_code_error_key(
+    rejection: Option<whatsapp_rust::pair_code::PairCodeRejection>,
+) -> &'static str {
+    use whatsapp_rust::pair_code::PairCodeRejection as R;
+    match rejection {
+        Some(R::RateOverlimit | R::BadRequest) => "pairing.throttled",
+        Some(R::FeatureNotAvailable) => "pairing.unavailable",
+        _ => "pairing.failed",
+    }
+}
+
 // Pin order for a chat: the time it was pinned, never 0 while pinned. The
 // sync action carries no usable timestamp on some pins (it decodes to the
 // epoch), and 0 means "not pinned" everywhere else.
@@ -566,6 +592,25 @@ mod receipt_tests {
         assert_eq!(pin_stamp(true, -5), 1);
         assert_eq!(pin_stamp(true, 1_700_000_000), 1_700_000_000);
         assert_eq!(pin_stamp(false, 1_700_000_000), 0);
+    }
+
+    #[test]
+    fn a_refused_pair_code_names_its_reason() {
+        use whatsapp_rust::pair_code::PairCodeRejection as R;
+        assert_eq!(
+            pairing_code_error_key(Some(R::RateOverlimit)),
+            "pairing.throttled"
+        );
+        assert_eq!(
+            pairing_code_error_key(Some(R::BadRequest)),
+            "pairing.throttled"
+        );
+        assert_eq!(
+            pairing_code_error_key(Some(R::FeatureNotAvailable)),
+            "pairing.unavailable"
+        );
+        assert_eq!(pairing_code_error_key(Some(R::Forbidden)), "pairing.failed");
+        assert_eq!(pairing_code_error_key(None), "pairing.failed");
     }
 
     #[test]
