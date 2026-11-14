@@ -1035,6 +1035,18 @@ msgstr "Use WhatsApp on your phone to scan the QR code"
 msgid "pairing.failed"
 msgstr "Failed to generate pairing code"
 
+msgid "pairing.throttled"
+msgstr "Too many attempts for this number. Wait a few minutes and try again."
+
+msgid "pairing.unavailable"
+msgstr "Linking with a phone number is not available for this account. Use the QR code instead."
+
+msgid "pairing.qr_expired"
+msgstr "The QR code expired before it was scanned. Restart Zapive to get a new one."
+
+msgid "pairing.outdated"
+msgstr "This version of Zapive is too old for WhatsApp. Update Zapive and try again."
+
 msgid "status.connected"
 msgstr "Connected"
 

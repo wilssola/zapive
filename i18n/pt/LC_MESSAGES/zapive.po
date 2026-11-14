@@ -1035,6 +1035,18 @@ msgstr "Use o WhatsApp no seu celular para escanear o código QR"
 msgid "pairing.failed"
 msgstr "Falha ao gerar código de emparelhamento"
 
+msgid "pairing.throttled"
+msgstr "Muitas tentativas para este número. Aguarde alguns minutos e tente de novo."
+
+msgid "pairing.unavailable"
+msgstr "A vinculação por número de telefone não está disponível para esta conta. Use o código QR."
+
+msgid "pairing.qr_expired"
+msgstr "O código QR expirou antes de ser lido. Reinicie o Zapive para gerar um novo."
+
+msgid "pairing.outdated"
+msgstr "Esta versão do Zapive está desatualizada para o WhatsApp. Atualize o Zapive e tente de novo."
+
 msgid "status.connected"
 msgstr "Conectado"
 

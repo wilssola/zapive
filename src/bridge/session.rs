@@ -182,7 +182,13 @@ impl Bridge {
     }
 
     pub fn on_pairing_failed(&mut self) {
-        self.ui.set_pairing_code(t("pairing.failed").into());
+        self.on_pairing_failed_with("pairing.failed");
+    }
+
+    // Shows why linking failed, on the login screen. `key` is a message id.
+    pub fn on_pairing_failed_with(&mut self, key: &str) {
+        self.finish_loading();
+        self.ui.set_pairing_code(t(key).into());
     }
 
     pub fn on_status(&mut self, text: &str) {
