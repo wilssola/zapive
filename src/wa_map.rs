@@ -548,6 +548,8 @@ pub struct LiveMeta<'a> {
     pub id: &'a str,
     pub from_me: bool,
     pub push_name: &'a str,
+    // Business name the server verified for the sender, if any.
+    pub verified_name: Option<&'a str>,
     pub timestamp: i64,
 }
 
@@ -562,6 +564,10 @@ pub fn from_live(store: &mut Store, inbound: &InboundMessage) -> Option<StoredMe
         id: &info.id,
         from_me: src.is_from_me,
         push_name: &info.push_name,
+        verified_name: info
+            .verified_name
+            .as_deref()
+            .and_then(|vn| vn.name.as_deref()),
         timestamp: info.timestamp.timestamp(),
     };
     normalize(store, &meta, &inbound.message, &HashMap::new(), 0)
@@ -863,6 +869,7 @@ pub fn from_history(store: &mut Store, web: &wa::WebMessageInfo) -> Option<Store
         id: key.id.as_deref()?,
         from_me,
         push_name: web.push_name.as_deref().unwrap_or(""),
+        verified_name: None,
         timestamp: web.message_timestamp.unwrap_or(0) as i64,
     };
     normalize(store, &meta, web.message.as_option()?, &reactions, status)
@@ -898,6 +905,11 @@ pub fn normalize(
             .push_names
             .insert(sender_jid.clone(), meta.push_name.to_string());
     }
+    if !meta.from_me
+        && let Some(verified) = meta.verified_name
+    {
+        store.record_verified_name(&sender_jid, verified);
+    }
     let sender = if meta.from_me {
         String::new()
     } else {
@@ -913,6 +925,7 @@ pub fn normalize(
                         .map(|c| &c.name)
                 })
                 .or_else(|| store.push_names.get(&sender_jid))
+                .or_else(|| store.verified_names.get(&sender_jid))
                 .cloned()
                 .unwrap_or_else(|| display_id(&sender_jid))
                 .as_str(),
@@ -1191,12 +1204,59 @@ mod tests {
                 id: "m1",
                 from_me: false,
                 push_name: "Alice",
+                verified_name: None,
                 timestamp: 1234,
             },
             &message,
             &HashMap::new(),
             5,
         )
+    }
+
+    #[test]
+    fn live_verified_name_is_recorded_and_never_replaces_a_contact() {
+        let message = wa::Message {
+            conversation: Some("oi".into()),
+            ..Default::default()
+        };
+        let live = |verified: Option<&'static str>| LiveMeta {
+            chat: "5511900000000@s.whatsapp.net".into(),
+            sender: "5511900000000@s.whatsapp.net".into(),
+            sender_alt: None,
+            recipient_alt: None,
+            id: "m2",
+            from_me: false,
+            push_name: "",
+            verified_name: verified,
+            timestamp: 1234,
+        };
+
+        let mut store = Store::default();
+        let m = normalize(
+            &mut store,
+            &live(Some("Mercado Livre")),
+            &message,
+            &HashMap::new(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(m.sender, "Mercado Livre");
+        assert_eq!(
+            store.verified_names["5511900000000@s.whatsapp.net"],
+            "Mercado Livre"
+        );
+
+        let mut saved = Store::default();
+        saved.upsert_contact("5511900000000@s.whatsapp.net", Some("Mãe"), None);
+        let m = normalize(
+            &mut saved,
+            &live(Some("Mercado Livre")),
+            &message,
+            &HashMap::new(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(m.sender, "Mãe");
     }
 
     #[test]

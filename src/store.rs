@@ -674,6 +674,8 @@ pub struct Store {
     pub contacts: HashMap<String, String>,
     // Names announced in messages.
     pub push_names: HashMap<String, String>,
+    // Verified business names (official accounts), used after push names.
+    pub verified_names: HashMap<String, String>,
     // @lid jid -> phone-number jid.
     pub aliases: HashMap<String, String>,
     // Stars can arrive before the message does.
@@ -809,6 +811,11 @@ impl Store {
         {
             self.push_names.insert(into.to_string(), push);
         }
+        if let Some(verified) = self.verified_names.get(from).cloned()
+            && !self.verified_names.contains_key(into)
+        {
+            self.verified_names.insert(into.to_string(), verified);
+        }
         if self.saved_contacts.remove(from) {
             self.saved_contacts.insert(into.to_string());
         }
@@ -836,7 +843,23 @@ impl Store {
                 return clean_text(push);
             }
         }
+        for key in keys {
+            if let Some(verified) = self.verified_names.get(key) {
+                return clean_text(verified);
+            }
+        }
         display_id(canon)
+    }
+
+    // Records a business name the server verified for `jid`. It only fills
+    // the gap below saved contacts and push names; see `chat_name`.
+    pub fn record_verified_name(&mut self, jid: &str, name: &str) {
+        let name = clean_text(name);
+        if name.trim().is_empty() {
+            return;
+        }
+        let jid = self.canon_owned(jid);
+        self.verified_names.insert(jid, name);
     }
 
     // Turns "@5511999999999" into "@Name" wherever we know who it is, so
@@ -868,7 +891,8 @@ impl Store {
                                     .filter(|c| !c.name.is_empty())
                                     .map(|c| &c.name)
                             })
-                            .or_else(|| self.push_names.get(jid));
+                            .or_else(|| self.push_names.get(jid))
+                            .or_else(|| self.verified_names.get(jid));
                         if let Some(name) = name {
                             out.push('@');
                             out.push_str(&clean_text(name));
@@ -1988,6 +2012,7 @@ impl Store {
         vault.set_checked("store:drafts", &to_json(&self.drafts))?;
         vault.set_checked("store:contacts", &to_json(&self.contacts))?;
         vault.set_checked("store:pushnames", &to_json(&self.push_names))?;
+        vault.set_checked("store:verified", &to_json(&self.verified_names))?;
         vault.set_checked("store:saved", &to_json(&self.saved_contacts))?;
         vault.set_checked("store:aliases", &to_json(&self.aliases))?;
         if self.starred_dirty {
@@ -2086,6 +2111,9 @@ impl Store {
         }
         if let Some(v) = read(vault, "store:pushnames") {
             self.push_names = v;
+        }
+        if let Some(v) = read(vault, "store:verified") {
+            self.verified_names = v;
         }
         if let Some(v) = read(vault, "store:saved") {
             self.saved_contacts = v;
@@ -2494,11 +2522,101 @@ mod tests {
     }
 
     #[test]
+    fn chat_name_prefers_saved_contact_then_push_then_verified_then_number() {
+        let jid = "5511900000000@s.whatsapp.net";
+        let mut store = Store::default();
+        assert_eq!(store.chat_name(jid), "+5511900000000");
+
+        store.record_verified_name(jid, "Mercado Livre");
+        assert_eq!(store.chat_name(jid), "Mercado Livre");
+
+        store.push_names.insert(jid.into(), "Loja Push".into());
+        assert_eq!(store.chat_name(jid), "Loja Push");
+
+        store.upsert_contact(jid, Some("Minha Loja"), None);
+        assert_eq!(store.chat_name(jid), "Minha Loja");
+    }
+
+    #[test]
+    fn verified_name_never_overrides_a_saved_contact_name() {
+        let jid = "5511900000000@s.whatsapp.net";
+        let mut store = Store::default();
+        store.upsert_contact(jid, Some("Mãe"), None);
+        store.record_verified_name(jid, "Instagram");
+        assert_eq!(store.chat_name(jid), "Mãe");
+        assert_eq!(store.verified_names[jid], "Instagram");
+    }
+
+    #[test]
+    fn verified_name_is_cleaned_and_blank_names_are_ignored() {
+        let mut store = Store::default();
+        store.record_verified_name("1@s.whatsapp.net", "   ");
+        assert!(store.verified_names.is_empty());
+        store.record_verified_name("1@s.whatsapp.net", "Loja\u{FE0F}");
+        assert_eq!(store.verified_names["1@s.whatsapp.net"], "Loja");
+    }
+
+    #[test]
+    fn verified_name_follows_a_lid_alias_to_the_phone_chat() {
+        let phone = "5511900000000@s.whatsapp.net";
+        let mut store = Store::default();
+        store.learn_alias("111@lid", phone);
+        store.record_verified_name("111@lid", "Instagram");
+        assert_eq!(store.verified_names[phone], "Instagram");
+        assert_eq!(store.chat_name("111@lid"), "Instagram");
+    }
+
+    #[test]
     fn contact_name_for_a_lid_shows_under_its_phone_number_alias() {
         let mut store = Store::default();
         store.learn_alias("111@lid", "5511900000000@s.whatsapp.net");
         store.upsert_contact("111@lid", Some("Ana"), None);
         assert_eq!(store.chat_name("5511900000000@s.whatsapp.net"), "Ana");
+    }
+
+    #[test]
+    fn verified_names_persist_and_old_vaults_without_them_load_empty() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_verified_names_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            store.record_verified_name("5511900000000@s.whatsapp.net", "Mercado Livre");
+            store.upsert_contact("5511900000000@s.whatsapp.net", Some("Minha Loja"), None);
+            store.save_checked(&vault).unwrap();
+            vault.batch_checked(&[], &["store:verified"]).unwrap();
+            assert!(vault.get("store:verified").is_none());
+        }
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut restored = Store::default();
+            restored.load_from(&vault);
+            assert_eq!(
+                restored.chat_name("5511900000000@s.whatsapp.net"),
+                "Minha Loja"
+            );
+            assert!(restored.verified_names.is_empty());
+        }
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            store.record_verified_name("5511900000000@s.whatsapp.net", "Mercado Livre");
+            store.save_checked(&vault).unwrap();
+        }
+        let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+        vault.open().unwrap();
+        let mut restored = Store::default();
+        restored.load_from(&vault);
+        assert_eq!(
+            restored.verified_names["5511900000000@s.whatsapp.net"],
+            "Mercado Livre"
+        );
+        drop(vault);
+        crate::paths::remove_db(&path);
     }
 
     #[test]

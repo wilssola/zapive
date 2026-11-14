@@ -141,6 +141,7 @@ impl Bridge {
             id,
             from_me: true,
             push_name: "",
+            verified_name: None,
             timestamp: now,
         };
         let Some(mut stored) =
