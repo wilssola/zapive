@@ -132,13 +132,9 @@ impl Bridge {
                         return false;
                     }
                 }
-                if !search.is_empty()
-                    && !crate::search::fold(&self.store.chat_name(&meta.jid)).contains(&search)
-                    && !meta.jid.contains(&search)
-                {
-                    return false;
-                }
-                true
+                search.is_empty()
+                    || crate::search::fold(&self.store.chat_name(&meta.jid)).contains(&search)
+                    || meta.jid.contains(&search)
             })
             .map(|meta| {
                 (

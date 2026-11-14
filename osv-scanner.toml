@@ -49,3 +49,15 @@ reason = "zvariant 5.15.0 unmaintained advisory (merged into zbus 6); latest sta
 id = "RUSTSEC-2026-0372"
 ignoreUntil = 2027-02-06
 reason = "zvariant_derive 5.15.0 unmaintained advisory (merged into zbus 6); latest standalone release still flagged, upgrade blocked by notify-rust/accesskit_unix requiring zbus ^5"
+
+# Real (local, medium) vulnerability, ignored with an expiry because the fix
+# cannot be taken yet: SQLite < 3.54.0 can return uninitialized page-cache
+# memory when a crafted database is opened next to a mismatched -wal file.
+# libsqlite3-sys >= 0.39 is required, but whatsapp-rust-sqlite-storage pins
+# libsqlite3-sys ^0.38 and rusqlite must share that single native sqlite3.
+# Zapive only opens databases it created in its own data directory. Remove
+# this entry when whatsapp-rust moves to diesel 2.4 / libsqlite3-sys 0.39.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0459"
+ignoreUntil = 2026-12-31
+reason = "libsqlite3-sys 0.38.2 bundles SQLite < 3.54.0 (CVE-2026-119375); local-only, needs crafted db+wal files; upgrade blocked by whatsapp-rust-sqlite-storage pinning libsqlite3-sys ^0.38"
