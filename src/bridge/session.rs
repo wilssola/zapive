@@ -43,6 +43,9 @@ impl Bridge {
         self.ui
             .set_message_sound(vault.setting_get("message_sound").as_deref() != Some("0"));
         self.load_wallpaper(&vault);
+        self.load_ui_scale(crate::ui_scale::parse(
+            &vault.setting_get("ui_scale").unwrap_or_default(),
+        ));
         self.load_call_silence(&vault);
         // Silence memory is per account and never outlives it.
         self.call_dismissed.clear();

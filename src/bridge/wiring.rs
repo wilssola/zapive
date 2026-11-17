@@ -291,6 +291,11 @@ pub fn install(ui: &AppWindow, wa: WaService) {
     };
     BRIDGE.with(|cell| *cell.borrow_mut() = Some(bridge));
     apply_now(|b| b.load_graphics_choice(crate::gfx::read_choice(&crate::paths::data_dir())));
+    let ui_scale_labels = crate::ui_scale::CHOICES
+        .iter()
+        .map(|percent| SharedString::from(format!("{percent}%")))
+        .collect::<Vec<_>>();
+    ui.set_ui_scale_labels(ModelRc::new(VecModel::from(ui_scale_labels)));
     let graphics_choices = crate::gfx::available_choices(&crate::gfx::Compiled::from_build());
     ui.set_graphics_labels(ModelRc::new(VecModel::from(
         graphics_choices
@@ -390,6 +395,7 @@ pub(super) fn wire_callbacks(ui: &AppWindow) {
     ui.on_wallpaper_reset(|| defer(|b| b.reset_wallpaper()));
     ui.on_wallpaper_scale_changed(|scale| defer(move |b| b.handle_wallpaper_scale(scale)));
     ui.on_graphics_renderer_changed(|index| defer(move |b| b.handle_graphics_choice(index)));
+    ui.on_ui_scale_changed(|index| defer(move |b| b.handle_ui_scale(index)));
     ui.on_wallpaper_hex_entered(|fg, hex| {
         let hex = hex.to_string();
         defer(move |b| b.wallpaper_hex_entered(fg, &hex));

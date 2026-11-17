@@ -30,6 +30,7 @@ mod single;
 mod sound;
 mod store;
 mod translation;
+mod ui_scale;
 mod update;
 mod vault;
 mod video;
@@ -109,6 +110,14 @@ fn main() {
     let locale = i18n::resolve_locale(&language, sys_locale::get_locale().as_deref());
     i18n::set_locale(locale);
     let use_pt = locale == i18n::Locale::Pt;
+    // The UI scale must reach the toolkit before the window is created and
+    // before any thread exists: the environment is only read at that point.
+    let ui_scale = ui_scale::parse(&app_vault.setting_get("ui_scale").unwrap_or_default());
+    ui_scale::remember_started_with(ui_scale);
+    if let Some(factor) = ui_scale::env_factor(platform::system_dpi(), ui_scale) {
+        // SAFETY: still the only thread; the tokio runtime is built below.
+        unsafe { std::env::set_var("SLINT_SCALE_FACTOR", factor) };
+    }
     let rt = RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             // Two was enough for messaging, but a call adds the relay
