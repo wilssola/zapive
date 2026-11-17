@@ -137,6 +137,12 @@ pub fn toast(title: &str, body: &str, payload: super::ToastPayload) {
     }
 }
 
+// Unused here: the UI scale setting is only offered where the system DPI can
+// be read before the window exists (Windows).
+pub fn system_dpi() -> u32 {
+    96
+}
+
 pub fn system_dark() -> bool {
     std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "color-scheme"])

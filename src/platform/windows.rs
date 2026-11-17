@@ -338,6 +338,12 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+// The system DPI the shell scales apps to (96 at 100%); 0 when unknown.
+pub fn system_dpi() -> u32 {
+    // SAFETY: GetDpiForSystem takes no arguments and only reads process-wide state.
+    unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() }
+}
+
 // Whether Windows apps are set to dark mode (defaults dark on error).
 pub fn system_dark() -> bool {
     let out = quiet("reg")
