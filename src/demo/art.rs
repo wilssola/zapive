@@ -170,26 +170,15 @@ pub fn photo(seed: u32, w: u32, h: u32) -> Image {
 // White bars on transparency: the .slint side colourises them, the same
 // format the real voice-note waveform uses.
 pub fn waveform(seed: u32) -> Image {
-    const BARS: u32 = 44;
-    const BAR_W: u32 = 3;
-    const GAP: u32 = 2;
-    const H: u32 = 30;
-    let width = BARS * (BAR_W + GAP);
-    let mut c = Canvas::new(width, H);
-    for i in 0..BARS {
-        let envelope = ((i as f32 / BARS as f32) * std::f32::consts::PI)
-            .sin()
-            .max(0.25);
-        let level = (0.25 + unit(seed + i * 5) * 0.75) * envelope;
-        let bar = ((level * H as f32).round() as u32).clamp(2, H);
-        let top = (H - bar) / 2;
-        for y in top..top + bar {
-            for x in 0..BAR_W {
-                c.put(i * (BAR_W + GAP) + x, y, [1.0, 1.0, 1.0], 1.0);
-            }
-        }
-    }
-    c.image()
+    let samples: Vec<f32> = (0..44)
+        .map(|i| {
+            let envelope = ((i as f32 / 44.0) * std::f32::consts::PI).sin().max(0.25);
+            (0.25 + unit(seed + i * 5) * 0.75) * envelope
+        })
+        .collect();
+    let wave = crate::audio::waveform_samples(&samples).unwrap();
+    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&wave.rgba, wave.w, wave.h);
+    Image::from_rgba8(buffer)
 }
 
 // The vivid "wallpaper" glass is drawn over: saturated blue and red colour

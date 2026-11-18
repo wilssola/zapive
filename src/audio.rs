@@ -248,39 +248,43 @@ pub fn decode_with_tempo(path: &Path, rate: f64) -> Option<AudioBuffer> {
     })
 }
 
-// ---- waveform (the 44-bar bitmap under the play button) ----
-
 const BARS: usize = 44;
-const BAR_W: usize = 3;
-const BAR_GAP: usize = 2;
-const WAVE_H: usize = 30;
+const BAR_W: usize = 5;
+const BAR_GAP: usize = 5;
+const WAVE_H: usize = 52;
 
 pub fn waveform(path: &Path) -> Option<Decoded> {
     let (samples, _) = decode_any(path)?;
+    waveform_samples(&samples)
+}
+
+pub(crate) fn waveform_samples(samples: &[f32]) -> Option<Decoded> {
     if samples.is_empty() {
         return None;
     }
-    let mut peaks = [0f32; BARS];
-    let bucket = (samples.len() / BARS).max(1);
-    for (i, peak) in peaks.iter_mut().enumerate() {
-        let start = i * bucket;
-        let end = ((i + 1) * bucket).min(samples.len());
-        *peak = samples[start..end]
-            .iter()
-            .map(|s| s.abs())
-            .fold(0.0, f32::max);
+    let mut levels = [0f32; BARS];
+    for (i, level) in levels.iter_mut().enumerate() {
+        let start = i * samples.len() / BARS;
+        let end = ((i + 1) * samples.len() / BARS).max(start + 1);
+        let bucket = &samples[start..end.min(samples.len())];
+        let energy = bucket.iter().map(|sample| sample * sample).sum::<f32>();
+        *level = (energy / bucket.len() as f32).sqrt();
     }
-    let max = peaks.iter().fold(0.0f32, |a, &b| a.max(b)).max(1e-6);
-    // White opaque bars on transparency; the .slint side colorizes them.
-    let width = BARS * (BAR_W + BAR_GAP);
+    let max = levels.iter().copied().fold(0.0f32, f32::max).max(1e-6);
+    let width = BARS * (BAR_W + BAR_GAP) - BAR_GAP;
     let mut rgba = vec![0u8; width * WAVE_H * 4];
-    for (i, &peak) in peaks.iter().enumerate() {
-        let h = ((peak / max) * WAVE_H as f32).round().max(2.0) as usize;
-        let top = (WAVE_H - h) / 2;
-        for y in top..top + h {
+    let radius = BAR_W as f32 / 2.0;
+    for (i, &level) in levels.iter().enumerate() {
+        let height = ((level / max) * (WAVE_H - BAR_W) as f32 + BAR_W as f32)
+            .clamp(BAR_W as f32, WAVE_H as f32);
+        let half_segment = (height / 2.0 - radius).max(0.0);
+        for y in 0..WAVE_H {
             for x in 0..BAR_W {
+                let dx = x as f32 + 0.5 - radius;
+                let dy = ((y as f32 + 0.5 - WAVE_H as f32 / 2.0).abs() - half_segment).max(0.0);
+                let alpha = (radius + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
                 let px = (y * width + i * (BAR_W + BAR_GAP) + x) * 4;
-                rgba[px..px + 4].copy_from_slice(&[255, 255, 255, 255]);
+                rgba[px..px + 4].copy_from_slice(&[255, 255, 255, (alpha * 255.0).round() as u8]);
             }
         }
     }
@@ -680,6 +684,37 @@ pub fn encode_voice_ogg(samples: &[f32], in_rate: u32, out_path: &Path) -> Optio
 
 #[cfg(test)]
 mod duration_tests {
+    #[test]
+    fn waveform_has_rounded_antialiased_bars_and_transparent_gaps() {
+        let wave = super::waveform_samples(&[0.5; 440]).unwrap();
+        let alpha = |x: usize, y: usize| wave.rgba[(y * wave.w as usize + x) * 4 + 3];
+        assert!(alpha(0, 0) < alpha(super::BAR_W / 2, 0));
+        assert!(alpha(super::BAR_W / 2, 0) > 0);
+        assert!(
+            wave.rgba
+                .chunks_exact(4)
+                .any(|pixel| pixel[3] > 0 && pixel[3] < 255)
+        );
+        for y in 0..wave.h as usize {
+            assert_eq!(alpha(super::BAR_W, y), 0);
+        }
+    }
+
+    #[test]
+    fn waveform_handles_empty_short_and_silent_audio() {
+        assert!(super::waveform_samples(&[]).is_none());
+        for samples in [&[0.0][..], &[0.0; 100][..]] {
+            let wave = super::waveform_samples(samples).unwrap();
+            assert!(wave.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+            assert!(
+                wave.rgba
+                    .chunks_exact(4)
+                    .take(wave.w as usize)
+                    .all(|pixel| pixel[3] == 0)
+            );
+        }
+    }
+
     #[test]
     fn audio_duration_probe_reads_wav_metadata() {
         let path =
