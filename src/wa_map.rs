@@ -254,7 +254,7 @@ fn reply_option(
 fn reply_card(content: &wa::Message) -> Option<(SpecialCard<'static>, Vec<ReplyOption>)> {
     let mut card = SpecialCard {
         kind: "reply-options",
-        title: t("card.reply_options"),
+        title: String::new(),
         ..Default::default()
     };
     let mut options = Vec::new();
@@ -431,14 +431,73 @@ fn reply_card(content: &wa::Message) -> Option<(SpecialCard<'static>, Vec<ReplyO
                 .unwrap_or("")
         };
         card.kind = "reply-response";
-        card.title = t("card.reply_response");
+        card.title.clear();
         card.body = card_text(text);
+    }
+    if card.body.is_empty() && !card.title.is_empty() {
+        card.body = card.title.clone();
     }
     card.options = options.iter().map(|o| o.label.clone()).collect();
     if card.kind == "reply-options" && options.is_empty() {
         card.detail = t("card.reply_unavailable");
     }
     Some((card, options))
+}
+
+pub fn reply_selection(original: &StoredMessage, response: &StoredMessage) -> Option<usize> {
+    if original.deleted
+        || original.revoked
+        || original.from_me
+        || !response.from_me
+        || response.deleted
+        || response.revoked
+        || original.jid != response.jid
+        || original.id != response.quote_id
+        || (!response.quote_jid.is_empty() && response.quote_jid != original.jid)
+    {
+        return None;
+    }
+    let content = display_content(original.raw.as_deref()?)?;
+    let (_, options) = reply_card(content)?;
+    let raw = display_content(response.raw.as_deref()?)?;
+    let context = context_of(raw)?;
+    if context.stanza_id.as_deref() != Some(original.id.as_str()) {
+        return None;
+    }
+    let (kind, id) = if let Some(value) = raw.buttons_response_message.as_option() {
+        ("buttons", value.selected_button_id.as_deref()?.to_owned())
+    } else if let Some(value) = raw.list_response_message.as_option() {
+        (
+            "list",
+            value
+                .single_select_reply
+                .as_option()?
+                .selected_row_id
+                .clone()?,
+        )
+    } else if let Some(value) = raw.template_button_reply_message.as_option() {
+        ("template", value.selected_id.clone()?)
+    } else {
+        use wa::message::interactive_response_message::InteractiveResponseMessage;
+        let value = raw.interactive_response_message.as_option()?;
+        let Some(InteractiveResponseMessage::NativeFlowResponseMessage(flow)) =
+            &value.interactive_response_message
+        else {
+            return None;
+        };
+        let params = flow.params_json.as_deref()?;
+        if params.len() > 65536 {
+            return None;
+        }
+        let params: serde_json::Value = serde_json::from_str(params).ok()?;
+        (
+            flow.name.as_deref()?,
+            params.get("id")?.as_str()?.to_owned(),
+        )
+    };
+    options
+        .iter()
+        .position(|option| option.kind == kind && option.id == id)
 }
 
 pub fn reply_response(message: &StoredMessage, index: usize) -> Option<wa::Message> {
@@ -677,6 +736,12 @@ fn coordinate_detail(lat: Option<f64>, lon: Option<f64>, live: bool) -> String {
     } else {
         coordinates
     }
+}
+
+pub fn reply_summary(content: &wa::Message) -> Option<String> {
+    let content = display_content(content)?;
+    let (card, _) = reply_card(content)?;
+    Some(card.body)
 }
 
 pub fn compatibility_card(content: &wa::Message) -> Option<String> {
@@ -1138,6 +1203,7 @@ pub fn system_message(chat: &str, id: &str, timestamp: i64, text: String) -> Sto
         quote_id: String::new(),
         quote_author: String::new(),
         quote_text: String::new(),
+        reply_selection: None,
         quote_jid: String::new(),
         link_title: String::new(),
         link_desc: String::new(),
@@ -1314,6 +1380,7 @@ pub fn normalize(
             .unwrap_or_default(),
         quote_author,
         quote_text,
+        reply_selection: None,
         link_title: String::new(),
         link_desc: String::new(),
         link_url: String::new(),
@@ -1493,6 +1560,7 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         quote_id: String::new(),
         quote_author: String::new(),
         quote_text: String::new(),
+        reply_selection: None,
         quote_jid: String::new(),
         link_title: String::new(),
         link_desc: String::new(),
@@ -1629,6 +1697,19 @@ mod tests {
     }
 
     #[test]
+    fn reply_summaries_only_include_the_original_message_and_response() {
+        for raw in invented_reply_messages() {
+            let stored = map(raw.clone()).unwrap();
+            let card = special_card(&stored);
+            assert_eq!(quoted_summary(&raw), card.body);
+            assert!(!quoted_summary(&raw).contains("Morning"));
+            let response = reply_response(&stored, 0).unwrap();
+            assert_eq!(quoted_summary(&response), "Morning");
+            assert!(special_card(&map(response).unwrap()).title.is_empty());
+        }
+    }
+
+    #[test]
     fn reply_options_map_and_build_typed_responses() {
         use whatsapp_rust::waproto::buffa::Message as _;
         for (i, raw) in invented_reply_messages().into_iter().enumerate() {
@@ -1693,7 +1774,16 @@ mod tests {
                 }
             }
             let decoded = wa::Message::decode_from_slice(&response.encode_to_vec()).unwrap();
-            let echoed = map(decoded).unwrap();
+            let mut echoed = map(decoded).unwrap();
+            assert!(reply_selection(&stored, &echoed).is_none());
+            echoed.from_me = true;
+            assert_eq!(reply_selection(&stored, &echoed), Some(0));
+            let mut unrelated = stored.clone();
+            unrelated.id = "different-question".into();
+            assert!(reply_selection(&unrelated, &echoed).is_none());
+            unrelated = stored.clone();
+            unrelated.jid = "different-chat@g.us".into();
+            assert!(reply_selection(&unrelated, &echoed).is_none());
             assert_eq!(special_card(&echoed).kind, "reply-response");
             assert_eq!(special_card(&echoed).body, "Morning");
             let mut own = stored.clone();

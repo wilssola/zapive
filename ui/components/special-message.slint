@@ -9,6 +9,7 @@ export component SpecialMessage inherits Rectangle {
     callback details();
     callback vote(int);
     callback reply(int);
+    property <bool> reply-card: message.cardKind == "reply-options" || message.cardKind == "reply-response";
     property <bool> can-reply: message.cardKind == "reply-options" && !message.fromMe && !privacy-hidden;
     property <int> expanded: -1;
     property <bool> interactive-poll: poll && message.poll-options.length > 0;
@@ -21,7 +22,7 @@ export component SpecialMessage inherits Rectangle {
         : (Theme.glass ? Theme.glass-fill-soft : Theme.dark ? #182831 : #f3f6f5);
     height: card-layout.preferred-height;
     border-radius: 12px;
-    background: root.view-once
+    background: root.reply-card ? transparent : root.view-once
         ? (Theme.dark ? #20343c : #e8f0f1) : surface;
     border-width: root.view-once ? 1px : 0px;
     border-color: Theme.dark ? #3b535c : #c3d4d8;
@@ -29,7 +30,14 @@ export component SpecialMessage inherits Rectangle {
 
     card-layout := VerticalLayout {
         padding: 0px;
-        spacing: 0px;
+        spacing: root.reply-card ? 6px : 0px;
+        padding-bottom: root.reply-card && root.message.cardOptions.length > 0 ? 8px : 0px;
+        if root.reply-card && root.message.cardBody != "": Text {
+            text: root.message.cardBody;
+            color: Theme.bubble-text;
+            font-size: 14px;
+            wrap: word-wrap;
+        }
         if root.location: Rectangle {
             height: root.message.cardHasPicture ? 158px : 92px;
             background: Theme.dark ? #142e3c : #dce8e9;
@@ -58,7 +66,7 @@ export component SpecialMessage inherits Rectangle {
                 }
             }
         }
-        HorizontalLayout {
+        if !root.reply-card: HorizontalLayout {
             padding: 14px;
             spacing: 12px;
             Rectangle {
@@ -178,7 +186,16 @@ export component SpecialMessage inherits Rectangle {
                                 height: 20px;
                                 border-radius: root.message.poll-multi ? 5px : 10px;
                                 border-width: opt.voted ? 0px : 2px;
-                                border-color: root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                                border-color: root.reply-card && root.message.cardSelectedOption == i
+                                    ? Theme.accent : root.message.fromMe ? Theme.time-out : Theme.text-dim;
+                                if root.reply-card && root.message.cardSelectedOption == i: Rectangle {
+                                    width: 10px;
+                                    height: 10px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 5px;
+                                    background: Theme.accent;
+                                }
                                 background: opt.voted ? Theme.accent : transparent;
                                 animate background { duration: Theme.motion-fast; }
                                 if opt.voted: Image {
@@ -264,14 +281,21 @@ export component SpecialMessage inherits Rectangle {
         }
         for option[i] in root.message.cardOptions: Rectangle {
             visible: !root.interactive-poll;
-            height: root.interactive-poll ? 0px : option-layout.preferred-height;
+            height: root.interactive-poll ? 0px : max(38px, option-layout.preferred-height);
+            border-radius: root.reply-card ? 12px : 0px;
+            background: (root.reply-card && root.message.cardSelectedOption == i)
+                || (root.can-reply && reply-touch.has-hover) ? Theme.accent.with-alpha(0.10) : transparent;
             border-width: 1px;
-            border-color: root.message.fromMe
+            border-color: (root.reply-card && root.message.cardSelectedOption == i)
+                || (root.can-reply && (reply-touch.has-hover || reply-key.has-focus))
+                ? Theme.accent : root.message.fromMe
                 ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
             reply-touch := TouchArea {
                 enabled: root.can-reply;
-                accessible-role: button;
+                accessible-role: checkbox;
                 accessible-label: option;
+                accessible-checkable: true;
+                accessible-checked: root.reply-card && root.message.cardSelectedOption == i;
                 accessible-enabled: root.can-reply;
                 accessible-action-default => { root.reply(i); }
                 mouse-cursor: root.can-reply ? pointer : default;
@@ -288,8 +312,11 @@ export component SpecialMessage inherits Rectangle {
                 }
             }
             option-layout := HorizontalLayout {
-                padding: 14px;
-                spacing: 14px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 16px;
                 Rectangle {
                     width: 20px;
                     Rectangle {
@@ -311,6 +338,12 @@ export component SpecialMessage inherits Rectangle {
                 }
             }
         }
+        if root.reply-card && root.message.cardReplyStamp != "": Text {
+            text: root.message.cardReplyStamp;
+            color: Theme.text-dim;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
         if root.poll && !root.message.poll-can-vote: VerticalLayout {
             padding: 14px;
             Text {
@@ -320,12 +353,12 @@ export component SpecialMessage inherits Rectangle {
                 wrap: word-wrap;
             }
         }
-        Rectangle {
+        if !root.reply-card: Rectangle {
             height: 1px;
             background: root.message.fromMe
                 ? (Theme.dark ? #175247 : #b6dcb4) : Theme.border;
         }
-        details-touch := TouchArea {
+        if !root.reply-card: details-touch := TouchArea {
             accessible-role: button;
             accessible-label: @tr("message.special.view_details");
             accessible-action-default => { root.details(); }

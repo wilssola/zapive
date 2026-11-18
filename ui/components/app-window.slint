@@ -2901,7 +2901,7 @@ export component AppWindow inherits Window {
                                         padding: 6px;
                                         padding-left: 12px;
                                         spacing: 2px;
-                                        Text {
+                                        if msg.cardKind != "reply-response": Text {
                                             text: msg.quoteName;
                                             animate opacity { duration: 120ms; easing: ease-out; }
                                             color: Theme.accent;
@@ -2916,6 +2916,7 @@ export component AppWindow inherits Window {
                                             animate opacity { duration: 120ms; easing: ease-out; }
                                             color: Theme.text-dim;
                                             font-size: 12.5px;
+                                            wrap: msg.cardKind == "reply-response" ? word-wrap : no-wrap;
                                             overflow: elide;
                                             width: min(self.preferred-width,
                                                 msg-row.content-w - 20px);

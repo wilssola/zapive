@@ -72,6 +72,8 @@ pub struct StoredMessage {
     pub quote_author: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quote_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_selection: Option<ReplySelection>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub link_title: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -105,6 +107,13 @@ pub struct StoredMessage {
     // A newer vote replaces the older one, so only the latest is kept.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub poll_votes: HashMap<String, PollVote>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReplySelection {
+    pub option_index: usize,
+    pub timestamp: i64,
+    pub response_id: String,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Debug)]
@@ -1059,6 +1068,7 @@ impl Store {
         list.push(stored);
         list.sort_by_key(|m| m.timestamp);
         self.dirty_jids.insert(jid.clone());
+        self.reconcile_reply_selections(&jid);
 
         let existing = self.chats.get(&jid);
         if existing.map(|e| timestamp >= e.timestamp).unwrap_or(true) {
@@ -1376,7 +1386,56 @@ impl Store {
             !known.contains(&m.id) && !removals.contains(&(jid.to_string(), m.id.clone()))
         }));
         live.sort_by(|a, b| (a.timestamp, &a.id).cmp(&(b.timestamp, &b.id)));
-        live.len() > before
+        let added = live.len() > before;
+        self.reconcile_reply_selections(jid);
+        added
+    }
+
+    fn reconcile_reply_selections(&mut self, jid: &str) {
+        let Some(messages) = self.messages.get(jid) else {
+            return;
+        };
+        let originals: HashMap<&str, usize> = messages
+            .iter()
+            .enumerate()
+            .map(|(index, message)| (message.id.as_str(), index))
+            .collect();
+        let mut selections: HashMap<usize, ReplySelection> = HashMap::new();
+        for response in messages
+            .iter()
+            .filter(|message| message.from_me && !message.deleted && !message.revoked)
+        {
+            let Some(&index) = originals.get(response.quote_id.as_str()) else {
+                continue;
+            };
+            let original = &messages[index];
+            let Some(option_index) = crate::wa_map::reply_selection(original, response) else {
+                continue;
+            };
+            let current = selections.get(&index).or(original.reply_selection.as_ref());
+            if current.is_some_and(|selection| {
+                (selection.timestamp, selection.response_id.as_str())
+                    >= (response.timestamp, response.id.as_str())
+            }) {
+                continue;
+            }
+            selections.insert(
+                index,
+                ReplySelection {
+                    option_index,
+                    timestamp: response.timestamp,
+                    response_id: response.id.clone(),
+                },
+            );
+        }
+        if selections.is_empty() {
+            return;
+        }
+        let messages = self.messages.get_mut(jid).unwrap();
+        for (index, selection) in selections {
+            messages[index].reply_selection = Some(selection);
+        }
+        self.dirty_jids.insert(jid.to_string());
     }
 
     pub fn load_older(&mut self, vault: &Vault, jid: &str) -> bool {
@@ -2228,6 +2287,9 @@ pub fn quoted_summary(quoted: &wa::Message) -> String {
     if quoted.is_view_once() {
         return t("compat.view_once");
     }
+    if let Some(text) = crate::wa_map::reply_summary(quoted.get_base_message()) {
+        return text.chars().take(120).collect();
+    }
     if let Some(card) = crate::wa_map::compatibility_card(quoted.get_base_message()) {
         return card.chars().take(120).collect();
     }
@@ -2338,6 +2400,140 @@ mod tests {
         );
         message.kind = MessageKind::Text;
         message
+    }
+
+    fn reply_original() -> StoredMessage {
+        use wa::message::{ButtonsMessage, buttons_message};
+        let mut message = text_msg("reply@g.us", "original", "Choose");
+        message.raw = Some(Arc::new(wa::Message {
+            buttons_message: Some(ButtonsMessage {
+                content_text: Some("Choose".into()),
+                buttons: ["first", "second"]
+                    .iter()
+                    .map(|id| buttons_message::Button {
+                        button_id: Some((*id).into()),
+                        button_text: Some(buttons_message::button::ButtonText {
+                            display_text: Some((*id).into()),
+                        })
+                        .into(),
+                        r#type: Some(buttons_message::button::Type::Response),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        }));
+        message
+    }
+
+    fn reply_message(id: &str, timestamp: i64, option_index: usize) -> StoredMessage {
+        let original = reply_original();
+        let mut response = text_msg(&original.jid, id, "selection");
+        response.timestamp = timestamp;
+        response.from_me = true;
+        response.quote_id = original.id.clone();
+        response.raw = Some(Arc::new(
+            crate::wa_map::reply_response(&original, option_index).unwrap(),
+        ));
+        response
+    }
+
+    #[test]
+    fn reply_selection_roundtrips_and_defaults_for_old_history() {
+        let mut original = reply_original();
+        let legacy = serde_json::to_value(&original).unwrap();
+        assert!(legacy.get("reply_selection").is_none());
+        let restored: StoredMessage = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.reply_selection, None);
+
+        original.reply_selection = Some(ReplySelection {
+            option_index: 1,
+            timestamp: 20,
+            response_id: "response".into(),
+        });
+        let restored: StoredMessage =
+            serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+        assert_eq!(restored.reply_selection, original.reply_selection);
+    }
+
+    #[test]
+    fn reply_selection_reconciles_out_of_order_pages_and_breaks_timestamp_ties() {
+        let mut store = Store::default();
+        store.add_message(reply_message("b", 20, 1));
+        store.dirty_jids.clear();
+        assert!(store.merge_page("reply@g.us", vec![reply_original()]));
+        assert!(store.dirty_jids.contains("reply@g.us"));
+        let selection = || ReplySelection {
+            option_index: 1,
+            timestamp: 20,
+            response_id: "b".into(),
+        };
+        assert_eq!(
+            store.messages_for("reply@g.us")[0].reply_selection,
+            Some(selection())
+        );
+        store.add_message(reply_message("a", 20, 0));
+        store.add_message(reply_message("older", 19, 0));
+        assert_eq!(
+            store.messages_for("reply@g.us")[0].reply_selection,
+            Some(selection())
+        );
+        store.add_message(reply_message("c", 20, 0));
+        assert_eq!(
+            store.messages_for("reply@g.us")[0].reply_selection,
+            Some(ReplySelection {
+                option_index: 0,
+                timestamp: 20,
+                response_id: "c".into(),
+            })
+        );
+        store.dirty_jids.clear();
+        assert!(!store.merge_page("reply@g.us", Vec::new()));
+        assert!(!store.dirty_jids.contains("reply@g.us"));
+    }
+
+    #[test]
+    fn reply_selection_ignores_invalid_responses_and_preserves_unloaded_winner() {
+        let mut original = reply_original();
+        original.reply_selection = Some(ReplySelection {
+            option_index: 1,
+            timestamp: 30,
+            response_id: "unloaded".into(),
+        });
+        let persisted = original.reply_selection.clone();
+        let mut store = Store::default();
+        store.merge_page("reply@g.us", vec![original, reply_message("older", 20, 0)]);
+        assert!(!store.dirty_jids.contains("reply@g.us"));
+        for (id, invalid) in ["incoming", "deleted", "revoked", "plain", "unknown"]
+            .iter()
+            .enumerate()
+        {
+            let mut response = reply_message(invalid, 40 + id as i64, 0);
+            match *invalid {
+                "incoming" => response.from_me = false,
+                "deleted" => response.deleted = true,
+                "revoked" => response.revoked = true,
+                "plain" => response.raw = None,
+                "unknown" => response.quote_id = "missing".into(),
+                _ => unreachable!(),
+            }
+            store.add_message(response);
+        }
+        assert_eq!(
+            store.messages_for("reply@g.us")[0].reply_selection,
+            persisted
+        );
+        store.add_message(reply_message("newer", 50, 0));
+        assert_eq!(
+            store.messages_for("reply@g.us")[0]
+                .reply_selection
+                .as_ref()
+                .unwrap()
+                .response_id,
+            "newer"
+        );
     }
 
     #[test]
