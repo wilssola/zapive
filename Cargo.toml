@@ -58,7 +58,7 @@ sys-locale = "0.3"
 # Must resolve to the same libsqlite3-sys (0.38) that whatsapp-rust's
 # diesel links, or cargo refuses the duplicate native sqlite3.
 rusqlite = { version = "0.40", features = ["bundled"] }
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 scrypt = { version = "0.12", default-features = false }
 # Both already sit in the tree as scrypt's own dependencies (hmac 0.12,
 # sha2 0.10); pinning them directly adds no new crate and no binary
