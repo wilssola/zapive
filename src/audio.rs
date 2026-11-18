@@ -701,7 +701,9 @@ mod duration_tests {
         assert!(alpha(super::BAR_W / 2, 0) > 0);
         assert!(
             wave.rgba
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|pixel| pixel[3] > 0 && pixel[3] < 255)
         );
         for y in 0..wave.h as usize {
@@ -730,10 +732,18 @@ mod duration_tests {
         assert!(super::waveform_samples(&[]).is_none());
         for samples in [&[0.0][..], &[0.0; 100][..]] {
             let wave = super::waveform_samples(samples).unwrap();
-            assert!(wave.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
             assert!(
                 wave.rgba
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|pixel| pixel[3] > 0)
+            );
+            assert!(
+                wave.rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .take(wave.w as usize)
                     .all(|pixel| pixel[3] == 0)
             );

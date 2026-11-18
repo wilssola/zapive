@@ -394,19 +394,19 @@ impl Bridge {
         let needs_media = needs_media(stored);
         let stored = stored.clone();
         self.messages_model.push(row);
-        if !stored.quote_id.is_empty() && stored.from_me {
-            if let Some(original) = self
+        if !stored.quote_id.is_empty()
+            && stored.from_me
+            && let Some(original) = self
                 .store
                 .messages_for(jid)
                 .iter()
                 .find(|m| m.id == stored.quote_id)
-            {
-                let (selected, stamp) = reply_selection_fields(original);
-                self.patch_row(&stored.quote_id, |row| {
-                    row.cardSelectedOption = selected;
-                    row.cardReplyStamp = stamp.into();
-                });
-            }
+        {
+            let (selected, stamp) = reply_selection_fields(original);
+            self.patch_row(&stored.quote_id, |row| {
+                row.cardSelectedOption = selected;
+                row.cardReplyStamp = stamp.into();
+            });
         }
         // Don't yank the view down while the user is reading older rows.
         if from_me || self.ui.get_stick_bottom() {
