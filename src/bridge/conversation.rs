@@ -14,6 +14,19 @@ pub(super) fn meta_pad(m: &StoredMessage) -> String {
     META_PAD.to_string() + &"\u{00a0}".repeat(extra)
 }
 
+fn reply_selection_fields(message: &StoredMessage) -> (i32, String) {
+    match message.reply_selection.as_ref() {
+        Some(selection) => (
+            i32::try_from(selection.option_index).unwrap_or(-1),
+            ta(
+                "message.options.answered_at",
+                &[&crate::store::format_stamp(selection.timestamp)],
+            ),
+        ),
+        None => (-1, String::new()),
+    }
+}
+
 impl Bridge {
     // ---- conversation ----
 
@@ -381,6 +394,20 @@ impl Bridge {
         let needs_media = needs_media(stored);
         let stored = stored.clone();
         self.messages_model.push(row);
+        if !stored.quote_id.is_empty() && stored.from_me {
+            if let Some(original) = self
+                .store
+                .messages_for(jid)
+                .iter()
+                .find(|m| m.id == stored.quote_id)
+            {
+                let (selected, stamp) = reply_selection_fields(original);
+                self.patch_row(&stored.quote_id, |row| {
+                    row.cardSelectedOption = selected;
+                    row.cardReplyStamp = stamp.into();
+                });
+            }
+        }
         // Don't yank the view down while the user is reading older rows.
         if from_me || self.ui.get_stick_bottom() {
             self.scroll_to_end();
@@ -629,6 +656,8 @@ impl Bridge {
                         .unwrap_or_default()
                 })
                 .into(),
+            cardSelectedOption: reply_selection_fields(m).0,
+            cardReplyStamp: reply_selection_fields(m).1.into(),
             cardKind: card.kind.into(),
             cardInitial: initial_of(&card.title).into(),
             cardTitle: card.title.into(),
