@@ -271,12 +271,19 @@ pub(crate) fn waveform_samples(samples: &[f32]) -> Option<Decoded> {
         *level = (energy / bucket.len() as f32).sqrt();
     }
     let max = levels.iter().copied().fold(0.0f32, f32::max).max(1e-6);
+    let average = levels.iter().sum::<f32>() / BARS as f32 / max;
+    let dense = average > 0.65;
     let width = BARS * (BAR_W + BAR_GAP) - BAR_GAP;
     let mut rgba = vec![0u8; width * WAVE_H * 4];
     let radius = BAR_W as f32 / 2.0;
     for (i, &level) in levels.iter().enumerate() {
-        let height = ((level / max) * (WAVE_H - BAR_W) as f32 + BAR_W as f32)
-            .clamp(BAR_W as f32, WAVE_H as f32);
+        let amplitude = if dense {
+            (level / max).powi(3) * 0.65
+        } else {
+            level / max
+        };
+        let height =
+            (amplitude * (WAVE_H - BAR_W) as f32 + BAR_W as f32).clamp(BAR_W as f32, WAVE_H as f32);
         let half_segment = (height / 2.0 - radius).max(0.0);
         for y in 0..WAVE_H {
             for x in 0..BAR_W {
@@ -686,7 +693,9 @@ pub fn encode_voice_ogg(samples: &[f32], in_rate: u32, out_path: &Path) -> Optio
 mod duration_tests {
     #[test]
     fn waveform_has_rounded_antialiased_bars_and_transparent_gaps() {
-        let wave = super::waveform_samples(&[0.5; 440]).unwrap();
+        let mut samples = [0.0; 440];
+        samples[..10].fill(0.5);
+        let wave = super::waveform_samples(&samples).unwrap();
         let alpha = |x: usize, y: usize| wave.rgba[(y * wave.w as usize + x) * 4 + 3];
         assert!(alpha(0, 0) < alpha(super::BAR_W / 2, 0));
         assert!(alpha(super::BAR_W / 2, 0) > 0);
@@ -698,6 +707,22 @@ mod duration_tests {
         for y in 0..wave.h as usize {
             assert_eq!(alpha(super::BAR_W, y), 0);
         }
+    }
+
+    #[test]
+    fn dense_waveforms_leave_vertical_space_and_preserve_level_variation() {
+        let samples: Vec<f32> = (0..440).map(|i| if i < 220 { 0.8 } else { 1.0 }).collect();
+        let wave = super::waveform_samples(&samples).unwrap();
+        let bar_height = |bar: usize| {
+            (0..wave.h as usize)
+                .filter(|&y| {
+                    let x = bar * (super::BAR_W + super::BAR_GAP) + super::BAR_W / 2;
+                    wave.rgba[(y * wave.w as usize + x) * 4 + 3] > 0
+                })
+                .count()
+        };
+        assert!(bar_height(0) < bar_height(30));
+        assert!(bar_height(30) < wave.h as usize * 3 / 4);
     }
 
     #[test]
