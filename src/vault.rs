@@ -85,7 +85,7 @@ impl KeyHandle {
             // aes-gcm appends the tag; the file format keeps it before the
             // ciphertext, matching the Node build.
             let mut sealed = cipher
-                .encrypt(Nonce::from_slice(&iv), Payload::from(plain))
+                .encrypt(&Nonce::from(iv), Payload::from(plain))
                 .expect("AES-GCM encryption cannot fail");
             let tag = sealed.split_off(sealed.len() - 16);
             let mut out = Vec::with_capacity(5 + 12 + 16 + sealed.len());
@@ -103,13 +103,13 @@ impl KeyHandle {
         }
         self.with(|key| {
             let key = key.ok_or("file is encrypted and vault is locked")?;
-            let iv = &data[5..17];
+            let iv: [u8; 12] = data[5..17].try_into().expect("validated nonce length");
             let tag = &data[17..33];
             let mut ct = data[33..].to_vec();
             ct.extend_from_slice(tag);
             let cipher = Aes256Gcm::new(key.into());
             cipher
-                .decrypt(Nonce::from_slice(iv), Payload::from(ct.as_slice()))
+                .decrypt(&Nonce::from(iv), Payload::from(ct.as_slice()))
                 .map_err(|_| "media decryption failed".to_string())
         })
     }
@@ -842,7 +842,7 @@ fn encrypt_str(plain: &str, key: &[u8; 32]) -> String {
     let iv: [u8; 12] = rand::random();
     let cipher = Aes256Gcm::new(key.into());
     let mut sealed = cipher
-        .encrypt(Nonce::from_slice(&iv), Payload::from(plain.as_bytes()))
+        .encrypt(&Nonce::from(iv), Payload::from(plain.as_bytes()))
         .expect("AES-GCM encryption cannot fail");
     let tag = sealed.split_off(sealed.len() - 16);
     format!(
@@ -859,13 +859,17 @@ fn decrypt_str(stored: &str, key: &[u8; 32]) -> Result<String, String> {
     let (Some("e"), Some(iv), Some(tag), Some(ct)) = (marker, iv, tag, ct) else {
         return Err("bad ciphertext".into());
     };
-    let iv = B64.decode(iv).map_err(|e| e.to_string())?;
+    let iv: [u8; 12] = B64
+        .decode(iv)
+        .map_err(|e| e.to_string())?
+        .try_into()
+        .map_err(|_| "bad nonce length".to_string())?;
     let tag = B64.decode(tag).map_err(|e| e.to_string())?;
     let mut ct = B64.decode(ct).map_err(|e| e.to_string())?;
     ct.extend_from_slice(&tag);
     let cipher = Aes256Gcm::new(key.into());
     let plain = cipher
-        .decrypt(Nonce::from_slice(&iv), Payload::from(ct.as_slice()))
+        .decrypt(&Nonce::from(iv), Payload::from(ct.as_slice()))
         .map_err(|_| "decryption failed".to_string())?;
     String::from_utf8(plain).map_err(|e| e.to_string())
 }
@@ -901,6 +905,40 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aes_gcm_storage_formats_remain_compatible() {
+        let key = [0; 32];
+        let iv = [0; 12];
+        let tag = hex_decode("530f8afbc74536b9a963b4f1c4cb738b").unwrap();
+        let stored = format!("e:{}:{}:", B64.encode(iv), B64.encode(&tag));
+        assert_eq!(decrypt_str(&stored, &key).unwrap(), "");
+        assert_eq!(
+            decrypt_str(&encrypt_str("test record", &key), &key).unwrap(),
+            "test record"
+        );
+
+        let handle = KeyHandle::default();
+        handle.set(Some(Zeroizing::new(key)));
+        let mut file = FILE_MAGIC.to_vec();
+        file.extend_from_slice(&iv);
+        file.extend_from_slice(&tag);
+        assert_eq!(handle.decrypt_bytes(&file).unwrap(), b"");
+        let encrypted = handle.encrypt_bytes(b"test media");
+        assert!(encrypted.starts_with(FILE_MAGIC));
+        assert_eq!(handle.decrypt_bytes(&encrypted).unwrap(), b"test media");
+    }
+
+    #[test]
+    fn encrypted_records_reject_invalid_nonce_lengths() {
+        for length in [0, 11, 13] {
+            let stored = format!("e:{}:{}:", B64.encode(vec![0; length]), B64.encode([0; 16]));
+            assert_eq!(
+                decrypt_str(&stored, &[0; 32]).unwrap_err(),
+                "bad nonce length"
+            );
+        }
+    }
 
     #[test]
     fn pin_kek_stays_compatible_with_scrypt_0_11() {
