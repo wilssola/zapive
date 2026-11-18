@@ -279,6 +279,9 @@ export component LightboxLayer inherits ModalLayer {
             image-fit: contain;
         }
         Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
             height: 64px;
             background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
             IconButton {
