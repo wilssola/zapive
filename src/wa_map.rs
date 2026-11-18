@@ -1191,6 +1191,8 @@ pub fn system_message(chat: &str, id: &str, timestamp: i64, text: String) -> Sto
         deleted: false,
         revoked: false,
         read_sent: false,
+        listened: false,
+        played_sent: false,
         gif: false,
         starred: false,
         pinned_until: 0,
@@ -1362,6 +1364,8 @@ pub fn normalize(
         deleted: false,
         revoked: false,
         read_sent: false,
+        listened: false,
+        played_sent: false,
         gif: false,
         starred: false,
         pinned_until: 0,
@@ -1548,6 +1552,8 @@ pub fn status_entry(store: &mut Store, inbound: &InboundMessage) -> Option<Store
         deleted: false,
         revoked: false,
         read_sent: false,
+        listened: false,
+        played_sent: false,
         gif: false,
         starred: false,
         pinned_until: 0,
@@ -1601,6 +1607,26 @@ mod tests {
             &HashMap::new(),
             5,
         )
+    }
+
+    #[test]
+    fn audio_document_keeps_protocol_kind_filename_and_unlistened_state() {
+        let message = map(wa::Message {
+            document_message: wa::message::DocumentMessage {
+                file_name: Some("original.opus".into()),
+                mimetype: Some("audio/ogg".into()),
+                file_length: Some(204 * 1024),
+                ..Default::default()
+            }
+            .into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(message.kind == MessageKind::Doc);
+        assert_eq!(message.text, "original.opus");
+        assert_eq!(message.audio_format(None), "OPUS");
+        assert!(!message.listened);
+        assert!(!message.is_voice_message());
     }
 
     fn invented_reply_messages() -> Vec<wa::Message> {

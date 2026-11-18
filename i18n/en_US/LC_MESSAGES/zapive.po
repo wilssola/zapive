@@ -2348,6 +2348,12 @@ msgstr "Open image"
 msgid "accessibility.open_document"
 msgstr "Open document {0}"
 
+msgid "audio.listened"
+msgstr "Audio already listened to"
+
+msgid "audio.unlistened"
+msgstr "Audio not listened to yet"
+
 msgid "accessibility.playback_position"
 msgstr "Playback position"
 

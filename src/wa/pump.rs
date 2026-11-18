@@ -164,7 +164,13 @@ impl EventHandler for Pump {
                         let chat = receipt.source.chat.to_non_ad_string();
                         let ids: Vec<String> =
                             receipt.message_ids.iter().map(|i| i.to_string()).collect();
-                        ui_apply(move |b| b.on_read_elsewhere(&chat, &ids));
+                        let played = receipt.r#type == ReceiptType::PlayedSelf;
+                        ui_apply(move |b| {
+                            if played {
+                                b.on_played_elsewhere(&chat, &ids);
+                            }
+                            b.on_read_elsewhere(&chat, &ids);
+                        });
                         return;
                     }
                     _ => {}

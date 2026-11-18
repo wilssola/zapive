@@ -3118,7 +3118,7 @@ export component AppWindow inherits Window {
                                     reply(i) => { root.select-reply-option(msg.id, i); }
                                 }
 
-                                if msg.kind == "doc": VerticalLayout {
+                                if msg.kind == "doc" && !msg.audioFile: VerticalLayout {
                                     spacing: 6px;
                                     Rectangle {
                                         height: 52px;
@@ -3237,150 +3237,104 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Voice-note player: waveform track, played
-                                // portion clipped over it, click to seek.
-                                if msg.kind == "audio" && !msg.voiceMessage: VerticalLayout {
-                                    spacing: 10px;
-                                    HorizontalLayout {
-                                        spacing: 10px;
-                                        Rectangle {
-                                            width: 36px;
-                                            height: 36px;
-                                            border-radius: 10px;
-                                            background: #00000018;
+                                if msg.kind == "audio" || msg.audioFile: HorizontalLayout {
+                                    spacing: 14px;
+                                    width: min(440px, msg-row.max-text-w);
+                                    if msg.voiceMessage: Rectangle {
+                                        width: 38px;
+                                        height: 38px;
+                                        if !msg.forwarded: Avatar {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            src: msg.voiceAvatar;
+                                            has-image: msg.voiceHasAvatar;
+                                            initial: msg.voiceInitial;
+                                            color-idx: msg.voiceColorIdx;
+                                            privacy-blurred: root.blur-photos;
+                                            privacy-reveal: row-hover.has-hover;
+                                        }
+                                        if msg.forwarded: Rectangle {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            border-radius: self.width / 2;
+                                            background: #ff792b;
                                             Image {
-                                                source: @image-url("../icons/music.svg");
-                                                colorize: Theme.icon;
-                                                width: 20px;
-                                                height: 20px;
-                                                x: 8px;
-                                                y: 8px;
+                                                source: @image-url("../icons/microphone.svg");
+                                                colorize: white;
+                                                width: 24px;
+                                                height: 24px;
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
                                             }
                                         }
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 3px;
-                                            Text {
-                                                text: msg.audioFilename;
-                                                width: 230px;
-                                                overflow: elide;
-                                                color: Theme.bubble-text;
-                                                font-size: 13px;
-                                                font-weight: 600;
-                                            }
-                                            Text {
-                                                text: @tr("media.type.audio") + " · " + msg.text;
-                                                color: msg.fromMe ? Theme.time-out : Theme.text-dim;
-                                                font-size: 11px;
+                                        Rectangle {
+                                            width: 21px;
+                                            height: 21px;
+                                            x: parent.width - self.width + 3px;
+                                            y: parent.height - self.height + 2px;
+                                            border-radius: self.width / 2;
+                                            border-width: 2px;
+                                            border-color: msg.fromMe ? Theme.bubble-out : Theme.bubble-in;
+                                            background: msg.audioListened ? #657875 : #00b978;
+                                            accessible-role: image;
+                                            accessible-label: msg.audioListened ? @tr("audio.listened") : @tr("audio.unlistened");
+                                            Image {
+                                                source: @image-url("../icons/microphone.svg");
+                                                colorize: white;
+                                                width: 14px;
+                                                height: 14px;
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
                                             }
                                         }
                                     }
-                                    HorizontalLayout {
-                                        spacing: 10px;
+                                    VerticalLayout {
+                                        alignment: center;
                                         IconButton {
-                                            label: msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play");
                                             width: 34px;
                                             height: 34px;
-                                            icon-size: 20px;
+                                            radius: 17px;
+                                            background: msg.fromMe ? #ffffff0c : Theme.media-track;
+                                            tint: Theme.bubble-text;
+                                            label: (msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play")) + (msg.voiceMessage ? "" : " · " + @tr("media.type.audio"));
                                             icon: msg.playing ? @image-url("../icons/player-pause.svg") : @image-url("../icons/player-play.svg");
-                                            clicked => { root.audio-toggle(msg.id); }
-                                        }
-                                        audio-track := TouchArea {
-                                            accessible-role: slider;
-                                            accessible-label: @tr("accessibility.playback_position");
-                                            accessible-value: round(msg.progress * 100) + "%";
-                                            accessible-action-increment => { root.audio-seek(msg.id, min(1, msg.progress + 0.1)); }
-                                            accessible-action-decrement => { root.audio-seek(msg.id, max(0, msg.progress - 0.1)); }
-                                            width: 194px;
-                                            height: 34px;
-                                            mouse-cursor: pointer;
-                                            clicked => { root.audio-seek(msg.id, self.mouse-x / self.width); }
-                                            Rectangle {
-                                                width: parent.width;
-                                                height: 4px;
-                                                y: 15px;
-                                                border-radius: 2px;
-                                                background: Theme.media-track;
-                                                Rectangle {
-                                                    width: parent.width * msg.progress;
-                                                    height: parent.height;
-                                                    border-radius: 2px;
-                                                    background: Theme.read;
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            text: msg.posLabel != "" ? msg.posLabel : "0:00";
-                                            width: 38px;
-                                            height: 34px;
-                                            horizontal-alignment: right;
-                                            vertical-alignment: center;
-                                            color: msg.fromMe ? Theme.time-out : Theme.text-dim;
-                                            font-size: 11px;
-                                        }
-                                    }
-                                    HorizontalLayout {
-                                        alignment: end;
-                                        BubbleMeta {
-                                            time: msg.time;
-                                            ticks: msg.ticks;
-                                            blue: msg.ticksBlue;
-                                            fromMe: msg.fromMe;
-                                        }
-                                    }
-                                }
-                                if msg.kind == "audio" && msg.voiceMessage: HorizontalLayout {
-                                    spacing: 10px;
-                                    VerticalLayout {
-                                        alignment: center;
-                                        IconButton {
-                                            label: msg.playing ? @tr("accessibility.pause") : @tr("accessibility.play");
-                                            icon: msg.playing
-                                                ? @image-url("../icons/player-pause.svg")
-                                                : @image-url("../icons/player-play.svg");
                                             icon-size: 20px;
                                             clicked => { root.audio-toggle(msg.id); }
                                         }
                                     }
                                     VerticalLayout {
                                         alignment: center;
-                                        spacing: 3px;
+                                        spacing: 6px;
+                                        horizontal-stretch: 1;
                                         wave-area := TouchArea {
                                             accessible-role: slider;
                                             accessible-label: @tr("accessibility.playback_position");
                                             accessible-value: round(msg.progress * 100) + "%";
                                             accessible-action-increment => { root.audio-seek(msg.id, min(1, msg.progress + 0.1)); }
                                             accessible-action-decrement => { root.audio-seek(msg.id, max(0, msg.progress - 0.1)); }
-                                            width: 220px;
-                                            height: 30px;
+                                            height: 26px;
                                             mouse-cursor: pointer;
-                                            clicked => {
-                                                root.audio-seek(msg.id,
-                                                    self.mouse-x / self.width);
-                                            }
+                                            clicked => { root.audio-seek(msg.id, self.mouse-x / self.width); }
                                             if msg.hasWave: Image {
+                                                x: 0px;
+                                                y: 0px;
                                                 source: msg.wave;
-                                                colorize: msg.fromMe
-                                                    ? #9fd3c7 : Theme.text-dim;
-                                                x: 0;
-                                                y: 0;
+                                                colorize: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 width: parent.width;
                                                 height: parent.height;
                                                 image-fit: fill;
                                             }
-                                            // Played portion: same bitmap in the
-                                            // accent color, clipped from the left.
                                             if msg.hasWave: Rectangle {
-                                                x: 0;
-                                                y: 0;
-                                                width: parent.width * msg.progress;
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width * clamp(msg.progress, 0, 1);
                                                 height: parent.height;
                                                 clip: true;
                                                 Image {
+                                                    x: 0px;
+                                                    y: 0px;
                                                     source: msg.wave;
                                                     colorize: Theme.read;
-                                                    x: 0;
-                                                    y: 0;
                                                     width: wave-area.width;
                                                     height: wave-area.height;
                                                     image-fit: fill;
@@ -3389,79 +3343,71 @@ export component AppWindow inherits Window {
                                             if !msg.hasWave: Rectangle {
                                                 width: parent.width;
                                                 height: 3px;
-                                                y: 14px;
+                                                y: (parent.height - self.height) / 2;
                                                 border-radius: 1.5px;
-                                                background: Theme.text-dim;
+                                                background: Theme.media-track;
+                                            }
+                                            Rectangle {
+                                                width: 13px;
+                                                height: 13px;
+                                                border-radius: 6.5px;
+                                                x: clamp(parent.width * msg.progress - self.width / 2, 0px, parent.width - self.width);
+                                                y: (parent.height - self.height) / 2;
+                                                background: Theme.read;
+                                                border-width: 2px;
+                                                border-color: Theme.dark ? #ffffff : #163b45;
                                             }
                                         }
                                         HorizontalLayout {
                                             spacing: 6px;
                                             Text {
-                                                text: msg.playing && msg.posLabel != ""
-                                                    ? msg.posLabel : msg.text;
+                                                text: msg.posLabel != "" ? msg.posLabel : msg.audioDuration;
                                                 color: msg.fromMe ? Theme.time-out : Theme.text-dim;
                                                 font-size: 11px;
                                                 horizontal-stretch: 1;
                                             }
-                                            if msg.ticks != "": Ticks { ticks: msg.ticks; blue: msg.ticksBlue; }
-                                            Text {
-                                                text: msg.time;
-                                                font-size: 10px;
-                                                color: msg.fromMe ? Theme.time-out : Theme.text-dim;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                    VerticalLayout {
-                                        alignment: center;
-                                        Rectangle {
-                                            width: 38px;
-                                            height: 38px;
-                                            if !msg.playing: Avatar {
-                                                width: 38px;
-                                                height: 38px;
-                                                src: msg.voiceAvatar;
-                                                has-image: msg.voiceHasAvatar;
-                                                initial: msg.voiceInitial;
-                                                color-idx: msg.voiceColorIdx;
-                                            }
-                                            if !msg.playing: Image {
-                                                source: @image-url("../icons/microphone.svg");
-                                                colorize: Theme.read;
-                                                width: 15px;
-                                                height: 15px;
-                                                x: parent.width - self.width;
-                                                y: parent.height - self.height;
-                                            }
                                             if msg.playing: Rectangle {
-                                                width: rate-label.preferred-width + 16px;
-                                                height: 24px;
-                                                x: parent.width - self.width;
-                                                y: (parent.height - self.height) / 2;
-                                                border-radius: 12px;
-                                                background: rate-touch.has-hover
-                                                    ? #00000030 : #00000018;
-                                                rate-touch := TouchArea {
+                                                width: 36px;
+                                                height: 18px;
+                                                border-radius: 9px;
+                                                background: #00000018;
+                                                TouchArea {
                                                     accessible-role: button;
                                                     accessible-label: @tr("accessibility.playback_rate", root.audio-rate-label);
                                                     accessible-action-default => { root.audio-cycle-rate(); }
                                                     mouse-cursor: pointer;
                                                     clicked => { root.audio-cycle-rate(); }
-                                                    rate-key := KeyFocus {
-                                                        activate => { root.audio-cycle-rate(); }
-                                                    }
-                                                    FocusRing {
-                                                        shown: rate-key.has-focus;
-                                                        width: parent.width;
-                                                        height: parent.height;
-                                                        border-radius: 12px;
-                                                    }
+                                                    rate-key := KeyFocus { activate => { root.audio-cycle-rate(); } }
+                                                    FocusRing { shown: rate-key.has-focus; border-radius: 9px; }
                                                 }
-                                                rate-label := Text {
+                                                Text {
                                                     text: root.audio-rate-label;
-                                                    color: Theme.text-dim;
-                                                    font-size: 11px;
-                                                    font-weight: 700;
+                                                    color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                    font-size: 10px;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            Rectangle {
+                                                width: audio-stamp.preferred-width;
+                                                height: 14px;
+                                                horizontal-stretch: 0;
+                                                audio-stamp := HorizontalLayout {
+                                                    spacing: 4px;
+                                                    alignment: end;
+                                                    Text {
+                                                        text: msg.time;
+                                                        font-size: 10px;
+                                                        color: msg.fromMe ? Theme.time-out : Theme.text-dim;
+                                                        horizontal-stretch: 0;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    if msg.ticks != "": Ticks {
+                                                        ticks: msg.ticks;
+                                                        blue: msg.ticksBlue;
+                                                    }
                                                 }
                                             }
                                         }
@@ -3787,7 +3733,7 @@ export component AppWindow inherits Window {
                                 // gets its own pill like WhatsApp draws it,
                                 // with breathing room under the artwork.
                                 if msg.sticker: Rectangle { height: 6px; }
-                                if msg.kind != "audio" && msg.kind != "system" && !msg-row.meta-inline: HorizontalLayout {
+                                if msg.kind != "audio" && !msg.audioFile && msg.kind != "system" && !msg-row.meta-inline: HorizontalLayout {
                                     alignment: end;
                                     spacing: msg-row.has-translation ? 8px : 0px;
                                     Rectangle {

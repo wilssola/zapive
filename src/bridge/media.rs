@@ -620,8 +620,7 @@ impl Bridge {
             .current_jid
             .as_ref()
             .and_then(|jid| self.store.messages_for(jid).iter().find(|m| m.id == id))
-            .map(|m| m.kind == MessageKind::Audio)
-            .unwrap_or(false);
+            .is_some_and(StoredMessage::is_audio);
         if is_audio && !self.waves.contains_key(id) {
             crate::jobs::waveform(id.to_string(), path.to_path_buf());
         }

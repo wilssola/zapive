@@ -57,7 +57,10 @@ impl Bridge {
         let Some(m) = self.store.messages_for(&jid).iter().find(|m| m.id == id) else {
             return;
         };
-        let duration = (m.duration_sec.max(1)) as f64;
+        if !m.is_audio() {
+            return;
+        }
+        let duration = m.duration_sec as f64;
         self.stop_audio();
         self.audio = Some(AudioState {
             id: id.to_string(),
@@ -78,9 +81,14 @@ impl Bridge {
         let Some(a) = &mut self.audio else { return };
         let id = a.id.clone();
         if let Some(buffer) = self.audio_buffers.get(&(id.clone(), rate_idx)) {
-            let player = crate::audio::Player::start(buffer, offset_secs / rate);
+            let duration = buffer.duration_secs() * rate;
+            let Some(player) = crate::audio::Player::start(buffer, offset_secs / rate) else {
+                self.stop_audio();
+                return;
+            };
             if let Some(a) = &mut self.audio {
-                a.player = player;
+                a.duration = duration;
+                a.player = Some(player);
                 a.paused = false;
                 a.pending_offset = None;
             }
@@ -118,6 +126,30 @@ impl Bridge {
         if self.audio_buffers.len() > 8 {
             self.audio_buffers.clear();
         }
+        let duration = buffer.duration_secs() * RATES[rate_idx];
+        if let Some(a) = &mut self.audio
+            && a.id == id
+        {
+            a.duration = duration;
+            let jid = a.jid.clone();
+            let seconds = duration.round() as u32;
+            if let Some(message) = self
+                .store
+                .messages
+                .get_mut(&jid)
+                .and_then(|messages| messages.iter_mut().find(|message| message.id == id))
+                && message.duration_sec != seconds
+            {
+                message.duration_sec = seconds;
+                self.store.dirty_jids.insert(jid.clone());
+                self.schedule_save();
+            }
+            if Some(&jid) == self.current_jid.as_ref() {
+                self.patch_row(id, |row| {
+                    row.audioDuration = crate::store::format_duration(seconds).into();
+                });
+            }
+        }
         self.audio_buffers
             .insert((id.to_string(), rate_idx), buffer);
         if let Some(a) = &self.audio
@@ -139,7 +171,7 @@ impl Bridge {
                 .current_jid
                 .as_ref()
                 .and_then(|jid| self.store.messages_for(jid).iter().find(|m| m.id == id))
-                .map(|m| m.duration_sec.max(1) as f64)
+                .map(|m| m.duration_sec as f64)
                 .unwrap_or(0.0);
             self.start_audio(id, (frac as f64).clamp(0.0, 1.0) * duration);
         }
@@ -192,7 +224,11 @@ impl Bridge {
             return;
         }
         let pos = (player.position_secs() * rate).clamp(0.0, a.duration);
-        let progress = (pos / a.duration).clamp(0.0, 1.0) as f32;
+        let progress = if a.duration > 0.0 {
+            (pos / a.duration).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
         let label = crate::store::format_duration(pos as u32);
         let (id, jid, paused) = (a.id.clone(), a.jid.clone(), a.paused);
         if Some(&jid) == self.current_jid.as_ref() {

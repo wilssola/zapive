@@ -46,6 +46,10 @@ pub struct StoredMessage {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub read_sent: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub listened: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub played_sent: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gif: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starred: bool,
@@ -285,6 +289,29 @@ impl StoredMessage {
         true
     }
 
+    pub fn is_audio(&self) -> bool {
+        use whatsapp_rust::proto_helpers::MessageExt as _;
+        let audio_mime = |mime: &str| {
+            mime.split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .split_once('/')
+                .is_some_and(|(kind, subtype)| {
+                    kind.eq_ignore_ascii_case("audio") && !subtype.trim().is_empty()
+                })
+        };
+        self.kind == MessageKind::Audio
+            || (self.kind == MessageKind::Doc
+                && (audio_mime(&self.mimetype)
+                    || self
+                        .raw
+                        .as_ref()
+                        .and_then(|raw| raw.get_base_message().document_message.as_option())
+                        .and_then(|doc| doc.mimetype.as_deref())
+                        .is_some_and(audio_mime)))
+    }
+
     pub fn is_voice_message(&self) -> bool {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         self.kind == MessageKind::Audio
@@ -296,6 +323,28 @@ impl StoredMessage {
                 .unwrap_or(false)
     }
 
+    pub fn audio_format(&self, source: Option<&str>) -> String {
+        let filename = self.audio_filename(source);
+        if let Some((_, extension)) = filename.rsplit_once('.')
+            && !extension.is_empty()
+            && extension.len() <= 10
+            && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        {
+            return extension.to_ascii_uppercase();
+        }
+        match self.mimetype.split(';').next().unwrap_or_default().trim() {
+            "audio/opus" => "OPUS",
+            "audio/ogg" => "OGG",
+            "audio/mpeg" => "MP3",
+            "audio/mp4" | "audio/x-m4a" => "M4A",
+            "audio/flac" | "audio/x-flac" => "FLAC",
+            "audio/wav" | "audio/x-wav" => "WAV",
+            "audio/aac" => "AAC",
+            _ => "",
+        }
+        .into()
+    }
+
     pub fn audio_filename(&self, source: Option<&str>) -> String {
         use whatsapp_rust::proto_helpers::MessageExt as _;
         let original = source
@@ -305,12 +354,7 @@ impl StoredMessage {
             .raw
             .as_ref()
             .and_then(|raw| raw.get_base_message().document_message.as_option())
-            .filter(|doc| {
-                doc.mimetype
-                    .as_deref()
-                    .unwrap_or(&self.mimetype)
-                    .starts_with("audio/")
-            })
+            .filter(|_| self.is_audio())
             .and_then(|doc| doc.file_name.as_deref())
             .filter(|name| !name.trim().is_empty());
         original
@@ -1827,8 +1871,33 @@ impl Store {
         true
     }
 
-    // Marks receipts as already sent for these messages, so "send
-    // message viewed" (opt-in) doesn't ack them twice.
+    pub fn mark_listened(&mut self, jid: &str, id: &str) -> bool {
+        let Some(message) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|messages| messages.iter_mut().find(|message| message.id == id))
+        else {
+            return false;
+        };
+        if !message.is_audio() || message.listened {
+            return false;
+        }
+        message.listened = true;
+        self.dirty_jids.insert(jid.to_string());
+        true
+    }
+
+    pub fn mark_played_sent(&mut self, jid: &str, id: &str) {
+        if let Some(message) = self
+            .messages
+            .get_mut(jid)
+            .and_then(|messages| messages.iter_mut().find(|message| message.id == id))
+        {
+            message.played_sent = true;
+            self.dirty_jids.insert(jid.to_string());
+        }
+    }
+
     pub fn mark_read_sent(&mut self, jid: &str, ids: &[String]) {
         let Some(list) = self.messages.get_mut(jid) else {
             return;
@@ -3537,6 +3606,164 @@ mod tests {
         stored.duration_sec = 65;
         stored.raw = Some(Arc::new(raw));
         stored
+    }
+
+    #[test]
+    fn audio_documents_are_detected_without_known_formats() {
+        let mut message = audio_message(None);
+        message.raw = None;
+        assert!(message.is_audio());
+        message.kind = MessageKind::Doc;
+        for mime in [
+            "audio/mpeg",
+            "audio/x-unrecognized",
+            " Audio/X-New ; codecs=test",
+        ] {
+            message.mimetype = mime.into();
+            assert!(message.is_audio());
+            assert!(!message.is_voice_message());
+        }
+        for mime in ["", "audio/", "audio", "application/ogg", "video/mp4"] {
+            message.mimetype = mime.into();
+            assert!(!message.is_audio());
+        }
+        message.raw = Some(Arc::new(wa::Message {
+            document_message: wa::message::DocumentMessage {
+                mimetype: Some("audio/x-unrecognized".into()),
+                file_name: Some("recording".into()),
+                ..Default::default()
+            }
+            .into(),
+            ..Default::default()
+        }));
+        assert!(message.is_audio());
+        assert!(message.audio_format(None).is_empty());
+        assert_eq!(message.audio_filename(None), "recording");
+        message.kind = MessageKind::Video;
+        message.mimetype = "audio/mpeg".into();
+        assert!(!message.is_audio());
+    }
+
+    #[test]
+    fn audio_documents_keep_local_listened_state_without_played_receipts() {
+        let mut message = audio_message(None);
+        message.kind = MessageKind::Doc;
+        message.mimetype = "audio/x-unrecognized".into();
+        message.duration_sec = 0;
+        message.raw = None;
+        let jid = message.jid.clone();
+        let id = message.id.clone();
+        let mut store = Store::default();
+        store.add_message(message);
+        store.dirty_jids.clear();
+        assert!(store.mark_listened(&jid, &id));
+        assert!(!store.mark_listened(&jid, &id));
+        assert!(store.dirty_jids.contains(&jid));
+        let restored: StoredMessage =
+            serde_json::from_str(&serde_json::to_string(&store.messages_for(&jid)[0]).unwrap())
+                .unwrap();
+        assert!(restored.is_audio());
+        assert!(restored.listened);
+        assert!(!restored.played_sent);
+        assert_eq!(format_duration(restored.duration_sec), "0:00");
+    }
+
+    #[test]
+    fn audio_listened_defaults_and_is_independent_of_receipts() {
+        let mut message = audio_message(Some(true));
+        message.read_sent = true;
+        message.status = 5;
+        let legacy = serde_json::to_value(&message).unwrap();
+        assert!(legacy.get("listened").is_none());
+        assert!(legacy.get("played_sent").is_none());
+        let restored: StoredMessage = serde_json::from_value(legacy).unwrap();
+        assert!(!restored.listened);
+        assert!(!restored.played_sent);
+        let mut store = Store::default();
+        let jid = message.jid.clone();
+        let id = message.id.clone();
+        store.add_message(message);
+        store.dirty_jids.clear();
+        assert!(store.mark_listened(&jid, &id));
+        assert!(store.dirty_jids.contains(&jid));
+        assert!(!store.mark_listened(&jid, &id));
+        assert!(!store.mark_listened(&jid, "missing"));
+        let message = &store.messages_for(&jid)[0];
+        assert!(message.listened);
+        assert!(message.read_sent);
+        assert!(!message.played_sent);
+        store.mark_played_sent(&jid, &id);
+        let restored: StoredMessage =
+            serde_json::from_str(&serde_json::to_string(&store.messages_for(&jid)[0]).unwrap())
+                .unwrap();
+        assert!(restored.listened);
+        assert!(restored.played_sent);
+        let mut text = history_message(&jid, 1);
+        text.status = 5;
+        let text_id = text.id.clone();
+        store.add_message(text);
+        assert!(!store.mark_listened(&jid, &text_id));
+    }
+
+    #[test]
+    fn audio_listened_survives_vault_reload() {
+        let path =
+            std::env::temp_dir().join(format!("zapive_audio_listened_{}.db", std::process::id()));
+        crate::paths::remove_db(&path);
+        {
+            let mut vault = Vault::open_at(&path.to_string_lossy()).unwrap();
+            vault.open().unwrap();
+            let mut store = Store::default();
+            let message = audio_message(Some(true));
+            let jid = message.jid.clone();
+            let id = message.id.clone();
+            store.add_message(message);
+            store.hydrated.insert(jid.clone());
+            store.save_checked(&vault).unwrap();
+            assert!(store.mark_listened(&jid, &id));
+            store.save_checked(&vault).unwrap();
+            let mut reloaded = Store::default();
+            reloaded.hydrate(&vault, &jid);
+            let message = reloaded
+                .messages_for(&jid)
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap();
+            assert!(message.listened);
+            assert!(!message.read_sent);
+            assert!(!message.played_sent);
+        }
+        crate::paths::remove_db(&path);
+    }
+
+    #[test]
+    fn audio_format_uses_known_metadata_without_inventing_values() {
+        let mut message = audio_message(Some(false));
+        assert!(message.audio_format(None).is_empty());
+        assert_eq!(message.audio_format(Some("/music/original.opus")), "OPUS");
+        message.mimetype = "audio/ogg; codecs=opus".into();
+        assert_eq!(message.audio_format(None), "OGG");
+        message.mimetype = "audio/opus".into();
+        assert_eq!(message.audio_format(None), "OPUS");
+        message.kind = MessageKind::Doc;
+        message.raw = Some(Arc::new(wa::Message {
+            document_message: wa::message::DocumentMessage {
+                mimetype: Some("audio/ogg".into()),
+                file_name: Some("original.opus".into()),
+                file_length: Some(204 * 1024),
+                ..Default::default()
+            }
+            .into(),
+            ..Default::default()
+        }));
+        assert_eq!(message.audio_filename(None), "original.opus");
+        assert_eq!(message.audio_format(None), "OPUS");
+        assert_eq!(
+            crate::media::format_size(
+                crate::media::expected_bytes(message.raw.as_ref().unwrap()).unwrap()
+            ),
+            "204.0 KB"
+        );
     }
 
     #[test]

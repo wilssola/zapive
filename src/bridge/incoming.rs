@@ -771,6 +771,21 @@ impl Bridge {
         self.schedule_save();
     }
 
+    pub fn on_played_elsewhere(&mut self, chat: &str, ids: &[String]) {
+        let jid = self.store.canon_owned(&normalize_jid(chat));
+        for id in ids {
+            if let Some(vault) = &self.vault {
+                self.store.hydrate_id(vault, &jid, id);
+            }
+            if self.store.mark_listened(&jid, id) {
+                if Some(&jid) == self.current_jid.as_ref() {
+                    self.patch_row(id, |row| row.audioListened = true);
+                }
+                self.schedule_save();
+            }
+        }
+    }
+
     // Another device of ours read (or played) these messages: nothing is
     // unread here for that chat any more.
     pub fn on_read_elsewhere(&mut self, chat: &str, ids: &[String]) {

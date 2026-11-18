@@ -118,18 +118,20 @@ impl Bridge {
         self.store.mark_read_sent(jid, &acked);
     }
 
-    // The voice-note counterpart: sent once, the moment playback actually
-    // starts (see spin_audio_at, which covers both an already-decoded
-    // buffer and the post-decode resume in on_audio_ready). Reuses
-    // `read_sent` so a later seek/scrub on the same note doesn't re-send.
     pub(super) fn send_played_receipt(&mut self, jid: &str, id: &str) {
+        if self.store.mark_listened(jid, id) {
+            if Some(jid) == self.current_jid.as_deref() {
+                self.patch_row(id, |row| row.audioListened = true);
+            }
+            self.schedule_save();
+        }
         if !self.ui.get_send_receipts() {
             return;
         }
         let Some(m) = self.store.messages_for(jid).iter().find(|m| m.id == id) else {
             return;
         };
-        if m.from_me || m.read_sent {
+        if m.from_me || m.played_sent || m.kind != MessageKind::Audio {
             return;
         }
         let sender = self.key_participant(m);
@@ -138,7 +140,8 @@ impl Bridge {
             sender,
             id: id.to_string(),
         });
-        self.store.mark_read_sent(jid, &[id.to_string()]);
+        self.store.mark_played_sent(jid, id);
+        self.schedule_save();
     }
 
     pub(super) fn select_reply_option(&mut self, id: &str, index: i32) {

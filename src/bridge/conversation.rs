@@ -592,6 +592,14 @@ impl Bridge {
         let preparing = self.preparation_states.get(&m.id).copied();
         let tr = self.translation_entry(m);
         let source = tr.map(|e| e.source.as_str()).unwrap_or("");
+        let audio_metadata = m.is_audio();
+        let audio_source = audio_metadata
+            .then(|| {
+                self.vault
+                    .as_ref()
+                    .and_then(|vault| vault.setting_get(&format!("media-source:{}", m.id)))
+            })
+            .flatten();
         MessageItem {
             poll_options: slint::ModelRc::new(VecModel::from(poll_options)),
             poll_multi,
@@ -773,14 +781,20 @@ impl Bridge {
                 &sender_jid
             }),
             voiceMessage: m.is_voice_message(),
-            audioFilename: if m.kind == MessageKind::Audio
-                || (m.kind == MessageKind::Doc && m.mimetype.starts_with("audio/"))
-            {
-                let source = self
-                    .vault
-                    .as_ref()
-                    .and_then(|vault| vault.setting_get(&format!("media-source:{}", m.id)));
-                m.audio_filename(source.as_deref()).into()
+            audioListened: m.listened,
+            audioFile: audio_metadata && !m.is_voice_message(),
+            audioDuration: if audio_metadata {
+                crate::store::format_duration(m.duration_sec).into()
+            } else {
+                "".into()
+            },
+            audioFormat: if audio_metadata {
+                m.audio_format(audio_source.as_deref()).into()
+            } else {
+                "".into()
+            },
+            audioFilename: if audio_metadata {
+                m.audio_filename(audio_source.as_deref()).into()
             } else {
                 "".into()
             },
