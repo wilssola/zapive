@@ -37,6 +37,10 @@ export component SettingsLayer inherits ModalLayer {
     in-out property <int> graphics-index: 0;
     in property <string> graphics-active;
     callback graphics-renderer-changed(int);
+    in property <[string]> ui-scale-labels;
+    in-out property <int> ui-scale-index: 0;
+    in-out property <bool> ui-scale-restart-needed: false;
+    callback ui-scale-changed(int);
     callback wallpaper-scale-changed(float);
     in-out property <bool> graphics-restart-needed: false;
     in property <[string]> mic-devices;
@@ -429,6 +433,23 @@ export component SettingsLayer inherits ModalLayer {
                                     current-index <=> root.graphics-index;
                                     selected(value) => {
                                         root.graphics-renderer-changed(self.current-index);
+                                    }
+                                }
+                            }
+                            if root.ui-scale-labels.length > 1: SettingsRow {
+                                label: @tr("settings.ui_scale.title");
+                                detail: root.ui-scale-restart-needed ? @tr("settings.ui_scale.restart")
+                                    : @tr("settings.ui_scale.description");
+                                icon: @image-url("../icons/eye.svg");
+                                ComboBox {
+                                    width: min(210px, root.win-width * 0.25);
+                                    height: 34px;
+                                    y: (parent.height - self.height) / 2;
+                                    accessible-label: @tr("settings.ui_scale.title");
+                                    model: root.ui-scale-labels;
+                                    current-index <=> root.ui-scale-index;
+                                    selected(value) => {
+                                        root.ui-scale-changed(self.current-index);
                                     }
                                 }
                             }

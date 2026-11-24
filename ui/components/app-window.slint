@@ -124,6 +124,10 @@ export component AppWindow inherits Window {
     in property <string> graphics-active;
     in-out property <bool> graphics-restart-needed: false;
     callback graphics-renderer-changed(int);
+    in property <[string]> ui-scale-labels;
+    in-out property <int> ui-scale-index: 0;
+    in-out property <bool> ui-scale-restart-needed: false;
+    callback ui-scale-changed(int);
     changed dark-theme => {
         Theme.dark = self.dark-theme;
         Palette.color-scheme = self.dark-theme ? ColorScheme.dark : ColorScheme.light;
@@ -5479,6 +5483,10 @@ export component AppWindow inherits Window {
         graphics-active: root.graphics-active;
         graphics-restart-needed <=> root.graphics-restart-needed;
         graphics-renderer-changed(a0) => { root.graphics-renderer-changed(a0); }
+        ui-scale-labels: root.ui-scale-labels;
+        ui-scale-index <=> root.ui-scale-index;
+        ui-scale-restart-needed <=> root.ui-scale-restart-needed;
+        ui-scale-changed(a0) => { root.ui-scale-changed(a0); }
         wallpaper-scale-changed(a0) => { root.wallpaper-scale = a0; root.wallpaper-scale-changed(a0); }
         mic-devices: root.mic-devices;
         speaker-devices: root.speaker-devices;

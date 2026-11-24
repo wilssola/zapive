@@ -2416,6 +2416,15 @@ msgstr "OpenGL"
 msgid "settings.graphics.software"
 msgstr "Software"
 
+msgid "settings.ui_scale.title"
+msgstr "Tamanho da interface"
+
+msgid "settings.ui_scale.description"
+msgstr "Amplia o texto e os controles. Aplicado quando o Zapive inicia."
+
+msgid "settings.ui_scale.restart"
+msgstr "Reinicie o Zapive para aplicar o novo tamanho da interface."
+
 msgid "settings.wallpaper.scale"
 msgstr "Escala do fundo"
 

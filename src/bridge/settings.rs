@@ -94,6 +94,29 @@ impl Bridge {
             .set_graphics_restart_needed(crate::gfx::restart_needed(choice, &compiled));
     }
 
+    pub(super) fn load_ui_scale(&mut self, percent: u16) {
+        self.ui
+            .set_ui_scale_index(crate::ui_scale::index_of(percent) as i32);
+    }
+
+    // The scale is applied when the window is created, so a new value only
+    // takes effect on the next start. The choice is saved at once; the
+    // prompt compares against the scale this window was started with.
+    pub(super) fn handle_ui_scale(&mut self, index: i32) {
+        let Some(percent) = usize::try_from(index)
+            .ok()
+            .and_then(crate::ui_scale::percent_at)
+        else {
+            return;
+        };
+        if let Some(vault) = &self.vault {
+            vault.setting_set("ui_scale", &percent.to_string());
+        }
+        self.ui.set_ui_scale_index(index);
+        self.ui
+            .set_ui_scale_restart_needed(percent != crate::ui_scale::started_with());
+    }
+
     // A hex typed in settings: only a valid #RRGGBB changes anything.
     pub(super) fn wallpaper_hex_entered(&mut self, fg: bool, hex: &str) {
         let Some((r, g, b)) = parse_hex_color(hex) else {
